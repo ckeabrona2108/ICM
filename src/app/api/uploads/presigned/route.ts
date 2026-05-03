@@ -1,0 +1,37 @@
+import { getServerSession } from "next-auth";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+
+import { authOptions } from "@/lib/auth";
+import { createPresignedUpload } from "@/lib/s3";
+
+const bodySchema = z.object({
+  fileName: z.string().min(1),
+  contentType: z.string().min(1)
+});
+
+export async function POST(request: Request) {
+  const session = await getServerSession(authOptions);
+
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await request.json();
+  const parsed = bodySchema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const key = `uploads/${session.user.id}/${Date.now()}-${parsed.data.fileName}`;
+  const signed = await createPresignedUpload({
+    key,
+    contentType: parsed.data.contentType
+  });
+
+  return NextResponse.json({
+    key,
+    ...signed
+  });
+}

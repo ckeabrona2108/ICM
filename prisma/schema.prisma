@@ -1,0 +1,787 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum ReleaseStatus {
+  DRAFT
+  MODERATION
+  CHANGES_REQUIRED
+  REJECTED
+  APPROVED
+  DISTRIBUTED
+  ARCHIVED
+}
+
+enum ReleaseType {
+  SINGLE
+  EP
+  ALBUM
+}
+
+enum ReleaseKind {
+  STANDARD
+  SINGLE_MAXI
+  MIXTAPE
+  AUDIOBOOK
+}
+
+enum PlatformMode {
+  ALL
+  SELECTED
+}
+
+enum PlatformDeliveryStatus {
+  PENDING
+  IN_REVIEW
+  LIVE
+  FAILED
+}
+
+enum TransactionType {
+  ROYALTY
+  PAYOUT
+  FEE
+  REFUND
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum FinanceReportStatus {
+  READY_TO_CONFIRM
+  AGREED
+}
+
+enum PayoutMethod {
+  BANK_TRANSFER
+  PAYPAL
+  OTHER
+}
+
+enum PayoutRequestStatus {
+  REQUESTED
+  PROCESSING
+  PAID
+  REJECTED
+}
+
+enum SubscriptionPlan {
+  STANDARD
+  FREE
+  PRO
+  LABEL
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  TRIALING
+  PAST_DUE
+  CANCELED
+}
+
+enum PaymentProvider {
+  YOOKASSA
+}
+
+enum PaymentStatus {
+  PENDING
+  WAITING_FOR_CAPTURE
+  SUCCEEDED
+  CANCELED
+  FAILED
+}
+
+enum AnalyticsImportJobStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum AnalyticsAiInsightStatus {
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_USER
+  RESOLVED
+  CLOSED
+}
+
+enum NewsPostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AiToolType {
+  RELEASE_DESCRIPTION
+  PRESS_RELEASE
+  ARTIST_BIO
+  REELS_IDEAS
+  COVER_ANALYSIS
+  PROMOTION_TIPS
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model User {
+  id            String            @id @default(cuid())
+  name          String
+  avatarUrl     String?
+  email         String            @unique
+  passwordHash  String?
+  role          Role              @default(USER)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  artistProfile ArtistProfile?
+  releases      Release[]
+  royalties     Royalty[]
+  transactions  Transaction[]
+  financeReports FinanceReport[]
+  payoutRequests PayoutRequest[]
+  subscription  Subscription?
+  subscriptionUsage SubscriptionUsage?
+  subscriptionPayments SubscriptionPayment[]
+  messages      Message[]
+  supportTickets SupportTicket[]
+  aiGenerations AiGeneration[]
+  campaigns     MarketingCampaign[]
+  adminLogs     AdminLog[]
+  analyticsReportSnapshots AnalyticsReportSnapshot[]
+  analyticsDailySummaries AnalyticsDailySummary[]
+  analyticsPlatformSummaries AnalyticsPlatformSummary[]
+  analyticsImportJobsCreated AnalyticsImportJob[] @relation("AnalyticsImportJobCreatedByAdmin")
+  unresolvedAnalyticsRows UnmatchedAnalyticsImport[] @relation("UnmatchedResolvedByAdmin")
+  analyticsAiInsights AnalyticsAiInsight[]
+  newsPostsCreated NewsPost[] @relation("NewsPostCreatedByAdmin")
+
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model ArtistProfile {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  stageName    String
+  bio          String?
+  country      String?
+  genres       String[]
+  avatarUrl    String?
+  socialLinks  Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  releases     Release[]
+  analyticsAiInsights AnalyticsAiInsight[]
+}
+
+model Release {
+  id                 String               @id @default(cuid())
+  userId             String
+  artistProfileId    String?
+  title              String
+  subtitle           String?
+  slug               String               @unique
+  genre              String
+  subgenre           String?
+  language           String
+  releaseKind        ReleaseKind          @default(STANDARD)
+  platformMode       PlatformMode         @default(ALL)
+  platforms          Json?
+  partnerCode        String?
+  rightsYear         Int?
+  releaseDate        DateTime
+  type               ReleaseType
+  status             ReleaseStatus        @default(DRAFT)
+  explicit           Boolean              @default(false)
+  upc                String?
+  isrc               String?
+  lyrics             String?
+  moderationComment  String?
+  moderationRemarks  Json?
+  moderationReturnedAt DateTime?
+  moderationCancelledAt DateTime?
+  moderationStartedAt DateTime?
+  approvedAt         DateTime?
+  approvedBy         String?
+  rejectedAt         DateTime?
+  rejectedBy         String?
+  rejectionReason    String?
+  priority           Boolean              @default(false)
+  coverMeta          Json?
+  submissionData     Json?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  artistProfile      ArtistProfile?       @relation(fields: [artistProfileId], references: [id])
+  tracks             Track[]
+  releaseFile        ReleaseFile?
+  coverImage         CoverImage?
+  distributionStatus DistributionStatus[]
+  royalties          Royalty[]
+  campaigns          MarketingCampaign[]
+  analyticsReportSnapshots AnalyticsReportSnapshot[]
+  analyticsDailySummaries AnalyticsDailySummary[]
+  analyticsPlatformSummaries AnalyticsPlatformSummary[]
+  resolvedUnmatchedAnalyticsImports UnmatchedAnalyticsImport[]
+  analyticsAiInsights AnalyticsAiInsight[]
+
+  @@index([userId, status])
+  @@index([releaseDate])
+}
+
+model Track {
+  id            String   @id @default(cuid())
+  releaseId     String
+  title         String
+  subtitle      String?
+  durationSec   Int
+  trackNumber   Int
+  isrc          String?
+  partnerCode   String?
+  hasAudio      Boolean  @default(true)
+  metadataLanguage String?
+  previewStart  String?
+  instantGratification Boolean @default(false)
+  focusTrack    Boolean  @default(false)
+  versionExplicit Boolean @default(false)
+  versionLive   Boolean  @default(false)
+  versionCover  Boolean  @default(false)
+  versionRemix  Boolean  @default(false)
+  versionInstrumental Boolean @default(false)
+  lyrics        String?
+  ringtoneDurationSec Float?
+  copyrightPct  Float?
+  relatedRightsPct Float?
+  contributors  Json?
+  createdAt     DateTime @default(now())
+
+  release       Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, trackNumber])
+}
+
+model ReleaseFile {
+  id          String   @id @default(cuid())
+  releaseId   String   @unique
+  storageKey  String
+  url         String
+  mimeType    String
+  sizeBytes   Int
+  checksum    String?
+  createdAt   DateTime @default(now())
+
+  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+}
+
+model CoverImage {
+  id          String   @id @default(cuid())
+  releaseId   String   @unique
+  storageKey  String
+  url         String
+  width       Int
+  height      Int
+  createdAt   DateTime @default(now())
+
+  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+}
+
+model Platform {
+  id                 String               @id @default(cuid())
+  code               String               @unique
+  name               String
+  region             String?
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+
+  distributionStatus DistributionStatus[]
+}
+
+model DistributionStatus {
+  id           String                 @id @default(cuid())
+  releaseId    String
+  platformId   String
+  status       PlatformDeliveryStatus @default(PENDING)
+  note         String?
+  deliveredAt  DateTime?
+  updatedAt    DateTime               @updatedAt
+
+  release      Release                @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  platform     Platform               @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, platformId])
+  @@index([status])
+}
+
+model Royalty {
+  id            String    @id @default(cuid())
+  userId        String
+  releaseId     String
+  amount        Decimal   @db.Decimal(12, 2)
+  currency      String    @default("USD")
+  statementDate DateTime
+  streams       Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release       Release   @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@index([userId, statementDate])
+}
+
+model Transaction {
+  id           String            @id @default(cuid())
+  userId       String
+  amount       Decimal           @db.Decimal(12, 2)
+  currency     String            @default("USD")
+  type         TransactionType
+  status       TransactionStatus @default(PENDING)
+  description  String?
+  reference    String?
+  createdAt    DateTime          @default(now())
+  processedAt  DateTime?
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model FinanceReport {
+  id          String             @id @default(cuid())
+  userId      String
+  periodStart DateTime
+  periodEnd   DateTime
+  amount      Decimal            @db.Decimal(12, 2)
+  currency    String             @default("USD")
+  status      FinanceReportStatus @default(READY_TO_CONFIRM)
+  agreedAt    DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, periodStart])
+}
+
+model PayoutRequest {
+  id          String            @id @default(cuid())
+  userId      String
+  amount      Decimal           @db.Decimal(12, 2)
+  currency    String            @default("USD")
+  method      PayoutMethod
+  requisites  Json
+  status      PayoutRequestStatus @default(REQUESTED)
+  comment     String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  processedAt DateTime?
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([createdAt])
+}
+
+model AnalyticsReportSnapshot {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  releaseId      String   @map("release_id")
+  upc            String
+  reportDate     DateTime @map("report_date")
+  periodDays     Int      @default(30) @map("period_days")
+  country        String
+  platform       String?  @map("platform")
+  streams        Int
+  payStreams     Int      @map("pay_streams")
+  trackName      String?  @map("track_name")
+  artistName     String?  @map("artist_name")
+  albumName      String?  @map("album_name")
+  sourceFileName String   @map("source_file_name")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release        Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([releaseId, reportDate, country, platform])
+  @@index([userId, reportDate])
+  @@index([releaseId, reportDate])
+  @@index([upc])
+  @@index([country])
+  @@index([platform])
+  @@map("analytics_report_snapshots")
+}
+
+model AnalyticsDailySummary {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  releaseId       String?  @map("release_id")
+  reportDate      DateTime @map("report_date")
+  totalStreams    Int      @map("total_streams")
+  totalPayStreams Int      @map("total_pay_streams")
+  countriesCount  Int      @default(0) @map("countries_count")
+  topCountry      String?  @map("top_country")
+  topPlatform     String?  @map("top_platform")
+  platformsCount  Int      @default(0) @map("platforms_count")
+  releasesCount   Int      @default(0) @map("releases_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release         Release? @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, releaseId, reportDate])
+  @@index([userId, reportDate])
+  @@index([releaseId, reportDate])
+  @@map("analytics_daily_summaries")
+}
+
+model AnalyticsPlatformSummary {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  releaseId     String?  @map("release_id")
+  reportDate    DateTime @map("report_date")
+  platform      String
+  streams       Int
+  payStreams    Int      @map("pay_streams")
+  sharePercent  Decimal  @default(0) @db.Decimal(7, 3) @map("share_percent")
+  changePercent Decimal? @db.Decimal(7, 3) @map("change_percent")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release       Release? @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, releaseId, reportDate, platform])
+  @@index([userId, reportDate])
+  @@index([releaseId, reportDate])
+  @@index([platform])
+  @@map("analytics_platform_summaries")
+}
+
+model AnalyticsImportJob {
+  id                   String                   @id @default(cuid())
+  sourceFileName       String                   @map("source_file_name")
+  storedFilePath       String?                  @map("stored_file_path")
+  reportDate           DateTime                 @map("report_date")
+  status               AnalyticsImportJobStatus @default(PENDING)
+  totalRows            Int                      @default(0) @map("total_rows")
+  importedRows         Int                      @default(0) @map("imported_rows")
+  matchedRows          Int                      @default(0) @map("matched_rows")
+  unmatchedRows        Int                      @default(0) @map("unmatched_rows")
+  affectedUsersCount   Int                      @default(0) @map("affected_users_count")
+  affectedReleasesCount Int                     @default(0) @map("affected_releases_count")
+  platformsCount       Int                      @default(0) @map("platforms_count")
+  rowsWithUnknownPlatform Int                   @default(0) @map("rows_with_unknown_platform")
+  topPlatform          String?                  @map("top_platform")
+  errorMessage         String?                  @map("error_message")
+  startedAt            DateTime?                @map("started_at")
+  finishedAt           DateTime?                @map("finished_at")
+  createdByAdminId     String                   @map("created_by_admin_id")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
+
+  createdByAdmin       User                     @relation("AnalyticsImportJobCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Cascade)
+  unmatchedRowsData    UnmatchedAnalyticsImport[]
+
+  @@index([status, createdAt])
+  @@index([reportDate])
+  @@map("analytics_import_jobs")
+}
+
+model UnmatchedAnalyticsImport {
+  id             String   @id @default(cuid())
+  upc            String
+  trackName      String?  @map("track_name")
+  artistName     String?  @map("artist_name")
+  albumName      String?  @map("album_name")
+  country        String
+  streams        Int
+  payStreams     Int      @map("pay_streams")
+  sourceFileName String   @map("source_file_name")
+  reportDate     DateTime @map("report_date")
+  reason         String
+  importJobId    String?  @map("import_job_id")
+  resolved       Boolean  @default(false)
+  resolvedAt     DateTime? @map("resolved_at")
+  resolvedByAdminId String? @map("resolved_by_admin_id")
+  resolvedReleaseId String? @map("resolved_release_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  importJob      AnalyticsImportJob? @relation(fields: [importJobId], references: [id], onDelete: SetNull)
+  resolvedByAdmin User? @relation("UnmatchedResolvedByAdmin", fields: [resolvedByAdminId], references: [id], onDelete: SetNull)
+  resolvedRelease Release? @relation(fields: [resolvedReleaseId], references: [id], onDelete: SetNull)
+
+  @@index([reportDate])
+  @@index([upc])
+  @@index([resolved, reportDate])
+  @@map("unmatched_analytics_imports")
+}
+
+model AnalyticsAiInsight {
+  id              String                   @id @default(cuid())
+  userId          String                   @map("user_id")
+  artistId        String?                  @map("artist_id")
+  releaseId       String?                  @map("release_id")
+  periodDays      Int                      @map("period_days")
+  filtersHash     String                   @map("filters_hash")
+  contextSnapshot Json                     @map("context_snapshot")
+  aiResponse      Json?                    @map("ai_response")
+  status          AnalyticsAiInsightStatus @default(PROCESSING)
+  errorMessage    String?                  @map("error_message")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
+
+  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  artist          ArtistProfile?           @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  release         Release?                 @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([artistId])
+  @@index([releaseId])
+  @@index([createdAt])
+  @@index([filtersHash])
+  @@map("analytics_ai_insights")
+}
+
+model NewsPost {
+  id               String         @id @default(cuid())
+  title            String
+  slug             String         @unique
+  excerpt          String?
+  content          String
+  coverImage       String?        @map("cover_image")
+  status           NewsPostStatus @default(DRAFT)
+  category         String?
+  isPinned         Boolean        @default(false) @map("is_pinned")
+  publishedAt      DateTime?      @map("published_at")
+  createdByAdminId String         @map("created_by_admin_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  createdByAdmin   User           @relation("NewsPostCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([publishedAt])
+  @@index([slug])
+  @@index([isPinned])
+  @@map("news_posts")
+}
+
+model Subscription {
+  id            String             @id @default(cuid())
+  userId        String             @unique
+  plan          SubscriptionPlan   @default(FREE)
+  status        SubscriptionStatus @default(TRIALING)
+  startedAt     DateTime           @default(now())
+  endsAt        DateTime?          @map("ends_at")
+  renewalAt     DateTime?
+  trialEndsAt   DateTime?
+  features      Json?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments      SubscriptionPayment[]
+}
+
+model SubscriptionUsage {
+  id                  String   @id @default(cuid())
+  userId              String   @unique @map("user_id")
+  periodStart         DateTime @map("period_start")
+  periodEnd           DateTime @map("period_end")
+  releasesUsed        Int      @default(0) @map("releases_used")
+  aiRequestsUsedDay   Int      @default(0) @map("ai_requests_used_day")
+  aiRequestsUsedMonth Int      @default(0) @map("ai_requests_used_month")
+  lastAiResetDay      DateTime @map("last_ai_reset_day")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([periodStart, periodEnd])
+  @@map("subscription_usage")
+}
+
+model SubscriptionPayment {
+  id                String          @id @default(cuid())
+  userId            String
+  subscriptionId    String?
+  tariffId          String
+  amount            Decimal         @db.Decimal(12, 2)
+  currency          String          @default("RUB")
+  provider          PaymentProvider @default(YOOKASSA)
+  providerPaymentId String?         @unique
+  idempotenceKey    String          @unique
+  status            PaymentStatus   @default(PENDING)
+  confirmationUrl   String?
+  returnUrl         String?
+  description       String?
+  metadata          Json?
+  paidAt            DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription      Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+  @@index([createdAt])
+}
+
+model Message {
+  id          String           @id @default(cuid())
+  userId      String
+  ticketId    String?
+  subject     String
+  body        String
+  direction   MessageDirection
+  isRead      Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket      SupportTicket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model SupportTicket {
+  id            String              @id @default(cuid())
+  userId        String
+  title         String
+  description   String
+  status        SupportTicketStatus @default(OPEN)
+  priority      String              @default("normal")
+  adminComment  String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  closedAt      DateTime?
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      Message[]
+}
+
+model AiGeneration {
+  id          String     @id @default(cuid())
+  userId      String
+  tool        AiToolType
+  prompt      String
+  result      String
+  tokensUsed  Int?
+  cost        Decimal?   @db.Decimal(10, 4)
+  createdAt   DateTime   @default(now())
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tool, createdAt])
+}
+
+model MarketingCampaign {
+  id            String         @id @default(cuid())
+  userId        String
+  releaseId     String?
+  name          String
+  channel       String
+  budget        Decimal        @db.Decimal(12, 2)
+  status        CampaignStatus @default(DRAFT)
+  startDate     DateTime
+  endDate       DateTime?
+  smartLinkUrl  String?
+  clicks        Int            @default(0)
+  conversions   Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release       Release?       @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status])
+}
+
+model AdminLog {
+  id          String   @id @default(cuid())
+  adminId     String
+  action      String
+  targetType  String
+  targetId    String?
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  admin       User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, createdAt])
+}
+
+model Account {
+  id                 String  @id @default(cuid())
+  userId             String
+  type               String
+  provider           String
+  providerAccountId  String
+  refresh_token      String? @db.Text
+  access_token       String? @db.Text
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.Text
+  session_state      String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id            String   @id @default(cuid())
+  sessionToken  String   @unique
+  userId        String
+  expires       DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}

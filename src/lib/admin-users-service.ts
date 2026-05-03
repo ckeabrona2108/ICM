@@ -1,0 +1,148 @@
+import { FinanceReportStatus, SubscriptionPlan, SubscriptionStatus, type PrismaClient } from "@prisma/client";
+import { z } from "zod";
+
+export * from "@/lib/admin-user-service";
+
+import {
+  canManageUsers,
+  getAdminUserProfileDetails,
+  listAdminUsers as listAdminUsersPaged,
+  type AdminUserProfileDetails
+} from "@/lib/admin-user-service";
+import { topUpUserBalanceByAdmin } from "@/lib/finance-service";
+import { createUserReportByAdmin, listUserReports } from "@/lib/report-service";
+import {
+  getUserSubscription,
+  updateUserSubscriptionByAdmin
+} from "@/lib/subscription-service";
+import { listUserReleasesForAdmin } from "@/lib/admin-user-service";
+
+export const adminTopUpSchema = z.object({
+  amount: z.number().positive("Сумма пополнения должна быть больше 0.").max(10_000_000),
+  description: z.string().trim().max(240).optional()
+});
+
+export const adminCreateReportSchema = z.object({
+  periodStart: z.string().datetime(),
+  periodEnd: z.string().datetime(),
+  amount: z.number().positive("Сумма отчёта должна быть больше 0.").max(10_000_000),
+  status: z.enum(["READY_TO_CONFIRM", "AGREED"]),
+  comment: z.string().trim().max(500).optional()
+});
+
+export const adminUpdateSubscriptionSchema = z.object({
+  plan: z.nativeEnum(SubscriptionPlan),
+  status: z.nativeEnum(SubscriptionStatus),
+  renewalAt: z.string().datetime().nullable().optional(),
+  comment: z.string().trim().max(500).optional()
+});
+
+export interface AdminUserDetails extends AdminUserProfileDetails {
+  releases: Awaited<ReturnType<typeof listUserReleasesForAdmin>>["items"];
+  reports: Awaited<ReturnType<typeof listUserReports>>;
+  subscription: Awaited<ReturnType<typeof getUserSubscription>>;
+}
+
+export async function listAdminUsers(prisma: PrismaClient) {
+  const result = await listAdminUsersPaged(prisma, {
+    q: undefined,
+    subscription: undefined,
+    status: undefined,
+    sortBy: "createdAt",
+    sortOrder: "desc",
+    page: 1,
+    perPage: 500
+  });
+  return result.items.map((item) => ({
+    ...item,
+    agreedBalance: item.balance
+  }));
+}
+
+export async function getAdminUserDetails(
+  prisma: PrismaClient,
+  userId: string
+): Promise<AdminUserDetails | null> {
+  const profile = await getAdminUserProfileDetails(prisma, userId);
+  if (!profile) return null;
+  const [releases, reports, subscription] = await Promise.all([
+    listUserReleasesForAdmin(prisma, userId, {
+      status: undefined,
+      page: 1,
+      perPage: 50
+    }),
+    listUserReports(prisma, userId),
+    getUserSubscription(prisma, userId)
+  ]);
+
+  return {
+    ...profile,
+    releases: releases.items,
+    reports,
+    subscription
+  };
+}
+
+export async function adminTopUpUserBalance(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  userId: string;
+  amount: number;
+  description?: string;
+}) {
+  return topUpUserBalanceByAdmin({
+    prisma: params.prisma,
+    adminId: params.adminId,
+    userId: params.userId,
+    amount: params.amount,
+    comment: params.description
+  });
+}
+
+export async function adminCreateUserFinanceReport(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  userId: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  status: "READY_TO_CONFIRM" | "AGREED";
+  comment?: string;
+}) {
+  return createUserReportByAdmin({
+    prisma: params.prisma,
+    adminId: params.adminId,
+    userId: params.userId,
+    periodStart: new Date(params.periodStart),
+    periodEnd: new Date(params.periodEnd),
+    amount: params.amount,
+    status:
+      params.status === "AGREED"
+        ? FinanceReportStatus.AGREED
+        : FinanceReportStatus.READY_TO_CONFIRM,
+    comment: params.comment
+  });
+}
+
+export async function adminUpdateUserSubscription(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  userId: string;
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  renewalAt?: string | null;
+  comment?: string;
+}) {
+  return updateUserSubscriptionByAdmin({
+    prisma: params.prisma,
+    adminId: params.adminId,
+    userId: params.userId,
+    plan: params.plan,
+    status: params.status,
+    renewalAt: params.renewalAt ? new Date(params.renewalAt) : null,
+    comment: params.comment
+  });
+}
+
+export { canManageUsers };
+

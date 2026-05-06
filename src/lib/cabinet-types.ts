@@ -1,5 +1,6 @@
 export type CabinetReleaseStatus =
   | "draft"
+  | "pending_verification"
   | "moderation"
   | "changes_required"
   | "rejected"

@@ -16,7 +16,7 @@ interface UserContextValue {
   user: CurrentUserProfile | null;
   loading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (force?: boolean) => Promise<void>;
   updateProfile: (payload: UpdateCurrentUserProfileRequest) => Promise<void>;
   uploadAvatar: (payload: UpdateCurrentUserAvatarRequest) => Promise<void>;
   deleteAvatar: () => Promise<void>;
@@ -47,7 +47,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
-  const refresh = React.useCallback(async () => {
+  const refresh = React.useCallback(async (force = false) => {
     if (!session?.user?.id) {
       setUser(null);
       return;
@@ -55,15 +55,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const parsed = await getCachedRequest(
-        "profile:current-user",
-        60_000,
-        async () => {
-          const response = await fetch("/api/user/profile", { method: "GET" });
-          return parseResponseOrThrow<CurrentUserProfileResponse>(response);
-        }
-      );
+      const load = async () => {
+        const response = await fetch("/api/user/profile", {
+          method: "GET",
+          cache: "no-store"
+        });
+        return parseResponseOrThrow<CurrentUserProfileResponse>(response);
+      };
+      const parsed = force
+        ? await load()
+        : await getCachedRequest("profile:current-user", 10_000, load);
       setUser(parsed);
+      primeCachedRequest("profile:current-user", parsed, 10_000);
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : "Не удалось загрузить профиль.");
     } finally {
@@ -73,7 +76,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => {
     if (status === "authenticated") {
-      void refresh();
+      void refresh(true);
       return;
     }
     if (status === "unauthenticated") {
@@ -81,6 +84,34 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       setLoading(false);
     }
+  }, [refresh, status]);
+
+  React.useEffect(() => {
+    if (status !== "authenticated") return;
+
+    const poll = () => {
+      if (document.visibilityState !== "visible") return;
+      void refresh(true);
+    };
+
+    const intervalId = window.setInterval(poll, 10_000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh(true);
+      }
+    };
+    const onFocus = () => {
+      void refresh(true);
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [refresh, status]);
 
   const updateProfile = React.useCallback(
@@ -91,7 +122,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify(payload)
       });
       const parsed = await parseResponseOrThrow<CurrentUserProfileResponse>(response);
-      primeCachedRequest("profile:current-user", parsed, 60_000);
+      primeCachedRequest("profile:current-user", parsed, 10_000);
       setUser(parsed);
     },
     []
@@ -105,7 +136,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify(payload)
       });
       const parsed = await parseResponseOrThrow<CurrentUserProfileResponse>(response);
-      primeCachedRequest("profile:current-user", parsed, 60_000);
+      primeCachedRequest("profile:current-user", parsed, 10_000);
       setUser(parsed);
     },
     []
@@ -116,7 +147,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       method: "DELETE"
     });
     const parsed = await parseResponseOrThrow<CurrentUserProfileResponse>(response);
-    primeCachedRequest("profile:current-user", parsed, 60_000);
+    primeCachedRequest("profile:current-user", parsed, 10_000);
     setUser(parsed);
   }, []);
 

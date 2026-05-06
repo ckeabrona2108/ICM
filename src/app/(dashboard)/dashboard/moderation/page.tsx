@@ -10,14 +10,16 @@ export default async function ModerationPage() {
   if (!session) redirect("/login");
 
   const cabinetReleases = await getCabinetReleasesByUser(session.user.id);
-  const items = cabinetReleases.filter((r) => r.status === "moderation");
+  const items = cabinetReleases.filter(
+    (r) => r.status === "moderation" || r.status === "pending_verification"
+  );
   return (
     <ReleasesListShell
       title="Модерация"
-      description="Релизы на проверке. Среднее время рассмотрения — до 12 часов."
+      description="Релизы на проверке и релизы, ожидающие подтверждения верификации."
       releases={items}
       emptyTitle="На модерации сейчас пусто"
-      emptyDescription="Здесь отображаются релизы, отправленные на проверку."
+      emptyDescription="Здесь отображаются релизы, отправленные на проверку или ожидающие подтверждения верификации."
     />
   );
 }

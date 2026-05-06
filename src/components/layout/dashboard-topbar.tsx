@@ -6,23 +6,28 @@ import { ChevronDown, LogOut, Wallet } from "lucide-react";
 import { useCurrentUser } from "@/components/user/user-provider";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { ServiceWorkStatus } from "@/components/layout/service-work-status";
+import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
+import { VerificationStatusBadge } from "@/components/verification/verification-status-badge";
 
 export function DashboardTopbar({
   userName,
   userEmail,
   planLabel,
   balanceLabel,
-  hasSubscription
+  hasSubscription,
+  contractStatus
 }: {
   userName: string;
   userEmail?: string;
   planLabel?: string;
   balanceLabel: string;
   hasSubscription: boolean;
+  contractStatus: ContractStatusPayload;
 }) {
   const { user } = useCurrentUser();
   const displayName = user?.name?.trim() || userName || "Пользователь";
   const displayEmail = user?.email?.trim() || userEmail?.trim() || "—";
+  const effectiveVerification = user?.verification ?? contractStatus;
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -88,8 +93,14 @@ export function DashboardTopbar({
               <span className="block max-w-[160px] truncate text-[14px] font-medium text-white">
                 {displayName}
               </span>
-              <span className="hidden max-w-[220px] truncate text-[12px] font-medium text-white/60 sm:block">
-                {displayEmail}
+              <span className="hidden items-center gap-2 sm:flex">
+                <span className="max-w-[220px] truncate text-[12px] font-medium text-white/60">
+                  {displayEmail}
+                </span>
+                <VerificationStatusBadge
+                  status={effectiveVerification.status}
+                  className="-translate-y-0.5"
+                />
               </span>
             </span>
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-white/50" />

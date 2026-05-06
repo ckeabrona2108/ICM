@@ -20,10 +20,13 @@ export function canManageReleases(role: string | null | undefined): boolean {
 
 export function isReleaseInAdminTab(
   status: ReleaseStatus,
-  tab: "moderation" | "all" | "approved" | "rejected"
+  tab: "moderation" | "pending_verification" | "all" | "approved" | "rejected"
 ): boolean {
   if (tab === "all") return true;
   if (tab === "moderation") return status === ReleaseStatus.MODERATION;
+  if (tab === "pending_verification") {
+    return status === ReleaseStatus.PENDING_VERIFICATION;
+  }
   if (tab === "approved") {
     return status === ReleaseStatus.APPROVED || status === ReleaseStatus.DISTRIBUTED;
   }

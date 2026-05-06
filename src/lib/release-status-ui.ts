@@ -6,6 +6,7 @@ type BadgeVariant = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
 export type UiReleaseStatus =
   | "draft"
+  | "pending_verification"
   | "moderation"
   | "changes_required"
   | "approved"
@@ -20,6 +21,7 @@ interface ReleaseStatusDescriptor {
 
 const releaseStatusDescriptorMap: Record<UiReleaseStatus, ReleaseStatusDescriptor> = {
   draft: { label: "Черновик", variant: "warning" },
+  pending_verification: { label: "Ожидает верификацию", variant: "warning" },
   moderation: { label: "На модерации", variant: "warning" },
   changes_required: { label: "Требуются изменения", variant: "warning" },
   approved: { label: "Принят", variant: "success" },
@@ -30,6 +32,8 @@ const releaseStatusDescriptorMap: Record<UiReleaseStatus, ReleaseStatusDescripto
 
 const statusAliases: Record<string, UiReleaseStatus> = {
   draft: "draft",
+  pending_verification: "pending_verification",
+  waiting_verification: "pending_verification",
   moderation: "moderation",
   on_moderation: "moderation",
   changes_required: "changes_required",
@@ -61,14 +65,13 @@ export function getPaymentStatusDescriptor(paid: boolean): {
   if (paid) {
     return {
       label: "Оплачен",
-      variant: "muted"
+      variant: "success"
     };
   }
 
   return {
     label: "Не оплачен",
-    variant: "muted",
-    className: "border-rose-400/20 bg-rose-500/10 text-rose-200/85"
+    variant: "danger"
   };
 }
 

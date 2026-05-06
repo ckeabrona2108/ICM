@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import type {
   CurrentUserProfileResponse,
   UpdateCurrentUserAvatarRequest
@@ -24,12 +25,13 @@ function toProfileResponse(data: {
   name: string;
   email: string;
   avatarUrl: string | null;
-}): CurrentUserProfileResponse {
+}, verification: Awaited<ReturnType<typeof getUserContractStatus>>): CurrentUserProfileResponse {
   return {
     id: data.id,
     name: data.name,
     email: data.email,
-    avatarUrl: data.avatarUrl
+    avatarUrl: data.avatarUrl,
+    verification
   };
 }
 
@@ -75,7 +77,11 @@ export async function PUT(request: Request) {
       }
     });
 
-    return NextResponse.json(toProfileResponse(updated), { status: 200 });
+    const verification = await getUserContractStatus({
+      prisma,
+      userId: updated.id
+    });
+    return NextResponse.json(toProfileResponse(updated, verification), { status: 200 });
   } catch (error) {
     if (isAvatarColumnMissingError(error)) {
       return NextResponse.json(
@@ -121,7 +127,11 @@ export async function DELETE() {
       }
     });
 
-    return NextResponse.json(toProfileResponse(updated), { status: 200 });
+    const verification = await getUserContractStatus({
+      prisma,
+      userId: updated.id
+    });
+    return NextResponse.json(toProfileResponse(updated, verification), { status: 200 });
   } catch (error) {
     if (isAvatarColumnMissingError(error)) {
       return NextResponse.json(

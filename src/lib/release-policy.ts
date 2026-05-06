@@ -11,6 +11,7 @@ import {
 
 export const releaseLifecycleStatuses = [
   "draft",
+  "pending_verification",
   "moderation",
   "changes_required",
   "approved",

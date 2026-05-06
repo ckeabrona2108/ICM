@@ -14,7 +14,7 @@ export function AiRecommendations() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <Sparkles className="h-4 w-4 text-violet-300" />
-          AI Recommendations
+          AI Monitoring
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">

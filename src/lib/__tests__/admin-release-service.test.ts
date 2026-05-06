@@ -23,6 +23,8 @@ test("moderation tab only shows moderation releases", () => {
   assert.equal(isReleaseInAdminTab(ReleaseStatus.MODERATION, "moderation"), true);
   assert.equal(isReleaseInAdminTab(ReleaseStatus.APPROVED, "moderation"), false);
   assert.equal(isReleaseInAdminTab(ReleaseStatus.REJECTED, "moderation"), false);
+  assert.equal(isReleaseInAdminTab(ReleaseStatus.PENDING_VERIFICATION, "pending_verification"), true);
+  assert.equal(isReleaseInAdminTab(ReleaseStatus.MODERATION, "pending_verification"), false);
 });
 
 test("approve/reject transitions are only allowed from moderation statuses", () => {

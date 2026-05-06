@@ -9,6 +9,7 @@ import type {
   ReleaseDraftSaveRequest,
   ReleaseDraftSaveResponse
 } from "@/lib/api/contracts";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import { prisma } from "@/lib/prisma";
 import { releaseSubmissionDataSchema } from "@/lib/release-policy";
 import { canSaveDraft } from "@/lib/draft-policy";
@@ -186,6 +187,20 @@ export async function POST(request: Request) {
   }
 
   const body: ReleaseDraftSaveRequest = parsed.data;
+  const contractStatus = await getUserContractStatus({
+    prisma,
+    userId: session.user.id
+  });
+
+  if (!contractStatus.isVerified) {
+    return NextResponse.json(
+      {
+        error: "verification_required",
+        message: "Для выпуска релизов необходимо пройти верификацию и подписать договор."
+      },
+      { status: 403 }
+    );
+  }
 
   if (body.data.priorityRelease) {
     const priorityAccess = await checkPriorityReleaseAccess(prisma, session.user.id);

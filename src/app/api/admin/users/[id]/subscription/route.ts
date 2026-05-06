@@ -1,21 +1,13 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
-import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
 import {
+  adminUpdateSubscriptionSchema,
   canManageUsers
-} from "@/lib/admin-user-service";
+} from "@/lib/admin-users-service";
 import { getUserSubscription, updateUserSubscriptionByAdmin } from "@/lib/subscription-service";
 import { prisma } from "@/lib/prisma";
-
-const updateSchema = z.object({
-  plan: z.nativeEnum(SubscriptionPlan),
-  status: z.nativeEnum(SubscriptionStatus),
-  renewalAt: z.string().datetime().nullable().optional(),
-  comment: z.string().trim().max(500).optional()
-});
 
 export async function GET(
   _request: Request,
@@ -59,7 +51,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const parsed = updateSchema.safeParse(payload);
+  const parsed = adminUpdateSubscriptionSchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "Invalid request payload" },
@@ -73,7 +65,7 @@ export async function PATCH(
     userId: context.params.id,
     plan: parsed.data.plan,
     status: parsed.data.status,
-    renewalAt: parsed.data.renewalAt ? new Date(parsed.data.renewalAt) : null,
+    endsAt: parsed.data.endsAt ? new Date(parsed.data.endsAt) : null,
     comment: parsed.data.comment
   });
 

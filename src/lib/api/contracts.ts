@@ -92,6 +92,12 @@ export interface ReleaseSubmitSuccessResponse {
   message: string;
 }
 
+export interface AdminCountsResponse {
+  verification_pending: number;
+  releases_moderation: number;
+  releases_pending_verification: number;
+}
+
 export interface ReleaseSubmitFailureResponse {
   ok: false;
   errors: ReleaseValidationIssue[];
@@ -145,6 +151,7 @@ export interface CurrentUserProfileResponse {
   name: string;
   email: string;
   avatarUrl: string | null;
+  verification: import("@/lib/contract-verification-shared").ContractStatusPayload;
 }
 
 export interface UpdateCurrentUserProfileRequest {

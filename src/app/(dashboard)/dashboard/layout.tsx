@@ -6,6 +6,8 @@ import { authOptions } from "@/lib/auth";
 import { DashboardSidebar } from "@/components/layout/dashboard-sidebar";
 import { DashboardTopbar } from "@/components/layout/dashboard-topbar";
 import { DashboardPrefetch } from "@/components/layout/dashboard-prefetch";
+import { DashboardVerificationStatusModal } from "@/components/verification/dashboard-verification-status-modal";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { prisma } from "@/lib/prisma";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
@@ -19,7 +21,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/login");
   }
 
-  const [releaseCounts, userProfile, balanceTotals, subscriptionOverview] = await Promise.all([
+  const [releaseCounts, userProfile, balanceTotals, subscriptionOverview, contractStatus] = await Promise.all([
     getReleaseSidebarCountsForUser({
       userId: session.user.id,
       prisma
@@ -49,7 +51,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         }
         throw error;
       }),
-    getSubscriptionOverview(prisma, session.user.id)
+    getSubscriptionOverview(prisma, session.user.id),
+    getUserContractStatus({
+      prisma,
+      userId: session.user.id
+    })
   ]);
 
   const sidebarCounts = {
@@ -73,16 +79,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="pointer-events-none absolute right-0 top-40 h-[360px] w-[360px] translate-x-1/4 rounded-full bg-[#3b1d75]/30 blur-[120px]" />
 
       <div className="relative h-screen min-w-0 overflow-hidden">
-        <DashboardSidebar counts={sidebarCounts} />
+        <DashboardSidebar counts={sidebarCounts} contractStatus={contractStatus} />
         <div className="h-screen min-w-0 lg:pl-[258px]">
           <div className="h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 sm:px-6 lg:px-8">
             <DashboardPrefetch />
+            <DashboardVerificationStatusModal initialStatus={contractStatus} />
             <DashboardTopbar
               userName={userName}
               userEmail={userEmail}
               planLabel={planLabel}
               balanceLabel={balanceLabel}
               hasSubscription={hasSubscription}
+              contractStatus={contractStatus}
             />
             {children}
           </div>

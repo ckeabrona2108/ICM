@@ -1,4 +1,5 @@
 import {
+  BalanceAdminAdjustmentType,
   FinanceReportStatus,
   PayoutRequestStatus,
   Prisma,
@@ -211,6 +212,109 @@ export async function topUpUserBalanceByAdmin(params: {
       oldValue: { agreedBalance: oldValue },
       newValue: { agreedBalance: newValue, amountDelta: params.amount },
       comment: params.comment
+    });
+  });
+
+  return { ok: true as const };
+}
+
+export async function adjustUserBalanceByAdmin(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  userId: string;
+  type: "credit" | "debit";
+  amount: number;
+  comment?: string;
+}) {
+  const user = await params.prisma.user.findUnique({
+    where: { id: params.userId },
+    select: { id: true }
+  });
+  if (!user) return { ok: false as const, error: "User not found" };
+
+  const normalizedComment = params.comment?.trim() || null;
+  if (!normalizedComment) {
+    return { ok: false as const, error: "Комментарий администратора обязателен." };
+  }
+
+  const oldTotals = await getUserBalanceTotals(params.prisma, params.userId);
+  const oldValue = oldTotals.agreedBalance;
+  const delta = params.type === "credit" ? params.amount : -params.amount;
+  const newValue = oldValue + delta;
+
+  if (params.type === "debit" && newValue < 0) {
+    return { ok: false as const, error: "Недостаточно средств для списания" };
+  }
+
+  const amountDecimal = new Prisma.Decimal(params.amount);
+  const now = new Date();
+  const { start, end } = monthRange(now);
+
+  await params.prisma.$transaction(async (tx) => {
+    if (params.type === "credit") {
+      const report = await tx.financeReport.create({
+        data: {
+          userId: params.userId,
+          periodStart: start,
+          periodEnd: end,
+          amount: amountDecimal,
+          status: FinanceReportStatus.AGREED,
+          agreedAt: now
+        }
+      });
+      await tx.transaction.create({
+        data: {
+          userId: params.userId,
+          amount: amountDecimal,
+          currency: "RUB",
+          type: TransactionType.ROYALTY,
+          status: TransactionStatus.COMPLETED,
+          description: normalizedComment,
+          reference: report.id,
+          processedAt: now
+        }
+      });
+    } else {
+      await tx.transaction.create({
+        data: {
+          userId: params.userId,
+          amount: amountDecimal,
+          currency: "RUB",
+          type: TransactionType.FEE,
+          status: TransactionStatus.COMPLETED,
+          description: normalizedComment,
+          reference: `admin-debit:${params.adminId}`,
+          processedAt: now
+        }
+      });
+    }
+
+    await tx.balanceAdminLog.create({
+      data: {
+        userId: params.userId,
+        adminId: params.adminId,
+        type:
+          params.type === "credit"
+            ? BalanceAdminAdjustmentType.CREDIT
+            : BalanceAdminAdjustmentType.DEBIT,
+        amount: amountDecimal,
+        oldBalance: new Prisma.Decimal(oldValue),
+        newBalance: new Prisma.Decimal(newValue),
+        comment: normalizedComment
+      }
+    });
+
+    await createAdminLog(tx, {
+      adminId: params.adminId,
+      action:
+        params.type === "credit"
+          ? "USER_BALANCE_CREDIT"
+          : "USER_BALANCE_DEBIT",
+      targetType: "User",
+      targetId: params.userId,
+      oldValue: { agreedBalance: oldValue },
+      newValue: { agreedBalance: newValue, amountDelta: delta },
+      comment: normalizedComment
     });
   });
 

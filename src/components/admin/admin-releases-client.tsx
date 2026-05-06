@@ -9,10 +9,16 @@ import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/releases/status-badge";
 import type { AdminReleaseDetails } from "@/lib/admin-data";
 
-type AdminReleaseTab = "moderation" | "all" | "approved" | "rejected";
+type AdminReleaseTab =
+  | "moderation"
+  | "pending_verification"
+  | "all"
+  | "approved"
+  | "rejected";
 
 const TAB_LABELS: Record<AdminReleaseTab, string> = {
   moderation: "На модерации",
+  pending_verification: "Ожидает верификацию",
   all: "Все",
   approved: "Принятые",
   rejected: "Отклонённые"
@@ -295,6 +301,11 @@ export function AdminReleasesClient({
                         <p className="mt-1">
                           Причина: {release.rejectionReason || release.moderationComment || "Не указана"}
                         </p>
+                      </div>
+                    ) : null}
+                    {release.status === "pending_verification" ? (
+                      <div className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-[13px] text-cyan-100">
+                        Релиз будет доступен для модерации после подтверждения верификации пользователя.
                       </div>
                     ) : null}
                   </div>

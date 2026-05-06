@@ -6,9 +6,8 @@ export function PaymentStatusBadge({ paid }: { paid: boolean }) {
   const descriptor = getPaymentStatusDescriptor(paid);
 
   return (
-    <Badge variant={descriptor.variant} className={cn("text-[10px] font-semibold tracking-[0.08em]", descriptor.className)}>
+    <Badge variant={descriptor.variant} className={cn(descriptor.className)}>
       {descriptor.label}
     </Badge>
   );
 }
-

@@ -7,10 +7,18 @@ export interface ReleaseSidebarCounts {
   changes_required: number;
 }
 
-type LifecycleStatus = "draft" | "moderation" | "changes_required" | "approved" | "archived";
+type LifecycleStatus =
+  | "draft"
+  | "pending_verification"
+  | "moderation"
+  | "changes_required"
+  | "approved"
+  | "archived";
 
 const lifecycleAliases: Record<string, LifecycleStatus> = {
   draft: "draft",
+  pending_verification: "pending_verification",
+  waiting_verification: "pending_verification",
   moderation: "moderation",
   on_moderation: "moderation",
   changes_required: "changes_required",
@@ -35,6 +43,7 @@ export function mapReleaseStatusToSection(
   switch (status) {
     case ReleaseStatus.DRAFT:
       return "draft";
+    case ReleaseStatus.PENDING_VERIFICATION:
     case ReleaseStatus.MODERATION:
       return "moderation";
     case ReleaseStatus.CHANGES_REQUIRED:

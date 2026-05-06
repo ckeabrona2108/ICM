@@ -31,6 +31,16 @@ test("status transitions move counts between sections without overlap", () => {
     changes_required: 0
   });
 
+  const awaitingVerification = buildReleaseSidebarCounts([
+    { status: ReleaseStatus.PENDING_VERIFICATION, _count: { _all: 2 } }
+  ]);
+  assert.deepEqual(awaitingVerification, {
+    all: 0,
+    draft: 0,
+    moderation: 2,
+    changes_required: 0
+  });
+
   const needsChanges = buildReleaseSidebarCounts([
     { status: ReleaseStatus.CHANGES_REQUIRED, _count: { _all: 1 } }
   ]);
@@ -69,6 +79,8 @@ test("approved/distributed are counted only in all releases", () => {
 
 test("normalizeLifecycleStatus supports legacy aliases", () => {
   assert.equal(normalizeLifecycleStatus("changes_required"), "changes_required");
+  assert.equal(normalizeLifecycleStatus("pending_verification"), "pending_verification");
+  assert.equal(normalizeLifecycleStatus("waiting_verification"), "pending_verification");
   assert.equal(normalizeLifecycleStatus("requires_changes"), "changes_required");
   assert.equal(normalizeLifecycleStatus("need_changes"), "changes_required");
   assert.equal(normalizeLifecycleStatus("revision_required"), "changes_required");

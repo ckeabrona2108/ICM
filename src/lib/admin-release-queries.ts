@@ -5,7 +5,12 @@ import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { allReleasePlatformCodes } from "@/lib/release-platforms";
 import { prisma } from "@/lib/prisma";
 
-export type AdminReleaseStatusFilter = "moderation" | "all" | "approved" | "rejected";
+export type AdminReleaseStatusFilter =
+  | "moderation"
+  | "pending_verification"
+  | "all"
+  | "approved"
+  | "rejected";
 
 type AdminReleaseSource = Prisma.ReleaseGetPayload<{
   include: {
@@ -98,6 +103,9 @@ function formatDateTime(value: Date): string {
 function toAdminStatus(status: ReleaseStatus): AdminReleaseStatus {
   if (status === ReleaseStatus.DRAFT) {
     return "draft";
+  }
+  if (status === ReleaseStatus.PENDING_VERIFICATION) {
+    return "pending_verification";
   }
   if (status === ReleaseStatus.MODERATION) {
     return "moderation";
@@ -242,12 +250,16 @@ function mapRelease(source: AdminReleaseSource): AdminReleaseDetails {
 
 function resolveStatuses(filter: AdminReleaseStatusFilter): ReleaseStatus[] | undefined {
   if (filter === "moderation") return [ReleaseStatus.MODERATION];
+  if (filter === "pending_verification") return [ReleaseStatus.PENDING_VERIFICATION];
   if (filter === "approved") return [ReleaseStatus.APPROVED, ReleaseStatus.DISTRIBUTED];
   if (filter === "rejected") return [ReleaseStatus.REJECTED];
   return undefined;
 }
 
 function resolveOrderBy(filter: AdminReleaseStatusFilter): Prisma.ReleaseOrderByWithRelationInput[] {
+  if (filter === "pending_verification") {
+    return [{ updatedAt: "desc" }];
+  }
   if (filter === "moderation") {
     return [{ moderationStartedAt: "desc" }, { updatedAt: "desc" }];
   }

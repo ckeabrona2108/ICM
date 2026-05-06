@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import type {
   CurrentUserProfileResponse,
   UpdateCurrentUserProfileRequest
@@ -23,12 +24,13 @@ function toProfileResponse(data: {
   name: string;
   email: string;
   avatarUrl: string | null;
-}): CurrentUserProfileResponse {
+}, verification: Awaited<ReturnType<typeof getUserContractStatus>>): CurrentUserProfileResponse {
   return {
     id: data.id,
     name: data.name,
     email: data.email,
-    avatarUrl: data.avatarUrl
+    avatarUrl: data.avatarUrl,
+    verification
   };
 }
 
@@ -72,7 +74,12 @@ export async function GET() {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  return NextResponse.json(toProfileResponse(user), { status: 200 });
+  const verification = await getUserContractStatus({
+    prisma,
+    userId: user.id
+  });
+
+  return NextResponse.json(toProfileResponse(user, verification), { status: 200 });
 }
 
 export async function PATCH(request: Request) {
@@ -128,7 +135,11 @@ export async function PATCH(request: Request) {
     }
 
     const updated = { ...updatedBase, avatarUrl };
-    return NextResponse.json(toProfileResponse(updated), { status: 200 });
+    const verification = await getUserContractStatus({
+      prisma,
+      userId: updated.id
+    });
+    return NextResponse.json(toProfileResponse(updated, verification), { status: 200 });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

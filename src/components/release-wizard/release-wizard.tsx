@@ -26,7 +26,8 @@ import type {
   ReleaseDraftSaveRequest,
   ReleaseDraftSaveResponse,
   ReleaseSubmitFailureResponse,
-  ReleaseSubmitRequest
+  ReleaseSubmitRequest,
+  ReleaseSubmitSuccessResponse
 } from "@/lib/api/contracts";
 import type {
   ReleaseLifecycleStatus,
@@ -40,6 +41,8 @@ import {
 import { resolveDraftReleaseId } from "@/lib/release-wizard-mode";
 import { shouldGuardUnsavedChanges } from "@/lib/wizard-dirty";
 import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
+import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
+import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
 
 const STEPS: Array<{ id: StepId; label: string }> = [
   { id: "info", label: "Информация по релизу" },
@@ -295,6 +298,9 @@ function WizardInner({
   const [guardError, setGuardError] = React.useState<string | null>(null);
   const [guardSaving, setGuardSaving] = React.useState(false);
   const [stepNavError, setStepNavError] = React.useState<string | null>(null);
+  const [contractModalOpen, setContractModalOpen] = React.useState(false);
+  const [contractGateStatus, setContractGateStatus] = React.useState<ContractStatusPayload | null>(null);
+  const [lastSubmitResult, setLastSubmitResult] = React.useState<ReleaseSubmitSuccessResponse | null>(null);
   const [submitErrorsBySection, setSubmitErrorsBySection] = React.useState<
     Record<WizardErrorSection, string[]>
   >({
@@ -441,6 +447,7 @@ function WizardInner({
 
   React.useEffect(() => {
     updateDraftReleaseId(resolveDraftReleaseId(submissionMode, sourceReleaseId));
+    setLastSubmitResult(null);
   }, [sourceReleaseId, submissionMode, updateDraftReleaseId]);
 
   React.useEffect(() => {
@@ -485,10 +492,11 @@ function WizardInner({
       });
       if (!response.ok) {
         const parsed = (await response.json().catch(() => null)) as
-          | { error?: string; errors?: Array<{ message?: string }> }
+          | { error?: string; message?: string; errors?: Array<{ message?: string }> }
           | null;
         const message =
           parsed?.errors?.[0]?.message ??
+          parsed?.message ??
           parsed?.error ??
           "Не удалось сохранить черновик.";
         throw new Error(message);
@@ -643,7 +651,7 @@ function WizardInner({
     return prepared;
   }, [data, set, submissionData]);
 
-  const handleSubmit = React.useCallback(async () => {
+  const doSubmit = React.useCallback(async () => {
     if (autosaveTimerRef.current != null) {
       window.clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
@@ -708,7 +716,7 @@ function WizardInner({
           if (!response.ok) {
             const parsed = (await response.json().catch(() => null)) as
               | ReleaseSubmitFailureResponse
-              | { error?: string }
+              | { error?: string; message?: string }
               | null;
             if (parsed && "errors" in parsed && Array.isArray(parsed.errors)) {
               setSubmitErrors([...new Set(parsed.errors.map((issue) => issue.message))]);
@@ -724,7 +732,11 @@ function WizardInner({
               }
             } else {
               const fallbackMessage =
-                parsed && "error" in parsed ? parsed.error : undefined;
+                parsed && "message" in parsed && typeof parsed.message === "string"
+                  ? parsed.message
+                  : parsed && "error" in parsed
+                    ? parsed.error
+                    : undefined;
               setSubmitErrors([
                 fallbackMessage ??
                   "Не удалось отправить релиз на модерацию. Попробуйте позже."
@@ -737,6 +749,13 @@ function WizardInner({
               });
             }
             throw new Error("submit_failed");
+          }
+
+          const parsed = (await response.json().catch(() => null)) as
+            | ReleaseSubmitSuccessResponse
+            | null;
+          if (parsed?.ok) {
+            setLastSubmitResult(parsed);
           }
         }
       });
@@ -817,6 +836,32 @@ function WizardInner({
     sourceReleaseId,
     submissionMode
   ]);
+
+  const handleSubmit = React.useCallback(async () => {
+    if (submittingRef.current) return;
+    setStepNavError(null);
+
+    try {
+      const response = await fetch("/api/verification/contract/status", {
+        method: "GET",
+        cache: "no-store"
+      });
+      if (response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | ContractStatusPayload
+          | null;
+        if (!payload?.canCreateRelease) {
+          setContractGateStatus(payload);
+          setContractModalOpen(true);
+          return;
+        }
+      }
+    } catch {
+      // optional: backend enforcement will still block submit if required
+    }
+
+    await doSubmit();
+  }, [doSubmit]);
 
   const jumpToErrorSection = React.useCallback(
     (section: WizardErrorSection) => {
@@ -1134,9 +1179,32 @@ function WizardInner({
               submitPhase={submitPhase}
             />
           ) : null}
-          {step === "upload" ? <StepUpload /> : null}
+          {step === "upload" ? <StepUpload submitResult={lastSubmitResult} /> : null}
         </motion.div>
       </AnimatePresence>
+
+      <VerificationAccessModal
+        open={contractModalOpen}
+        status={
+          contractGateStatus ?? {
+          status: "not_signed",
+          signed: false,
+          isVerified: false,
+          canSubmitReleases: false,
+          canCreateRelease: false,
+          signedAt: null,
+          contractVersion: null,
+          reason: "Для выпуска релизов необходимо пройти верификацию и подписать договор.",
+          rejectionReason: null,
+          rejectionKind: null,
+          verificationId: null
+        }
+        }
+        onClose={() => {
+          setContractModalOpen(false);
+          setStepNavError("Для выпуска релизов необходимо пройти верификацию и подписать договор.");
+        }}
+      />
 
       {/* nav buttons (hidden on review/upload — review has its own CTA) */}
       {step !== "review" && step !== "upload" ? (

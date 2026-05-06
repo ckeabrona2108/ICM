@@ -5,6 +5,7 @@ import {
   type PrismaClient
 } from "@prisma/client";
 import { addDays, addMonths } from "date-fns";
+import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
 
 export type EffectivePlan = "STANDARD" | "PRO" | "ENTERPRISE";
 
@@ -225,6 +226,7 @@ async function getUserSubscriptionRecord(tx: TxClient, userId: string): Promise<
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
   startedAt: Date;
+  endsAt: Date | null;
   renewalAt: Date | null;
 } | null> {
   const subscription = await tx.subscription.findUnique({
@@ -234,6 +236,7 @@ async function getUserSubscriptionRecord(tx: TxClient, userId: string): Promise<
       plan: true,
       status: true,
       startedAt: true,
+      endsAt: true,
       renewalAt: true
     }
   });
@@ -407,9 +410,8 @@ async function resolveSubscriptionRuntime(tx: TxClient, userId: string): Promise
 
   const normalizedPlan = normalizePlan(subscription.plan);
   const now = new Date();
-  const hasFutureEnd = Boolean(
-    subscription.renewalAt && subscription.renewalAt.getTime() > now.getTime()
-  );
+  const effectiveEnd = getSubscriptionEffectiveEndDate(subscription);
+  const hasFutureEnd = Boolean(effectiveEnd && effectiveEnd.getTime() > now.getTime());
   const hasActiveSubscription =
     (subscription.status === SubscriptionStatus.ACTIVE ||
       subscription.status === SubscriptionStatus.TRIALING) &&
@@ -433,7 +435,7 @@ async function resolveSubscriptionRuntime(tx: TxClient, userId: string): Promise
     status,
     hasActiveSubscription,
     startedAt: subscription.startedAt,
-    endsAt: hasActiveSubscription ? subscription.renewalAt : null,
+    endsAt: hasActiveSubscription ? effectiveEnd : null,
     limits: getPlanLimits(plan, hasActiveSubscription),
     usage: {
       id: usage.id,
@@ -662,12 +664,18 @@ export async function applySubscriptionUpgrade(params: {
     select: {
       id: true,
       startedAt: true,
+      endsAt: true,
       renewalAt: true
     }
   });
 
   const now = new Date();
-  const currentEnd = existing?.renewalAt ?? null;
+  const currentEnd = existing
+    ? getSubscriptionEffectiveEndDate({
+        endsAt: existing.endsAt ?? null,
+        renewalAt: existing.renewalAt ?? null
+      })
+    : null;
   const nextEnd = currentEnd && now.getTime() < currentEnd.getTime() ? addMonths(currentEnd, 1) : addMonths(now, 1);
 
   const updated = await params.tx.subscription.upsert({
@@ -677,17 +685,20 @@ export async function applySubscriptionUpgrade(params: {
       plan: params.plan,
       status: SubscriptionStatus.ACTIVE,
       startedAt: now,
+      endsAt: nextEnd,
       renewalAt: nextEnd
     },
     update: {
       plan: params.plan,
       status: SubscriptionStatus.ACTIVE,
       startedAt: existing?.startedAt ?? now,
+      endsAt: nextEnd,
       renewalAt: nextEnd
     },
     select: {
       id: true,
       startedAt: true,
+      endsAt: true,
       renewalAt: true
     }
   });
@@ -723,7 +734,7 @@ export async function applySubscriptionUpgrade(params: {
   return {
     id: updated.id,
     startedAt: updated.startedAt,
-    endsAt: updated.renewalAt ?? addDays(now, 30)
+    endsAt: getSubscriptionEffectiveEndDate(updated) ?? addDays(now, 30)
   };
 }
 

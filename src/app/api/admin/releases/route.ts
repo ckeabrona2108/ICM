@@ -7,6 +7,7 @@ import { canManageReleases } from "@/lib/admin-release-service";
 
 const allowedStatuses = new Set<AdminReleaseStatusFilter>([
   "moderation",
+  "pending_verification",
   "all",
   "approved",
   "rejected"

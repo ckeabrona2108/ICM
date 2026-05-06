@@ -28,14 +28,14 @@ export default async function AiRecommendationsPage() {
   return (
     <DashboardShell>
       <PageHeader
-        title="AI-рекомендации"
+        title="AI Monitoring"
         description="Демо-раздел персональных AI-подсказок по вашей статистике."
       />
 
       {!subscriptionOverview.limits.aiEnabled ? (
         <section className="rounded-2xl border border-amber-400/25 bg-amber-500/10 p-5">
           <p className="text-[16px] font-semibold text-amber-100">
-            Для доступа к AI-рекомендациям необходимо обновить подписку.
+            Для доступа к AI Monitoring необходимо обновить подписку.
           </p>
           <p className="mt-2 text-[13px] text-amber-100/85">
             AI доступен на тарифах PRO и ENTERPRISE.

@@ -145,7 +145,7 @@ export function AnalyticsAiInsights({ filters }: AnalyticsAiInsightsProps) {
     <PageSection>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-[18px] font-semibold text-white">AI-рекомендации</h3>
+          <h3 className="text-[18px] font-semibold text-white">AI Monitoring</h3>
           <p className="mt-1 text-[13px] text-white/65">
             Анализ запускается вручную только по вашим агрегированным данным.
           </p>

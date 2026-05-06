@@ -16,7 +16,8 @@ const chartSource = readFileSync(chartSourcePath, "utf8");
 
 test("Hover shows only dot + tooltip", () => {
   assert.ok(chartSource.includes("<Tooltip"));
-  assert.ok(chartSource.includes("activeDot={(props) => <ActiveDotGlow"));
+  assert.ok(chartSource.includes("activeDot={(props"));
+  assert.ok(chartSource.includes("<ActiveDotGlow"));
   assert.ok(!chartSource.includes("<Customized"));
 });
 

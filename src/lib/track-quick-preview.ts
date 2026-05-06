@@ -95,6 +95,10 @@ function groupTrackPersons(persons: SubmissionTrackPersonLike[]) {
     if (role === "автор" || role === "автор текста") {
       continue;
     }
+    if (role.includes("соисполн")) {
+      grouped.coPerformer.push(name);
+      continue;
+    }
     if (role.includes("исполн")) {
       grouped.performer.push(name);
       continue;
@@ -105,10 +109,6 @@ function groupTrackPersons(persons: SubmissionTrackPersonLike[]) {
     }
     if (role.includes("remix")) {
       grouped.remixer.push(name);
-      continue;
-    }
-    if (role.includes("соисполн")) {
-      grouped.coPerformer.push(name);
       continue;
     }
     if (role.includes("продюсер") || role.includes("producer")) {
@@ -178,4 +178,3 @@ export function buildTrackQuickPreviewData(
     }
   };
 }
-

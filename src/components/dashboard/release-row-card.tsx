@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -59,6 +58,7 @@ function ReleaseRowCardBase({
   const timelineState = getReleaseTimelineState(release.status, release.paid);
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
+  const showPendingVerificationNotice = release.status === "pending_verification";
   const editLocked = release.status === "moderation";
   const showHistoryIcon = release.status !== "draft";
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
@@ -73,7 +73,12 @@ function ReleaseRowCardBase({
   const label = release.label?.trim() || "Не указан";
   const priorityBadge = getPriorityBadgeDescriptor(Boolean(release.priority));
   const isDataCover = coverUrl.startsWith("data:");
-  const useNativeImage = isDataCover || coverUrl.length > 4096;
+  const isBlobCover = coverUrl.startsWith("blob:");
+  const isRelativeCover = coverUrl.startsWith("/");
+  const isHttpCover = coverUrl.startsWith("http://") || coverUrl.startsWith("https://");
+  const isRenderableCover = Boolean(
+    coverUrl && (isDataCover || isBlobCover || isRelativeCover || isHttpCover)
+  );
   const quickPreviewData =
     quickPreviewTrackNum == null ? null : (quickPreviewCache[quickPreviewTrackNum] ?? null);
   const isQuickPreviewOpen = quickPreviewTrackNum != null;
@@ -264,24 +269,14 @@ function ReleaseRowCardBase({
         <div className="flex flex-col gap-5 sm:flex-row">
           {/* cover */}
           <div className="relative h-[88px] w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/[0.06] sm:h-[100px] sm:w-[100px]">
-            {coverUrl ? (
-              useNativeImage ? (
-                // next/image can fail for very large data URLs; fallback keeps draft card stable.
-                <img
-                  src={coverUrl}
-                  alt=""
-                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                  loading="lazy"
-                />
-              ) : (
-                <Image
-                  src={coverUrl}
-                  alt=""
-                  fill
-                  sizes="100px"
-                  className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                />
-              )
+            {isRenderableCover ? (
+              // Keep release cards stable even when remote host is not configured in next/image.
+              <img
+                src={coverUrl}
+                alt=""
+                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+                loading="lazy"
+              />
             ) : (
               <div className="grid h-full w-full place-items-center bg-white/[0.02] text-[12px] font-medium text-white/45">
                 Без обложки
@@ -355,12 +350,6 @@ function ReleaseRowCardBase({
 
             {showPay ? (
               <div className="mt-4 flex items-center justify-between border-t border-white/[0.05] pt-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-[13px] font-medium uppercase tracking-[0.12em] text-white/56">
-                    {release.paid ? "Оплачен" : "Не оплачен"}
-                  </span>
-                </div>
-
                 {timelineState.showPayButton ? (
                   <button
                     type="button"
@@ -378,6 +367,11 @@ function ReleaseRowCardBase({
           steps={timelineState.steps}
           activeIndex={timelineState.activeIndex}
         />
+        {showPendingVerificationNotice ? (
+          <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-cyan-500/8 p-4 text-[13px] text-cyan-100/88">
+            После подтверждения верификации релиз будет отправлен на модерацию.
+          </div>
+        ) : null}
         {showChangesNotice ? (
           <ReleaseChangesNotice
             status={release.status === "rejected" ? "rejected" : "changes_required"}

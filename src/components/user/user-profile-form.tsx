@@ -2,12 +2,14 @@
 
 import * as React from "react";
 
+import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { useCurrentUser } from "@/components/user/user-provider";
+import { VerificationStatusBadge } from "@/components/verification/verification-status-badge";
 import {
   userProfileEmailSchema,
   userProfileNameSchema,
@@ -23,8 +25,13 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export function UserProfileForm() {
+export function UserProfileForm({
+  contractStatus
+}: {
+  contractStatus: ContractStatusPayload;
+}) {
   const { user, loading, updateProfile, uploadAvatar, deleteAvatar } = useCurrentUser();
+  const effectiveVerification = user?.verification ?? contractStatus;
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [saving, setSaving] = React.useState(false);
@@ -155,7 +162,10 @@ export function UserProfileForm() {
             />
           </Field>
 
-          <Field label="Email">
+          <Field
+            label="Email"
+            suffix={<VerificationStatusBadge status={effectiveVerification.status} />}
+          >
             <Input
               type="email"
               value={email}
@@ -187,16 +197,21 @@ export function UserProfileForm() {
 
 function Field({
   label,
+  suffix,
   className,
   children
 }: {
   label: string;
+  suffix?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className={className}>
-      <Label className="mb-1.5 block text-[14px] font-medium text-white/74">{label}</Label>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <Label className="block text-[14px] font-medium text-white/74">{label}</Label>
+        {suffix}
+      </div>
       {children}
     </div>
   );

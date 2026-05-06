@@ -72,6 +72,7 @@ export function AdminUserDetailClient({
   const [releases, setReleases] = React.useState(initialReleases);
   const [finance, setFinance] = React.useState(initialFinance);
   const [reports, setReports] = React.useState(initialReports);
+  const [subscriptionView, setSubscriptionView] = React.useState<UserSubscriptionView | null>(initialSubscription);
 
   const [busy, setBusy] = React.useState<null | "reload" | "topup" | "report" | "subscription">(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -81,6 +82,7 @@ export function AdminUserDetailClient({
 
   const [topUpAmount, setTopUpAmount] = React.useState("1000");
   const [topUpComment, setTopUpComment] = React.useState("");
+  const [balanceAdjustmentType, setBalanceAdjustmentType] = React.useState<"credit" | "debit">("credit");
   const [showTopUpConfirm, setShowTopUpConfirm] = React.useState(false);
 
   const now = new Date();
@@ -99,7 +101,7 @@ export function AdminUserDetailClient({
   const [subscriptionStatus, setSubscriptionStatus] = React.useState<SubscriptionStatus>(
     initialSubscription?.status ?? SubscriptionStatus.CANCELED
   );
-  const [renewalAt, setRenewalAt] = React.useState(initialSubscription?.renewalAt?.slice(0, 10) ?? "");
+  const [endsAt, setEndsAt] = React.useState(initialSubscription?.endsAt?.slice(0, 10) ?? "");
   const [subscriptionComment, setSubscriptionComment] = React.useState("");
 
   const reloadAll = React.useCallback(async () => {
@@ -143,9 +145,10 @@ export function AdminUserDetailClient({
       setFinance(financePayload);
       setReports(reportsPayload.reports);
       const nextSub = subscriptionPayload.subscription;
+      setSubscriptionView(nextSub ?? null);
       setPlan(nextSub?.plan ?? SubscriptionPlan.FREE);
       setSubscriptionStatus(nextSub?.status ?? SubscriptionStatus.CANCELED);
-      setRenewalAt(nextSub?.renewalAt?.slice(0, 10) ?? "");
+      setEndsAt(nextSub?.endsAt?.slice(0, 10) ?? "");
     } catch (reloadError) {
       setError(reloadError instanceof Error ? reloadError.message : "Не удалось обновить данные.");
     } finally {
@@ -183,24 +186,25 @@ export function AdminUserDetailClient({
     setBusy("topup");
     setError(null);
     try {
-      const response = await fetch(`/api/admin/users/${profile.id}/balance/top-up`, {
+      const response = await fetch(`/api/admin/users/${profile.id}/balance/adjust`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          type: balanceAdjustmentType,
           amount: Number(topUpAmount),
-          comment: topUpComment.trim() || undefined
+          comment: topUpComment.trim()
         })
       });
       const payload = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
       if (!response.ok) {
-        throw new Error(payload?.error ?? "Не удалось пополнить баланс.");
+        throw new Error(payload?.error ?? "Не удалось изменить баланс.");
       }
       setShowTopUpConfirm(false);
       setTopUpComment("");
-      setToast(payload?.message ?? "Баланс пополнен.");
+      setToast(payload?.message ?? "Баланс пользователя обновлен.");
       await reloadAll();
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Не удалось пополнить баланс.");
+      setError(submitError instanceof Error ? submitError.message : "Не удалось изменить баланс.");
     } finally {
       setBusy(null);
     }
@@ -246,7 +250,7 @@ export function AdminUserDetailClient({
         body: JSON.stringify({
           plan,
           status: subscriptionStatus,
-          renewalAt: renewalAt ? new Date(`${renewalAt}T00:00:00.000Z`).toISOString() : null,
+          endsAt: endsAt ? new Date(`${endsAt}T00:00:00.000Z`).toISOString() : null,
           comment: subscriptionComment.trim() || undefined
         })
       });
@@ -314,10 +318,16 @@ export function AdminUserDetailClient({
       <div className="grid gap-4 xl:grid-cols-2">
         <section className="rounded-2xl border border-white/[0.08] bg-[#15161d]/90 p-5">
           <h2 className="text-[18px] font-semibold text-white">Баланс</h2>
-          <p className="mt-1 text-[13px] text-white/60">
-            Текущий баланс: {formatRubCurrency(finance.agreedBalance)} · Pending: {formatRubCurrency(finance.pendingBalance)}
-          </p>
+          <p className="mt-1 text-[13px] text-white/60">Текущий баланс: {formatRubCurrency(finance.agreedBalance)}</p>
           <div className="mt-4 space-y-3">
+            <select
+              value={balanceAdjustmentType}
+              onChange={(event) => setBalanceAdjustmentType(event.target.value as "credit" | "debit")}
+              className="h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+            >
+              <option value="credit">Пополнить</option>
+              <option value="debit">Списать</option>
+            </select>
             <input
               type="number"
               min={1}
@@ -338,13 +348,18 @@ export function AdminUserDetailClient({
               disabled={busy !== null}
               className="inline-flex h-11 items-center rounded-xl bg-[#7b3df5] px-4 text-[14px] font-semibold text-white hover:bg-[#8b4ff7] disabled:opacity-50"
             >
-              Пополнить баланс
+              Применить
             </button>
           </div>
         </section>
 
         <section className="rounded-2xl border border-white/[0.08] bg-[#15161d]/90 p-5">
           <h2 className="text-[18px] font-semibold text-white">Подписка</h2>
+          <p className="mt-1 text-[13px] text-white/60">
+            {subscriptionView
+              ? `${subscriptionView.plan} ${subscriptionView.status} · До: ${subscriptionView.endsAt ? new Date(subscriptionView.endsAt).toLocaleDateString("ru-RU") : "—"} · Источник: ${subscriptionView.source === "ADMIN_GRANT" ? "Админ" : "Оплата"}`
+              : "Нет активной подписки"}
+          </p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <select
               value={plan}
@@ -370,8 +385,8 @@ export function AdminUserDetailClient({
             </select>
             <input
               type="date"
-              value={renewalAt}
-              onChange={(event) => setRenewalAt(event.target.value)}
+              value={endsAt}
+              onChange={(event) => setEndsAt(event.target.value)}
               className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
             />
             <input
@@ -557,8 +572,8 @@ export function AdminUserDetailClient({
 
       {showTopUpConfirm ? (
         <ConfirmModal
-          title="Подтвердите пополнение баланса"
-          description={`Пополнить баланс на ${formatRubCurrency(Number(topUpAmount || 0))}?`}
+          title="Подтвердите изменение баланса"
+          description={`${balanceAdjustmentType === "credit" ? "Пополнить" : "Списать"} ${formatRubCurrency(Number(topUpAmount || 0))}?`}
           busy={busy === "topup"}
           onCancel={() => setShowTopUpConfirm(false)}
           onConfirm={() => {

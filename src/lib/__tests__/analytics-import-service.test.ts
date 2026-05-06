@@ -95,15 +95,21 @@ function createMockPrisma() {
         const [releaseId, country] = where.id.split(":");
         const existing = snapshots.find((row) => row.releaseId === releaseId && row.country === country);
         if (!existing) throw new Error("snapshot not found");
-        if (typeof data.streams === "object" && data.streams && "increment" in data.streams) {
-          existing.streams += data.streams.increment;
-        } else if (typeof data.streams === "number") {
-          existing.streams = data.streams;
+        const streamsUpdate = data.streams as number | { increment: number } | undefined;
+        if (typeof streamsUpdate === "object" && streamsUpdate && "increment" in streamsUpdate) {
+          existing.streams += streamsUpdate.increment;
+        } else if (typeof streamsUpdate === "number") {
+          existing.streams = streamsUpdate;
         }
-        if (typeof data.payStreams === "object" && data.payStreams && "increment" in data.payStreams) {
-          existing.payStreams += data.payStreams.increment;
-        } else if (typeof data.payStreams === "number") {
-          existing.payStreams = data.payStreams;
+        const payStreamsUpdate = data.payStreams as number | { increment: number } | undefined;
+        if (
+          typeof payStreamsUpdate === "object" &&
+          payStreamsUpdate &&
+          "increment" in payStreamsUpdate
+        ) {
+          existing.payStreams += payStreamsUpdate.increment;
+        } else if (typeof payStreamsUpdate === "number") {
+          existing.payStreams = payStreamsUpdate;
         }
         if (typeof data.userId === "string") existing.userId = data.userId;
         if (typeof data.upc === "string") existing.upc = data.upc;

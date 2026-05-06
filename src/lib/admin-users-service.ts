@@ -9,7 +9,7 @@ import {
   listAdminUsers as listAdminUsersPaged,
   type AdminUserProfileDetails
 } from "@/lib/admin-user-service";
-import { topUpUserBalanceByAdmin } from "@/lib/finance-service";
+import { adjustUserBalanceByAdmin, topUpUserBalanceByAdmin } from "@/lib/finance-service";
 import { createUserReportByAdmin, listUserReports } from "@/lib/report-service";
 import {
   getUserSubscription,
@@ -30,11 +30,27 @@ export const adminCreateReportSchema = z.object({
   comment: z.string().trim().max(500).optional()
 });
 
+const subscriptionPlanSchema = z.union([
+  z.nativeEnum(SubscriptionPlan),
+  z.enum(["standard", "pro", "enterprise"]).transform((value) => value.toUpperCase() as SubscriptionPlan)
+]);
+
+const subscriptionStatusSchema = z.union([
+  z.nativeEnum(SubscriptionStatus),
+  z.enum(["active", "expired", "canceled"]).transform((value) => value.toUpperCase() as SubscriptionStatus)
+]);
+
 export const adminUpdateSubscriptionSchema = z.object({
-  plan: z.nativeEnum(SubscriptionPlan),
-  status: z.nativeEnum(SubscriptionStatus),
-  renewalAt: z.string().datetime().nullable().optional(),
+  plan: subscriptionPlanSchema,
+  status: subscriptionStatusSchema,
+  endsAt: z.string().datetime().nullable(),
   comment: z.string().trim().max(500).optional()
+});
+
+export const adminBalanceAdjustSchema = z.object({
+  type: z.enum(["credit", "debit"]),
+  amount: z.number().positive("Сумма должна быть больше 0.").max(10_000_000),
+  comment: z.string().trim().min(3, "Комментарий администратора обязателен.").max(500)
 });
 
 export interface AdminUserDetails extends AdminUserProfileDetails {
@@ -130,7 +146,7 @@ export async function adminUpdateUserSubscription(params: {
   userId: string;
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
-  renewalAt?: string | null;
+  endsAt: string | null;
   comment?: string;
 }) {
   return updateUserSubscriptionByAdmin({
@@ -139,10 +155,20 @@ export async function adminUpdateUserSubscription(params: {
     userId: params.userId,
     plan: params.plan,
     status: params.status,
-    renewalAt: params.renewalAt ? new Date(params.renewalAt) : null,
+    endsAt: params.endsAt ? new Date(params.endsAt) : null,
     comment: params.comment
   });
 }
 
-export { canManageUsers };
+export async function adminAdjustUserBalance(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  userId: string;
+  type: "credit" | "debit";
+  amount: number;
+  comment: string;
+}) {
+  return adjustUserBalanceByAdmin(params);
+}
 
+export { canManageUsers };

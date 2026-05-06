@@ -78,6 +78,8 @@ export async function createPresignedUpload(input: {
 export async function createPresignedDownload(input: {
   key: string;
   expiresIn?: number;
+  responseContentDisposition?: string;
+  responseContentType?: string;
 }): Promise<{ url: string; mock: boolean }> {
   const client = getClient();
 
@@ -90,7 +92,9 @@ export async function createPresignedDownload(input: {
 
   const command = new GetObjectCommand({
     Bucket: bucket,
-    Key: input.key
+    Key: input.key,
+    ResponseContentDisposition: input.responseContentDisposition,
+    ResponseContentType: input.responseContentType
   });
 
   const url = await getSignedUrl(client, command, {

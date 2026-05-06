@@ -7,8 +7,13 @@ import { CheckCircle2 } from "lucide-react";
 
 import { useWizard } from "./wizard-context";
 import { WizardCard } from "./wizard-ui";
+import type { ReleaseSubmitSuccessResponse } from "@/lib/api/contracts";
 
-export function StepUpload() {
+export function StepUpload({
+  submitResult
+}: {
+  submitResult?: ReleaseSubmitSuccessResponse | null;
+}) {
   const { data, reset, submissionMode } = useWizard();
   const [progress, setProgress] = React.useState(0);
   const [done, setDone] = React.useState(false);
@@ -37,12 +42,16 @@ export function StepUpload() {
             <CheckCircle2 className="h-7 w-7" />
           </span>
           <h3 className="text-[18px] font-semibold text-white">
-            {submissionMode === "edit"
-              ? "Версия отправлена на модерацию"
-              : "Релиз отправлен на модерацию"}
+            {submitResult?.nextStatus === "pending_verification"
+              ? "Релиз ожидает подтверждения верификации"
+              : submissionMode === "edit"
+                ? "Версия отправлена на модерацию"
+                : "Релиз отправлен на модерацию"}
           </h3>
           <p className="max-w-md text-[13px] text-white/55">
-            {submissionMode === "edit" ? (
+            {submitResult?.message ? (
+              submitResult.message
+            ) : submissionMode === "edit" ? (
               <>
                 Обновлённая копия «{data.title || "Без названия"}» ушла в очередь модерации. Черновик
                 можно отслеживать в разделе «Черновики» до появления карточки в «Мои релизы».
@@ -56,10 +65,16 @@ export function StepUpload() {
           </p>
           <div className="mt-2 flex items-center gap-2">
             <Link
-              href="/dashboard/releases"
+              href={
+                submitResult?.nextStatus === "pending_verification"
+                  ? "/dashboard/moderation"
+                  : "/dashboard/releases"
+              }
               className="rounded-lg bg-white/[0.06] px-4 py-2 text-[12.5px] text-white/85 transition-colors hover:bg-white/[0.10] hover:text-white"
             >
-              К моим релизам
+              {submitResult?.nextStatus === "pending_verification"
+                ? "К ожидающим релизам"
+                : "К моим релизам"}
             </Link>
             <button
               type="button"

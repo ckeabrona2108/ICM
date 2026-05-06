@@ -9,6 +9,7 @@ import type {
   ReleaseSubmitSuccessResponse
 } from "@/lib/api/contracts";
 import { prisma } from "@/lib/prisma";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import {
   canEditRelease,
   groupReleaseValidationIssuesByStep,
@@ -44,6 +45,8 @@ function toPrismaReleaseType(value: ReleaseSubmitRequest["data"]["type"]): Relea
 
 function toLifecycleStatus(status: ReleaseStatus): ReleaseLifecycleStatus {
   switch (status) {
+    case ReleaseStatus.PENDING_VERIFICATION:
+      return "pending_verification";
     case ReleaseStatus.MODERATION:
       return "moderation";
     case ReleaseStatus.CHANGES_REQUIRED:
@@ -182,6 +185,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const contractStatus = await getUserContractStatus({
+    prisma,
+    userId: session.user.id
+  });
+  if (!contractStatus.isVerified) {
+    return NextResponse.json(
+      {
+        error: "verification_required",
+        message: "Для выпуска релизов необходимо пройти верификацию и подписать договор."
+      },
+      { status: 403 }
+    );
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();
@@ -310,6 +327,10 @@ export async function POST(request: Request) {
     return NextResponse.json(response, { status: 422 });
   }
 
+  const nextReleaseStatus = contractStatus.canSubmitReleases
+    ? ReleaseStatus.MODERATION
+    : ReleaseStatus.PENDING_VERIFICATION;
+
   const releasePayload = {
     title: body.data.title,
     subtitle: body.data.subtitle?.trim() || null,
@@ -323,7 +344,7 @@ export async function POST(request: Request) {
     platforms: (body.data.platforms ?? []) as unknown as Prisma.InputJsonValue,
     partnerCode: body.data.partnerCode?.trim() || null,
     rightsYear: body.data.rightsYear?.trim() ? Number(body.data.rightsYear) : null,
-    status: ReleaseStatus.MODERATION,
+    status: nextReleaseStatus,
     explicit: body.data.tracks.some((track) => Boolean(track.versionExplicit)),
     upc: body.data.upc?.trim() || null,
     isrc: body.data.tracks[0]?.isrc?.trim() || null,
@@ -392,13 +413,17 @@ export async function POST(request: Request) {
       data: {
         adminId: session.user.id,
         action: isResubmission
-          ? "RELEASE_RESUBMITTED_TO_MODERATION"
-          : "RELEASE_SUBMITTED_TO_MODERATION",
+          ? nextReleaseStatus === ReleaseStatus.MODERATION
+            ? "RELEASE_RESUBMITTED_TO_MODERATION"
+            : "RELEASE_RESUBMITTED_PENDING_VERIFICATION"
+          : nextReleaseStatus === ReleaseStatus.MODERATION
+            ? "RELEASE_SUBMITTED_TO_MODERATION"
+            : "RELEASE_SUBMITTED_PENDING_VERIFICATION",
         targetType: "Release",
         targetId: releaseId,
         payload: {
           previousStatus,
-          nextStatus: ReleaseStatus.MODERATION,
+          nextStatus: nextReleaseStatus,
           moderationSnapshot: body.data
         } as Prisma.InputJsonValue
       }
@@ -413,13 +438,18 @@ export async function POST(request: Request) {
 
   const response: ReleaseSubmitSuccessResponse = {
     ok: true,
-    nextStatus: "moderation",
+    nextStatus:
+      nextReleaseStatus === ReleaseStatus.MODERATION
+        ? "moderation"
+        : "pending_verification",
     message:
-      (existingRelease?.status ?? ReleaseStatus.DRAFT) === ReleaseStatus.DRAFT
-        ? "Релиз отправлен на модерацию."
-        : body.mode === "edit"
-        ? "Изменения приняты. Релиз отправлен на повторную модерацию."
-        : "Релиз отправлен на повторную модерацию."
+      nextReleaseStatus === ReleaseStatus.MODERATION
+        ? (existingRelease?.status ?? ReleaseStatus.DRAFT) === ReleaseStatus.DRAFT
+          ? "Релиз отправлен на модерацию."
+          : body.mode === "edit"
+            ? "Изменения приняты. Релиз отправлен на повторную модерацию."
+            : "Релиз отправлен на повторную модерацию."
+        : "Ваша верификация ожидает проверки. После подтверждения администратором релиз будет автоматически отправлен на модерацию."
   };
 
   return NextResponse.json(

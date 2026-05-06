@@ -1,29 +1,60 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 import {
   AlertCircle,
   BarChart3,
   Bell,
+  BookOpenText,
   ChevronDown,
   CreditCard,
   Headset,
   HelpCircle,
+  LayoutGrid,
   LogOut,
   Music2,
   Package,
+  Rocket,
   Sparkles,
   Store,
   UserRound,
   Wallet
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 
+import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { getCachedRequest } from "@/lib/client-request-cache";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/components/user/user-provider";
+import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
+
+function RobotStickerIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={cn("block", className)}
+    >
+      <path d="M12 4.25v2.1" />
+      <path d="M9.25 6.35h5.5a3.7 3.7 0 0 1 3.7 3.7v4.9a3.7 3.7 0 0 1-3.7 3.7h-5.5a3.7 3.7 0 0 1-3.7-3.7v-4.9a3.7 3.7 0 0 1 3.7-3.7Z" />
+      <path d="M8 18.65v1.35" />
+      <path d="M16 18.65v1.35" />
+      <path d="M5.55 10.1H4.1" />
+      <path d="M19.9 10.1h-1.45" />
+      <circle cx="9.75" cy="11.95" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="14.25" cy="11.95" r="0.9" fill="currentColor" stroke="none" />
+      <path d="M9.4 15.05c.7.55 1.55.82 2.6.82s1.9-.27 2.6-.82" />
+    </svg>
+  );
+}
 
 interface NavLeaf {
   type: "leaf";
@@ -41,6 +72,9 @@ interface NavChild {
   href: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  badge?: string;
+  badgeTone?: "soon";
+  unavailable?: boolean;
   count?: number;
   countTone?: "default" | "brand" | "warning" | "info" | "danger";
 }
@@ -114,7 +148,7 @@ function buildNav(counts: {
     {
       type: "leaf",
       href: "/dashboard/marketplace",
-      label: "Маркет битов",
+      label: "Beat Market",
       icon: Store,
       badge: "Скоро",
       badgeTone: "soon",
@@ -134,19 +168,76 @@ function buildNav(counts: {
   ];
 
   base.splice(3, 0, {
-    type: "leaf",
-    href: "/dashboard/ai-recommendations",
-    label: "AI-рекомендации",
-    icon: Sparkles,
-    badge: counts.aiEnabled ? "DEMO" : "PRO",
-    badgeTone: "soon"
+    type: "group",
+    id: "ai",
+    label: "AI",
+    icon: RobotStickerIcon,
+    defaultOpen: true,
+    children: [
+      {
+        href: "/dashboard/ai-recommendations",
+        label: "AI Monitoring",
+        icon: RobotStickerIcon,
+        badge: "BETA",
+        badgeTone: "soon"
+      },
+      {
+        href: "/dashboard/ai-music-tools",
+        label: "AI Music Tools",
+        icon: RobotStickerIcon,
+        badge: "Скоро",
+        badgeTone: "soon",
+        unavailable: true
+      },
+      {
+        href: "/dashboard/ai-studio",
+        label: "AI Studio",
+        icon: RobotStickerIcon,
+        badge: "Скоро",
+        badgeTone: "soon",
+        unavailable: true
+      },
+      {
+        href: "/dashboard/ai-artists",
+        label: "AI Artists",
+        icon: RobotStickerIcon,
+        badge: "Скоро",
+        badgeTone: "soon",
+        unavailable: true
+      },
+      {
+        href: "/dashboard/ai-textbook",
+        label: "TextBook",
+        icon: BookOpenText,
+        badge: "Скоро",
+        badgeTone: "soon",
+        unavailable: true
+      },
+      {
+        href: "/dashboard/ai-workspace",
+        label: "Workspace",
+        icon: LayoutGrid,
+        badge: "Скоро",
+        badgeTone: "soon",
+        unavailable: true
+      },
+      {
+        href: "/dashboard/ai-tiktok-boost",
+        label: "TikTok Boost",
+        icon: Rocket,
+        badge: "Скоро",
+        badgeTone: "soon",
+        unavailable: true
+      }
+    ]
   });
 
   return base;
 }
 
 export function DashboardSidebar({
-  counts
+  counts,
+  contractStatus
 }: {
   counts: {
     totalReleases: number;
@@ -155,13 +246,17 @@ export function DashboardSidebar({
     changesCount: number;
     aiEnabled: boolean;
   };
+  contractStatus: ContractStatusPayload;
 }) {
   const pathname = usePathname() ?? "";
+  const { user } = useCurrentUser();
+  const effectiveVerification = user?.verification ?? contractStatus;
   const [liveCounts, setLiveCounts] = React.useState({
     ...counts,
     supportUnreadCount: 0,
     aiEnabled: counts.aiEnabled
   });
+  const [verificationModalOpen, setVerificationModalOpen] = React.useState(false);
   const [unavailableToast, setUnavailableToast] = React.useState<string | null>(null);
   const unavailableToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const nav = React.useMemo(() => buildNav(liveCounts), [liveCounts]);
@@ -350,7 +445,7 @@ export function DashboardSidebar({
     for (const item of nav) {
       if (item.type === "group") {
         map[item.id] =
-          item.defaultOpen || item.children.some((c) => pathname.startsWith(c.href));
+          item.defaultOpen || item.children.some((child) => pathname.startsWith(child.href));
       }
     }
     return map;
@@ -358,100 +453,114 @@ export function DashboardSidebar({
 
   const [open, setOpen] = React.useState<Record<string, boolean>>(initialOpen);
 
-  const toggle = (id: string) => setOpen((s) => ({ ...s, [id]: !s[id] }));
+  const toggle = (id: string) => setOpen((state) => ({ ...state, [id]: !state[id] }));
+  const requiresVerificationGate = React.useCallback(
+    (href: string) => href === "/dashboard/releases/new" && !effectiveVerification.canCreateRelease,
+    [effectiveVerification.canCreateRelease]
+  );
 
   return (
     <>
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[4px] lg:flex">
         <div className="flex h-full flex-col overflow-y-auto px-3.5 py-5">
-        <Link href="/dashboard" className="mb-6 flex items-center gap-2.5 px-2">
-          <span className="grid h-10 w-10 place-items-center overflow-hidden">
-            <Image
-              src="/brand/logo.png"
-              alt="ICM"
-              width={317}
-              height={400}
-              className="h-8 w-auto object-contain"
-            />
-          </span>
-          <span className="leading-tight">
-            <span className="block text-[14px] font-bold tracking-wide text-white">
-              ICECREAMMUSIC
+          <Link href="/dashboard" className="mb-6 flex items-center gap-2.5 px-2">
+            <span className="grid h-10 w-10 place-items-center overflow-hidden">
+              <Image
+                src="/brand/logo.png"
+                alt="ICM"
+                width={317}
+                height={400}
+                className="h-8 w-auto object-contain"
+              />
             </span>
-          </span>
-        </Link>
+            <span className="leading-tight">
+              <span className="block text-[14px] font-bold tracking-wide text-white">
+                ICECREAMMUSIC
+              </span>
+            </span>
+          </Link>
 
-        <nav className="flex-1 space-y-0.5">
-          {nav.map((item) => {
-            if (item.type === "leaf") {
-              return (
-                <NavLink
-                  key={item.href}
-                  item={item}
-                  pathname={pathname}
-                  onUnavailableClick={showUnavailableNotice}
-                />
-              );
-            }
-            const ActiveIcon = item.icon;
-            const isOpen = open[item.id];
-            const groupActive = item.children.some(
-              (c) => pathname === c.href || pathname.startsWith(`${c.href}/`)
-            );
-            return (
-              <div key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => toggle(item.id)}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
-                    groupActive
-                      ? "text-white"
-                      : "text-white/65 hover:bg-white/[0.04] hover:text-white"
-                  )}
-                >
-                  <ActiveIcon className="h-4.5 w-4.5 shrink-0" />
-                  <span className="flex-1 text-left">{item.label}</span>
-                  <ChevronDown
-                    className={cn(
-                      "h-3.5 w-3.5 text-white/40 transition-transform",
-                      isOpen && "rotate-180"
-                    )}
+          <nav className="flex-1 space-y-0.5">
+            {nav.map((item) => {
+              if (item.type === "leaf") {
+                return (
+                  <NavLink
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    onUnavailableClick={showUnavailableNotice}
+                    onVerificationRequired={() => setVerificationModalOpen(true)}
+                    requiresVerificationGate={requiresVerificationGate}
                   />
-                </button>
-                <AnimatePresence initial={false}>
-                  {isOpen ? (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                      className="overflow-hidden"
-                    >
-                      <div className="my-1 ml-3 space-y-0.5 border-l border-white/[0.05] pl-2">
-                        {item.children.map((child) => (
-                          <SubNavLink key={child.href} child={child} pathname={pathname} />
-                        ))}
-                      </div>
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-              </div>
-            );
-          })}
+                );
+              }
 
-          <button
-            type="button"
-            onClick={() => {
-              import("next-auth/react").then((m) => m.signOut({ callbackUrl: "/login" }));
-            }}
-            className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium text-white/65 transition-colors hover:bg-white/[0.04] hover:text-white"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span>Выход</span>
-          </button>
-        </nav>
+              const ActiveIcon = item.icon;
+              const isOpen = open[item.id];
+              const groupActive = item.children.some(
+                (child) => pathname === child.href || pathname.startsWith(`${child.href}/`)
+              );
 
+              return (
+                <div key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(item.id)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
+                      groupActive
+                        ? "text-white"
+                        : "text-white/65 hover:bg-white/[0.04] hover:text-white"
+                    )}
+                  >
+                    <ActiveIcon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1 text-left">{item.label}</span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 text-white/40 transition-transform",
+                        isOpen && "rotate-180"
+                      )}
+                    />
+                  </button>
+                  <AnimatePresence initial={false}>
+                    {isOpen ? (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                        className="overflow-hidden"
+                      >
+                        <div className="my-1 ml-3 space-y-0.5 border-l border-white/[0.05] pl-2">
+                          {item.children.map((child) => (
+                            <SubNavLink
+                              key={child.href}
+                              child={child}
+                              pathname={pathname}
+                              onUnavailableClick={showUnavailableNotice}
+                              onVerificationRequired={() => setVerificationModalOpen(true)}
+                              requiresVerificationGate={requiresVerificationGate}
+                            />
+                          ))}
+                        </div>
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => {
+                import("next-auth/react").then((module) => module.signOut({ callbackUrl: "/login" }));
+              }}
+              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium text-white/65 transition-colors hover:bg-white/[0.04] hover:text-white"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              <span>Выход</span>
+            </button>
+          </nav>
         </div>
       </aside>
 
@@ -473,6 +582,12 @@ export function DashboardSidebar({
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      <VerificationAccessModal
+        open={verificationModalOpen}
+        status={effectiveVerification}
+        onClose={() => setVerificationModalOpen(false)}
+      />
     </>
   );
 }
@@ -480,21 +595,32 @@ export function DashboardSidebar({
 function NavLink({
   item,
   pathname,
-  onUnavailableClick
+  onUnavailableClick,
+  onVerificationRequired,
+  requiresVerificationGate
 }: {
   item: NavLeaf;
   pathname: string;
   onUnavailableClick?: () => void;
+  onVerificationRequired?: () => void;
+  requiresVerificationGate?: (href: string) => boolean;
 }) {
   const Icon = item.icon;
   const active = pathname === item.href;
+
   return (
     <Link
       href={item.href}
       onClick={(event) => {
-        if (!item.unavailable) return;
-        event.preventDefault();
-        onUnavailableClick?.();
+        if (item.unavailable) {
+          event.preventDefault();
+          onUnavailableClick?.();
+          return;
+        }
+        if (requiresVerificationGate?.(item.href)) {
+          event.preventDefault();
+          onVerificationRequired?.();
+        }
       }}
       className={cn(
         "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
@@ -510,7 +636,7 @@ function NavLink({
           transition={{ type: "spring", stiffness: 380, damping: 32 }}
         />
       ) : null}
-      <Icon className="relative h-4.5 w-4.5 shrink-0" />
+      <Icon className="relative h-4 w-4 shrink-0" />
       <span className="relative flex-1">{item.label}</span>
       {item.badge ? (
         <span
@@ -549,26 +675,59 @@ function NavLink({
 
 function SubNavLink({
   child,
-  pathname
+  pathname,
+  onUnavailableClick,
+  onVerificationRequired,
+  requiresVerificationGate
 }: {
   child: NavChild;
   pathname: string;
+  onUnavailableClick?: () => void;
+  onVerificationRequired?: () => void;
+  requiresVerificationGate?: (href: string) => boolean;
 }) {
   const Icon = child.icon;
   const active = pathname === child.href;
+
   return (
     <Link
       href={child.href}
       prefetch={child.href === "/dashboard/drafts" ? false : undefined}
+      onClick={(event) => {
+        if (child.unavailable) {
+          event.preventDefault();
+          onUnavailableClick?.();
+          return;
+        }
+        if (requiresVerificationGate?.(child.href)) {
+          event.preventDefault();
+          onVerificationRequired?.();
+        }
+      }}
       className={cn(
         "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-colors",
         active
           ? "bg-[#7b3df5]/[0.20] text-white"
-          : "text-white/55 hover:bg-white/[0.04] hover:text-white"
+          : "text-white/55 hover:bg-white/[0.04] hover:text-white",
+        child.unavailable && "opacity-85"
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      <span className="flex-1 truncate">{child.label}</span>
+      <span className="min-w-0 flex-1 whitespace-normal break-normal leading-snug [overflow-wrap:normal] [hyphens:none]">
+        {child.label}
+      </span>
+      {child.badge ? (
+        <span
+          className={cn(
+            "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em]",
+            child.badgeTone === "soon"
+              ? "border-cyan-300/35 bg-cyan-400/10 text-cyan-200"
+              : "border-white/[0.18] bg-white/[0.07] text-white/85"
+          )}
+        >
+          {child.badge}
+        </span>
+      ) : null}
       {typeof child.count === "number" && child.count > 0 ? (
         <span
           className={cn(

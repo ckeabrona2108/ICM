@@ -296,7 +296,10 @@ async function groupByPlatformSafe(
   where: { userId?: string; releaseId?: string; reportDate: Date }
 ): Promise<Array<{ platform: string | null; _sum: { streams: number | null; payStreams: number | null } }>> {
   try {
-    return await tx.analyticsReportSnapshot.groupBy({
+    const snapshotsRepo = tx.analyticsReportSnapshot as unknown as {
+      groupBy: (args: unknown) => Promise<unknown>;
+    };
+    return (await snapshotsRepo.groupBy({
       by: ["platform"],
       where,
       _sum: { streams: true, payStreams: true },
@@ -305,7 +308,7 @@ async function groupByPlatformSafe(
           streams: "desc"
         }
       }
-    });
+    })) as Array<{ platform: string | null; _sum: { streams: number | null; payStreams: number | null } }>;
   } catch (error) {
     if (!isUnknownPlatformFieldError(error)) throw error;
   }

@@ -60,6 +60,7 @@ interface SubmissionDataLike {
 }
 
 function toCabinetStatus(status: ReleaseStatus): CabinetReleaseStatus {
+  if (status === ReleaseStatus.PENDING_VERIFICATION) return "pending_verification";
   if (status === ReleaseStatus.MODERATION) return "moderation";
   if (status === ReleaseStatus.CHANGES_REQUIRED) return "changes_required";
   if (status === ReleaseStatus.REJECTED) return "rejected";

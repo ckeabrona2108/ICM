@@ -2,6 +2,7 @@ import type { ModerationRemark } from "@/lib/api/contracts";
 
 export type AdminReleaseStatus =
   | "draft"
+  | "pending_verification"
   | "moderation"
   | "approved"
   | "changes_required"

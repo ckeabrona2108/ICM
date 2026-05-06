@@ -11,6 +11,7 @@ import {
 } from "@prisma/client";
 import { z } from "zod";
 import { computeSettlementDelta } from "@/lib/finance-service";
+import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
 
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   return Number(value ?? 0);
@@ -88,9 +89,18 @@ export function canManageUsers(role: string | null | undefined): boolean {
   return role === "ADMIN";
 }
 
-function mapAccountStatus(status: SubscriptionStatus | null | undefined): AdminUserAccountStatus {
+function mapAccountStatus(
+  status: SubscriptionStatus | null | undefined,
+  endsAt: Date | null | undefined
+): AdminUserAccountStatus {
   if (!status) return "INACTIVE";
-  return status === SubscriptionStatus.CANCELED ? "INACTIVE" : "ACTIVE";
+  if (status === SubscriptionStatus.CANCELED || status === SubscriptionStatus.EXPIRED) {
+    return "INACTIVE";
+  }
+  if (endsAt && endsAt.getTime() < Date.now()) {
+    return "INACTIVE";
+  }
+  return "ACTIVE";
 }
 
 function includesQuery(user: { id: string; name: string; email: string }, query: string): boolean {
@@ -122,7 +132,9 @@ export async function listAdminUsers(
       subscription: {
         select: {
           plan: true,
-          status: true
+          status: true,
+          endsAt: true,
+          renewalAt: true
         }
       },
       _count: {
@@ -155,6 +167,12 @@ export async function listAdminUsers(
     const balance = reportsBalance + settlementDelta;
     const subscriptionPlan = user.subscription?.plan ?? null;
     const subscriptionStatus = user.subscription?.status ?? null;
+    const subscriptionEndsAt = user.subscription
+      ? getSubscriptionEffectiveEndDate({
+          endsAt: user.subscription.endsAt ?? null,
+          renewalAt: user.subscription.renewalAt ?? null
+        })
+      : null;
     return {
       id: user.id,
       name: user.name,
@@ -164,7 +182,7 @@ export async function listAdminUsers(
       createdAt: user.createdAt.toISOString(),
       subscriptionPlan,
       subscriptionStatus,
-      accountStatus: mapAccountStatus(subscriptionStatus),
+      accountStatus: mapAccountStatus(subscriptionStatus, subscriptionEndsAt),
       balance,
       releaseCount: user._count.releases
     } satisfies AdminUserTableItem;
@@ -228,7 +246,9 @@ export async function getAdminUserProfileDetails(
       subscription: {
         select: {
           plan: true,
-          status: true
+          status: true,
+          endsAt: true,
+          renewalAt: true
         }
       },
       _count: {
@@ -260,6 +280,12 @@ export async function getAdminUserProfileDetails(
   const balance = reportsBalance + settlementDelta;
   const subscriptionPlan = user.subscription?.plan ?? null;
   const subscriptionStatus = user.subscription?.status ?? null;
+  const subscriptionEndsAt = user.subscription
+    ? getSubscriptionEffectiveEndDate({
+        endsAt: user.subscription.endsAt ?? null,
+        renewalAt: user.subscription.renewalAt ?? null
+      })
+    : null;
 
   return {
     id: user.id,
@@ -269,7 +295,7 @@ export async function getAdminUserProfileDetails(
     role: user.role,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
-    accountStatus: mapAccountStatus(subscriptionStatus),
+    accountStatus: mapAccountStatus(subscriptionStatus, subscriptionEndsAt),
     subscriptionPlan,
     subscriptionStatus,
     balance,

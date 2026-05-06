@@ -3,6 +3,7 @@ import type { CabinetReleaseStatus } from "@/lib/cabinet-types";
 export type ReleaseTimelineStepId =
   | "draft"
   | "unpaid"
+  | "verification"
   | "moderation"
   | "changes_required"
   | "published";
@@ -31,6 +32,14 @@ const CHANGES_STEPS: ReleaseTimelineStep[] = [
   { id: "unpaid", label: "Не оплачен" },
   { id: "moderation", label: "На модерации" },
   { id: "changes_required", label: "Требуются изменения" },
+  { id: "published", label: "Опубликован" }
+];
+
+const VERIFICATION_STEPS: ReleaseTimelineStep[] = [
+  { id: "draft", label: "Черновик" },
+  { id: "unpaid", label: "Не оплачен" },
+  { id: "verification", label: "Подпись на проверке" },
+  { id: "moderation", label: "На модерации" },
   { id: "published", label: "Опубликован" }
 ];
 
@@ -66,6 +75,15 @@ export function getReleaseTimelineState(
       steps: BASE_STEPS,
       currentStep: "moderation",
       activeIndex: indexOfStep(BASE_STEPS, "moderation"),
+      showPayButton: false
+    };
+  }
+
+  if (releaseStatus === "pending_verification") {
+    return {
+      steps: VERIFICATION_STEPS,
+      currentStep: "verification",
+      activeIndex: indexOfStep(VERIFICATION_STEPS, "verification"),
       showPayButton: false
     };
   }

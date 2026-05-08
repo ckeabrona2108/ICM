@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   BalanceAdminAdjustmentType,
   FinanceReportStatus,
+  ReleaseStatus,
   Role,
   SubscriptionPlan,
   SubscriptionSource,
@@ -201,6 +202,7 @@ test("admin grants subscription with custom end date and logs the change", async
 
 test("admin can change subscription plan and creates subscription admin log", async () => {
   let subscriptionLogPayload: any = null;
+  const updatedReleasePayloads: any[] = [];
   const prisma = {
     user: {
       findUnique: async () => ({ id: "u1" })
@@ -212,10 +214,21 @@ test("admin can change subscription plan and creates subscription admin log", as
         source: SubscriptionSource.ADMIN_GRANT,
         adminComment: "old",
         grantedByAdminId: "admin_0",
+        startedAt: new Date("2026-06-01T00:00:00.000Z"),
         endsAt: new Date("2026-08-01T00:00:00.000Z"),
         renewalAt: new Date("2026-08-01T00:00:00.000Z")
       }),
       upsert: async () => ({})
+    },
+    release: {
+      findMany: async () => [],
+      update: async ({ data }: any) => {
+        updatedReleasePayloads.push(data);
+        return { id: "r1" };
+      }
+    },
+    subscriptionPayment: {
+      findMany: async () => []
     },
     subscriptionAdminLog: {
       create: async ({ data }: any) => {
@@ -229,6 +242,8 @@ test("admin can change subscription plan and creates subscription admin log", as
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
         subscription: prisma.subscription,
+        release: prisma.release,
+        subscriptionPayment: prisma.subscriptionPayment,
         subscriptionAdminLog: prisma.subscriptionAdminLog,
         adminLog: prisma.adminLog
       })
@@ -247,6 +262,7 @@ test("admin can change subscription plan and creates subscription admin log", as
   assert.equal(result.ok, true);
   assert.equal(subscriptionLogPayload.oldPlan, SubscriptionPlan.ENTERPRISE);
   assert.equal(subscriptionLogPayload.newPlan, SubscriptionPlan.PRO);
+  assert.equal(updatedReleasePayloads.length, 0);
 });
 
 test("admin cancels subscription and uses explicit canceled status", async () => {
@@ -296,6 +312,76 @@ test("admin cancels subscription and uses explicit canceled status", async () =>
 
   assert.equal(result.ok, true);
   assert.equal(upsertPayload.update.status, SubscriptionStatus.CANCELED);
+});
+
+test("downgrade from PRO to FREE snapshots historical submitted release", async () => {
+  let releaseUpdateData: any = null;
+
+  const prisma = {
+    user: {
+      findUnique: async () => ({ id: "u1" })
+    },
+    subscription: {
+      findUnique: async () => ({
+        plan: SubscriptionPlan.PRO,
+        status: SubscriptionStatus.ACTIVE,
+        source: SubscriptionSource.ADMIN_GRANT,
+        adminComment: null,
+        grantedByAdminId: "admin_0",
+        startedAt: new Date("2026-05-01T00:00:00.000Z"),
+        endsAt: new Date("2026-06-01T00:00:00.000Z"),
+        renewalAt: new Date("2026-06-01T00:00:00.000Z")
+      }),
+      upsert: async () => ({})
+    },
+    release: {
+      findMany: async () => [
+        {
+          id: "r1",
+          status: ReleaseStatus.APPROVED,
+          createdAt: new Date("2026-05-07T10:00:00.000Z"),
+          updatedAt: new Date("2026-05-07T10:00:00.000Z"),
+          moderationStartedAt: new Date("2026-05-07T10:00:00.000Z"),
+          submissionData: {}
+        }
+      ],
+      update: async ({ data }: any) => {
+        releaseUpdateData = data;
+        return { id: "r1" };
+      }
+    },
+    subscriptionPayment: {
+      findMany: async () => []
+    },
+    subscriptionAdminLog: {
+      create: async () => ({})
+    },
+    adminLog: {
+      create: async () => ({})
+    },
+    $transaction: async (handler: (tx: any) => Promise<unknown>) =>
+      handler({
+        subscription: prisma.subscription,
+        release: prisma.release,
+        subscriptionPayment: prisma.subscriptionPayment,
+        subscriptionAdminLog: prisma.subscriptionAdminLog,
+        adminLog: prisma.adminLog
+      })
+  } as any;
+
+  const result = await updateUserSubscriptionByAdmin({
+    prisma,
+    adminId: "admin_1",
+    userId: "u1",
+    plan: SubscriptionPlan.FREE,
+    status: SubscriptionStatus.CANCELED,
+    endsAt: null,
+    comment: "Снижен до FREE"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(releaseUpdateData?.submissionData?.paymentSnapshot?.plan, "PRO");
+  assert.equal(releaseUpdateData?.submissionData?.paymentSnapshot?.releasesUsedAfterSubmit, 1);
 });
 
 test("admin can credit balance and writes balance admin log", async () => {

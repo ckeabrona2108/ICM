@@ -12,11 +12,13 @@ interface ParsedAnalyticsCsvRow {
   country: string;
   platform: string;
   upc: string;
+  reportDate: Date;
   payStreams: number;
   streams: number;
 }
 
 interface GroupedAnalyticsRow {
+  reportDate: Date;
   upc: string;
   country: string;
   platform: string;
@@ -465,6 +467,22 @@ function normalizePlatform(value: string): string {
   return normalizeAnalyticsPlatform(normalizeText(value));
 }
 
+function toDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function parseCsvReportDate(value: string, fallback: Date): Date {
+  const normalized = normalizeText(value);
+  if (!normalized) return fallback;
+
+  const iso = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  if (!iso) return fallback;
+
+  const parsed = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return fallback;
+  return parsed;
+}
+
 function parseInteger(value: string): number {
   const cleaned = value.replace(/\s+/g, "").replace(",", ".").trim();
   if (!cleaned) return 0;
@@ -473,7 +491,7 @@ function parseInteger(value: string): number {
   return Math.max(0, Math.round(parsed));
 }
 
-function parseCsvLine(line: string): string[] {
+function parseCsvLine(line: string, delimiter: "," | ";" = ","): string[] {
   const cells: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -492,7 +510,7 @@ function parseCsvLine(line: string): string[] {
       continue;
     }
 
-    if (char === "," && !inQuotes) {
+    if (char === delimiter && !inQuotes) {
       cells.push(current);
       current = "";
       continue;
@@ -503,6 +521,35 @@ function parseCsvLine(line: string): string[] {
 
   cells.push(current);
   return cells;
+}
+
+function countDelimiterOutsideQuotes(line: string, delimiter: "," | ";"): number {
+  let count = 0;
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      const next = line[i + 1];
+      if (inQuotes && next === '"') {
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === delimiter && !inQuotes) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function detectCsvDelimiter(headerLine: string): "," | ";" {
+  const commaCount = countDelimiterOutsideQuotes(headerLine, ",");
+  const semicolonCount = countDelimiterOutsideQuotes(headerLine, ";");
+  return semicolonCount > commaCount ? ";" : ",";
 }
 
 export function parseReportDateFromFilename(fileName: string): Date {
@@ -528,7 +575,7 @@ function collapseNames(values: Set<string>): string | null {
   return `${normalized[0]} (+${normalized.length - 1})`;
 }
 
-function parseAnalyticsCsv(csvText: string): ParsedAnalyticsCsvRow[] {
+function parseAnalyticsCsv(csvText: string, fallbackReportDate: Date): ParsedAnalyticsCsvRow[] {
   const lines = csvText
     .replace(/^\uFEFF/, "")
     .split(/\r?\n/)
@@ -537,7 +584,8 @@ function parseAnalyticsCsv(csvText: string): ParsedAnalyticsCsvRow[] {
 
   if (lines.length === 0) return [];
 
-  const headers = parseCsvLine(lines[0]).map(normalizeHeader);
+  const delimiter = detectCsvDelimiter(lines[0]);
+  const headers = parseCsvLine(lines[0], delimiter).map(normalizeHeader);
   const indexMap = new Map(headers.map((header, index) => [header, index]));
   const required = [
     "track",
@@ -557,7 +605,7 @@ function parseAnalyticsCsv(csvText: string): ParsedAnalyticsCsvRow[] {
 
   const rows: ParsedAnalyticsCsvRow[] = [];
   for (let i = 1; i < lines.length; i += 1) {
-    const cells = parseCsvLine(lines[i]);
+    const cells = parseCsvLine(lines[i], delimiter);
 
     const read = (header: string) => {
       const index = indexMap.get(header);
@@ -576,6 +624,7 @@ function parseAnalyticsCsv(csvText: string): ParsedAnalyticsCsvRow[] {
       country,
       platform,
       upc,
+      reportDate: parseCsvReportDate(read("report_date"), fallbackReportDate),
       payStreams: parseInteger(read("pay_streams")),
       streams: parseInteger(read("streams"))
     });
@@ -588,10 +637,11 @@ function groupAnalyticsRows(rows: ParsedAnalyticsCsvRow[]): GroupedAnalyticsRow[
   const grouped = new Map<string, GroupedAnalyticsRow>();
 
   for (const row of rows) {
-    const key = `${row.upc}::${row.country}::${row.platform}`;
+    const key = `${toDateKey(row.reportDate)}::${row.upc}::${row.country}::${row.platform}`;
     const current = grouped.get(key);
     if (!current) {
       grouped.set(key, {
+        reportDate: row.reportDate,
         upc: row.upc,
         country: row.country,
         platform: row.platform,
@@ -637,13 +687,19 @@ function toRoundedPercent(value: number): Prisma.Decimal {
   return new Prisma.Decimal(rounded);
 }
 
+const MAX_READABLE_CHANGE_PERCENT = 150;
+
+function clampReadableChangePercent(value: number): number {
+  return Math.max(-MAX_READABLE_CHANGE_PERCENT, Math.min(MAX_READABLE_CHANGE_PERCENT, value));
+}
+
 function calculateChangePercent(current: number, previous: number): Prisma.Decimal | null {
   if (previous === 0) {
     if (current > 0) return null;
     return toRoundedPercent(0);
   }
   const percent = ((current - previous) / previous) * 100;
-  return toRoundedPercent(percent);
+  return toRoundedPercent(clampReadableChangePercent(percent));
 }
 
 async function recomputeSummariesForReportDateTx(params: {
@@ -951,9 +1007,11 @@ export async function importAnalyticsCsvReport(params: {
     console.log("[analytics-import]", ...args);
   };
 
-  const reportDate = parseReportDateFromFilename(params.sourceFileName);
-  const parsedRows = parseAnalyticsCsv(params.csvText);
+  const fallbackReportDate = parseReportDateFromFilename(params.sourceFileName);
+  const parsedRows = parseAnalyticsCsv(params.csvText, fallbackReportDate);
   const groupedRows = groupAnalyticsRows(parsedRows);
+  const reportDateKeys = Array.from(new Set(groupedRows.map((row) => toDateKey(row.reportDate))));
+  const reportDates = reportDateKeys.map((key) => new Date(`${key}T00:00:00.000Z`));
 
   const uniqueUpcs = Array.from(
     new Set(
@@ -1016,6 +1074,7 @@ export async function importAnalyticsCsvReport(params: {
 
   const touchedUserIds = new Set<string>();
   const touchedReleaseIds = new Set<string>();
+  const touchedByDate = new Map<string, { userIds: Set<string>; releaseIds: Set<string> }>();
   const platformsSet = new Set<string>();
   let matchedRows = 0;
   let unmatchedRows = 0;
@@ -1028,12 +1087,38 @@ export async function importAnalyticsCsvReport(params: {
   await params.prisma.$transaction(
     async (tx) => {
       const platformSummaryRepo = getAnalyticsPlatformSummaryRepo(tx);
-      await tx.analyticsReportSnapshot.deleteMany({ where: { reportDate } });
-      if (platformSummaryRepo) {
-        await platformSummaryRepo.deleteMany({ where: { reportDate } });
+      if (reportDates.length > 0) {
+        await tx.analyticsReportSnapshot.deleteMany({
+          where: {
+            reportDate: {
+              in: reportDates
+            }
+          }
+        });
+        if (platformSummaryRepo) {
+          await platformSummaryRepo.deleteMany({
+            where: {
+              reportDate: {
+                in: reportDates
+              }
+            }
+          });
+        }
+        await tx.unmatchedAnalyticsImport.deleteMany({
+          where: {
+            reportDate: {
+              in: reportDates
+            }
+          }
+        });
+        await tx.analyticsDailySummary.deleteMany({
+          where: {
+            reportDate: {
+              in: reportDates
+            }
+          }
+        });
       }
-      await tx.unmatchedAnalyticsImport.deleteMany({ where: { reportDate } });
-      await tx.analyticsDailySummary.deleteMany({ where: { reportDate } });
 
       const unmatchedPayload: Prisma.UnmatchedAnalyticsImportCreateManyInput[] = [];
 
@@ -1049,7 +1134,7 @@ export async function importAnalyticsCsvReport(params: {
             streams: row.streams,
             payStreams: row.payStreams,
             sourceFileName: params.sourceFileName,
-            reportDate,
+            reportDate: row.reportDate,
             reason: "missing_upc",
             importJobId: params.importJobId ?? null
           });
@@ -1074,7 +1159,7 @@ export async function importAnalyticsCsvReport(params: {
             streams: row.streams,
             payStreams: row.payStreams,
             sourceFileName: params.sourceFileName,
-            reportDate,
+            reportDate: row.reportDate,
             reason: "release_not_found_by_upc",
             importJobId: params.importJobId ?? null
           });
@@ -1084,6 +1169,14 @@ export async function importAnalyticsCsvReport(params: {
         matchedRows += 1;
         touchedUserIds.add(release.userId);
         touchedReleaseIds.add(release.id);
+        const dateKey = toDateKey(row.reportDate);
+        const touchedForDate = touchedByDate.get(dateKey) ?? {
+          userIds: new Set<string>(),
+          releaseIds: new Set<string>()
+        };
+        touchedForDate.userIds.add(release.userId);
+        touchedForDate.releaseIds.add(release.id);
+        touchedByDate.set(dateKey, touchedForDate);
         platformsSet.add(row.platform);
         if (row.platform === "Unknown") {
           rowsWithUnknownPlatform += 1;
@@ -1096,7 +1189,7 @@ export async function importAnalyticsCsvReport(params: {
             releaseId: release.id,
             userId: release.userId,
             upc: csvUpc,
-            reportDate,
+            reportDate: row.reportDate,
             periodDays: Math.max(1, Math.floor(params.periodDays ?? 30)),
             country: row.country,
             platform: row.platform,
@@ -1117,13 +1210,15 @@ export async function importAnalyticsCsvReport(params: {
         });
       }
 
-      if (touchedUserIds.size > 0 || touchedReleaseIds.size > 0) {
-        await recomputeSummariesForReportDateTx({
-          tx,
-          reportDate,
-          touchedUserIds: Array.from(touchedUserIds),
-          touchedReleaseIds: Array.from(touchedReleaseIds)
-        });
+      if (touchedByDate.size > 0) {
+        for (const [dateKey, touched] of touchedByDate.entries()) {
+          await recomputeSummariesForReportDateTx({
+            tx,
+            reportDate: new Date(`${dateKey}T00:00:00.000Z`),
+            touchedUserIds: Array.from(touched.userIds),
+            touchedReleaseIds: Array.from(touched.releaseIds)
+          });
+        }
       }
     },
     {
@@ -1134,7 +1229,7 @@ export async function importAnalyticsCsvReport(params: {
 
   devLog("import-summary", {
     sourceFileName: params.sourceFileName,
-    reportDate: reportDate.toISOString().slice(0, 10),
+    reportDate: fallbackReportDate.toISOString().slice(0, 10),
     groupedRows: groupedRows.length,
     matchedRows,
     unmatchedRows,
@@ -1145,7 +1240,7 @@ export async function importAnalyticsCsvReport(params: {
 
   return {
     sourceFileName: params.sourceFileName,
-    reportDate: reportDate.toISOString().slice(0, 10),
+    reportDate: fallbackReportDate.toISOString().slice(0, 10),
     totalCsvRows: parsedRows.length,
     groupedRows: groupedRows.length,
     importedRows: matchedRows,

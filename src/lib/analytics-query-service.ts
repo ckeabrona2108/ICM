@@ -213,6 +213,12 @@ function toDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+const MAX_READABLE_CHANGE_PERCENT = 150;
+
+function clampReadableChangePercent(value: number): number {
+  return Math.max(-MAX_READABLE_CHANGE_PERCENT, Math.min(MAX_READABLE_CHANGE_PERCENT, value));
+}
+
 function calculateChangePercent(current: number, previous: number): number | null {
   if (previous === 0) {
     if (current > 0) return null;
@@ -220,7 +226,7 @@ function calculateChangePercent(current: number, previous: number): number | nul
   }
 
   const percent = ((current - previous) / previous) * 100;
-  return Number(percent.toFixed(2));
+  return Number(clampReadableChangePercent(percent).toFixed(2));
 }
 
 function toTrend(changePercent: number | null, current: number, previous: number): AnalyticsTrend {
@@ -302,10 +308,12 @@ async function buildOverviewFromSnapshots(
   const currentPayStreams = current._sum.payStreams ?? 0;
   const previousStreams = previous?._sum.streams ?? 0;
   const previousPayStreams = previous?._sum.payStreams ?? 0;
+  const periodStreams = chartGroups.reduce((sum, row) => sum + (row._sum.streams ?? 0), 0);
+  const periodPayStreams = chartGroups.reduce((sum, row) => sum + (row._sum.payStreams ?? 0), 0);
 
   return {
-    totalStreams: currentStreams,
-    totalPayStreams: currentPayStreams,
+    totalStreams: periodStreams,
+    totalPayStreams: periodPayStreams,
     streamsChangePercent: calculateChangePercent(currentStreams, previousStreams),
     payStreamsChangePercent: calculateChangePercent(currentPayStreams, previousPayStreams),
     latestReportDate: toDateKey(current.reportDate),
@@ -545,9 +553,12 @@ export async function getAnalyticsOverview(
       ];
     }
 
+    const periodStreams = chartRows.reduce((sum, row) => sum + row.totalStreams, 0);
+    const periodPayStreams = chartRows.reduce((sum, row) => sum + row.totalPayStreams, 0);
+
     return {
-      totalStreams: current.totalStreams,
-      totalPayStreams: current.totalPayStreams,
+      totalStreams: periodStreams,
+      totalPayStreams: periodPayStreams,
       streamsChangePercent: calculateChangePercent(
         current.totalStreams,
         previous?.totalStreams ?? 0
@@ -564,7 +575,10 @@ export async function getAnalyticsOverview(
         streams: row.streams,
         payStreams: row.payStreams,
         sharePercent: Number(row.sharePercent),
-        changePercent: row.changePercent == null ? null : Number(row.changePercent)
+        changePercent:
+          row.changePercent == null
+            ? null
+            : Number(clampReadableChangePercent(Number(row.changePercent)).toFixed(2))
       })),
       chart: chartRows.map((row) => ({
         date: toDateKey(row.reportDate),

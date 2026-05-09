@@ -9,12 +9,52 @@ import { ServiceWorkStatus } from "@/components/layout/service-work-status";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { VerificationStatusBadge } from "@/components/verification/verification-status-badge";
 
+function formatRuCount(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+}
+
+function formatSubscriptionExpiry(endsAt?: string | null, nowTs = Date.now()): string | null {
+  if (!endsAt) return null;
+  const parsed = new Date(endsAt);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const diffMs = parsed.getTime() - nowTs;
+  if (diffMs <= 0) return "Подписка истекла";
+
+  const totalMinutes = Math.ceil(diffMs / (60 * 1000));
+  if (totalMinutes < 60) {
+    return `Подписка истечёт через ${totalMinutes} ${formatRuCount(totalMinutes, "минуту", "минуты", "минут")}`;
+  }
+
+  if (totalMinutes < 24 * 60) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (minutes === 0) {
+      return `Подписка истечёт через ${hours} ${formatRuCount(hours, "час", "часа", "часов")}`;
+    }
+    return `Подписка истечёт через ${hours} ${formatRuCount(hours, "час", "часа", "часов")} ${minutes} ${formatRuCount(minutes, "минуту", "минуты", "минут")}`;
+  }
+
+  const countdownDays = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  if (countdownDays % 7 === 0 && countdownDays >= 7 && countdownDays <= 56) {
+    const weeks = Math.ceil(countdownDays / 7);
+    return `Подписка истечёт через ${weeks} ${formatRuCount(weeks, "неделю", "недели", "недель")}`;
+  }
+
+  return `Подписка истечёт через ${countdownDays} ${formatRuCount(countdownDays, "день", "дня", "дней")}`;
+}
+
 export function DashboardTopbar({
   userName,
   userEmail,
   planLabel,
   balanceLabel,
   hasSubscription,
+  subscriptionEndsAt,
   contractStatus
 }: {
   userName: string;
@@ -22,14 +62,28 @@ export function DashboardTopbar({
   planLabel?: string;
   balanceLabel: string;
   hasSubscription: boolean;
+  subscriptionEndsAt?: string | null;
   contractStatus: ContractStatusPayload;
 }) {
   const { user } = useCurrentUser();
   const displayName = user?.name?.trim() || userName || "Пользователь";
   const displayEmail = user?.email?.trim() || userEmail?.trim() || "—";
   const effectiveVerification = user?.verification ?? contractStatus;
+  const [nowTs, setNowTs] = React.useState(() => Date.now());
+  const subscriptionExpiresLabel =
+    hasSubscription && planLabel
+      ? formatSubscriptionExpiry(subscriptionEndsAt, nowTs)
+      : null;
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!hasSubscription || !subscriptionEndsAt) return;
+    const timer = window.setInterval(() => {
+      setNowTs(Date.now());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [hasSubscription, subscriptionEndsAt]);
 
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -62,9 +116,16 @@ export function DashboardTopbar({
 
       <div className="ml-auto flex min-w-0 items-center gap-3">
         {hasSubscription && planLabel ? (
-          <span className="rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold tracking-[0.14em] text-white/88">
-            {planLabel}
-          </span>
+          <div className="flex items-end flex-col">
+            <span className="rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold tracking-[0.14em] text-white/88">
+              {planLabel}
+            </span>
+            {subscriptionExpiresLabel ? (
+              <span className="mt-1 hidden text-[11px] font-medium text-white/55 sm:block">
+                {subscriptionExpiresLabel}
+              </span>
+            ) : null}
+          </div>
         ) : null}
 
         <Link

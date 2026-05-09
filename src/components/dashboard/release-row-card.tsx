@@ -9,7 +9,11 @@ import {
   Diamond,
   ExternalLink,
   Pencil,
+  ScrollText,
+  Smartphone,
   Trash2,
+  Type,
+  Video,
   X
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -38,6 +42,131 @@ interface ReleaseRowCardProps {
   allowDraftDelete?: boolean;
 }
 
+interface SubmissionTrackPersonLike {
+  name?: string;
+  role?: string;
+}
+
+interface SubmissionTrackLike {
+  subtitle?: string;
+  lyrics?: string;
+  durationSec?: number;
+  syncedLyricsFile?: unknown;
+  textFile?: unknown;
+  ringtoneFile?: unknown;
+  karaokeFile?: unknown;
+  videoFile?: unknown;
+  videoShotFile?: unknown;
+  videoClipFile?: unknown;
+  copyrightPct?: string;
+  relatedRightsPct?: string;
+  trackPersons?: SubmissionTrackPersonLike[];
+}
+
+interface SubmissionDataLike {
+  tracks?: SubmissionTrackLike[];
+}
+
+function parseSubmissionData(value: unknown): SubmissionDataLike | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as SubmissionDataLike;
+}
+
+function readFileRef(input: unknown): { url?: string; storageKey?: string } | null {
+  if (!input) return null;
+  if (typeof input === "string") {
+    const value = input.trim();
+    return value ? { url: value } : null;
+  }
+  if (typeof input !== "object" || Array.isArray(input)) return null;
+  const source = input as Record<string, unknown>;
+  const url = typeof source.url === "string" ? source.url.trim() : "";
+  const storageKey =
+    typeof source.storageKey === "string"
+      ? source.storageKey.trim()
+      : typeof source.key === "string"
+        ? source.key.trim()
+        : "";
+  if (!url && !storageKey) return null;
+  return {
+    ...(url ? { url } : {}),
+    ...(storageKey ? { storageKey } : {})
+  };
+}
+
+function parsePercentValue(value: string | undefined): number | null {
+  const normalized = (value ?? "").trim().replace(",", ".");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function formatPercent(value: number): string {
+  return `${value.toLocaleString("ru-RU", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2
+  })}%`;
+}
+
+function formatRightsShareCombined(params: {
+  copyrightPct?: string;
+  relatedRightsPct?: string;
+}): string {
+  const copyright = parsePercentValue(params.copyrightPct);
+  const related = parsePercentValue(params.relatedRightsPct);
+
+  if (copyright == null && related == null) return "100%";
+  if (copyright != null && related == null) return formatPercent(copyright);
+  if (copyright == null && related != null) return formatPercent(related);
+  if (copyright != null && related != null && copyright === related) {
+    return formatPercent(copyright);
+  }
+
+  if (copyright != null && related != null) {
+    return `${formatPercent(copyright)} / ${formatPercent(related)}`;
+  }
+
+  return "100%";
+}
+
+function formatDurationFromSeconds(value: number | undefined): string | null {
+  if (!Number.isFinite(value) || (value ?? 0) <= 0) return null;
+  const total = Math.max(0, Math.floor(value ?? 0));
+  const mm = String(Math.floor(total / 60)).padStart(2, "0");
+  const ss = String(total % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+function resolveTrackDuration(params: {
+  fallback: string;
+  durationSec?: number;
+}): string {
+  const fromSeconds = formatDurationFromSeconds(params.durationSec);
+  if (fromSeconds) return fromSeconds;
+  const normalized = params.fallback.trim();
+  return normalized || "00:00";
+}
+
+function resolveTrackArtists(
+  persons: SubmissionTrackPersonLike[] | undefined,
+  fallback: string
+): string {
+  const list =
+    persons
+      ?.filter((person) => {
+        const role = person.role?.toLowerCase() ?? "";
+        return role.includes("исполн") || role.includes("artist") || role.includes("feat");
+      })
+      .map((person) => person.name?.trim() ?? "")
+      .filter(Boolean) ?? [];
+  return list.length > 0 ? Array.from(new Set(list)).join(", ") : fallback;
+}
+
+function hasTrackFile(input: unknown): boolean {
+  return Boolean(readFileRef(input));
+}
+
 function ReleaseRowCardBase({
   release,
   index = 0,
@@ -55,6 +184,8 @@ function ReleaseRowCardBase({
   >({});
   const [deleting, setDeleting] = React.useState(false);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [paying, setPaying] = React.useState(false);
+  const [payError, setPayError] = React.useState<string | null>(null);
   const timelineState = getReleaseTimelineState(release.status, release.paid);
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
@@ -84,6 +215,48 @@ function ReleaseRowCardBase({
   const isQuickPreviewOpen = quickPreviewTrackNum != null;
   const isQuickPreviewLoading =
     quickPreviewTrackNum != null && quickPreviewLoadingTrackNum === quickPreviewTrackNum;
+  const parsedSubmissionData = React.useMemo(
+    () => parseSubmissionData(release.submissionData),
+    [release.submissionData]
+  );
+  const trackServices = React.useMemo(
+    () =>
+      release.tracks.map((track) => {
+        const submissionTrack = parsedSubmissionData?.tracks?.[Math.max(0, track.num - 1)];
+        const hasSyncedText =
+          hasTrackFile(submissionTrack?.syncedLyricsFile) ||
+          hasTrackFile(submissionTrack?.textFile);
+        const hasPlainText = Boolean(submissionTrack?.lyrics?.trim());
+        const hasRingtone =
+          hasTrackFile(submissionTrack?.ringtoneFile) ||
+          hasTrackFile(submissionTrack?.karaokeFile);
+        const hasVideo =
+          hasTrackFile(submissionTrack?.videoFile) ||
+          hasTrackFile(submissionTrack?.videoShotFile) ||
+          hasTrackFile(submissionTrack?.videoClipFile);
+
+        return {
+          trackNum: track.num,
+          subtitle: submissionTrack?.subtitle?.trim() || "",
+          artists: resolveTrackArtists(submissionTrack?.trackPersons, artist),
+          duration: resolveTrackDuration({
+            fallback: track.duration,
+            durationSec: submissionTrack?.durationSec
+          }),
+          rightsShare: formatRightsShareCombined({
+            copyrightPct: submissionTrack?.copyrightPct,
+            relatedRightsPct: submissionTrack?.relatedRightsPct
+          }),
+          services: {
+            ringtone: hasRingtone,
+            plainText: hasPlainText,
+            syncedText: hasSyncedText,
+            video: hasVideo
+          }
+        };
+      }),
+    [artist, parsedSubmissionData, release.tracks]
+  );
 
   const handleDeleteDraft = React.useCallback(async () => {
     if (release.status !== "draft") return;
@@ -196,6 +369,39 @@ function ReleaseRowCardBase({
     },
     [quickPreviewCache, quickPreviewLoadingTrackNum, release]
   );
+
+  const startReleasePayment = React.useCallback(async () => {
+    if (paying) return;
+
+    setPayError(null);
+    setPaying(true);
+    try {
+      const response = await fetch(`/api/releases/${release.id}/pay`, {
+        method: "POST"
+      });
+
+      const parsed = (await response.json().catch(() => null)) as
+        | { error?: string; confirmationUrl?: string }
+        | null;
+
+      if (!response.ok) {
+        setPayError(parsed?.error ?? "Не удалось создать платёж.");
+        return;
+      }
+
+      const confirmationUrl = parsed?.confirmationUrl?.trim();
+      if (!confirmationUrl) {
+        setPayError("Платёжный шлюз не вернул ссылку на оплату.");
+        return;
+      }
+
+      window.location.href = confirmationUrl;
+    } catch {
+      setPayError("Сервис оплаты временно недоступен. Повторите позже.");
+    } finally {
+      setPaying(false);
+    }
+  }, [paying, release.id]);
 
   return (
     <motion.div
@@ -349,16 +555,25 @@ function ReleaseRowCardBase({
             </div>
 
             {showPay ? (
-              <div className="mt-4 flex items-center justify-between border-t border-white/[0.05] pt-4">
+              <div className="mt-4 flex items-center justify-end border-t border-white/[0.05] pt-4">
                 {timelineState.showPayButton ? (
                   <button
                     type="button"
+                    onClick={() => {
+                      void startReleasePayment();
+                    }}
+                    disabled={paying}
                     className="rounded-lg bg-[#7b3df5] px-4 py-2 text-[14px] font-semibold text-white transition-colors hover:bg-[#8b4ff7]"
                   >
-                    Оплатить
+                    {paying ? "Переход к оплате..." : "Оплатить"}
                   </button>
                 ) : null}
               </div>
+            ) : null}
+            {payError ? (
+              <p className="mt-2 text-right text-[12px] font-medium text-rose-300">
+                {payError}
+              </p>
             ) : null}
           </div>
         </div>
@@ -405,33 +620,79 @@ function ReleaseRowCardBase({
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
               className="overflow-hidden"
             >
-              <div className="mt-3 space-y-1 rounded-xl border border-white/[0.05] bg-black/20 p-3">
+              <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.05] bg-black/20">
                 {release.tracks.length === 0 ? (
-                  <p className="px-2 py-3 text-center text-[12.5px] text-white/40">
+                  <p className="px-4 py-4 text-center text-[12.5px] text-white/40">
                     Треков пока нет
                   </p>
                 ) : (
-                  release.tracks.map((t) => (
-                    <div
-                      key={t.num}
-                      role="button"
-                      tabIndex={0}
-                      onClick={(event) => openTrackQuickPreview(t.num, event)}
-                      onKeyDown={(event) => openTrackQuickPreview(t.num, event)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
-                        isQuickPreviewOpen &&
-                          quickPreviewTrackNum === t.num &&
-                          "bg-[#7b3df5]/15 ring-1 ring-[#7b3df5]/45"
-                      )}
-                    >
-                      <span className="w-6 text-[12px] tabular-nums text-white/40">
-                        {String(t.num).padStart(2, "0")}
-                      </span>
-                      <span className="flex-1 truncate text-[13px] text-white/85">{t.title}</span>
-                      <span className="text-[12px] tabular-nums text-white/40">{t.duration}</span>
+                  <div className="min-w-[900px]">
+                    <div className="grid grid-cols-[44px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.07] px-4 py-2 text-[12px] font-semibold text-white/48">
+                      <span>#</span>
+                      <span>Название</span>
+                      <span className="text-center">Исполнитель</span>
+                      <span className="text-center">Длительность</span>
+                      <span className="text-center">Доля прав</span>
+                      <span className="text-center">Сервисы</span>
                     </div>
-                  ))
+                    {release.tracks.map((t) => {
+                      const extra = trackServices.find((item) => item.trackNum === t.num);
+                      return (
+                        <div
+                          key={t.num}
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => openTrackQuickPreview(t.num, event)}
+                          onKeyDown={(event) => openTrackQuickPreview(t.num, event)}
+                          className={cn(
+                            "grid grid-cols-[44px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.04] px-4 py-2.5 text-[13px] transition-colors last:border-b-0 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
+                            isQuickPreviewOpen &&
+                              quickPreviewTrackNum === t.num &&
+                              "bg-[#7b3df5]/12 ring-1 ring-inset ring-[#7b3df5]/40"
+                          )}
+                        >
+                          <span className="tabular-nums text-white/42">{t.num}</span>
+                          <div className="min-w-0 truncate font-medium text-white/88">
+                            <span>{t.title}</span>
+                            {extra?.subtitle ? (
+                              <span className="ml-1 text-white/45">{extra.subtitle}</span>
+                            ) : null}
+                          </div>
+                          <span className="justify-self-stretch truncate text-center text-white/72">
+                            {extra?.artists ?? artist}
+                          </span>
+                          <span className="justify-self-stretch text-center tabular-nums text-white/62">
+                            {extra?.duration ?? t.duration}
+                          </span>
+                          <span className="justify-self-stretch text-center tabular-nums text-white/62">
+                            {extra?.rightsShare ?? "100%"}
+                          </span>
+                          <div className="flex items-center justify-center gap-2">
+                            <TrackServiceIndicator
+                              label="Рингтон"
+                              enabled={Boolean(extra?.services.ringtone)}
+                              icon={<Smartphone className="h-4 w-4" />}
+                            />
+                            <TrackServiceIndicator
+                              label="Текст"
+                              enabled={Boolean(extra?.services.plainText)}
+                              icon={<Type className="h-4 w-4" />}
+                            />
+                            <TrackServiceIndicator
+                              label="Синх. текст"
+                              enabled={Boolean(extra?.services.syncedText)}
+                              icon={<ScrollText className="h-4 w-4" />}
+                            />
+                            <TrackServiceIndicator
+                              label="Видео"
+                              enabled={Boolean(extra?.services.video)}
+                              icon={<Video className="h-4 w-4" />}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -560,11 +821,24 @@ export const ReleaseRowCard = React.memo(ReleaseRowCardBase);
 ReleaseRowCard.displayName = "ReleaseRowCard";
 
 function StatusFieldValue({ release }: { release: CabinetRelease }) {
+  const showPaymentBadge =
+    release.paymentKind === "subscription" ||
+    release.paymentKind === "unpaid" ||
+    !release.paid;
+  const statusPaymentLabel =
+    release.paymentKind === "subscription" && release.paymentLabel
+      ? release.paymentLabel.replace(/\s+\d+\/(?:\d+|∞)$/u, "")
+      : release.paymentLabel;
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <StatusBadge status={release.status} />
-      {!release.paid ? (
-        <PaymentStatusBadge paid={release.paid} />
+      {showPaymentBadge ? (
+        <PaymentStatusBadge
+          paid={release.paid}
+          label={statusPaymentLabel}
+          kind={release.paymentKind}
+        />
       ) : null}
     </div>
   );
@@ -700,5 +974,29 @@ function SkeletonBlock() {
         <div className="h-3 w-3/5 animate-pulse rounded bg-white/10" />
       </div>
     </div>
+  );
+}
+
+function TrackServiceIndicator({
+  label,
+  enabled,
+  icon
+}: {
+  label: string;
+  enabled: boolean;
+  icon: React.ReactNode;
+}) {
+  return (
+    <span
+      title={enabled ? `${label}: добавлен` : `${label}: не добавлен`}
+      className={cn(
+        "inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors",
+        enabled
+          ? "border-cyan-300/35 bg-cyan-500/12 text-cyan-200"
+          : "border-white/[0.12] bg-white/[0.03] text-white/35"
+      )}
+    >
+      {icon}
+    </span>
   );
 }

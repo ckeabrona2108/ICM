@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import * as React from "react";
+import { usePathname } from "next/navigation";
 
 interface NewsCard {
   id: string;
@@ -26,6 +27,9 @@ function formatDate(value: string): string {
 }
 
 function NewsCardView({ item }: { item: NewsCard }) {
+  const pathname = usePathname();
+  const detailHref = pathname?.startsWith("/dashboard") ? `/dashboard/news/${item.slug}` : `/news/${item.slug}`;
+
   return (
     <article className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
       {item.cover_image ? (
@@ -61,7 +65,7 @@ function NewsCardView({ item }: { item: NewsCard }) {
         <p className="mt-2 text-[14px] leading-relaxed text-white/70">{item.excerpt ?? "Без описания"}</p>
 
         <Link
-          href={`/news/${item.slug}`}
+          href={detailHref}
           className="mt-4 inline-flex rounded-lg border border-white/20 px-3 py-1.5 text-[13px] font-medium text-white/90 transition hover:bg-white/10"
         >
           Читать

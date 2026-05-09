@@ -21,11 +21,11 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
   {
     id: "standard",
     badge: 153,
-    title: "Стандарт",
+    title: "STANDART",
     icon: "mic2",
     iconColor: "#a78bfa",
     description: "🎧 Твой первый шаг в индустрию — просто, быстро, без стресса.",
-    price: "₽490",
+    price: "₽350",
     period: "/ Мес",
     features: [
       "🎵 1 релиз в месяц — идеально для старта",
@@ -46,7 +46,7 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
     icon: "camera",
     iconColor: "#fb923c",
     description: "🔥 Больше релизов — больше шансов залететь. Для тех, кто настроен на результат.",
-    price: "₽1190",
+    price: "₽990",
     period: "/ Мес",
     features: [
       "🎵 До 6 релизов в месяц — масштабируйся",
@@ -64,11 +64,11 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
   {
     id: "enterprise",
     badge: 417,
-    title: "Энтерпрайз",
+    title: "ENTERPRISE",
     icon: "dollar",
     iconColor: "#7b61ff",
     description: "👑 Максимум возможностей для серьёзных артистов. Уровень, где начинается настоящий рост.",
-    price: "₽1490",
+    price: "₽1990",
     period: "/ Мес",
     features: [
       "♾️ Безлимитные релизы",

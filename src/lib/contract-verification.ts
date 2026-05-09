@@ -7,6 +7,10 @@ import { ReleaseStatus, type PrismaClient } from "@prisma/client";
 import { createPresignedDownload, createPresignedUpload } from "@/lib/s3";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import {
+  notifyAdminContractSigned,
+  notifyAdminReleaseSubmitted
+} from "@/lib/telegram-notifier";
+import {
   CONTRACT_FILE_NAME,
   CONTRACT_FILE_URL,
   type ContractSignerFormData,
@@ -57,6 +61,8 @@ interface CreateContractSignatureParams {
   signerData: ContractSignerFormData;
   ipAddress?: string | null;
   userAgent?: string | null;
+  notify?: (payload: { userId: string; userName: string | null; userEmail: string }) => Promise<boolean>;
+  logger?: { error: (...args: unknown[]) => void };
 }
 
 interface ContractSignatureRecordLike {
@@ -118,6 +124,57 @@ interface ReleaseMutationLike {
     findMany(args: unknown): Promise<Array<{ id: string }>>;
     updateMany(args: unknown): Promise<unknown>;
   };
+}
+
+function deriveArtistNameFromSubmissionData(value: unknown): string {
+  if (!value || typeof value !== "object") return "Неизвестный исполнитель";
+  const maybePersons = (value as { persons?: unknown }).persons;
+  if (!Array.isArray(maybePersons)) return "Неизвестный исполнитель";
+
+  const normalized = maybePersons
+    .map((person) => {
+      if (!person || typeof person !== "object") return null;
+      const name = typeof (person as { name?: unknown }).name === "string" ? (person as { name: string }).name.trim() : "";
+      const role = typeof (person as { role?: unknown }).role === "string" ? (person as { role: string }).role.trim().toLowerCase() : "";
+      if (!name) return null;
+      return { name, role };
+    })
+    .filter((person): person is { name: string; role: string } => Boolean(person));
+
+  const preferred =
+    normalized.find((person) => person.role.includes("исполн") || person.role.includes("artist")) ??
+    normalized[0];
+
+  return preferred?.name || "Неизвестный исполнитель";
+}
+
+async function notifyMovedReleasesNowOnModeration(params: {
+  prisma: PrismaClient;
+  releaseIds: string[];
+}): Promise<void> {
+  if (params.releaseIds.length === 0) return;
+
+  const releases = await (
+    params.prisma as unknown as {
+      release: {
+        findMany(args: unknown): Promise<Array<{ id: string; title?: string | null; submissionData?: unknown }>>;
+      };
+    }
+  ).release.findMany({
+    where: { id: { in: params.releaseIds } },
+    select: {
+      id: true,
+      title: true,
+      submissionData: true
+    }
+  });
+
+  for (const release of releases) {
+    await notifyAdminReleaseSubmitted({
+      releaseTitle: release.title?.trim() || "Без названия",
+      artistName: deriveArtistNameFromSubmissionData(release.submissionData)
+    });
+  }
 }
 
 const storeDir = path.join(process.cwd(), ".tmp");
@@ -237,7 +294,7 @@ async function uploadSignaturePng(params: {
 
   const signed = await createPresignedUpload({ key, contentType: "image/png" });
 
-  if (signed.mock) {
+  if (signed.mock || signed.url.startsWith("/")) {
     return { signatureImageUrl: dataUrl };
   }
 
@@ -521,6 +578,8 @@ export async function hasSignedContract(params: {
 export async function createContractSignature(
   params: CreateContractSignatureParams
 ): Promise<ContractStatusPayload> {
+  const notify = params.notify ?? notifyAdminContractSigned;
+  const logger = params.logger ?? console;
   const signerData = normalizeSignerData(params.signerData);
   const issues = validateContractSignerData(signerData);
   if (issues.length > 0) {
@@ -584,6 +643,15 @@ export async function createContractSignature(
     };
     records.unshift(record);
     await writeStore(records);
+    try {
+      await notify({
+        userId: params.userId,
+        userName: params.userName,
+        userEmail: params.userEmail
+      });
+    } catch (error) {
+      logger.error("[verification] telegram notification failed", error);
+    }
     return toContractStatusPayload(record);
   }
 
@@ -591,6 +659,15 @@ export async function createContractSignature(
     const created = (await model.create({
       data: recordBase
     })) as ContractSignatureRecordLike;
+    try {
+      await notify({
+        userId: params.userId,
+        userName: params.userName,
+        userEmail: params.userEmail
+      });
+    } catch (error) {
+      logger.error("[verification] telegram notification failed", error);
+    }
     return toContractStatusPayload(toListItem(created));
   } catch (error) {
     if (!isSchemaUnavailableError(error)) throw error;
@@ -607,6 +684,15 @@ export async function createContractSignature(
     };
     records.unshift(record);
     await writeStore(records);
+    try {
+      await notify({
+        userId: params.userId,
+        userName: params.userName,
+        userEmail: params.userEmail
+      });
+    } catch (notifyError) {
+      logger.error("[verification] telegram notification failed", notifyError);
+    }
     return toContractStatusPayload(record);
   }
 }
@@ -784,6 +870,15 @@ async function approveContractSignatureWithStoreFallback(params: {
   };
   await writeStore(records);
 
+  try {
+    await notifyMovedReleasesNowOnModeration({
+      prisma: params.prisma,
+      releaseIds: movedReleaseIds
+    });
+  } catch (error) {
+    console.error("[verification] telegram notification failed", error);
+  }
+
   return {
     ok: true,
     verificationId: current.id,
@@ -807,7 +902,7 @@ export async function approveContractSignatureByAdmin(params: {
   }
 
   try {
-    return await params.prisma.$transaction(async (tx) => {
+    const result = await params.prisma.$transaction(async (tx) => {
       const current = (await tx.userContractSignature.findUnique({
         where: { id: params.verificationId }
       })) as ContractSignatureRecordLike | null;
@@ -856,6 +951,19 @@ export async function approveContractSignatureByAdmin(params: {
         movedReleaseIds
       } satisfies VerificationReviewResult;
     });
+
+    if (result.ok) {
+      try {
+        await notifyMovedReleasesNowOnModeration({
+          prisma: params.prisma,
+          releaseIds: result.movedReleaseIds ?? []
+        });
+      } catch (error) {
+        console.error("[verification] telegram notification failed", error);
+      }
+    }
+
+    return result;
   } catch (error) {
     if (isSchemaUnavailableError(error)) {
       return approveContractSignatureWithStoreFallback({

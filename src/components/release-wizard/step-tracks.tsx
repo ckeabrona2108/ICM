@@ -20,13 +20,37 @@ import {
   normalizeTrackMeta,
   useWizard,
   type TrackFile,
-  type TrackMeta
+  type TrackMeta,
+  type UploadedFileRef
 } from "./wizard-context";
 import { TrackMetaForm } from "./track-meta-form";
 import { WizardCard } from "./wizard-ui";
 
 const MAX_BYTES = 1024 * 1024 * 1024; // 1GB
 const ALLOWED = [".wav", ".flac"];
+const TRACK_ASSET_LIMITS = {
+  syncedLyrics: {
+    maxBytes: 20 * 1024 * 1024,
+    allowedExtensions: [".ttml"]
+  },
+  ringtone: {
+    maxBytes: 200 * 1024 * 1024,
+    allowedExtensions: [".wav", ".flac", ".mp3"]
+  },
+  video: {
+    maxBytes: 6 * 1024 * 1024 * 1024,
+    allowedExtensions: [".mov", ".mp4", ".avi"]
+  }
+} as const;
+type TrackAssetKind = keyof typeof TRACK_ASSET_LIMITS;
+
+interface PresignedUploadResponse {
+  key: string;
+  url: string;
+  method?: string;
+  fields?: Record<string, string>;
+  mock?: boolean;
+}
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} Б`;
@@ -49,6 +73,28 @@ function formatDuration(seconds: number) {
 function fileExt(name: string) {
   const i = name.lastIndexOf(".");
   return i >= 0 ? name.slice(i).toLowerCase() : "";
+}
+
+function sanitizeFileName(name: string): string {
+  return (
+    name
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/gu, "_")
+      .replace(/_+/gu, "_")
+      .slice(0, 120) || "file.bin"
+  );
+}
+
+function inferContentTypeFromName(name: string): string {
+  const normalized = name.trim().toLowerCase();
+  if (normalized.endsWith(".ttml")) return "application/ttml+xml";
+  if (normalized.endsWith(".wav")) return "audio/wav";
+  if (normalized.endsWith(".flac")) return "audio/flac";
+  if (normalized.endsWith(".mp3")) return "audio/mpeg";
+  if (normalized.endsWith(".mov")) return "video/quicktime";
+  if (normalized.endsWith(".mp4")) return "video/mp4";
+  if (normalized.endsWith(".avi")) return "video/x-msvideo";
+  return "application/octet-stream";
 }
 
 async function readDuration(file: File): Promise<number | undefined> {
@@ -90,6 +136,10 @@ export function StepTracks() {
   const [error, setError] = React.useState<string | null>(null);
   const [openMetaId, setOpenMetaId] = React.useState<string | null>(null);
   const [loadingDuration, setLoadingDuration] = React.useState(false);
+  const [uploadingAsset, setUploadingAsset] = React.useState<{
+    trackId: string;
+    kind: TrackAssetKind;
+  } | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   const patchTrackMeta = (id: string, patch: Partial<TrackMeta>) => {
@@ -101,6 +151,106 @@ export function StepTracks() {
           : t
       )
     );
+  };
+
+  const uploadTrackAsset = async (params: {
+    trackId: string;
+    kind: TrackAssetKind;
+    file: File;
+  }) => {
+      const { trackId, kind, file } = params;
+      const ext = fileExt(file.name);
+      const limits = TRACK_ASSET_LIMITS[kind];
+
+      if (!(limits.allowedExtensions as readonly string[]).includes(ext)) {
+        setError(
+          `Файл «${file.name}» не подходит для этого поля. Разрешено: ${limits.allowedExtensions.join(", ")}.`
+        );
+        return;
+      }
+
+      if (file.size > limits.maxBytes) {
+        setError(
+          `Файл «${file.name}» превышает лимит ${formatSize(limits.maxBytes)}.`
+        );
+        return;
+      }
+
+      setError(null);
+      setUploadingAsset({ trackId, kind });
+      try {
+        const contentType = file.type || inferContentTypeFromName(file.name);
+        const targetResponse = await fetch("/api/uploads/presigned", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: sanitizeFileName(file.name),
+            contentType
+          })
+        });
+
+        const target = (await targetResponse.json().catch(() => null)) as
+          | PresignedUploadResponse
+          | { error?: string }
+          | null;
+
+        if (!targetResponse.ok || !target || !("url" in target) || !target.url || !target.key) {
+          const fallback =
+            target && "error" in target && typeof target.error === "string"
+              ? target.error
+              : "Не удалось получить ссылку для загрузки файла.";
+          throw new Error(fallback);
+        }
+
+        const uploadResponse = await fetch(target.url, {
+          method: target.method ?? "PUT",
+          headers: {
+            "Content-Type": contentType
+          },
+          body: file
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error("Ошибка загрузки файла в хранилище.");
+        }
+
+        const uploadedFile: UploadedFileRef = {
+          storageKey: target.key,
+          url: target.url.split("?")[0] ?? target.url,
+          fileName: file.name,
+          contentType,
+          sizeBytes: file.size
+        };
+
+        if (kind === "syncedLyrics") {
+          patchTrackMeta(trackId, { syncedLyricsFile: uploadedFile });
+        } else if (kind === "ringtone") {
+          patchTrackMeta(trackId, { ringtoneFile: uploadedFile });
+        } else {
+          patchTrackMeta(trackId, { videoFile: uploadedFile });
+        }
+      } catch (uploadError) {
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Не удалось загрузить файл. Попробуйте ещё раз."
+        );
+      } finally {
+        setUploadingAsset((current) =>
+          current?.trackId === trackId && current.kind === kind ? null : current
+        );
+      }
+  };
+
+  const removeTrackAsset = (params: { trackId: string; kind: TrackAssetKind }) => {
+    const { trackId, kind } = params;
+    if (kind === "syncedLyrics") {
+      patchTrackMeta(trackId, { syncedLyricsFile: null });
+    } else if (kind === "ringtone") {
+      patchTrackMeta(trackId, { ringtoneFile: null });
+    } else {
+      patchTrackMeta(trackId, { videoFile: null });
+    }
   };
 
   const acceptFiles = React.useCallback(
@@ -405,6 +555,13 @@ export function StepTracks() {
                         fileName={t.name}
                         hasAudio={t.hasAudio}
                         onPatch={(patch) => patchTrackMeta(t.id, patch)}
+                        uploadingAssetKind={
+                          uploadingAsset?.trackId === t.id ? uploadingAsset.kind : null
+                        }
+                        onUploadAsset={(kind, file) => {
+                          void uploadTrackAsset({ trackId: t.id, kind, file });
+                        }}
+                        onRemoveAsset={(kind) => removeTrackAsset({ trackId: t.id, kind })}
                       />
                     </div>
                   ) : null}

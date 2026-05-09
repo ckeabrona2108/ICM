@@ -183,6 +183,19 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mimeType });
 }
 
+function toAbsoluteStorageUrl(rawUrl: string): string {
+  const normalized = rawUrl.trim();
+  if (/^https?:\/\//iu.test(normalized)) {
+    return normalized;
+  }
+
+  if (typeof window !== "undefined") {
+    return new URL(normalized, window.location.origin).toString();
+  }
+
+  return normalized;
+}
+
 async function uploadBlobToStorage(params: {
   fileName: string;
   contentType: string;
@@ -226,7 +239,7 @@ async function uploadBlobToStorage(params: {
     throw new Error("Ошибка загрузки файла в хранилище.");
   }
 
-  const cleanUrl = target.url.split("?")[0] ?? target.url;
+  const cleanUrl = toAbsoluteStorageUrl(target.url.split("?")[0] ?? target.url);
   return {
     storageKey: target.key,
     url: cleanUrl,

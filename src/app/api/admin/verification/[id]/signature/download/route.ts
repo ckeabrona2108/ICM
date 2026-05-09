@@ -35,7 +35,7 @@ export async function GET(
   }
 
   if (asset.redirectUrl) {
-    return NextResponse.redirect(asset.redirectUrl, { status: 302 });
+    return NextResponse.redirect(new URL(asset.redirectUrl, request.url), { status: 302 });
   }
   const body = asset.body ? new Uint8Array(asset.body) : null;
   return new NextResponse(body, {

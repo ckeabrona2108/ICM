@@ -4,7 +4,7 @@ import * as React from "react";
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, Loader2, X } from "lucide-react";
 import { getSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -15,7 +15,8 @@ import { Label } from "@/components/ui/label";
 export default function RegisterPage() {
   const router = useRouter();
   const [created, setCreated] = useState(false);
-  const [agree, setAgree] = useState(true);
+  const [agree, setAgree] = useState(false);
+  const [policyOpen, setPolicyOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
@@ -80,13 +81,30 @@ export default function RegisterPage() {
     }
   }
 
+  React.useEffect(() => {
+    if (!policyOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPolicyOpen(false);
+    };
+
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [policyOpen]);
+
   return (
     <div className="w-full max-w-[560px]">
       <div className="mb-12 flex justify-center">
         <Link href="/" className="flex items-center">
           <Image
             src="/brand/logo.png"
-            alt="ICM Music Cloud"
+            alt="ICECREAMMUSIC"
             width={317}
             height={400}
             priority
@@ -196,9 +214,13 @@ export default function RegisterPage() {
               условия использования
             </Link>{" "}
             и{" "}
-            <Link href="#" className="text-white underline-offset-4 hover:underline">
+            <button
+              type="button"
+              onClick={() => setPolicyOpen(true)}
+              className="text-white underline-offset-4 hover:underline"
+            >
               политику конфиденциальности
-            </Link>
+            </button>
           </span>
         </label>
 
@@ -245,6 +267,40 @@ export default function RegisterPage() {
           Войти
         </Link>
       </p>
+
+      {policyOpen ? (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-[#04050b]/82 p-3 backdrop-blur-md"
+          onClick={() => setPolicyOpen(false)}
+        >
+          <div
+            className="flex h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/12 bg-[#11131b] shadow-[0_40px_120px_-60px_rgba(0,0,0,0.95)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 sm:px-5">
+              <h2 className="text-[16px] font-semibold text-white sm:text-[18px]">
+                Политика конфиденциальности
+              </h2>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPolicyOpen(false)}
+                className="h-9 rounded-lg px-2.5"
+                aria-label="Закрыть окно политики конфиденциальности"
+                title="Закрыть"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <iframe
+              src="/docs/%D0%9F%D0%BE%D0%BB%D0%B8%D1%82%D0%B8%D0%BA%D0%B0.pdf#toolbar=0&navpanes=0"
+              title="Политика конфиденциальности"
+              className="h-full w-full bg-white"
+            />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

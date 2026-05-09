@@ -59,6 +59,9 @@ export interface TrackMeta {
   metadataLanguage: string;
   lyrics: string;
   ringtoneDurationSec: string;
+  syncedLyricsFile: UploadedFileRef | null;
+  ringtoneFile: UploadedFileRef | null;
+  videoFile: UploadedFileRef | null;
   /** Синхронизированные строки (удержание Play → отпускание) */
   syncedLyrics: SyncedLine[];
 }
@@ -83,6 +86,9 @@ export function emptyTrackMeta(): TrackMeta {
     metadataLanguage: "",
     lyrics: "",
     ringtoneDurationSec: "",
+    syncedLyricsFile: null,
+    ringtoneFile: null,
+    videoFile: null,
     syncedLyrics: []
   };
 }

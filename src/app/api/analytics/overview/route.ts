@@ -10,6 +10,12 @@ function toDateKey(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+const MAX_READABLE_CHANGE_PERCENT = 150;
+
+function clampReadableChangePercent(value: number): number {
+  return Math.max(-MAX_READABLE_CHANGE_PERCENT, Math.min(MAX_READABLE_CHANGE_PERCENT, value));
+}
+
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -112,7 +118,7 @@ export async function GET(request: Request) {
       const previousPayStreams = Number(previous?.pay_streams ?? 0);
       const calcChange = (now: number, prev: number) => {
         if (prev === 0) return now > 0 ? null : 0;
-        return Number((((now - prev) / prev) * 100).toFixed(2));
+        return Number(clampReadableChangePercent(((now - prev) / prev) * 100).toFixed(2));
       };
 
       const rangeStart = new Date(current.report_date);
@@ -131,6 +137,8 @@ export async function GET(request: Request) {
         GROUP BY "report_date"
         ORDER BY "report_date" ASC
       `);
+      const periodStreams = chartRows.reduce((sum, row) => sum + Number(row.streams ?? 0), 0);
+      const periodPayStreams = chartRows.reduce((sum, row) => sum + Number(row.pay_streams ?? 0), 0);
 
       let platformsBreakdown: Array<{
         platform: string;
@@ -199,8 +207,8 @@ export async function GET(request: Request) {
 
       return NextResponse.json(
         {
-          total_streams: currentStreams,
-          total_pay_streams: currentPayStreams,
+          total_streams: periodStreams,
+          total_pay_streams: periodPayStreams,
           streams_change_percent: calcChange(currentStreams, previousStreams),
           pay_streams_change_percent: calcChange(currentPayStreams, previousPayStreams),
           latest_report_date: toDateKey(current.report_date),

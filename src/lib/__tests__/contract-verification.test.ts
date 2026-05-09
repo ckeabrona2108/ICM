@@ -231,6 +231,69 @@ test("new user signs contract and verification becomes pending", async () => {
   assert.equal(status.status, "pending");
 });
 
+test("contract signing sends telegram notification only on first successful signature", async () => {
+  const { prisma } = createFakePrisma();
+  const notifications: Array<{ userId: string; userEmail: string }> = [];
+
+  const first = await createContractSignature({
+    prisma: prisma as never,
+    userId: "user_1",
+    userEmail: "artist@example.com",
+    userName: "Artist",
+    contractVersion: "2026-01",
+    signatureImage: SIGNATURE_DATA_URL,
+    signerData: validSignerData(),
+    notify: async (payload) => {
+      notifications.push({ userId: payload.userId, userEmail: payload.userEmail });
+      return true;
+    }
+  });
+
+  const second = await createContractSignature({
+    prisma: prisma as never,
+    userId: "user_1",
+    userEmail: "artist@example.com",
+    userName: "Artist",
+    contractVersion: "2026-01",
+    signatureImage: SIGNATURE_DATA_URL,
+    signerData: validSignerData(),
+    notify: async (payload) => {
+      notifications.push({ userId: payload.userId, userEmail: payload.userEmail });
+      return true;
+    }
+  });
+
+  assert.equal(first.status, "pending");
+  assert.equal(second.status, "pending");
+  assert.equal(notifications.length, 1);
+});
+
+test("contract signing does not fail when telegram notification fails", async () => {
+  const { prisma } = createFakePrisma();
+  let loggerCalled = false;
+
+  const result = await createContractSignature({
+    prisma: prisma as never,
+    userId: "user_1",
+    userEmail: "artist@example.com",
+    userName: "Artist",
+    contractVersion: "2026-01",
+    signatureImage: SIGNATURE_DATA_URL,
+    signerData: validSignerData(),
+    notify: async () => {
+      throw new Error("telegram_down");
+    },
+    logger: {
+      error: () => {
+        loggerCalled = true;
+      }
+    }
+  });
+
+  assert.equal(result.status, "pending");
+  assert.equal(loggerCalled, true);
+});
+
 test("admin counts include pending verification and pending verification releases", async () => {
   const now = new Date("2026-05-06T18:00:00.000Z");
   const { prisma } = createFakePrisma({

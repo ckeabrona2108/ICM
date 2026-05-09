@@ -24,6 +24,17 @@ const ANALYTICS_BASE_TABLES = [
 export const ANALYTICS_STORED_CSV_UNAVAILABLE_MESSAGE =
   "Stored CSV file is unavailable. Re-upload the source report and create a new import job.";
 
+type AnalyticsPlatformSummaryDeleteRepo = {
+  deleteMany: (args: unknown) => Promise<unknown>;
+};
+
+function getAnalyticsPlatformSummaryRepo(
+  prisma: PrismaClient
+): AnalyticsPlatformSummaryDeleteRepo | null {
+  return (prisma as { analyticsPlatformSummary?: AnalyticsPlatformSummaryDeleteRepo })
+    .analyticsPlatformSummary ?? null;
+}
+
 function isUnknownAnalyticsImportJobExtendedFieldsError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return (
@@ -383,6 +394,101 @@ export async function recalculateAnalyticsImportJobSummaries(params: {
   });
 
   return recalculated;
+}
+
+export async function deleteAnalyticsImportJob(params: {
+  prisma: PrismaClient;
+  jobId: string;
+}) {
+  const job = await params.prisma.analyticsImportJob.findUnique({
+    where: { id: params.jobId },
+    select: {
+      id: true,
+      sourceFileName: true,
+      storedFilePath: true,
+      reportDate: true
+    }
+  });
+
+  if (!job) {
+    throw new Error("Import job not found");
+  }
+
+  const snapshotsToDelete = await params.prisma.analyticsReportSnapshot.findMany({
+    where: {
+      sourceFileName: job.sourceFileName,
+      reportDate: job.reportDate
+    },
+    select: {
+      userId: true,
+      releaseId: true
+    }
+  });
+
+  const touchedUserIds = Array.from(new Set(snapshotsToDelete.map((item) => item.userId)));
+  const touchedReleaseIds = Array.from(new Set(snapshotsToDelete.map((item) => item.releaseId)));
+
+  await params.prisma.$transaction(async (tx) => {
+    await tx.analyticsReportSnapshot.deleteMany({
+      where: {
+        sourceFileName: job.sourceFileName,
+        reportDate: job.reportDate
+      }
+    });
+
+    const platformSummaryRepo = getAnalyticsPlatformSummaryRepo(tx as unknown as PrismaClient);
+    if (platformSummaryRepo) {
+      await platformSummaryRepo.deleteMany({
+        where: {
+          reportDate: job.reportDate
+        }
+      });
+    }
+
+    await tx.analyticsDailySummary.deleteMany({
+      where: {
+        reportDate: job.reportDate
+      }
+    });
+
+    await tx.unmatchedAnalyticsImport.deleteMany({
+      where: {
+        OR: [
+          { importJobId: job.id },
+          {
+            sourceFileName: job.sourceFileName,
+            reportDate: job.reportDate
+          }
+        ]
+      }
+    });
+
+    await tx.analyticsImportJob.delete({
+      where: { id: job.id }
+    });
+  });
+
+  await recomputeSummariesForReportDate({
+    prisma: params.prisma,
+    reportDate: job.reportDate,
+    touchedUserIds,
+    touchedReleaseIds
+  });
+
+  if (job.storedFilePath) {
+    try {
+      await fs.unlink(job.storedFilePath);
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  return {
+    ok: true as const,
+    jobId: job.id
+  };
 }
 
 export async function listUnmatchedAnalyticsRows(params: {

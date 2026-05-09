@@ -17,7 +17,7 @@ function IcmTariffCardBase({
   className,
   ctaMode = "landing",
   ctaLabel,
-  showTierBadge = true,
+  showTierBadge = false,
   showCurrentPlanBadge,
   ctaDisabled,
   ctaLoading,
@@ -37,6 +37,15 @@ function IcmTariffCardBase({
   const Icon = ICONS[tier.icon];
   const btnLabel =
     ctaLabel ?? (ctaMode === "dashboard" ? "Подключить" : tier.button.label);
+  const handleCtaClick = React.useCallback(() => {
+    if (onCtaClick) {
+      onCtaClick();
+      return;
+    }
+    if (ctaMode === "landing" && typeof window !== "undefined") {
+      window.location.href = "/register";
+    }
+  }, [ctaMode, onCtaClick]);
 
   return (
     <div
@@ -56,7 +65,7 @@ function IcmTariffCardBase({
         </div>
       ) : null}
       {showCurrentPlanBadge ? (
-        <div className="absolute left-5 top-5 rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+        <div className="absolute right-5 top-5 rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
           Текущий план
         </div>
       ) : null}
@@ -90,7 +99,7 @@ function IcmTariffCardBase({
 
       <button
         type="button"
-        onClick={onCtaClick}
+        onClick={handleCtaClick}
         disabled={ctaDisabled || ctaLoading}
         className={cn(
           "mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5",

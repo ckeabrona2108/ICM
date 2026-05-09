@@ -57,6 +57,10 @@ export interface AdminReleaseDetails {
   moderationReturnedAt?: string;
   priority?: boolean;
   paid: boolean;
+  paymentKind?: "paid" | "subscription" | "unpaid";
+  paymentLabel?: string;
+  paymentUsage?: string | null;
+  paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   metadataLanguage: string;
   releaseType: string;
   artists: string;

@@ -32,6 +32,19 @@ export const releaseKindSchema = z.enum([
 export const territoryModeSchema = z.enum(["all", "selected", "exclude", "cis"]);
 export const platformModeSchema = z.enum(["all", "selected"]);
 
+function isAcceptableUploadedFileUrl(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  if (normalized.startsWith("/api/uploads/object/")) return true;
+
+  try {
+    const url = new URL(normalized);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 const personSchema = z.object({
   name: z.string().trim(),
   role: z.string().trim()
@@ -47,7 +60,9 @@ const coverMetaSchema = z.object({
 
 const uploadedFileSchema = z.object({
   storageKey: z.string().trim().min(1),
-  url: z.string().trim().url(),
+  url: z.string().trim().refine(isAcceptableUploadedFileUrl, {
+    message: "Некорректный URL загруженного файла."
+  }),
   fileName: z.string().trim().optional(),
   contentType: z.string().trim().optional(),
   sizeBytes: z.number().int().nonnegative().optional()
@@ -56,6 +71,14 @@ const uploadedFileSchema = z.object({
 const uploadedCoverSchema = uploadedFileSchema.extend({
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional()
+});
+
+const paymentSnapshotSchema = z.object({
+  version: z.literal(1),
+  kind: z.literal("subscription_included"),
+  plan: z.enum(["STANDARD", "PRO", "ENTERPRISE"]),
+  releasesUsedAfterSubmit: z.number().int().positive(),
+  releasesLimit: z.number().int().positive().nullable()
 });
 
 const trackSchema = z.object({
@@ -80,7 +103,15 @@ const trackSchema = z.object({
   versionRemix: z.boolean().optional(),
   versionInstrumental: z.boolean().optional(),
   lyrics: z.string().trim().optional(),
-  ringtoneDurationSec: z.string().trim().optional()
+  ringtoneDurationSec: z.string().trim().optional(),
+  syncedLyricsFile: uploadedFileSchema.optional(),
+  ringtoneFile: uploadedFileSchema.optional(),
+  videoFile: uploadedFileSchema.optional(),
+  // Legacy aliases kept for backward compatibility with older submissions/admin mappings.
+  textFile: uploadedFileSchema.optional(),
+  karaokeFile: uploadedFileSchema.optional(),
+  videoShotFile: uploadedFileSchema.optional(),
+  videoClipFile: uploadedFileSchema.optional()
 });
 
 export const releaseSubmissionDataSchema = z.object({
@@ -107,6 +138,7 @@ export const releaseSubmissionDataSchema = z.object({
   platformMode: platformModeSchema.optional(),
   platforms: z.array(z.string().trim()).optional(),
   tracks: z.array(trackSchema),
+  paymentSnapshot: paymentSnapshotSchema.optional(),
   moderatorComment: z.string().trim().optional(),
   realTimeDelivery: z.boolean().optional(),
   yandexPreReleaseDate: z.string().trim().optional(),

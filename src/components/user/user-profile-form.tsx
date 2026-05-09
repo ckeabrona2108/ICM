@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { useCurrentUser } from "@/components/user/user-provider";
 import { VerificationStatusBadge } from "@/components/verification/verification-status-badge";
+import { ContractReadOnlyModal } from "@/components/verification/contract-readonly-modal";
 import {
   userProfileEmailSchema,
   userProfileNameSchema,
@@ -38,6 +39,9 @@ export function UserProfileForm({
   const [avatarLoading, setAvatarLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
+  const [contractViewerOpen, setContractViewerOpen] = React.useState(false);
+
+  const canViewContract = effectiveVerification.isVerified;
 
   React.useEffect(() => {
     if (!user) return;
@@ -124,7 +128,7 @@ export function UserProfileForm({
     <Card>
       <CardContent>
         <form className="grid gap-4 md:grid-cols-2" onSubmit={onSaveProfile}>
-          <div className="md:col-span-2 flex items-center gap-4 rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
+          <div className="md:col-span-2 flex flex-wrap items-center gap-4 rounded-xl border border-white/[0.1] bg-white/[0.02] p-3">
             <UserAvatar name={user?.name} avatarUrl={user?.avatarUrl} size="lg" />
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <label className="inline-flex h-10 cursor-pointer items-center rounded-xl border border-white/[0.16] px-3 text-[14px] font-semibold text-white/88 hover:bg-white/[0.04]">
@@ -140,6 +144,8 @@ export function UserProfileForm({
               <Button
                 type="button"
                 variant="outline"
+                size="sm"
+                className="rounded-xl border-white/[0.16] text-[14px] font-semibold text-white/88 hover:bg-white/[0.04]"
                 onClick={() => {
                   void onDeleteAvatar();
                 }}
@@ -150,6 +156,22 @@ export function UserProfileForm({
               <p className="basis-full text-[13px] font-medium text-white/58">
                 JPG/PNG/WEBP, до 2 МБ.
               </p>
+            </div>
+            <div className="flex w-full items-stretch justify-start gap-2 sm:ml-auto sm:w-auto sm:justify-end">
+              <VerificationStatusBadge
+                status={effectiveVerification.status}
+                className="h-10 min-h-10 items-center rounded-full px-4 py-0 text-[12.5px] font-semibold leading-none"
+              />
+              {canViewContract ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 min-h-10 rounded-full border-white/[0.16] px-4 py-0 text-[12.5px] font-semibold leading-none text-white/85 hover:bg-white/[0.04]"
+                  onClick={() => setContractViewerOpen(true)}
+                >
+                  Договор
+                </Button>
+              ) : null}
             </div>
           </div>
 
@@ -162,10 +184,7 @@ export function UserProfileForm({
             />
           </Field>
 
-          <Field
-            label="Email"
-            suffix={<VerificationStatusBadge status={effectiveVerification.status} />}
-          >
+          <Field label="Email">
             <Input
               type="email"
               value={email}
@@ -185,12 +204,20 @@ export function UserProfileForm({
                 Изменения обновляются во всех разделах кабинета.
               </p>
             )}
-            <Button type="submit" disabled={loading || saving}>
+            <Button
+              type="submit"
+              disabled={loading || saving}
+              className="h-11 w-full rounded-full px-7 text-[15px] sm:w-auto sm:min-w-[250px]"
+            >
               {saving ? "Сохранение..." : "Сохранить изменения"}
             </Button>
           </div>
         </form>
       </CardContent>
+      <ContractReadOnlyModal
+        open={contractViewerOpen}
+        onClose={() => setContractViewerOpen(false)}
+      />
     </Card>
   );
 }
@@ -208,7 +235,7 @@ function Field({
 }) {
   return (
     <div className={className}>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
+      <div className="mb-1.5 flex items-start justify-between gap-2">
         <Label className="block text-[14px] font-medium text-white/74">{label}</Label>
         {suffix}
       </div>

@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { AnalyticsAIService } from "@/lib/analytics-ai-service";
+import { AnalyticsAIService, sanitizeAnalyticsAiErrorMessage } from "@/lib/analytics-ai-service";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: Request) {
@@ -109,6 +109,9 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json(
+      { error: sanitizeAnalyticsAiErrorMessage(message) },
+      { status: 400 }
+    );
   }
 }

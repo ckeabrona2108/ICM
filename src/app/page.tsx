@@ -6,6 +6,7 @@ import { AdvantageCards } from "@/components/landing/advantage-cards";
 import { HeroCollage } from "@/components/landing/hero-collage";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { IcmHeader } from "@/components/landing/icm-header";
+import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
 import {
   AppleMusicLogo,
   ShazamLogo,
@@ -31,7 +32,9 @@ const PLATFORMS = [
 
 export default function HomePage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#09090b] text-white">
+    <main className="relative h-[100dvh] overflow-x-hidden overflow-y-auto bg-[#09090b] text-white">
+      <LandingScrollUnlock />
+
       {/* ambient animated glow */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="blob-a absolute -top-40 left-1/2 h-[600px] w-[1100px] rounded-full bg-[#7b61ff]/15 blur-[160px]" />
@@ -43,7 +46,7 @@ export default function HomePage() {
 
       {/* ============== HERO ============== */}
       <section id="hero" className="relative">
-        <div className="mx-auto grid max-w-7xl gap-12 px-6 pb-20 pt-12 sm:px-8 lg:grid-cols-[1fr_1.05fr] lg:gap-12 lg:pb-32 lg:pt-20">
+        <div className="mx-auto grid max-w-7xl gap-12 px-6 pb-24 pt-28 sm:px-8 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-12 lg:pb-36 lg:pt-36">
           <Reveal>
             <h1 className="max-w-2xl text-balance text-[44px] font-bold leading-[1.04] tracking-[-0.02em] sm:text-[56px] md:text-[68px] lg:text-[76px]">
               Всё для артиста <br className="hidden sm:block" />
@@ -80,7 +83,7 @@ export default function HomePage() {
       </section>
 
       {/* ============== HOW IT WORKS ============== */}
-      <section id="how" className="relative mx-auto max-w-7xl px-6 pb-24 sm:px-8 lg:pb-32">
+      <section id="how" className="relative mx-auto -mt-8 max-w-7xl px-6 pb-24 pt-16 sm:px-8 lg:-mt-10 lg:pb-32 lg:pt-20">
         <Reveal className="text-center">
           <h2 className="text-[36px] font-bold tracking-tight sm:text-[44px] lg:text-[52px]">
             Как это работает?
@@ -96,7 +99,11 @@ export default function HomePage() {
       </section>
 
       {/* ============== ADVANTAGES ============== */}
-      <section className="relative mx-auto max-w-7xl px-6 pb-24 sm:px-8 lg:pb-32">
+      <section className="relative mx-auto max-w-7xl px-6 pb-24 pt-6 sm:px-8 lg:pb-32 lg:pt-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-16 top-0 h-16 bg-gradient-to-b from-white/[0.015] to-transparent blur-2xl"
+        />
         <Reveal className="text-center">
           <h2 className="text-[36px] font-bold tracking-tight sm:text-[44px] lg:text-[52px]">
             Наши преимущества
@@ -109,7 +116,11 @@ export default function HomePage() {
       </section>
 
       {/* ============== PLATFORMS ============== */}
-      <section id="platforms" className="relative mx-auto max-w-7xl px-6 pb-24 sm:px-8 lg:pb-32">
+      <section id="platforms" className="relative mx-auto max-w-7xl px-6 pb-24 pt-6 sm:px-8 lg:pb-32 lg:pt-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-16 top-0 h-16 bg-gradient-to-b from-white/[0.015] to-transparent blur-2xl"
+        />
         <Reveal className="text-center">
           <h2 className="text-[36px] font-bold tracking-tight sm:text-[44px] lg:text-[52px]">
             Основные площадки
@@ -136,7 +147,11 @@ export default function HomePage() {
       </section>
 
       {/* ============== PRICING ============== */}
-      <section id="pricing" className="relative mx-auto max-w-7xl px-6 pb-24 sm:px-8 lg:pb-32">
+      <section id="pricing" className="relative mx-auto max-w-7xl px-6 pb-24 pt-6 sm:px-8 lg:pb-32 lg:pt-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-16 top-0 h-16 bg-gradient-to-b from-white/[0.015] to-transparent blur-2xl"
+        />
         <Reveal className="text-center">
           <h2 className="text-[36px] font-bold tracking-tight sm:text-[44px] lg:text-[52px]">
             Наши услуги
@@ -192,13 +207,14 @@ export default function HomePage() {
                 className="h-7 w-auto object-contain"
               />
             </span>
-            <span>© 2026 ICM Music Cloud</span>
+            <span>© 2026 ICECREAMMUSIC</span>
           </div>
-          <div className="flex items-center gap-5">
-            <a href="#" className="hover:text-white/80">Политика</a>
-            <a href="#" className="hover:text-white/80">Условия</a>
-            <a href="#" className="hover:text-white/80">Поддержка</a>
-          </div>
+        </div>
+        <div className="mx-auto max-w-7xl border-t border-white/[0.06] px-6 pb-8 pt-5 text-center text-[12.5px] leading-relaxed text-white/55 sm:px-8">
+          <p>ИП Шманцарь Вячеслав Васильевич</p>
+          <p>ОГРН: 324390000034601</p>
+          <p>ИНН: 391301950740</p>
+          <p>+79024226647 (Поддержка по телефону не осуществляется)</p>
         </div>
       </footer>
     </main>

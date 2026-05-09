@@ -13,8 +13,14 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "ICM · Music Cloud",
+  title: "ICECREAMMUSIC",
   description: "Премиум-экосистема для артистов: дистрибуция, продвижение, аналитика и AI-инструменты."
+  ,
+  icons: {
+    icon: "/brand/logo.png",
+    shortcut: "/brand/logo.png",
+    apple: "/brand/logo.png"
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

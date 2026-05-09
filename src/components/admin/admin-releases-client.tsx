@@ -269,12 +269,14 @@ export function AdminReleasesClient({
                       <StatusBadge status={release.status} />
                       <span
                         className={
-                          release.paid
+                          release.paymentKind === "subscription"
+                            ? "inline-flex items-center rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-200"
+                            : release.paid
                             ? "inline-flex items-center rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-200"
                             : "inline-flex items-center rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200"
                         }
                       >
-                        {release.paid ? "Оплачен" : "Не оплачен"}
+                        {release.paymentLabel ?? (release.paid ? "Оплачен" : "Не оплачен")}
                       </span>
                       {release.priority ? (
                         <span className="inline-flex items-center rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">

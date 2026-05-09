@@ -7,7 +7,7 @@ import { canManageReleases } from "@/lib/admin-release-service";
 import { createPresignedDownload } from "@/lib/s3";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: { id: string; fileId: string } }
 ) {
   const session = await getServerSession(authOptions);
@@ -37,11 +37,11 @@ export async function GET(
       key: target.storageKey,
       expiresIn: 600
     });
-    return NextResponse.redirect(signed.url, { status: 302 });
+    return NextResponse.redirect(new URL(signed.url, request.url), { status: 302 });
   }
 
   if (target.url) {
-    return NextResponse.redirect(target.url, { status: 302 });
+    return NextResponse.redirect(new URL(target.url, request.url), { status: 302 });
   }
 
   return NextResponse.json({ error: "File URL is unavailable" }, { status: 404 });

@@ -8,6 +8,7 @@ import { DashboardTopbar } from "@/components/layout/dashboard-topbar";
 import { DashboardPrefetch } from "@/components/layout/dashboard-prefetch";
 import { DashboardVerificationStatusModal } from "@/components/verification/dashboard-verification-status-modal";
 import { getUserContractStatus } from "@/lib/contract-verification";
+import { formatRubCurrency } from "@/lib/currency-format";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { prisma } from "@/lib/prisma";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
@@ -66,7 +67,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     aiEnabled: subscriptionOverview.limits.aiEnabled
   };
 
-  const balanceLabel = `${balanceTotals.agreedBalance.toFixed(2)} ₽`;
+  const balanceLabel = formatRubCurrency(balanceTotals.agreedBalance);
   const planLabel = subscriptionOverview.currentPlan ?? undefined;
   const hasSubscription = subscriptionOverview.hasActiveSubscription;
   const userName = userProfile?.name ?? session.user.name ?? "Пользователь";
@@ -90,6 +91,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               planLabel={planLabel}
               balanceLabel={balanceLabel}
               hasSubscription={hasSubscription}
+              subscriptionEndsAt={subscriptionOverview.endsAt}
               contractStatus={contractStatus}
             />
             {children}

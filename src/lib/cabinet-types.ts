@@ -41,6 +41,10 @@ export interface CabinetRelease {
   genre: string;
   status: CabinetReleaseStatus;
   paid: boolean;
+  paymentKind?: "paid" | "subscription" | "unpaid";
+  paymentLabel?: string;
+  paymentUsage?: string | null;
+  paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   tracks: CabinetTrack[];
   moderationStep?: 1 | 2 | 3 | 4;
   releaseCatalogId?: string;

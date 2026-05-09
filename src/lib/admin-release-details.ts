@@ -1,6 +1,19 @@
-import { Prisma, ReleaseStatus } from "@prisma/client";
+import {
+  PaymentStatus,
+  Prisma,
+  ReleaseStatus,
+  SubscriptionPlan,
+  SubscriptionStatus
+} from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { buildReleasePaymentBackfill } from "@/lib/release-payment-backfill";
+import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
+import {
+  buildReleasePaymentDisplay,
+  parseReleasePaymentSnapshot,
+  type ReleasePaymentSnapshot
+} from "@/lib/release-payment";
 import { allReleasePlatformCodes } from "@/lib/release-platforms";
 
 type FileKind = "audio" | "text" | "karaoke" | "video-shot" | "video-clip";
@@ -33,6 +46,7 @@ interface SubmissionDataLike {
   videoShot?: Record<string, unknown>;
   videoClip?: Record<string, unknown>;
   lyrics?: string;
+  paymentSnapshot?: unknown;
 }
 
 interface SubmissionTrackLike {
@@ -57,6 +71,9 @@ interface SubmissionTrackLike {
   versionInstrumental?: boolean;
   lyrics?: string;
   audioFile?: unknown;
+  syncedLyricsFile?: unknown;
+  ringtoneFile?: unknown;
+  videoFile?: unknown;
   textFile?: unknown;
   karaokeFile?: unknown;
   videoShotFile?: unknown;
@@ -79,7 +96,7 @@ interface PersonGroups {
   lyricsAuthors: string[];
 }
 
-interface TrackRoleGroups extends PersonGroups {}
+type TrackRoleGroups = PersonGroups;
 
 type FullReleaseRow = Prisma.ReleaseGetPayload<{
   include: {
@@ -105,9 +122,231 @@ type LegacyReleaseRow = Omit<
   "approvedAt" | "approvedBy" | "rejectedAt" | "rejectedBy" | "rejectionReason"
 >;
 
+function readReleaseIdFromPaymentMetadata(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  const kind = typeof record.kind === "string" ? record.kind.trim().toLowerCase() : "";
+  const releaseId =
+    typeof record.releaseId === "string" ? record.releaseId.trim() : "";
+  if (!releaseId) return null;
+  if (!kind || kind === "release") return releaseId;
+  return null;
+}
+
+async function getPaidReleaseIdSetByUser(userId: string): Promise<Set<string>> {
+  const payments = await prisma.subscriptionPayment.findMany({
+    where: {
+      userId,
+      status: PaymentStatus.SUCCEEDED
+    },
+    select: {
+      metadata: true
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  const paidReleaseIds = new Set<string>();
+  for (const payment of payments) {
+    const releaseId = readReleaseIdFromPaymentMetadata(payment.metadata);
+    if (releaseId) paidReleaseIds.add(releaseId);
+  }
+  return paidReleaseIds;
+}
+
 function parseSubmissionData(value: unknown): SubmissionDataLike | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as SubmissionDataLike;
+}
+
+function readSubmissionData(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function hasPaymentSnapshot(value: unknown): boolean {
+  const data = readSubmissionData(value);
+  if (!data || !data.paymentSnapshot || typeof data.paymentSnapshot !== "object") return false;
+  const snapshot = data.paymentSnapshot as Record<string, unknown>;
+  return snapshot.kind === "subscription_included" && snapshot.version === 1;
+}
+
+function toEffectivePlan(plan: SubscriptionPlan): "STANDARD" | "PRO" | "ENTERPRISE" | null {
+  if (plan === SubscriptionPlan.STANDARD) return "STANDARD";
+  if (plan === SubscriptionPlan.PRO) return "PRO";
+  if (plan === SubscriptionPlan.ENTERPRISE || plan === SubscriptionPlan.LABEL) return "ENTERPRISE";
+  return null;
+}
+
+function planReleaseLimit(plan: "STANDARD" | "PRO" | "ENTERPRISE"): number | null {
+  if (plan === "ENTERPRISE") return null;
+  if (plan === "PRO") return 6;
+  return 1;
+}
+
+function resolveSubmitMoment(
+  release: Pick<FullReleaseRow, "createdAt" | "updatedAt" | "moderationStartedAt">
+): Date {
+  return release.moderationStartedAt ?? release.updatedAt ?? release.createdAt;
+}
+
+function resolveSubmitMomentInWindow(params: {
+  release: Pick<FullReleaseRow, "createdAt" | "updatedAt" | "moderationStartedAt">;
+  windowStart: Date;
+  windowEnd: Date;
+}): Date {
+  const { release, windowStart, windowEnd } = params;
+  if (release.moderationStartedAt) return release.moderationStartedAt;
+
+  const start = windowStart.getTime();
+  const end = windowEnd.getTime();
+  const created = release.createdAt.getTime();
+  const updated = release.updatedAt.getTime();
+
+  if (created >= start && created < end) return release.createdAt;
+  if (updated >= start && updated < end) return release.updatedAt;
+  if (created < start && updated >= start) return new Date(start);
+  return release.createdAt;
+}
+
+function buildSnapshot(params: {
+  plan: "STANDARD" | "PRO" | "ENTERPRISE";
+  releasesUsedAfterSubmit: number;
+}): ReleasePaymentSnapshot {
+  return {
+    version: 1,
+    kind: "subscription_included",
+    plan: params.plan,
+    releasesUsedAfterSubmit: params.releasesUsedAfterSubmit,
+    releasesLimit: planReleaseLimit(params.plan)
+  };
+}
+
+async function inferMissingPaymentSnapshotForRelease(params: {
+  release: FullReleaseRow;
+  paidReleaseIds: Set<string>;
+}): Promise<ReleasePaymentSnapshot | null> {
+  const successfulSubscriptionPayments = await prisma.subscriptionPayment.findMany({
+    where: {
+      userId: params.release.userId,
+      status: PaymentStatus.SUCCEEDED
+    },
+    select: {
+      userId: true,
+      tariffId: true,
+      paidAt: true,
+      createdAt: true
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  const userReleases = await prisma.release.findMany({
+    where: {
+      userId: params.release.userId,
+      status: {
+        not: ReleaseStatus.DRAFT
+      }
+    },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      moderationStartedAt: true,
+      submissionData: true
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  const inferredItems = buildReleasePaymentBackfill({
+    releases: userReleases.map((release) => ({
+      id: release.id,
+      userId: params.release.userId,
+      status: release.status,
+      createdAt: release.createdAt,
+      updatedAt: release.updatedAt,
+      moderationStartedAt: release.moderationStartedAt,
+      submissionData: release.submissionData
+    })),
+    successfulSubscriptionPayments,
+    oneTimePaidReleaseIds: params.paidReleaseIds
+  });
+
+  const inferredFromPayments =
+    inferredItems.find((item) => item.releaseId === params.release.id)?.snapshot ?? null;
+  if (inferredFromPayments) return inferredFromPayments;
+
+  const subscription = await prisma.subscription.findUnique({
+    where: { userId: params.release.userId },
+    select: {
+      plan: true,
+      status: true,
+      startedAt: true,
+      endsAt: true,
+      renewalAt: true
+    }
+  });
+  if (!subscription) return null;
+  const plan = toEffectivePlan(subscription.plan);
+  if (!plan) return null;
+
+  const effectiveEnd = getSubscriptionEffectiveEndDate({
+    endsAt: subscription.endsAt ?? null,
+    renewalAt: subscription.renewalAt ?? null
+  });
+  if (!effectiveEnd || effectiveEnd.getTime() <= subscription.startedAt.getTime()) return null;
+
+  const isActiveLike =
+    subscription.status === SubscriptionStatus.ACTIVE ||
+    subscription.status === SubscriptionStatus.TRIALING;
+  const now = Date.now();
+  if (!isActiveLike && effectiveEnd.getTime() < now) {
+    // Expired subscription still can label historical releases in its active window.
+  }
+
+  const eligible = userReleases
+    .filter((release) => !params.paidReleaseIds.has(release.id))
+    .filter((release) => {
+      const submitAt = resolveSubmitMomentInWindow({
+        release,
+        windowStart: subscription.startedAt,
+        windowEnd: effectiveEnd
+      }).getTime();
+      return submitAt >= subscription.startedAt.getTime() && submitAt < effectiveEnd.getTime();
+    })
+    .sort((a, b) => {
+      const left = resolveSubmitMomentInWindow({
+        release: a,
+        windowStart: subscription.startedAt,
+        windowEnd: effectiveEnd
+      }).getTime();
+      const right = resolveSubmitMomentInWindow({
+        release: b,
+        windowStart: subscription.startedAt,
+        windowEnd: effectiveEnd
+      }).getTime();
+      return left - right;
+    });
+
+  const limit = planReleaseLimit(plan);
+  const included = limit == null ? eligible : eligible.slice(0, Math.max(0, limit));
+  let usage = 0;
+  for (const release of included) {
+    usage += 1;
+    if (release.id !== params.release.id) continue;
+    if (hasPaymentSnapshot(release.submissionData)) return null;
+    return buildSnapshot({
+      plan,
+      releasesUsedAfterSubmit: usage
+    });
+  }
+
+  return null;
 }
 
 function toDateOnly(value: Date | null): string {
@@ -231,8 +470,18 @@ function trackFileId(trackId: string, kind: FileKind): string {
   return `track-${trackId}-${kind}`;
 }
 
-export function mapAdminReleaseDetails(source: FullReleaseRow) {
+export function mapAdminReleaseDetails(
+  source: FullReleaseRow,
+  oneTimePaid = false,
+  inferredSnapshot: ReleasePaymentSnapshot | null = null
+) {
   const submission = parseSubmissionData(source.submissionData);
+  const paymentSnapshot =
+    parseReleasePaymentSnapshot(submission?.paymentSnapshot) ?? inferredSnapshot;
+  const payment = buildReleasePaymentDisplay({
+    paid: oneTimePaid,
+    snapshot: paymentSnapshot
+  });
   const submissionTracks = submission?.tracks ?? [];
   const releasePersons = groupPersons(submission?.persons ?? []);
 
@@ -301,9 +550,9 @@ export function mapAdminReleaseDetails(source: FullReleaseRow) {
 
       const grouped = groupPersons(contributors);
       const trackAudioFile = parseFileRef(sTrack?.audioFile);
-      const textFile = parseFileRef(sTrack?.textFile);
-      const karaokeFile = parseFileRef(sTrack?.karaokeFile);
-      const videoShotFile = parseFileRef(sTrack?.videoShotFile);
+      const textFile = parseFileRef(sTrack?.syncedLyricsFile ?? sTrack?.textFile);
+      const karaokeFile = parseFileRef(sTrack?.ringtoneFile ?? sTrack?.karaokeFile);
+      const videoShotFile = parseFileRef(sTrack?.videoFile ?? sTrack?.videoShotFile);
       const videoClipFile = parseFileRef(sTrack?.videoClipFile);
       const hasLyricsText = Boolean((sTrack?.lyrics ?? track.lyrics ?? "").trim());
 
@@ -397,7 +646,10 @@ export function mapAdminReleaseDetails(source: FullReleaseRow) {
   return {
     id: source.id,
     status: source.status.toLowerCase(),
-    payment_status: source.status === ReleaseStatus.DISTRIBUTED ? "paid" : "unpaid",
+    payment_status: payment.kind,
+    payment_label: payment.label,
+    payment_usage: payment.usageLabel,
+    payment_plan: payment.plan,
     priority: Boolean(source.priority || submission?.priorityRelease),
     cover: {
       url: coverUrl,
@@ -469,7 +721,12 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
       }
     });
     if (!release) return null;
-    return mapAdminReleaseDetails(release);
+    const paidReleaseIds = await getPaidReleaseIdSetByUser(release.userId);
+    const inferredSnapshot = await inferMissingPaymentSnapshotForRelease({
+      release,
+      paidReleaseIds
+    });
+    return mapAdminReleaseDetails(release, paidReleaseIds.has(releaseId), inferredSnapshot);
   } catch (error) {
     if (!isMissingReleaseDecisionColumnError(error)) throw error;
 
@@ -532,7 +789,17 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
       rejectionReason: null
     } as FullReleaseRow;
 
-    return mapAdminReleaseDetails(synthetic);
+    const paidReleaseIds = await getPaidReleaseIdSetByUser(synthetic.userId);
+    const inferredSnapshot = await inferMissingPaymentSnapshotForRelease({
+      release: synthetic,
+      paidReleaseIds
+    });
+
+    return mapAdminReleaseDetails(
+      synthetic,
+      paidReleaseIds.has(releaseId),
+      inferredSnapshot
+    );
   }
 }
 
@@ -550,9 +817,9 @@ function resolveTrackFileRefFromSubmission(
   if (!sTrack) return null;
 
   if (kind === "audio") return parseFileRef(sTrack.audioFile);
-  if (kind === "text") return parseFileRef(sTrack.textFile);
-  if (kind === "karaoke") return parseFileRef(sTrack.karaokeFile);
-  if (kind === "video-shot") return parseFileRef(sTrack.videoShotFile);
+  if (kind === "text") return parseFileRef(sTrack.syncedLyricsFile ?? sTrack.textFile);
+  if (kind === "karaoke") return parseFileRef(sTrack.ringtoneFile ?? sTrack.karaokeFile);
+  if (kind === "video-shot") return parseFileRef(sTrack.videoFile ?? sTrack.videoShotFile);
   if (kind === "video-clip") return parseFileRef(sTrack.videoClipFile);
   return null;
 }

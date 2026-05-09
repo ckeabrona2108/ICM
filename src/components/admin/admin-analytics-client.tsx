@@ -180,6 +180,27 @@ export function AdminAnalyticsClient() {
     }
   }
 
+  async function removeJob(jobId: string, fileName: string) {
+    const confirmed = window.confirm(
+      `Удалить импорт «${fileName}» из истории и убрать связанную аналитику этого отчёта?`
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/analytics/imports/${jobId}`, {
+        method: "DELETE"
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Не удалось удалить импорт");
+      }
+      await loadJobs();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось удалить импорт");
+    }
+  }
+
   return (
     <div className="space-y-6 pb-10">
       <section className="rounded-2xl border border-white/[0.08] bg-[#161720] p-5">
@@ -304,6 +325,15 @@ export function AdminAnalyticsClient() {
                         className="rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] text-white/85 hover:bg-white/10"
                       >
                         recalculate
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void removeJob(job.id, job.sourceFileName);
+                        }}
+                        className="rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-200 hover:bg-rose-500/15"
+                      >
+                        delete
                       </button>
                     </div>
                   </td>

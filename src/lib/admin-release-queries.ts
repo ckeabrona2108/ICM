@@ -1,7 +1,21 @@
-import { ReleaseStatus, Role, type Prisma } from "@prisma/client";
+import {
+  PaymentStatus,
+  ReleaseStatus,
+  Role,
+  SubscriptionPlan,
+  SubscriptionStatus,
+  type Prisma
+} from "@prisma/client";
 
 import type { ModerationRemark } from "@/lib/api/contracts";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
+import { buildReleasePaymentBackfill } from "@/lib/release-payment-backfill";
+import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
+import {
+  buildReleasePaymentDisplay,
+  parseReleasePaymentSnapshot,
+  type ReleasePaymentSnapshot
+} from "@/lib/release-payment";
 import { allReleasePlatformCodes } from "@/lib/release-platforms";
 import { prisma } from "@/lib/prisma";
 
@@ -46,6 +60,7 @@ interface SubmissionDataLike {
   platforms?: string[];
   realTimeDelivery?: boolean;
   yandexPreReleaseDate?: string;
+  paymentSnapshot?: unknown;
   persons?: Array<{ name?: string; role?: string }>;
   tracks?: Array<{
     title?: string;
@@ -70,6 +85,83 @@ interface SubmissionDataLike {
 function parseSubmissionData(value: unknown): SubmissionDataLike | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as SubmissionDataLike;
+}
+
+function readSubmissionData(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function hasPaymentSnapshot(value: unknown): boolean {
+  const data = readSubmissionData(value);
+  if (!data || !data.paymentSnapshot || typeof data.paymentSnapshot !== "object") return false;
+  const snapshot = data.paymentSnapshot as Record<string, unknown>;
+  return snapshot.kind === "subscription_included" && snapshot.version === 1;
+}
+
+function toEffectivePlan(plan: SubscriptionPlan): "STANDARD" | "PRO" | "ENTERPRISE" | null {
+  if (plan === SubscriptionPlan.STANDARD) return "STANDARD";
+  if (plan === SubscriptionPlan.PRO) return "PRO";
+  if (plan === SubscriptionPlan.ENTERPRISE || plan === SubscriptionPlan.LABEL) return "ENTERPRISE";
+  return null;
+}
+
+function planReleaseLimit(plan: "STANDARD" | "PRO" | "ENTERPRISE"): number | null {
+  if (plan === "ENTERPRISE") return null;
+  if (plan === "PRO") return 6;
+  return 1;
+}
+
+function resolveSubmitMoment(
+  release: Pick<AdminReleaseSource, "createdAt" | "updatedAt" | "moderationStartedAt">
+): Date {
+  return release.moderationStartedAt ?? release.updatedAt ?? release.createdAt;
+}
+
+function resolveSubmitMomentInWindow(params: {
+  release: Pick<AdminReleaseSource, "createdAt" | "updatedAt" | "moderationStartedAt">;
+  windowStart: Date;
+  windowEnd: Date;
+}): Date {
+  const { release, windowStart, windowEnd } = params;
+  if (release.moderationStartedAt) return release.moderationStartedAt;
+
+  const start = windowStart.getTime();
+  const end = windowEnd.getTime();
+  const created = release.createdAt.getTime();
+  const updated = release.updatedAt.getTime();
+
+  if (created >= start && created < end) return release.createdAt;
+  if (updated >= start && updated < end) return release.updatedAt;
+  if (created < start && updated >= start) return new Date(start);
+  return release.createdAt;
+}
+
+function buildSnapshot(params: {
+  plan: "STANDARD" | "PRO" | "ENTERPRISE";
+  releasesUsedAfterSubmit: number;
+}): ReleasePaymentSnapshot {
+  return {
+    version: 1,
+    kind: "subscription_included",
+    plan: params.plan,
+    releasesUsedAfterSubmit: params.releasesUsedAfterSubmit,
+    releasesLimit: planReleaseLimit(params.plan)
+  };
+}
+
+function applyInferredSnapshot(
+  release: AdminReleaseSource,
+  snapshot: ReleasePaymentSnapshot | undefined
+): AdminReleaseSource {
+  if (!snapshot) return release;
+  return {
+    ...release,
+    submissionData: {
+      ...(readSubmissionData(release.submissionData) ?? {}),
+      paymentSnapshot: snapshot
+    } as unknown as Prisma.JsonValue
+  };
 }
 
 function parseModerationRemarks(value: unknown): ModerationRemark[] | undefined {
@@ -157,8 +249,53 @@ function resolveCoverUrl(source: AdminReleaseSource, submission: SubmissionDataL
   });
 }
 
-function mapRelease(source: AdminReleaseSource): AdminReleaseDetails {
+function readReleaseIdFromPaymentMetadata(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const record = metadata as Record<string, unknown>;
+  const kind = typeof record.kind === "string" ? record.kind.trim().toLowerCase() : "";
+  const releaseId =
+    typeof record.releaseId === "string" ? record.releaseId.trim() : "";
+  if (!releaseId) return null;
+  if (!kind || kind === "release") return releaseId;
+  return null;
+}
+
+async function getPaidReleaseIdSet(params: {
+  userIds: string[];
+  releaseIds: string[];
+}): Promise<Set<string>> {
+  if (params.userIds.length === 0 || params.releaseIds.length === 0) return new Set<string>();
+
+  const releaseIdSet = new Set(params.releaseIds);
+  const payments = await prisma.subscriptionPayment.findMany({
+    where: {
+      userId: { in: params.userIds },
+      status: PaymentStatus.SUCCEEDED
+    },
+    select: {
+      metadata: true
+    },
+    orderBy: {
+      createdAt: "desc"
+    }
+  });
+
+  const paidReleaseIds = new Set<string>();
+  for (const payment of payments) {
+    const releaseId = readReleaseIdFromPaymentMetadata(payment.metadata);
+    if (releaseId && releaseIdSet.has(releaseId)) {
+      paidReleaseIds.add(releaseId);
+    }
+  }
+  return paidReleaseIds;
+}
+
+function mapRelease(source: AdminReleaseSource, oneTimePaid: boolean): AdminReleaseDetails {
   const submission = parseSubmissionData(source.submissionData);
+  const payment = buildReleasePaymentDisplay({
+    paid: oneTimePaid,
+    snapshot: parseReleasePaymentSnapshot(submission?.paymentSnapshot)
+  });
   const coverUrl = resolveCoverUrl(source, submission);
   const persons = submission?.persons ?? [];
   const territoriesCount = submission?.territoryCountries?.length ?? 244;
@@ -195,7 +332,11 @@ function mapRelease(source: AdminReleaseSource): AdminReleaseDetails {
       ? formatDateTime(source.moderationReturnedAt)
       : undefined,
     priority: Boolean(source.priority),
-    paid: source.status === ReleaseStatus.DISTRIBUTED,
+    paid: payment.kind !== "unpaid",
+    paymentKind: payment.kind,
+    paymentLabel: payment.label,
+    paymentUsage: payment.usageLabel,
+    paymentPlan: payment.plan,
     metadataLanguage: submission?.language || source.language,
     releaseType: source.type.toLowerCase(),
     artists:
@@ -248,6 +389,129 @@ function mapRelease(source: AdminReleaseSource): AdminReleaseDetails {
   };
 }
 
+async function inferMissingPaymentSnapshots(params: {
+  releases: AdminReleaseSource[];
+  paidReleaseIds: Set<string>;
+}): Promise<Map<string, ReleasePaymentSnapshot>> {
+  const userIds = Array.from(new Set(params.releases.map((release) => release.userId)));
+  if (userIds.length === 0) return new Map();
+
+  const successfulSubscriptionPayments = await prisma.subscriptionPayment.findMany({
+    where: {
+      userId: { in: userIds },
+      status: PaymentStatus.SUCCEEDED
+    },
+    select: {
+      userId: true,
+      tariffId: true,
+      paidAt: true,
+      createdAt: true
+    },
+    orderBy: {
+      createdAt: "asc"
+    }
+  });
+
+  const inferredItems = buildReleasePaymentBackfill({
+    releases: params.releases.map((release) => ({
+      id: release.id,
+      userId: release.userId,
+      status: release.status,
+      createdAt: release.createdAt,
+      updatedAt: release.updatedAt,
+      moderationStartedAt: release.moderationStartedAt,
+      submissionData: release.submissionData
+    })),
+    successfulSubscriptionPayments,
+    oneTimePaidReleaseIds: params.paidReleaseIds
+  });
+
+  const inferred = new Map<string, ReleasePaymentSnapshot>();
+  for (const item of inferredItems) {
+    inferred.set(item.releaseId, item.snapshot);
+  }
+
+  const subscriptions = await prisma.subscription.findMany({
+    where: {
+      userId: { in: userIds }
+    },
+    select: {
+      userId: true,
+      plan: true,
+      status: true,
+      startedAt: true,
+      endsAt: true,
+      renewalAt: true
+    }
+  });
+
+  const subscriptionByUser = new Map(subscriptions.map((item) => [item.userId, item]));
+  for (const userId of userIds) {
+    const subscription = subscriptionByUser.get(userId);
+    if (!subscription) continue;
+    const plan = toEffectivePlan(subscription.plan);
+    if (!plan) continue;
+
+    const effectiveEnd = getSubscriptionEffectiveEndDate({
+      endsAt: subscription.endsAt ?? null,
+      renewalAt: subscription.renewalAt ?? null
+    });
+    if (!effectiveEnd || effectiveEnd.getTime() <= subscription.startedAt.getTime()) continue;
+
+    const isActiveLike =
+      subscription.status === SubscriptionStatus.ACTIVE ||
+      subscription.status === SubscriptionStatus.TRIALING;
+    const now = Date.now();
+    if (!isActiveLike && effectiveEnd.getTime() < now) {
+      // Expired subscription still can label historical releases in its active window.
+    }
+
+    const eligible = params.releases
+      .filter((release) => release.userId === userId)
+      .filter((release) => release.status !== ReleaseStatus.DRAFT)
+      .filter((release) => !params.paidReleaseIds.has(release.id))
+      .filter((release) => {
+        const submitAt = resolveSubmitMomentInWindow({
+          release,
+          windowStart: subscription.startedAt,
+          windowEnd: effectiveEnd
+        }).getTime();
+        return submitAt >= subscription.startedAt.getTime() && submitAt < effectiveEnd.getTime();
+      })
+      .sort((a, b) => {
+        const left = resolveSubmitMomentInWindow({
+          release: a,
+          windowStart: subscription.startedAt,
+          windowEnd: effectiveEnd
+        }).getTime();
+        const right = resolveSubmitMomentInWindow({
+          release: b,
+          windowStart: subscription.startedAt,
+          windowEnd: effectiveEnd
+        }).getTime();
+        return left - right;
+      });
+
+    const limit = planReleaseLimit(plan);
+    const included = limit == null ? eligible : eligible.slice(0, Math.max(0, limit));
+    let usage = 0;
+    for (const release of included) {
+      usage += 1;
+      if (inferred.has(release.id)) continue;
+      if (hasPaymentSnapshot(release.submissionData)) continue;
+      inferred.set(
+        release.id,
+        buildSnapshot({
+          plan,
+          releasesUsedAfterSubmit: usage
+        })
+      );
+    }
+  }
+
+  return inferred;
+}
+
 function resolveStatuses(filter: AdminReleaseStatusFilter): ReleaseStatus[] | undefined {
   if (filter === "moderation") return [ReleaseStatus.MODERATION];
   if (filter === "pending_verification") return [ReleaseStatus.PENDING_VERIFICATION];
@@ -297,6 +561,26 @@ function isMissingReleaseDecisionColumnError(error: unknown): boolean {
 export async function getAdminReleases(
   filter: AdminReleaseStatusFilter = "all"
 ): Promise<AdminReleaseDetails[]> {
+  const mapWithPayment = async (
+    rows: Array<AdminReleaseSource>
+  ): Promise<AdminReleaseDetails[]> => {
+    const paidReleaseIds = await getPaidReleaseIdSet({
+      userIds: Array.from(new Set(rows.map((release) => release.userId))),
+      releaseIds: rows.map((release) => release.id)
+    });
+    const inferredSnapshots = await inferMissingPaymentSnapshots({
+      releases: rows,
+      paidReleaseIds
+    });
+
+    return rows.map((release) =>
+      mapRelease(
+        applyInferredSnapshot(release, inferredSnapshots.get(release.id)),
+        paidReleaseIds.has(release.id)
+      )
+    );
+  };
+
   const statuses = resolveStatuses(filter);
   try {
     const releases = await prisma.release.findMany({
@@ -318,7 +602,7 @@ export async function getAdminReleases(
       orderBy: resolveOrderBy(filter)
     });
 
-    return releases.map(mapRelease);
+    return mapWithPayment(releases as AdminReleaseSource[]);
   } catch (error) {
     if (!isMissingReleaseDecisionColumnError(error)) {
       throw error;
@@ -357,13 +641,13 @@ export async function getAdminReleases(
       orderBy: resolveLegacyOrderBy(filter)
     });
 
-    return legacyRows.map((row) =>
-      mapRelease({
+    return mapWithPayment(
+      legacyRows.map((row) => ({
         ...row,
         approvedAt: null,
         rejectedAt: null,
         rejectionReason: null
-      } as AdminReleaseSource)
+      })) as AdminReleaseSource[]
     );
   }
 }

@@ -57,12 +57,40 @@ export function getReleaseStatusDescriptor(status: string): ReleaseStatusDescrip
   return releaseStatusDescriptorMap[key];
 }
 
-export function getPaymentStatusDescriptor(paid: boolean): {
+export function getPaymentStatusDescriptor(params: {
+  paid: boolean;
+  label?: string;
+  kind?: "paid" | "subscription" | "unpaid";
+}): {
   label: string;
   variant: BadgeVariant;
   className?: string;
 } {
-  if (paid) {
+  if (params.label?.trim()) {
+    if (params.kind === "subscription") {
+      return {
+        label: params.label.trim(),
+        variant: "warning",
+        className: "border-cyan-400/25 bg-cyan-500/10 text-cyan-200"
+      };
+    }
+
+    if (params.kind === "paid") {
+      return {
+        label: params.label.trim(),
+        variant: "success"
+      };
+    }
+
+    if (params.kind === "unpaid") {
+      return {
+        label: params.label.trim(),
+        variant: "danger"
+      };
+    }
+  }
+
+  if (params.paid) {
     return {
       label: "Оплачен",
       variant: "success"

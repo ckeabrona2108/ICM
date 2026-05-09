@@ -1,5 +1,6 @@
 import { AnalyticsAiInsightStatus, type PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
+import https from "node:https";
 import { z } from "zod";
 
 import { getAnalyticsOverview, type AnalyticsTrend } from "@/lib/analytics-query-service";
@@ -7,6 +8,8 @@ import { checkAiAccess, incrementAiUsage } from "@/lib/subscription-limits";
 
 const AI_STORAGE_UNAVAILABLE_MESSAGE =
   "AI insights storage is unavailable. Apply analytics AI migrations.";
+const ANALYTICS_AI_PUBLIC_ERROR_MESSAGE =
+  "AI-сервис временно недоступен. Попробуйте позже.";
 
 const ANALYTICS_AI_SYSTEM_PROMPT = `Ты AI-аналитик музыкальной дистрибуции.
 Твоя задача — анализировать статистику конкретного артиста или пользователя и давать практические рекомендации.
@@ -201,6 +204,39 @@ export interface RequestAnalysisResult {
   retryAfterSeconds?: number;
 }
 
+export function sanitizeAnalyticsAiErrorMessage(message: string): string {
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("deepseek") ||
+    normalized.includes("mistral") ||
+    normalized.includes("ai provider") ||
+    normalized.includes("provider returned empty content") ||
+    normalized.includes("provider returned invalid json") ||
+    normalized.includes("request failed:") ||
+    normalized.includes("api key") ||
+    normalized.includes("authentication_error") ||
+    normalized.includes("invalid_request_error") ||
+    normalized.includes("bearer ") ||
+    normalized.includes("chat/completions") ||
+    normalized.includes("is not configured")
+  ) {
+    return ANALYTICS_AI_PUBLIC_ERROR_MESSAGE;
+  }
+
+  return message;
+}
+
+type AiProvider = "deepseek" | "mistral";
+
+function resolveAiProvider(): AiProvider {
+  const configured = (process.env.AI_PROVIDER ?? "").trim().toLowerCase();
+  if (configured === "mistral") return "mistral";
+  if (configured === "deepseek") return "deepseek";
+  if (process.env.MISTRAL_API_KEY?.trim()) return "mistral";
+  return "deepseek";
+}
+
 function clampPeriodDays(value: number | undefined): number {
   if (!Number.isFinite(value)) return 30;
   return Math.max(1, Math.min(90, Math.floor(value ?? 30)));
@@ -210,6 +246,12 @@ function toDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+const MAX_READABLE_CHANGE_PERCENT = 150;
+
+function clampReadableChangePercent(value: number): number {
+  return Math.max(-MAX_READABLE_CHANGE_PERCENT, Math.min(MAX_READABLE_CHANGE_PERCENT, value));
+}
+
 function calculateChangePercent(current: number, previous: number): number | null {
   if (previous === 0) {
     if (current > 0) return null;
@@ -217,7 +259,7 @@ function calculateChangePercent(current: number, previous: number): number | nul
   }
 
   const percent = ((current - previous) / previous) * 100;
-  return Number(percent.toFixed(2));
+  return Number(clampReadableChangePercent(percent).toFixed(2));
 }
 
 function isUnknownSnapshotPlatformFieldError(error: unknown): boolean {
@@ -399,17 +441,259 @@ function mapInsightRow(row: AnalyticsAiInsightRow): AnalyticsAiInsightView {
     question: parseContextQuestion(row.contextSnapshot),
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
-    error_message: row.errorMessage,
+    error_message: row.errorMessage
+      ? sanitizeAnalyticsAiErrorMessage(row.errorMessage)
+      : null,
     response: row.aiResponse ? safeParseAiResponse(row.aiResponse) : null
   };
 }
 
 function buildUserPrompt(context: AnalyticsContext, question?: string): string {
+  const compactContext = compactContextForPrompt(context);
   const userQuestion = question
     ? `\n\nВопрос пользователя: ${question}\nОтветь на вопрос строго в рамках analytics_context.`
     : "";
 
-  return `Проанализируй analytics_context и верни JSON строго по указанному формату.${userQuestion}\n\nanalytics_context:\n${JSON.stringify(context)}`;
+  return `Проанализируй analytics_context и верни результат строго в формате json (валидный JSON-объект, без markdown и без пояснений).${userQuestion}\n\nanalytics_context:\n${JSON.stringify(compactContext)}`;
+}
+
+function clipText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function compactContextForPrompt(context: AnalyticsContext): AnalyticsContext {
+  return {
+    ...context,
+    top_releases: context.top_releases.slice(0, 6).map((item) => ({
+      ...item,
+      title: clipText(item.title, 120),
+      artist: clipText(item.artist, 80),
+      upc: clipText(item.upc, 32),
+      genre: item.genre ? clipText(item.genre, 60) : null
+    })),
+    top_tracks: context.top_tracks.slice(0, 8).map((item) => ({
+      ...item,
+      track: clipText(item.track, 120),
+      release: clipText(item.release, 120)
+    })),
+    top_countries: context.top_countries.slice(0, 10),
+    top_platforms: context.top_platforms.slice(0, 8).map((item) => ({
+      ...item,
+      platform: clipText(item.platform, 80)
+    })),
+    genre_performance: context.genre_performance.slice(0, 8).map((item) => ({
+      ...item,
+      genre: clipText(item.genre, 80)
+    })),
+    previous_releases_comparison: context.previous_releases_comparison.slice(0, 6).map((item) => ({
+      ...item,
+      title: clipText(item.title, 120)
+    })),
+    chart: context.chart.slice(-45)
+  };
+}
+
+function extractMessageContentText(content: unknown): string | null {
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const chunks: string[] = [];
+
+  for (const item of content) {
+    if (typeof item === "string") {
+      if (item.trim().length > 0) chunks.push(item);
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+
+    const part = item as { text?: unknown; content?: unknown };
+    if (typeof part.text === "string" && part.text.trim().length > 0) {
+      chunks.push(part.text);
+      continue;
+    }
+    if (typeof part.content === "string" && part.content.trim().length > 0) {
+      chunks.push(part.content);
+    }
+  }
+
+  const merged = chunks.join("").trim();
+  return merged.length > 0 ? merged : null;
+}
+
+function parseJsonFromModelText(text: string): unknown {
+  const normalized = text.trim();
+  if (!normalized) {
+    throw new Error("AI provider returned empty content");
+  }
+
+  try {
+    return JSON.parse(normalized) as unknown;
+  } catch {
+    // Continue with fallbacks.
+  }
+
+  const fenced = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1]) as unknown;
+    } catch {
+      // Continue with fallbacks.
+    }
+  }
+
+  const firstBrace = normalized.indexOf("{");
+  const lastBrace = normalized.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const objectSlice = normalized.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(objectSlice) as unknown;
+    } catch {
+      // Fall through to final error.
+    }
+  }
+
+  throw new Error("AI provider returned invalid JSON");
+}
+
+function getProviderHost(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "invalid_base_url";
+  }
+}
+
+function logProviderResponseShape(params: {
+  reason: string;
+  data: unknown;
+  model: string;
+  baseUrl: string;
+  status?: number;
+}): void {
+  const root = params.data && typeof params.data === "object"
+    ? (params.data as Record<string, unknown>)
+    : null;
+  const choices = Array.isArray(root?.choices) ? root.choices : null;
+  const firstChoice =
+    choices && choices[0] && typeof choices[0] === "object"
+      ? (choices[0] as Record<string, unknown>)
+      : null;
+  const message =
+    firstChoice?.message && typeof firstChoice.message === "object"
+      ? (firstChoice.message as Record<string, unknown>)
+      : null;
+  const content = message?.content;
+
+  console.warn("[analytics-ai] provider_response_shape", {
+    reason: params.reason,
+    status: params.status ?? null,
+    providerHost: getProviderHost(params.baseUrl),
+    model: params.model,
+    hasChoices: Array.isArray(choices),
+    choicesCount: choices?.length ?? 0,
+    finishReason: typeof firstChoice?.finish_reason === "string" ? firstChoice.finish_reason : null,
+    hasMessage: Boolean(message),
+    contentType: Array.isArray(content) ? "array" : typeof content,
+    contentArrayLength: Array.isArray(content) ? content.length : null
+  });
+}
+
+function getMessageContentFromPayload(data: unknown): unknown {
+  const root = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+  if (!root) return undefined;
+
+  const choices = Array.isArray(root.choices) ? root.choices : null;
+  const firstChoice =
+    choices && choices[0] && typeof choices[0] === "object"
+      ? (choices[0] as Record<string, unknown>)
+      : null;
+  const message =
+    firstChoice?.message && typeof firstChoice.message === "object"
+      ? (firstChoice.message as Record<string, unknown>)
+      : null;
+  if (message && "content" in message) return message.content;
+
+  // Fallback for response-like payload variants.
+  const output = Array.isArray(root.output) ? root.output : null;
+  const firstOutput =
+    output && output[0] && typeof output[0] === "object"
+      ? (output[0] as Record<string, unknown>)
+      : null;
+  const outputContent = Array.isArray(firstOutput?.content) ? firstOutput.content : null;
+  const firstOutputContent =
+    outputContent && outputContent[0] && typeof outputContent[0] === "object"
+      ? (outputContent[0] as Record<string, unknown>)
+      : null;
+  if (firstOutputContent && "text" in firstOutputContent) return firstOutputContent.text;
+
+  return undefined;
+}
+
+function logAnalyticsAiRawError(scope: string, error: unknown): void {
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : JSON.stringify(error);
+
+  console.error("[analytics-ai] raw_error", {
+    scope,
+    message: raw?.slice(0, 1200) ?? "unknown_error"
+  });
+}
+
+async function requestViaHttps(params: {
+  url: string;
+  apiKey: string;
+  requestBody: string;
+  timeoutMs: number;
+}): Promise<{ status: number; bodyText: string }> {
+  const target = new URL(params.url);
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || undefined,
+        path: `${target.pathname}${target.search}`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: `Bearer ${params.apiKey}`,
+          Connection: "close"
+        }
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            bodyText: Buffer.concat(chunks).toString("utf8")
+          });
+        });
+      }
+    );
+
+    req.on("error", reject);
+    req.setTimeout(params.timeoutMs, () => {
+      req.destroy(new Error("https_request_timeout"));
+    });
+    req.write(params.requestBody);
+    req.end();
+  });
 }
 
 async function callDeepSeek(params: {
@@ -421,13 +705,31 @@ async function callDeepSeek(params: {
     throw new Error("DEEPSEEK_API_KEY is not configured");
   }
 
-  const baseUrl = (process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/$/, "");
-  const model = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
-  const timeoutMs = 20_000;
+  const configuredBaseUrl = (process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/$/, "");
+  const baseUrls = [configuredBaseUrl];
+  if (!configuredBaseUrl.endsWith("/v1")) {
+    baseUrls.push(`${configuredBaseUrl}/v1`);
+  }
+  const primaryModel = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
+  const fallbackModel = process.env.DEEPSEEK_FALLBACK_MODEL ?? "deepseek-v4-flash";
 
-  const payload = {
-    model,
-    temperature: 0.2,
+  const buildPayload = (config: {
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    jsonMode: boolean;
+  }) => ({
+    model: config.model,
+    temperature: config.temperature,
+    max_tokens: config.maxTokens,
+    ...(config.jsonMode
+      ? {
+          response_format: {
+            type: "json_object" as const
+          }
+        }
+      : {}),
+    stream: false,
     messages: [
       {
         role: "system",
@@ -438,11 +740,310 @@ async function callDeepSeek(params: {
         content: buildUserPrompt(params.context, params.question)
       }
     ]
+  });
+
+  const runOnce = async (params: {
+    payload: ReturnType<typeof buildPayload>;
+    timeoutMs: number;
+    model: string;
+    baseUrl: string;
+    attemptLabel: string;
+  }): Promise<AnalyticsAiResponse> => {
+    const { payload, timeoutMs, model, baseUrl, attemptLabel } = params;
+    const requestBody = JSON.stringify(payload);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const url = `${baseUrl}/chat/completions`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Connection: "close",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: requestBody,
+        signal: controller.signal
+      });
+
+      let status = response.status;
+      let bodyText = await response.text().catch(() => "");
+
+      if (response.ok && !bodyText.trim()) {
+        console.warn("[analytics-ai] provider_empty_body", {
+          providerHost: getProviderHost(baseUrl),
+          model,
+          status: response.status,
+          attempt: attemptLabel
+        });
+
+        try {
+          const fallback = await requestViaHttps({
+            url,
+            apiKey,
+            requestBody,
+            timeoutMs
+          });
+          status = fallback.status;
+          bodyText = fallback.bodyText;
+          console.warn("[analytics-ai] transport_fallback_https", {
+            providerHost: getProviderHost(baseUrl),
+            model,
+            status,
+            attempt: attemptLabel,
+            hasBody: Boolean(bodyText.trim())
+          });
+        } catch (transportError) {
+          console.warn("[analytics-ai] transport_fallback_https_failed", {
+            providerHost: getProviderHost(baseUrl),
+            model,
+            attempt: attemptLabel,
+            error:
+              transportError instanceof Error
+                ? transportError.message.slice(0, 200)
+                : "unknown_transport_error"
+          });
+        }
+      }
+
+      if (status < 200 || status >= 300) {
+        const details = bodyText || "";
+        const detailLower = details.toLowerCase();
+
+        if (status === 429) {
+          throw new Error("AI лимит запросов временно превышен. Попробуйте позже.");
+        }
+        if (status === 402) {
+          throw new Error("AI недоступен из-за ограничений биллинга. Попробуйте позже.");
+        }
+        if (
+          status === 400 &&
+          (
+            detailLower.includes("context length") ||
+            detailLower.includes("max context") ||
+            detailLower.includes("max_tokens") ||
+            detailLower.includes("token")
+          )
+        ) {
+          throw new Error("AI запрос слишком большой для модели. Попробуйте сузить фильтры.");
+        }
+
+        throw new Error(`AI upstream error (${status})`);
+      }
+
+      if (!bodyText.trim()) {
+        console.warn("[analytics-ai] provider_empty_body_final", {
+          providerHost: getProviderHost(baseUrl),
+          model,
+          status,
+          attempt: attemptLabel
+        });
+        throw new Error("AI provider returned empty content");
+      }
+
+      let data: unknown = null;
+      try {
+        data = JSON.parse(bodyText) as unknown;
+      } catch {
+        console.warn("[analytics-ai] provider_non_json_body", {
+          providerHost: getProviderHost(baseUrl),
+          model,
+          status: response.status,
+          attempt: attemptLabel,
+          bodyPreview: bodyText.slice(0, 280)
+        });
+      }
+
+      const content = extractMessageContentText(getMessageContentFromPayload(data));
+      if (!content) {
+        logProviderResponseShape({
+          reason: "empty_content",
+          data,
+          model,
+          baseUrl,
+          status
+        });
+        throw new Error("AI provider returned empty content");
+      }
+
+      const root = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+      const choices = Array.isArray(root?.choices) ? root.choices : null;
+      const firstChoice =
+        choices && choices[0] && typeof choices[0] === "object"
+          ? (choices[0] as Record<string, unknown>)
+          : null;
+
+      if (typeof firstChoice?.finish_reason === "string" && firstChoice.finish_reason === "length") {
+        console.warn("[analytics-ai] provider_truncated_output", {
+          providerHost: getProviderHost(baseUrl),
+          model,
+          attempt: attemptLabel
+        });
+        throw new Error("AI provider response was truncated");
+      }
+
+      const jsonText = content.trim();
+      let parsedJson: unknown;
+      try {
+        parsedJson = parseJsonFromModelText(jsonText);
+      } catch {
+        console.warn("[analytics-ai] provider_invalid_json", {
+          providerHost: getProviderHost(baseUrl),
+          model,
+          attempt: attemptLabel,
+          contentLength: jsonText.length
+        });
+        throw new Error("AI provider returned invalid JSON");
+      }
+      return safeParseAiResponse(parsedJson);
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
-  const requestBody = JSON.stringify(payload);
+  const attempts: Array<{
+    label: string;
+    model: string;
+    baseUrl: string;
+    timeoutMs: number;
+    temperature: number;
+    maxTokens: number;
+    jsonMode: boolean;
+  }> = [];
 
-  const runOnce = async (): Promise<AnalyticsAiResponse> => {
+  for (const baseUrl of baseUrls) {
+    attempts.push({
+      label: `json_primary@${baseUrl}`,
+      model: primaryModel,
+      baseUrl,
+      timeoutMs: 14_000,
+      temperature: 0.2,
+      maxTokens: 1600,
+      jsonMode: true
+    });
+    attempts.push({
+      label: `text_primary@${baseUrl}`,
+      model: primaryModel,
+      baseUrl,
+      timeoutMs: 12_000,
+      temperature: 0,
+      maxTokens: 1200,
+      jsonMode: false
+    });
+
+    if (fallbackModel !== primaryModel) {
+      attempts.push({
+        label: `text_fallback_model@${baseUrl}`,
+        model: fallbackModel,
+        baseUrl,
+        timeoutMs: 12_000,
+        temperature: 0,
+        maxTokens: 1200,
+        jsonMode: false
+      });
+    }
+  }
+
+  let lastError: unknown = null;
+
+  for (const attempt of attempts) {
+    try {
+      return await runOnce({
+        payload: buildPayload({
+          model: attempt.model,
+          temperature: attempt.temperature,
+          maxTokens: attempt.maxTokens,
+          jsonMode: attempt.jsonMode
+        }),
+        timeoutMs: attempt.timeoutMs,
+        model: attempt.model,
+        baseUrl: attempt.baseUrl,
+        attemptLabel: attempt.label
+      });
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const retryable =
+        message.includes("empty content") ||
+        message.includes("invalid json") ||
+        message.includes("truncated") ||
+        message.includes("upstream error (5");
+
+      console.warn("[analytics-ai] attempt_failed", {
+        attempt: attempt.label,
+        model: attempt.model,
+        retryable,
+        reason: error instanceof Error ? error.message.slice(0, 240) : "unknown_error"
+      });
+
+      if (!retryable) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("AI provider returned empty content");
+}
+
+function normalizeMistralBaseUrl(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/$/, "");
+  return normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+}
+
+async function callMistral(params: {
+  context: AnalyticsContext;
+  question?: string;
+}): Promise<AnalyticsAiResponse> {
+  const apiKey = process.env.MISTRAL_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("MISTRAL_API_KEY is not configured");
+  }
+
+  const baseUrl = normalizeMistralBaseUrl(process.env.MISTRAL_BASE_URL ?? "https://api.mistral.ai");
+  const primaryModel = process.env.MISTRAL_MODEL ?? "mistral-small-latest";
+  const fallbackModel = process.env.MISTRAL_FALLBACK_MODEL ?? "mistral-medium-latest";
+  const timeoutMs = 18_000;
+
+  const buildPayload = (config: {
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    jsonMode: boolean;
+  }) => ({
+    model: config.model,
+    temperature: config.temperature,
+    max_tokens: config.maxTokens,
+    ...(config.jsonMode
+      ? {
+          response_format: {
+            type: "json_object" as const
+          }
+        }
+      : {}),
+    stream: false,
+    messages: [
+      {
+        role: "system",
+        content: ANALYTICS_AI_SYSTEM_PROMPT
+      },
+      {
+        role: "user",
+        content: buildUserPrompt(params.context, params.question)
+      }
+    ]
+  });
+
+  const runOnce = async (config: {
+    attempt: string;
+    payload: ReturnType<typeof buildPayload>;
+    model: string;
+  }): Promise<AnalyticsAiResponse> => {
+    const { attempt, payload, model } = config;
+    const requestBody = JSON.stringify(payload);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -451,47 +1052,263 @@ async function callDeepSeek(params: {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
           Authorization: `Bearer ${apiKey}`
         },
         body: requestBody,
         signal: controller.signal
       });
 
+      const bodyText = await response.text().catch(() => "");
+
       if (!response.ok) {
-        const details = await response.text().catch(() => "");
-        throw new Error(`DeepSeek request failed: ${response.status} ${details.slice(0, 500)}`);
+        const detailLower = bodyText.toLowerCase();
+        if (response.status === 401) {
+          throw new Error("AI провайдер не принял ключ авторизации.");
+        }
+        if (response.status === 402) {
+          throw new Error("AI недоступен из-за ограничений биллинга. Попробуйте позже.");
+        }
+        if (response.status === 429) {
+          throw new Error("AI лимит запросов временно превышен. Попробуйте позже.");
+        }
+        if (
+          response.status === 400 &&
+          (
+            detailLower.includes("context") ||
+            detailLower.includes("token") ||
+            detailLower.includes("max_tokens")
+          )
+        ) {
+          throw new Error("AI запрос слишком большой для модели. Попробуйте сузить фильтры.");
+        }
+        throw new Error(`AI upstream error (${response.status})`);
       }
 
-      const data = (await response.json().catch(() => null)) as
-        | {
-            choices?: Array<{
-              message?: {
-                content?: string;
-              };
-            }>;
-          }
-        | null;
-
-      const content = data?.choices?.[0]?.message?.content;
-      if (!content || typeof content !== "string") {
-        throw new Error("DeepSeek returned empty content");
+      if (!bodyText.trim()) {
+        console.warn("[analytics-ai] mistral_empty_body", {
+          attempt,
+          providerHost: getProviderHost(baseUrl),
+          model
+        });
+        throw new Error("AI provider returned empty content");
       }
 
-      const jsonText = content.trim();
-      const parsedJson = JSON.parse(jsonText) as unknown;
+      let data: unknown = null;
+      try {
+        data = JSON.parse(bodyText) as unknown;
+      } catch {
+        console.warn("[analytics-ai] mistral_non_json_body", {
+          attempt,
+          providerHost: getProviderHost(baseUrl),
+          model,
+          bodyPreview: bodyText.slice(0, 280)
+        });
+      }
+
+      const content = extractMessageContentText(getMessageContentFromPayload(data));
+      if (!content) {
+        logProviderResponseShape({
+          reason: "mistral_empty_content",
+          data,
+          model,
+          baseUrl
+        });
+        throw new Error("AI provider returned empty content");
+      }
+
+      const parsedJson = parseJsonFromModelText(content);
       return safeParseAiResponse(parsedJson);
     } finally {
       clearTimeout(timer);
     }
   };
 
-  try {
-    return await runOnce();
-  } catch (firstError) {
-    return runOnce().catch(() => {
-      throw firstError;
+  const attempts: Array<{
+    attempt: string;
+    payload: ReturnType<typeof buildPayload>;
+    model: string;
+  }> = [
+    {
+      attempt: "mistral_json_primary",
+      model: primaryModel,
+      payload: buildPayload({
+        model: primaryModel,
+        temperature: 0.2,
+        maxTokens: 1800,
+        jsonMode: true
+      })
+    },
+    {
+      attempt: "mistral_text_primary",
+      model: primaryModel,
+      payload: buildPayload({
+        model: primaryModel,
+        temperature: 0,
+        maxTokens: 1400,
+        jsonMode: false
+      })
+    }
+  ];
+
+  if (fallbackModel !== primaryModel) {
+    attempts.push({
+      attempt: "mistral_text_fallback_model",
+      model: fallbackModel,
+      payload: buildPayload({
+        model: fallbackModel,
+        temperature: 0,
+        maxTokens: 1400,
+        jsonMode: false
+      })
     });
   }
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      return await runOnce(attempt);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const retryable =
+        message.includes("empty content") ||
+        message.includes("invalid json") ||
+        message.includes("truncated") ||
+        message.includes("upstream error (5");
+
+      console.warn("[analytics-ai] attempt_failed", {
+        provider: "mistral",
+        attempt: attempt.attempt,
+        model: attempt.model,
+        retryable,
+        reason: error instanceof Error ? error.message.slice(0, 240) : "unknown_error"
+      });
+
+      if (!retryable) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("AI provider returned empty content");
+}
+
+function buildLocalFallbackAnalysis(context: AnalyticsContext, question?: string): AnalyticsAiResponse {
+  const streamsDelta = context.overview.streams_change_percent;
+  const payStreamsDelta = context.overview.pay_streams_change_percent;
+  const topRelease = context.top_releases[0] ?? null;
+  const topCountry = context.top_countries[0] ?? null;
+  const topPlatform = context.top_platforms[0] ?? null;
+
+  const trendLabel =
+    streamsDelta == null
+      ? "динамика не определена"
+      : streamsDelta > 0
+        ? `рост ${streamsDelta}%`
+        : streamsDelta < 0
+          ? `снижение ${Math.abs(streamsDelta)}%`
+          : "без изменений";
+
+  const payTrendLabel =
+    payStreamsDelta == null
+      ? "динамика pay streams не определена"
+      : payStreamsDelta > 0
+        ? `рост pay streams ${payStreamsDelta}%`
+        : payStreamsDelta < 0
+          ? `снижение pay streams ${Math.abs(payStreamsDelta)}%`
+          : "pay streams без изменений";
+
+  const summaryQuestion =
+    question && question.trim().length > 0
+      ? ` Учтён вопрос: «${clipText(question.trim(), 120)}».`
+      : "";
+
+  const keyFindings: AnalyticsAiResponse["key_findings"] = [
+    {
+      title: "Текущая динамика по стримам",
+      details: `За выбранный период зафиксирован ${trendLabel}, при этом ${payTrendLabel}.`,
+      based_on: `overview.total_streams=${context.overview.total_streams}, overview.total_pay_streams=${context.overview.total_pay_streams}, streams_change_percent=${streamsDelta ?? "null"}, pay_streams_change_percent=${payStreamsDelta ?? "null"}`
+    }
+  ];
+
+  if (topRelease) {
+    keyFindings.push({
+      title: "Лидирующий релиз",
+      details: `Сильнее всего трафик даёт релиз «${topRelease.title}» (${topRelease.streams} streams).`,
+      based_on: `top_releases[0]: release_id=${topRelease.release_id}, streams=${topRelease.streams}, trend=${topRelease.trend}`
+    });
+  }
+
+  if (topCountry || topPlatform) {
+    keyFindings.push({
+      title: "Ключевая география и площадка",
+      details: `Основной вклад сейчас дают ${topCountry ? `страна ${topCountry.country}` : "страны из топа"} и ${topPlatform ? `площадка ${topPlatform.platform}` : "ведущие площадки"}.`,
+      based_on: `top_countries[0]=${topCountry ? `${topCountry.country}/${topCountry.streams}` : "n/a"}, top_platforms[0]=${topPlatform ? `${topPlatform.platform}/${topPlatform.streams}` : "n/a"}`
+    });
+  }
+
+  const recommendations: AnalyticsAiResponse["recommendations"] = [
+    {
+      title: "Сфокусировать промо на лидирующем релизе",
+      details: topRelease
+        ? `Усильте продвижение «${topRelease.title}» и рядом протестируйте 1-2 похожих креатива, чтобы масштабировать текущий спрос.`
+        : "Выберите 1 релиз с максимальными streams за период и масштабируйте его промо первым.",
+      priority: "high"
+    },
+    {
+      title: "Закрепить сильные страны и площадки",
+      details:
+        "Повторите успешные сценарии в странах/площадках из топа, а эксперименты запускайте в отдельном бюджетном пуле, чтобы не просадить базовую воронку.",
+      priority: "medium"
+    },
+    {
+      title: "Контроль weekly-ритма релизов",
+      details:
+        "Держите стабильный ритм релизов и сравнивайте 7-дневные окна по streams/pay streams, чтобы быстро ловить просадки до накопления эффекта.",
+      priority: "medium"
+    }
+  ];
+
+  const risks: AnalyticsAiResponse["risks"] = [
+    {
+      title: "Зависимость от одного источника трафика",
+      details:
+        "Если доля топ-страны или топ-площадки слишком высокая, любое изменение алгоритмов может заметно просадить результат."
+    }
+  ];
+
+  if (streamsDelta != null && streamsDelta < 0) {
+    risks.push({
+      title: "Нисходящий тренд по охвату",
+      details:
+        "Текущая динамика streams отрицательная — без быстрого обновления промо и контент-плана снижение может ускориться."
+    });
+  }
+
+  const nextSteps: string[] = [
+    "Соберите weekly-срез по streams/pay streams за последние 4 недели и сравните с предыдущими 4 неделями.",
+    "Выделите 1 релиз и 1 площадку для приоритетного теста креативов на 7 дней.",
+    "По итогам недели зафиксируйте, что масштабировать, а что отключить."
+  ];
+
+  return {
+    summary:
+      `Автоанализ построен на локальной аналитике кабинета: ${trendLabel}, ${payTrendLabel}.${summaryQuestion}`,
+    key_findings: keyFindings,
+    recommendations: recommendations,
+    risks,
+    next_steps: nextSteps,
+    best_performing: {
+      release: topRelease?.title ?? null,
+      track: context.top_tracks[0]?.track ?? null,
+      country: topCountry?.country ?? null,
+      platform: topPlatform?.platform ?? null,
+      genre: context.genre_performance[0]?.genre ?? null
+    }
+  };
 }
 
 async function resolveLatestAndPreviousReportDates(prisma: PrismaClient, params: {
@@ -1142,12 +1959,51 @@ export class AnalyticsAIService {
   }
 
   async analyze(context: AnalyticsContext, question?: string): Promise<AnalyticsAiResponse> {
-    const response = await callDeepSeek({
-      context,
-      question: normalizeQuestion(question)
-    });
+    const normalizedQuestion = normalizeQuestion(question);
+    try {
+      const provider = resolveAiProvider();
+      console.info("[analytics-ai] provider_selected", { provider });
+      if (provider === "mistral") {
+        try {
+          return await callMistral({
+            context,
+            question: normalizedQuestion
+          });
+        } catch (mistralError) {
+          logAnalyticsAiRawError("mistral_provider", mistralError);
+          // Safety fallback to DeepSeek if explicitly unavailable.
+          if (process.env.DEEPSEEK_API_KEY?.trim()) {
+            return await callDeepSeek({
+              context,
+              question: normalizedQuestion
+            });
+          }
+          throw mistralError;
+        }
+      }
 
-    return response;
+      return await callDeepSeek({
+        context,
+        question: normalizedQuestion
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const canFallback =
+        message.includes("empty content") ||
+        message.includes("invalid json") ||
+        message.includes("truncated") ||
+        message.includes("upstream error (5") ||
+        message.includes("https_request_timeout");
+
+      if (canFallback) {
+        console.warn("[analytics-ai] using_local_fallback_analysis", {
+          reason: error instanceof Error ? error.message.slice(0, 220) : "unknown_error"
+        });
+        return buildLocalFallbackAnalysis(context, normalizedQuestion);
+      }
+
+      throw error;
+    }
   }
 
   async saveInsight(params: {
@@ -1536,7 +2392,9 @@ export class AnalyticsAIService {
         insight: successInsight
       };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message.slice(0, 500) : "AI analyze failed";
+      logAnalyticsAiRawError("requestAnalysis", error);
+      const rawErrorMessage = error instanceof Error ? error.message.slice(0, 500) : "AI analyze failed";
+      const errorMessage = sanitizeAnalyticsAiErrorMessage(rawErrorMessage);
 
       try {
         const failedInsight = await this.saveInsight({
@@ -1624,7 +2482,9 @@ export class AnalyticsAIService {
         }
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 500) : "AI analyze failed";
+      logAnalyticsAiRawError("requestTransientAnalysis", error);
+      const rawMessage = error instanceof Error ? error.message.slice(0, 500) : "AI analyze failed";
+      const message = sanitizeAnalyticsAiErrorMessage(rawMessage);
       return {
         status: "failed",
         insight: {

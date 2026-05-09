@@ -41,6 +41,25 @@ function getClient() {
   });
 }
 
+function buildLocalObjectPath(key: string): string {
+  return `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function buildLocalDownloadUrl(input: {
+  key: string;
+  responseContentDisposition?: string;
+  responseContentType?: string;
+}): string {
+  const url = new URL(buildLocalObjectPath(input.key), "http://localhost");
+  if (input.responseContentDisposition) {
+    url.searchParams.set("contentDisposition", input.responseContentDisposition);
+  }
+  if (input.responseContentType) {
+    url.searchParams.set("contentType", input.responseContentType);
+  }
+  return `${url.pathname}${url.search}`;
+}
+
 export async function createPresignedUpload(input: {
   key: string;
   contentType: string;
@@ -50,10 +69,10 @@ export async function createPresignedUpload(input: {
 
   if (!client || !bucket) {
     return {
-      url: "https://example-upload.local/mock-upload",
+      url: buildLocalObjectPath(input.key),
       method: "PUT",
       fields: {},
-      mock: true
+      mock: false
     };
   }
 
@@ -85,8 +104,8 @@ export async function createPresignedDownload(input: {
 
   if (!client || !bucket) {
     return {
-      url: `https://example-upload.local/mock-download/${encodeURIComponent(input.key)}`,
-      mock: true
+      url: buildLocalDownloadUrl(input),
+      mock: false
     };
   }
 

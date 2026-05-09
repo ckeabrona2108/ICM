@@ -86,6 +86,13 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
           metadataLanguage: track.metadataLanguage,
           lyrics: track.lyrics ?? "",
           ringtoneDurationSec: track.ringtoneDurationSec ?? "",
+          syncedLyricsFile: track.syncedLyricsFile ?? track.textFile ?? null,
+          ringtoneFile: track.ringtoneFile ?? track.karaokeFile ?? null,
+          videoFile:
+            track.videoFile ??
+            track.videoShotFile ??
+            track.videoClipFile ??
+            null,
           syncedLyrics: []
         }
       })),

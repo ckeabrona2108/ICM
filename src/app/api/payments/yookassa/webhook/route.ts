@@ -32,6 +32,11 @@ function resolveTariffFromPayment(params: {
   );
 }
 
+function readMetadataRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
 export async function POST(request: Request) {
   const configuredSecret = process.env.YOOKASSA_WEBHOOK_SECRET?.trim();
   if (configuredSecret) {
@@ -72,6 +77,7 @@ export async function POST(request: Request) {
 
   const status = getWebhookStatus(payload);
   const metadata = getWebhookMetadata(payload);
+  const localMetadata = readMetadataRecord(payment.metadata);
   const paymentStatus = mapWebhookStatus(status);
 
   if (paymentStatus !== PaymentStatus.SUCCEEDED) {
@@ -80,6 +86,7 @@ export async function POST(request: Request) {
       data: {
         status: paymentStatus,
         metadata: {
+          ...localMetadata,
           ...metadata,
           providerPaymentId
         }
@@ -90,6 +97,38 @@ export async function POST(request: Request) {
 
   if (payment.status === PaymentStatus.SUCCEEDED) {
     return NextResponse.json({ ok: true }, { status: 200 });
+  }
+
+  const metadataKindRaw =
+    typeof metadata.kind === "string"
+      ? metadata.kind
+      : typeof localMetadata.kind === "string"
+        ? localMetadata.kind
+        : "";
+  const metadataKind = metadataKindRaw.trim().toLowerCase();
+  const isReleasePayment =
+    metadataKind === "release" || payment.tariffId === "release_payg";
+
+  if (isReleasePayment) {
+    const updatedReleasePayment = await prisma.subscriptionPayment.update({
+      where: { id: payment.id },
+      data: {
+        status: PaymentStatus.SUCCEEDED,
+        paidAt: new Date(),
+        metadata: {
+          ...localMetadata,
+          ...metadata,
+          kind: "release",
+          providerPaymentId
+        }
+      },
+      select: { id: true }
+    });
+
+    return NextResponse.json(
+      { ok: true, paymentId: updatedReleasePayment.id },
+      { status: 200 }
+    );
   }
 
   const tariff = resolveTariffFromPayment({
@@ -104,6 +143,7 @@ export async function POST(request: Request) {
       data: {
         status: PaymentStatus.FAILED,
         metadata: {
+          ...localMetadata,
           ...metadata,
           error: "Unknown tariff in payment webhook"
         }
@@ -126,6 +166,7 @@ export async function POST(request: Request) {
         paidAt: new Date(),
         subscriptionId: subscription.id,
         metadata: {
+          ...localMetadata,
           ...metadata,
           providerPaymentId
         }

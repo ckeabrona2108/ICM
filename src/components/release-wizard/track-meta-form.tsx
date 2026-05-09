@@ -14,6 +14,7 @@ import { useWizard, type PersonRole, type TrackMeta } from "./wizard-context";
 import { Checkbox, FieldLabel, Select, TextArea, TextInput } from "./wizard-ui";
 
 const TRACK_LANGUAGE_OPTIONS = [...LANGUAGES, "Без слов"];
+type TrackAssetKind = "syncedLyrics" | "ringtone" | "video";
 
 function normalizePercentInput(raw: string): string {
   const cleaned = raw.replace(",", ".").replace(/[^\d.]/gu, "");
@@ -31,12 +32,18 @@ export function TrackMetaForm({
   meta,
   fileName,
   hasAudio,
-  onPatch
+  onPatch,
+  uploadingAssetKind,
+  onUploadAsset,
+  onRemoveAsset
 }: {
   meta: TrackMeta;
   fileName: string;
   hasAudio: boolean;
   onPatch: (patch: Partial<TrackMeta>) => void;
+  uploadingAssetKind: TrackAssetKind | null;
+  onUploadAsset: (kind: TrackAssetKind, file: File) => void;
+  onRemoveAsset: (kind: TrackAssetKind) => void;
 }) {
   const [rightsError, setRightsError] = React.useState<string | null>(null);
 
@@ -353,8 +360,110 @@ export function TrackMetaForm({
                     />
                   </div>
                 ) : null}
+                <div className="grid gap-3 pt-1 lg:grid-cols-3">
+                  <TrackAssetUploadCard
+                    title="Синхронизированный текст трека"
+                    hint="Формат: .ttml"
+                    kind="syncedLyrics"
+                    fileName={meta.syncedLyricsFile?.fileName ?? null}
+                    uploading={uploadingAssetKind === "syncedLyrics"}
+                    onUploadAsset={onUploadAsset}
+                    onRemoveAsset={onRemoveAsset}
+                  />
+                  <TrackAssetUploadCard
+                    title="Добавление рингтона"
+                    hint="Форматы: .wav, .flac, .mp3"
+                    kind="ringtone"
+                    fileName={meta.ringtoneFile?.fileName ?? null}
+                    uploading={uploadingAssetKind === "ringtone"}
+                    onUploadAsset={onUploadAsset}
+                    onRemoveAsset={onRemoveAsset}
+                  />
+                  <TrackAssetUploadCard
+                    title="Загрузка видео"
+                    hint="Форматы: .mov, .mp4, .avi"
+                    kind="video"
+                    fileName={meta.videoFile?.fileName ?? null}
+                    uploading={uploadingAssetKind === "video"}
+                    onUploadAsset={onUploadAsset}
+                    onRemoveAsset={onRemoveAsset}
+                  />
+                </div>
               </div>
       </div>
+    </div>
+  );
+}
+
+function TrackAssetUploadCard({
+  title,
+  hint,
+  kind,
+  fileName,
+  uploading,
+  onUploadAsset,
+  onRemoveAsset
+}: {
+  title: string;
+  hint: string;
+  kind: TrackAssetKind;
+  fileName: string | null;
+  uploading: boolean;
+  onUploadAsset: (kind: TrackAssetKind, file: File) => void;
+  onRemoveAsset: (kind: TrackAssetKind) => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const accept =
+    kind === "syncedLyrics"
+      ? ".ttml"
+      : kind === "ringtone"
+        ? ".wav,.flac,.mp3,audio/wav,audio/flac,audio/mpeg"
+        : ".mov,.mp4,.avi,video/quicktime,video/mp4,video/x-msvideo";
+
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
+      <p className="text-[12px] font-semibold text-white/85">{title}</p>
+      <p className="mt-1 text-[11px] text-white/45">{hint}</p>
+
+      {fileName ? (
+        <p className="mt-2 truncate text-[11px] text-emerald-200/85">{fileName}</p>
+      ) : (
+        <p className="mt-2 text-[11px] text-white/35">Файл не загружен</p>
+      )}
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white/85 transition hover:border-white/[0.2] hover:bg-white/[0.08] disabled:opacity-50"
+        >
+          {uploading ? "Загружаем..." : "Загрузить файл"}
+        </button>
+        {fileName ? (
+          <button
+            type="button"
+            onClick={() => onRemoveAsset(kind)}
+            disabled={uploading}
+            className="rounded-lg border border-rose-400/20 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-rose-200 transition hover:bg-rose-500/15 disabled:opacity-50"
+          >
+            Удалить
+          </button>
+        ) : null}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        className="sr-only"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onUploadAsset(kind, file);
+          event.target.value = "";
+        }}
+      />
     </div>
   );
 }

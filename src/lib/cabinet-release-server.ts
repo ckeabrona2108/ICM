@@ -6,6 +6,10 @@ import type {
   CabinetReleaseStatus,
   CabinetTrack
 } from "@/lib/cabinet-types";
+import {
+  buildReleasePaymentDisplay,
+  parseReleasePaymentSnapshot
+} from "@/lib/release-payment";
 import { allReleasePlatformCodes } from "@/lib/release-platforms";
 
 export const cabinetReleaseSelect = {
@@ -14,6 +18,7 @@ export const cabinetReleaseSelect = {
   upc: true,
   isrc: true,
   createdAt: true,
+  updatedAt: true,
   releaseDate: true,
   genre: true,
   status: true,
@@ -57,6 +62,7 @@ interface SubmissionDataLike {
   platformMode?: "all" | "selected";
   platforms?: string[];
   persons?: Array<{ name?: string; role?: string }>;
+  paymentSnapshot?: unknown;
 }
 
 function toCabinetStatus(status: ReleaseStatus): CabinetReleaseStatus {
@@ -198,7 +204,8 @@ function resolveCoverUrl(params: {
 
 export function mapReleaseToCabinetRelease(
   release: ReleaseWithTracks,
-  number: number
+  number: number,
+  paid?: boolean
 ): CabinetRelease {
   const submissionData = parseSubmissionData(release.submissionData);
   const territories = deriveTerritories(submissionData);
@@ -213,6 +220,13 @@ export function mapReleaseToCabinetRelease(
   const releaseDate = withFallback(submissionData?.releaseDate, dbReleaseDate || fallbackDate);
   const preorderDate = withFallback(submissionData?.preorderDate, dbReleaseDate || fallbackDate);
   const startDate = withFallback(submissionData?.startDate, dbReleaseDate || fallbackDate);
+
+  const oneTimePaid = paid ?? release.status === ReleaseStatus.DISTRIBUTED;
+  const paymentSnapshot = parseReleasePaymentSnapshot(submissionData?.paymentSnapshot);
+  const payment = buildReleasePaymentDisplay({
+    paid: oneTimePaid,
+    snapshot: paymentSnapshot
+  });
 
   return {
     id: release.id,
@@ -237,7 +251,11 @@ export function mapReleaseToCabinetRelease(
     genre: withFallback(submissionData?.genre, release.genre || "Не указан"),
     status: toCabinetStatus(release.status),
     priority: Boolean(release.priority),
-    paid: release.status === ReleaseStatus.DISTRIBUTED,
+    paid: payment.kind !== "unpaid",
+    paymentKind: payment.kind,
+    paymentLabel: payment.label,
+    paymentUsage: payment.usageLabel,
+    paymentPlan: payment.plan,
     tracks: mapTracks(release.tracks),
     moderationStarted: Boolean(release.moderationStartedAt),
     moderationRemarks: parseModerationRemarks(release.moderationRemarks),

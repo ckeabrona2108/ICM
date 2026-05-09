@@ -13,6 +13,7 @@ import { getUserContractStatus } from "@/lib/contract-verification";
 import { prisma } from "@/lib/prisma";
 import { releaseSubmissionDataSchema } from "@/lib/release-policy";
 import { canSaveDraft } from "@/lib/draft-policy";
+import { parseReleasePaymentSnapshot } from "@/lib/release-payment";
 import {
   checkPriorityReleaseAccess,
   checkReleaseCreationLimit
@@ -70,6 +71,11 @@ function slugFromTitle(title: string): string {
     .replace(/^-+|-+$/gu, "")
     .slice(0, 64);
   return `${base || "draft"}-${Date.now()}`;
+}
+
+function readSubmissionData(input: unknown): Record<string, unknown> | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  return input as Record<string, unknown>;
 }
 
 function buildTracks(data: ReleaseDraftSaveRequest["data"]) {
@@ -183,7 +189,13 @@ export async function POST(request: Request) {
 
   const parsed = releaseDraftSaveRequestSchema.safeParse(payload);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: "Invalid request payload",
+        details: parsed.error.flatten()
+      },
+      { status: 400 }
+    );
   }
 
   const body: ReleaseDraftSaveRequest = parsed.data;
@@ -221,6 +233,29 @@ export async function POST(request: Request) {
     }
   }
 
+  let existingPaymentSnapshot: ReturnType<typeof parseReleasePaymentSnapshot> = null;
+
+  if (body.releaseId) {
+    const existingSubmissionData = await prisma.release.findFirst({
+      where: {
+        id: body.releaseId,
+        userId: session.user.id
+      },
+      select: {
+        submissionData: true
+      }
+    });
+
+    existingPaymentSnapshot = parseReleasePaymentSnapshot(
+      readSubmissionData(existingSubmissionData?.submissionData)?.paymentSnapshot
+    );
+  }
+
+  const submissionDataForStorage = ({
+    ...body.data,
+    ...(existingPaymentSnapshot ? { paymentSnapshot: existingPaymentSnapshot } : {})
+  } as unknown) as Prisma.InputJsonValue;
+
   const releasePayload = {
     title: body.data.title.trim() || "Новый черновик",
     subtitle: body.data.subtitle?.trim() || null,
@@ -247,7 +282,7 @@ export async function POST(request: Request) {
     coverMeta: body.data.coverMeta
       ? (body.data.coverMeta as unknown as Prisma.InputJsonValue)
       : Prisma.DbNull,
-    submissionData: body.data as unknown as Prisma.InputJsonValue,
+    submissionData: submissionDataForStorage,
     priority: Boolean(body.data.priorityRelease)
   };
 

@@ -9,6 +9,17 @@ export interface TelegramNewTicketNotificationPayload {
   firstMessage: string;
 }
 
+export interface TelegramContractSignedNotificationPayload {
+  userId: string;
+  userName: string | null;
+  userEmail: string;
+}
+
+export interface TelegramReleaseModerationNotificationPayload {
+  releaseTitle: string;
+  artistName: string;
+}
+
 function resolveAppUrl(): string {
   return (
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
@@ -63,10 +74,16 @@ export async function sendTelegramMessage(text: string): Promise<boolean> {
 export async function notifyAdminNewSupportTicket(
   payload: TelegramNewTicketNotificationPayload
 ): Promise<boolean> {
+  return sendTelegramMessage(buildAdminNewSupportTicketTelegramText(payload));
+}
+
+export function buildAdminNewSupportTicketTelegramText(
+  payload: TelegramNewTicketNotificationPayload
+): string {
   const adminUrl = `${resolveAppUrl().replace(/\/$/, "")}/admin/support/tickets/${payload.ticketId}`;
   const createdAt = payload.createdAt.toISOString().slice(0, 16).replace("T", " ");
 
-  const text = [
+  return [
     "Новый тикет в поддержке",
     "",
     `Тикет: #${payload.ticketId}`,
@@ -81,6 +98,28 @@ export async function notifyAdminNewSupportTicket(
     "Ответить в админ-панели:",
     adminUrl
   ].join("\n");
+}
 
-  return sendTelegramMessage(text);
+export function buildContractSignedTelegramText(
+  payload: TelegramContractSignedNotificationPayload
+): string {
+  return `Пользователь ${payload.userName?.trim() || payload.userId} - ${payload.userEmail} подписал договор. Необходимо его проверить.`;
+}
+
+export async function notifyAdminContractSigned(
+  payload: TelegramContractSignedNotificationPayload
+): Promise<boolean> {
+  return sendTelegramMessage(buildContractSignedTelegramText(payload));
+}
+
+export function buildReleaseModerationTelegramText(
+  payload: TelegramReleaseModerationNotificationPayload
+): string {
+  return `Релиз на модерацию: ${payload.releaseTitle} — ${payload.artistName}`;
+}
+
+export async function notifyAdminReleaseSubmitted(
+  payload: TelegramReleaseModerationNotificationPayload
+): Promise<boolean> {
+  return sendTelegramMessage(buildReleaseModerationTelegramText(payload));
 }

@@ -28,48 +28,45 @@ export function IcmHeader() {
       initial={{ y: -40, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className={`sticky top-0 z-50 transition-all duration-300 ${
-        scrolled ? "backdrop-blur-xl" : ""
-      }`}
+      className="fixed inset-x-0 top-0 z-[60] px-4 pt-4 sm:px-6 lg:px-8"
     >
-      <div
-        className={`border-b transition-colors duration-300 ${
-          scrolled ? "border-white/[0.06] bg-[#09090b]/80" : "border-transparent bg-transparent"
-        }`}
-      >
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5 sm:px-8">
-          {/* Logo */}
-          <Link href="/" className="group flex items-center">
-            <span className="relative flex h-14 shrink-0 items-center transition-transform duration-300 group-hover:scale-105">
+      <div className="mx-auto max-w-7xl">
+        <div
+          className={`flex items-center justify-between gap-3 rounded-full border px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition-all duration-300 sm:px-5 lg:px-6 ${
+            scrolled
+              ? "border-white/[0.10] bg-[rgba(8,8,12,0.78)]"
+              : "border-white/[0.08] bg-[rgba(8,8,12,0.65)]"
+          }`}
+        >
+          <Link href="/" className="group flex shrink-0 items-center">
+            <span className="relative flex h-11 shrink-0 items-center transition-transform duration-300 group-hover:scale-[1.03] sm:h-12">
               <Image
                 src="/brand/logo.png"
                 alt="ICM Music Cloud"
                 width={317}
                 height={400}
                 priority
-                className="h-14 w-auto object-contain drop-shadow-[0_6px_22px_rgba(99,102,241,0.55)]"
+                className="h-11 w-auto object-contain drop-shadow-[0_6px_22px_rgba(99,102,241,0.55)] sm:h-12"
               />
             </span>
           </Link>
 
-          {/* Center nav */}
           <nav className="hidden items-center gap-1 md:flex">
             {NAV.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
-                className="relative rounded-lg px-4 py-2 text-[14px] font-medium text-white/70 transition-colors hover:text-white"
+                className="rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
               >
                 {link.label}
               </a>
             ))}
           </nav>
 
-          {/* Right CTA */}
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <Link
               href="/login"
-              className="hidden text-[14px] font-medium text-white/80 transition-colors hover:text-white sm:inline-block"
+              className="hidden rounded-full px-3 py-2 text-[14px] font-medium text-white/[0.72] transition-colors duration-200 hover:text-white sm:inline-block"
             >
               Вход в аккаунт
             </Link>
@@ -77,7 +74,7 @@ export function IcmHeader() {
               type="button"
               aria-label="Меню"
               onClick={() => setOpen((s) => !s)}
-              className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.04] text-white md:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white transition-colors hover:bg-white/[0.08] md:hidden"
             >
               {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
@@ -85,16 +82,15 @@ export function IcmHeader() {
         </div>
       </div>
 
-      {/* Mobile menu */}
       {open ? (
-        <div className="border-b border-white/[0.06] bg-[#09090b]/95 backdrop-blur-xl md:hidden">
-          <div className="mx-auto max-w-7xl px-6 py-3 sm:px-8">
+        <div className="mx-auto mt-3 max-w-7xl md:hidden">
+          <div className="rounded-[28px] border border-white/[0.08] bg-[rgba(8,8,12,0.82)] p-2 shadow-[0_18px_44px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
             {NAV.map((link) => (
               <a
                 key={link.href}
                 href={link.href}
                 onClick={() => setOpen(false)}
-                className="block rounded-lg px-3 py-3 text-sm text-white/80 hover:bg-white/[0.04] hover:text-white"
+                className="block rounded-2xl px-4 py-3 text-sm text-white/[0.72] transition-colors hover:bg-white/[0.05] hover:text-white"
               >
                 {link.label}
               </a>
@@ -102,7 +98,7 @@ export function IcmHeader() {
             <Link
               href="/login"
               onClick={() => setOpen(false)}
-              className="block rounded-lg px-3 py-3 text-sm text-white/80 hover:bg-white/[0.04] hover:text-white"
+              className="block rounded-2xl px-4 py-3 text-sm text-white/[0.72] transition-colors hover:bg-white/[0.05] hover:text-white"
             >
               Вход в аккаунт
             </Link>

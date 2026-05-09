@@ -60,7 +60,7 @@ export default function LoginPage() {
         <Link href="/" className="flex items-center">
           <Image
             src="/brand/logo.png"
-            alt="ICM Music Cloud"
+            alt="ICECREAMMUSIC"
             width={317}
             height={400}
             priority
@@ -138,7 +138,7 @@ export default function LoginPage() {
             Запомнить меня
           </label>
           <Link
-            href="#"
+            href="/forgot-password"
             className="text-[13.5px] text-white/55 transition-colors hover:text-white"
           >
             Забыли пароль?
@@ -146,9 +146,15 @@ export default function LoginPage() {
         </div>
 
         {error ? (
-          <p className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
-            {error}
-          </p>
+          <div className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
+            <p>{error}</p>
+            <Link
+              href="/forgot-password"
+              className="mt-2 inline-block font-medium text-white underline underline-offset-4"
+            >
+              Восстановить пароль
+            </Link>
+          </div>
         ) : null}
 
         <Button

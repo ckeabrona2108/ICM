@@ -175,7 +175,7 @@ function ParallaxCard({ card, springX, springY, reduce }: ParallaxCardProps) {
       className={`absolute ${card.pos} ${card.size} ${card.z}`}
     >
       <div
-        className="group relative h-full w-full overflow-hidden rounded-[28px] border border-white/[0.08] bg-[#0e0e10] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.75)]"
+        className="group relative h-full w-full overflow-hidden rounded-[28px] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.75)]"
         style={
           reduce
             ? undefined
@@ -188,14 +188,10 @@ function ParallaxCard({ card, springX, springY, reduce }: ParallaxCardProps) {
           alt={card.alt}
           fill
           sizes="(max-width: 768px) 50vw, 280px"
-          className="pointer-events-none select-none object-cover"
+          className="pointer-events-none select-none object-contain"
           draggable={false}
           priority={card.id === "vibes"}
         />
-        {/* sheen highlight */}
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.18),transparent_55%)] mix-blend-overlay" />
-        {/* hover ring */}
-        <div className="pointer-events-none absolute inset-0 rounded-[28px] ring-0 ring-white/25 transition group-hover:ring-2" />
       </div>
     </motion.div>
   );

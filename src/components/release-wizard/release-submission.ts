@@ -2,10 +2,31 @@ import type { ReleaseSubmissionData } from "@/lib/release-policy";
 
 import type { WizardData } from "./wizard-context";
 
+function normalizeUploadedUrl(url: string): string {
+  const normalized = url.trim();
+  if (/^https?:\/\//iu.test(normalized)) {
+    return normalized;
+  }
+
+  if (typeof window !== "undefined") {
+    return new URL(normalized, window.location.origin).toString();
+  }
+
+  return normalized;
+}
+
+function normalizeUploadedFileRef<T extends { url: string } | null | undefined>(value: T): T {
+  if (!value) return value;
+  return {
+    ...value,
+    url: normalizeUploadedUrl(value.url)
+  };
+}
+
 export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionData {
   return {
     cover: data.cover,
-    coverUpload: data.coverUpload,
+    coverUpload: normalizeUploadedFileRef(data.coverUpload),
     coverMeta: data.coverMeta,
     language: data.language,
     title: data.title,
@@ -32,7 +53,7 @@ export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionD
     tracks: data.tracks.map((track) => ({
       fileName: track.name,
       hasAudio: track.hasAudio,
-      audioFile: track.audioUpload ?? undefined,
+      audioFile: normalizeUploadedFileRef(track.audioUpload) ?? undefined,
       durationSec: track.durationSec,
       title: track.meta.title,
       subtitle: track.meta.subtitle,
@@ -54,7 +75,14 @@ export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionD
       versionRemix: track.meta.versionRemix,
       versionInstrumental: track.meta.versionInstrumental,
       lyrics: track.meta.lyrics,
-      ringtoneDurationSec: track.meta.ringtoneDurationSec
+      ringtoneDurationSec: track.meta.ringtoneDurationSec,
+      syncedLyricsFile: normalizeUploadedFileRef(track.meta.syncedLyricsFile) ?? undefined,
+      ringtoneFile: normalizeUploadedFileRef(track.meta.ringtoneFile) ?? undefined,
+      videoFile: normalizeUploadedFileRef(track.meta.videoFile) ?? undefined,
+      // Legacy aliases for current admin download resolver.
+      textFile: normalizeUploadedFileRef(track.meta.syncedLyricsFile) ?? undefined,
+      karaokeFile: normalizeUploadedFileRef(track.meta.ringtoneFile) ?? undefined,
+      videoShotFile: normalizeUploadedFileRef(track.meta.videoFile) ?? undefined
     })),
     moderatorComment: data.moderatorComment,
     realTimeDelivery: data.realTimeDelivery,

@@ -11,6 +11,7 @@ import {
   FileText,
   Loader2,
   Music2,
+  ScrollText,
   Trash2,
   Video,
   X,
@@ -23,6 +24,9 @@ interface AdminReleaseDetailsResponse {
   id: string;
   status: string;
   payment_status: string;
+  payment_label?: string;
+  payment_usage?: string | null;
+  payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
   cover: {
     url: string;
@@ -165,6 +169,14 @@ function guessDownloadName(fallback: string, fileName: string | null | undefined
   return normalized || fallback;
 }
 
+function formatDuration(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "-";
+  const totalSeconds = Math.round(value);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDetailsResponse }) {
   const router = useRouter();
   const canModerate = details.status === "moderation";
@@ -176,6 +188,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [upc, setUpc] = React.useState(details.release.upc && details.release.upc !== "-" ? details.release.upc : "");
   const [reason, setReason] = React.useState("");
   const [platformsOpen, setPlatformsOpen] = React.useState(false);
+  const [lyricsModal, setLyricsModal] = React.useState<{ title: string; lyrics: string } | null>(null);
 
   const approve = async () => {
     const normalized = upc.trim();
@@ -280,7 +293,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={details.status} />
               <span className="text-[12px] text-white/60">
-                Оплата: {details.payment_status === "paid" ? "Оплачен" : "Не оплачен"}
+                Оплата: {details.payment_label ?? (details.payment_status === "paid" ? "Оплачен" : "Не оплачен")}
               </span>
               {details.priority ? (
                 <span className="inline-flex items-center rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
@@ -439,11 +452,13 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         <h2 className="text-[20px] font-semibold text-white">Список треков</h2>
         {details.tracks.map((track, index) => {
           const hasAudioDownload = Boolean(track.files.audio.download_url);
+          const lyricsText = track.raw_commentary.lyrics.trim();
+          const hasLyricsText = lyricsText.length > 0;
           const downloadableFiles = fileActions([
             { label: "Скачать аудио", file: track.files.audio },
-            { label: "Скачать текст", file: track.files.text },
-            { label: "Скачать караоке", file: track.files.karaoke },
-            { label: "Скачать video shot", file: track.files.video_shot },
+            { label: "Скачать синхронизированный текст", file: track.files.text },
+            { label: "Скачать рингтон", file: track.files.karaoke },
+            { label: "Скачать видео", file: track.files.video_shot },
             { label: "Скачать video clip", file: track.files.video_clip }
           ]).filter((entry) => Boolean(entry.file.download_url));
 
@@ -453,15 +468,38 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
               className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#171929]/80 via-[#14151d]/95 to-[#111219]/95 p-5"
             >
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-[16px] font-semibold text-white">
-                  {index + 1}. {toDash(track.title)}
-                </p>
+                <div className="space-y-2">
+                  <p className="text-[16px] font-semibold text-white">
+                    {index + 1}. {toDash(track.title)}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 text-[12px] text-white/55">
+                    <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1">
+                      Длительность: {formatDuration(track.duration_sec)}
+                    </span>
+                    <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1">
+                      ISRC: {toDash(track.identification.isrc)}
+                    </span>
+                    <span className="rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1">
+                      Язык: {toDash(track.usage.metadata_language)}
+                    </span>
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <TrackFileIcon label="Аудио" ok={track.files.audio.available} icon={<Music2 className="h-3.5 w-3.5" />} />
-                  <TrackFileIcon label="Текст" ok={track.files.text.available} icon={<FileText className="h-3.5 w-3.5" />} />
-                  <TrackFileIcon label="Караоке" ok={track.files.karaoke.available} icon={<FileText className="h-3.5 w-3.5" />} />
-                  <TrackFileIcon label="Video shot" ok={track.files.video_shot.available} icon={<Video className="h-3.5 w-3.5" />} />
+                  <TrackFileIcon label="Синх. текст" ok={track.files.text.available} icon={<FileText className="h-3.5 w-3.5" />} />
+                  <TrackFileIcon label="Рингтон" ok={track.files.karaoke.available} icon={<Music2 className="h-3.5 w-3.5" />} />
+                  <TrackFileIcon label="Видео" ok={track.files.video_shot.available} icon={<Video className="h-3.5 w-3.5" />} />
                   <TrackFileIcon label="Video clip" ok={track.files.video_clip.available} icon={<Video className="h-3.5 w-3.5" />} />
+                  {hasLyricsText ? (
+                    <button
+                      type="button"
+                      onClick={() => setLyricsModal({ title: track.title.trim() || `Трек ${index + 1}`, lyrics: lyricsText })}
+                      className="inline-flex h-8 items-center gap-1 rounded-lg border border-[#7b3df5]/40 bg-[#7b3df5]/12 px-3 text-[12px] font-semibold text-[#d7cbff] transition hover:bg-[#7b3df5]/20"
+                    >
+                      <ScrollText className="h-3.5 w-3.5" />
+                      Текст
+                    </button>
+                  ) : null}
                   {downloadableFiles.length === 1 ? (
                     <a
                       href={downloadableFiles[0]?.file.download_url ?? ""}
@@ -508,7 +546,9 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                   title="Общая информация о треке"
                   rows={[
                     ["Название трека", toDash(track.title)],
-                    ["Подзаголовок трека", toDash(track.subtitle)]
+                    ["Подзаголовок трека", toDash(track.subtitle)],
+                    ["Длительность", formatDuration(track.duration_sec)],
+                    ["Текст трека", hasLyricsText ? "Доступен по кнопке «Текст»" : "Не добавлен"]
                   ]}
                 />
                 <InfoSection
@@ -627,6 +667,25 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
           confirmTone="danger"
         />
       ) : null}
+
+      {lyricsModal ? (
+        <ModalCard
+          title={`Текст трека: ${lyricsModal.title}`}
+          subtitle="Полный текст трека"
+          onCancel={() => setLyricsModal(null)}
+          onConfirm={() => setLyricsModal(null)}
+          confirmLabel="Закрыть"
+          confirmBusy={false}
+          cancelLabel="Закрыть"
+          hideConfirm
+        >
+          <div className="max-h-[65vh] overflow-y-auto rounded-xl border border-white/[0.08] bg-black/20 px-4 py-3">
+            <p className="whitespace-pre-wrap break-words text-[15px] leading-8 text-white/92">
+              {lyricsModal.lyrics}
+            </p>
+          </div>
+        </ModalCard>
+      ) : null}
     </div>
   );
 }
@@ -684,7 +743,9 @@ function ModalCard({
   onConfirm,
   confirmLabel,
   confirmBusy,
-  confirmTone = "primary"
+  confirmTone = "primary",
+  cancelLabel = "Отмена",
+  hideConfirm = false
 }: {
   title: string;
   subtitle: string;
@@ -694,10 +755,12 @@ function ModalCard({
   confirmLabel: string;
   confirmBusy: boolean;
   confirmTone?: "primary" | "danger";
+  cancelLabel?: string;
+  hideConfirm?: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-[#14151d] p-5">
+      <div className="w-full max-w-3xl rounded-2xl border border-white/[0.1] bg-[#14151d] p-5">
         <h2 className="text-[19px] font-semibold text-white">{title}</h2>
         <p className="mt-1 text-[13px] text-white/65">{subtitle}</p>
         {children ? <div className="mt-3">{children}</div> : null}
@@ -707,19 +770,21 @@ function ModalCard({
             onClick={onCancel}
             className="rounded-lg border border-white/[0.12] px-3 py-2 text-[13px] text-white/80"
           >
-            Отмена
+            {cancelLabel}
           </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={confirmBusy}
-            className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[13px] font-semibold text-black disabled:opacity-40 ${
-              confirmTone === "danger" ? "bg-rose-500" : "bg-emerald-500"
-            }`}
-          >
-            {confirmBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {confirmLabel}
-          </button>
+          {hideConfirm ? null : (
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={confirmBusy}
+              className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-[13px] font-semibold text-black disabled:opacity-40 ${
+                confirmTone === "danger" ? "bg-rose-500" : "bg-emerald-500"
+              }`}
+            >
+              {confirmBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {confirmLabel}
+            </button>
+          )}
         </div>
       </div>
     </div>

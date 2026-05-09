@@ -215,6 +215,9 @@ export interface AdminReleaseDetailsResponse {
   id: string;
   status: string;
   payment_status: string;
+  payment_label?: string;
+  payment_usage?: string | null;
+  payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
   cover: {
     url: string;

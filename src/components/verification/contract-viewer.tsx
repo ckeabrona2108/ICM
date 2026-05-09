@@ -39,10 +39,14 @@ function ContractPage({
 
 export function ContractViewer({
   className,
-  onReadStateChange
+  onReadStateChange,
+  readOnly = false,
+  allowExternalOpen = true
 }: {
   className?: string;
-  onReadStateChange: (readToEnd: boolean) => void;
+  onReadStateChange?: (readToEnd: boolean) => void;
+  readOnly?: boolean;
+  allowExternalOpen?: boolean;
 }) {
   const [ready, setReady] = React.useState(false);
   const [loadError, setLoadError] = React.useState(false);
@@ -129,7 +133,7 @@ export function ContractViewer({
     if (!node) return;
     const reachedBottom = node.scrollTop + node.clientHeight >= node.scrollHeight - 5;
     setIsReadToEnd(reachedBottom);
-    onReadStateChange(reachedBottom);
+    onReadStateChange?.(reachedBottom);
   }, [onReadStateChange]);
 
   React.useEffect(() => {
@@ -137,18 +141,23 @@ export function ContractViewer({
   }, [handleScroll, pages.length]);
 
   return (
-    <div className={cn("space-y-3", className)}>
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] px-5 py-3 text-[14px] leading-relaxed text-white/70">
-        <span className="inline-flex items-center gap-1.5 [overflow-wrap:anywhere]">
-          <ChevronDown className="h-3.5 w-3.5" />
-          Прокрутите документ до конца
-        </span>
-      </div>
+      <div className={cn("space-y-3", className)}>
+      {!readOnly ? (
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] px-5 py-3 text-[14px] leading-relaxed text-white/70">
+          <span className="inline-flex items-center gap-1.5 [overflow-wrap:anywhere]">
+            <ChevronDown className="h-3.5 w-3.5" />
+            Прокрутите документ до конца
+          </span>
+        </div>
+      ) : null}
 
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="h-[68vh] overflow-y-auto rounded-2xl border border-white/12 bg-[#0a0f1c] p-4 [scroll-behavior:smooth] sm:p-5"
+        className={cn(
+          "overflow-y-auto rounded-2xl border border-white/12 bg-[#0a0f1c] [scroll-behavior:smooth]",
+          readOnly ? "h-[50vh] p-2.5 sm:h-[52vh] sm:p-3" : "h-[68vh] p-4 sm:p-5"
+        )}
       >
         <div className="mx-auto w-full max-w-[1120px] space-y-6 px-2 py-2 [overflow-wrap:anywhere] sm:px-4 sm:py-4">
           {!ready ? (
@@ -175,22 +184,26 @@ export function ContractViewer({
           {loadError ? (
             <div className="mx-auto w-full max-w-[1060px] rounded-2xl border border-rose-300/30 bg-rose-500/12 px-6 py-5">
               <p className="text-[15px] leading-relaxed text-rose-100 [overflow-wrap:anywhere]">
-                Не удалось загрузить документ. Попробуйте открыть его отдельно.
+                {allowExternalOpen
+                  ? "Не удалось загрузить документ. Попробуйте открыть его отдельно."
+                  : "Не удалось загрузить документ. Попробуйте позже."}
               </p>
-              <a
-                href={DOCUMENT_VIEW_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-4 inline-flex rounded-xl border border-sky-200/35 bg-sky-400/10 px-4 py-2 text-[13px] font-medium text-sky-100 transition-colors hover:bg-sky-400/20"
-              >
-                Открыть документ
-              </a>
+              {allowExternalOpen ? (
+                <a
+                  href={DOCUMENT_VIEW_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex rounded-xl border border-sky-200/35 bg-sky-400/10 px-4 py-2 text-[13px] font-medium text-sky-100 transition-colors hover:bg-sky-400/20"
+                >
+                  Открыть документ
+                </a>
+              ) : null}
             </div>
           ) : null}
         </div>
       </div>
 
-      {!isReadToEnd ? (
+      {!readOnly && !isReadToEnd ? (
         <p className="text-[14px] leading-relaxed text-amber-200/90 [overflow-wrap:anywhere]">Прокрутите документ до конца</p>
       ) : null}
     </div>

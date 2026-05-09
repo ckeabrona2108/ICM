@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const resolvedImageHosts = (() => {
-  const hosts = new Set(["images.unsplash.com", "s3.icecreammusic.net"]);
+  const hosts = new Set([
+    "images.unsplash.com",
+    "s3.icecreammusic.net",
+    "localhost",
+    "127.0.0.1"
+  ]);
   const candidateUrls = [process.env.NEXT_PUBLIC_S3_URL, process.env.S3_ENDPOINT];
   for (const candidate of candidateUrls) {
     if (!candidate) continue;

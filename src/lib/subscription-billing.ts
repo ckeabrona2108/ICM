@@ -10,7 +10,7 @@ export interface SubscriptionTariffConfig {
 export const subscriptionTariffs: SubscriptionTariffConfig[] = [
   {
     id: "standard",
-    title: "Стандарт",
+    title: "STANDART",
     amountRub: 350,
     plan: SubscriptionPlan.STANDARD
   },
@@ -22,7 +22,7 @@ export const subscriptionTariffs: SubscriptionTariffConfig[] = [
   },
   {
     id: "enterprise",
-    title: "Энтерпрайз",
+    title: "ENTERPRISE",
     amountRub: 1990,
     plan: SubscriptionPlan.ENTERPRISE
   }

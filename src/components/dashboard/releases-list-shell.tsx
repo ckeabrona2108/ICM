@@ -80,7 +80,8 @@ export function ReleasesListShell({
           r.label,
           r.genre,
           r.status,
-          !r.paid ? "не оплачен" : ""
+          r.paymentLabel,
+          !r.paid ? "неоплачено" : ""
         ]
           .filter(Boolean)
           .map((s) => String(s).toLowerCase());

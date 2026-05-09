@@ -88,7 +88,7 @@ export function HowItWorks() {
       ref={containerRef}
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className="relative overflow-hidden rounded-[28px] border border-white/[0.06] bg-[#0c0c0f] p-6 sm:p-10 lg:p-14"
+      className="relative overflow-visible rounded-[28px] border border-white/[0.06] bg-[#0c0c0f] p-6 sm:p-10 lg:p-14"
     >
       {/* moving spotlight */}
       <Spotlight index={highlightIndex} reduce={Boolean(reduce)} />

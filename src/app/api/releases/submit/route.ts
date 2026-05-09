@@ -10,6 +10,12 @@ import type {
 } from "@/lib/api/contracts";
 import { prisma } from "@/lib/prisma";
 import { getUserContractStatus } from "@/lib/contract-verification";
+import { isInitialReleaseSubmission } from "@/lib/release-submission-state";
+import {
+  buildReleasePaymentSnapshotFromLimitDecision,
+  parseReleasePaymentSnapshot
+} from "@/lib/release-payment";
+import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 import {
   canEditRelease,
   groupReleaseValidationIssuesByStep,
@@ -21,6 +27,7 @@ import {
 import {
   checkPriorityReleaseAccess,
   checkReleaseCreationLimit,
+  type LimitDecision,
   incrementReleaseUsage
 } from "@/lib/subscription-limits";
 
@@ -178,6 +185,29 @@ function slugFromTitle(title: string): string {
   return `${base || "release"}-${Date.now()}`;
 }
 
+function readSubmissionData(input: unknown): Record<string, unknown> | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  return input as Record<string, unknown>;
+}
+
+function isMainArtistRole(role: string): boolean {
+  const normalized = role.trim().toLowerCase();
+  return normalized.includes("исполн") || normalized.includes("artist");
+}
+
+function resolveReleaseArtistName(data: ReleaseSubmitRequest["data"]): string {
+  const artists = data.persons
+    .filter((person) => isMainArtistRole(person.role))
+    .map((person) => person.name.trim())
+    .filter(Boolean);
+
+  if (artists.length > 0) {
+    return artists.join(", ");
+  }
+
+  return data.label?.trim() || "Неизвестный исполнитель";
+}
+
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
 
@@ -292,8 +322,14 @@ export async function POST(request: Request) {
     }
   }
 
-  if (body.mode === "new" && !existingRelease) {
-    const releaseLimit = await checkReleaseCreationLimit(prisma, session.user.id);
+  const initialSubmission = isInitialReleaseSubmission(existingRelease?.status);
+  let releaseLimitForSnapshot: LimitDecision | null = null;
+  if (initialSubmission) {
+    releaseLimitForSnapshot = await checkReleaseCreationLimit(prisma, session.user.id);
+  }
+
+  if (body.mode === "new" && !existingRelease && releaseLimitForSnapshot) {
+    const releaseLimit = releaseLimitForSnapshot;
     const allowUnpaidStandardModeration =
       !releaseLimit.allowed &&
       releaseLimit.code === "release_limit_reached" &&
@@ -330,6 +366,18 @@ export async function POST(request: Request) {
   const nextReleaseStatus = contractStatus.canSubmitReleases
     ? ReleaseStatus.MODERATION
     : ReleaseStatus.PENDING_VERIFICATION;
+  const existingSubmissionData = readSubmissionData(existingRelease?.submissionData);
+  const existingPaymentSnapshot = parseReleasePaymentSnapshot(
+    existingSubmissionData?.paymentSnapshot
+  );
+  const nextPaymentSnapshot =
+    buildReleasePaymentSnapshotFromLimitDecision(releaseLimitForSnapshot) ??
+    existingPaymentSnapshot ??
+    undefined;
+  const submissionDataForStorage = ({
+    ...body.data,
+    ...(nextPaymentSnapshot ? { paymentSnapshot: nextPaymentSnapshot } : {})
+  } as unknown) as Prisma.InputJsonValue;
 
   const releasePayload = {
     title: body.data.title,
@@ -360,9 +408,9 @@ export async function POST(request: Request) {
     coverMeta: body.data.coverMeta
       ? (body.data.coverMeta as unknown as Prisma.InputJsonValue)
       : Prisma.DbNull,
-    submissionData: body.data as unknown as Prisma.InputJsonValue,
+    submissionData: submissionDataForStorage,
     moderationCancelledAt: null,
-    moderationStartedAt: null
+    moderationStartedAt: new Date()
   };
 
   const trackCreateData = buildTrackCreateData(body.data.tracks);
@@ -424,7 +472,7 @@ export async function POST(request: Request) {
         payload: {
           previousStatus,
           nextStatus: nextReleaseStatus,
-          moderationSnapshot: body.data
+          moderationSnapshot: submissionDataForStorage
         } as Prisma.InputJsonValue
       }
     });
@@ -432,8 +480,19 @@ export async function POST(request: Request) {
     return releaseId;
   });
 
-  if (body.mode === "new" && !existingRelease) {
+  if (initialSubmission) {
     await incrementReleaseUsage(prisma, session.user.id);
+  }
+
+  if (initialSubmission) {
+    try {
+      await notifyAdminReleaseSubmitted({
+        releaseTitle: body.data.title.trim(),
+        artistName: resolveReleaseArtistName(body.data)
+      });
+    } catch (error) {
+      console.error("[releases] telegram notification failed", error);
+    }
   }
 
   const response: ReleaseSubmitSuccessResponse = {

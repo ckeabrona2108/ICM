@@ -157,27 +157,12 @@ export async function GET(request: Request) {
             SUM("streams")::bigint AS "streams",
             SUM("pay_streams")::bigint AS "pay_streams"
           FROM "analytics_report_snapshots"
-          WHERE ${Prisma.join([...conditions, Prisma.sql`"report_date" = ${current.report_date}`], " AND ")}
+          WHERE ${Prisma.join(conditions, " AND ")}
           GROUP BY "platform"
           ORDER BY SUM("streams") DESC
         `);
 
-        const prevPlatformRows = previous?.report_date
-          ? await prisma.$queryRaw<
-              Array<{ platform: string | null; streams: bigint | number | null }>
-            >(Prisma.sql`
-              SELECT
-                "platform",
-                SUM("streams")::bigint AS "streams"
-              FROM "analytics_report_snapshots"
-              WHERE ${Prisma.join([...conditions, Prisma.sql`"report_date" = ${previous.report_date}`], " AND ")}
-              GROUP BY "platform"
-            `)
-          : [];
-
-        const prevMap = new Map(
-          prevPlatformRows.map((row) => [row.platform ?? "Unknown", Number(row.streams ?? 0)])
-        );
+        const allTimeStreams = platformRows.reduce((sum, row) => sum + Number(row.streams ?? 0), 0);
 
         platformsBreakdown = platformRows.map((row) => {
           const name = row.platform ?? "Unknown";
@@ -187,8 +172,8 @@ export async function GET(request: Request) {
             streams: streamsValue,
             pay_streams: Number(row.pay_streams ?? 0),
             share_percent:
-              currentStreams > 0 ? Number(((streamsValue / currentStreams) * 100).toFixed(3)) : 0,
-            change_percent: calcChange(streamsValue, prevMap.get(name) ?? 0)
+              allTimeStreams > 0 ? Number(((streamsValue / allTimeStreams) * 100).toFixed(3)) : 0,
+            change_percent: null
           };
         });
       } catch {
@@ -199,7 +184,7 @@ export async function GET(request: Request) {
               streams: currentStreams,
               pay_streams: currentPayStreams,
               share_percent: 100,
-              change_percent: calcChange(currentStreams, previousStreams)
+              change_percent: null
             }
           ];
         }

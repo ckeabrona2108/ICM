@@ -2,18 +2,6 @@ import { Prisma, ReleaseStatus, type PrismaClient } from "@prisma/client";
 import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import { normalizeAnalyticsPlatform } from "@/lib/analytics-platform";
 
-type AnalyticsPlatformSummaryRepo = {
-  findMany: (args: unknown) => Promise<
-    Array<{
-      platform: string;
-      streams: number;
-      payStreams: number;
-      sharePercent: Prisma.Decimal | number;
-      changePercent: Prisma.Decimal | number | null;
-    }>
-  >;
-};
-
 type AnalyticsDailySummaryRepo = {
   findMany: (args: unknown) => Promise<
     Array<{
@@ -23,13 +11,6 @@ type AnalyticsDailySummaryRepo = {
     }>
   >;
 };
-
-function getAnalyticsPlatformSummaryRepo(
-  prisma: PrismaClient
-): AnalyticsPlatformSummaryRepo | null {
-  return (prisma as { analyticsPlatformSummary?: AnalyticsPlatformSummaryRepo })
-    .analyticsPlatformSummary ?? null;
-}
 
 function getAnalyticsDailySummaryRepo(
   prisma: PrismaClient
@@ -65,7 +46,7 @@ async function groupSnapshotPlatformsCompat(
   prisma: PrismaClient,
   where: {
     userId: string;
-    reportDate: Date;
+    reportDate?: Date;
     releaseId?: string;
     country?: string;
     upc?: string;
@@ -99,9 +80,9 @@ async function groupSnapshotPlatformsCompat(
   }
 
   const conditions: Prisma.Sql[] = [
-    Prisma.sql`"user_id" = ${where.userId}`,
-    Prisma.sql`"report_date" = ${where.reportDate}`
+    Prisma.sql`"user_id" = ${where.userId}`
   ];
+  if (where.reportDate) conditions.push(Prisma.sql`"report_date" = ${where.reportDate}`);
   if (where.releaseId) conditions.push(Prisma.sql`"release_id" = ${where.releaseId}`);
   if (where.country) conditions.push(Prisma.sql`"country" = ${where.country}`);
   if (where.upc) conditions.push(Prisma.sql`"upc" = ${where.upc}`);
@@ -138,6 +119,54 @@ async function groupSnapshotPlatformsCompat(
     }
     throw error;
   }
+}
+
+async function buildAllTimePlatformsBreakdown(
+  prisma: PrismaClient,
+  params: {
+    userId: string;
+    releaseId?: string;
+    country?: string;
+    upc?: string;
+    platform?: string;
+    fallbackStreams?: number;
+    fallbackPayStreams?: number;
+  }
+): Promise<AnalyticsOverviewResponse["platformsBreakdown"]> {
+  const groups = await groupSnapshotPlatformsCompat(prisma, {
+    userId: params.userId,
+    ...(params.releaseId ? { releaseId: params.releaseId } : {}),
+    ...(params.country ? { country: params.country } : {}),
+    ...(params.upc ? { upc: params.upc } : {}),
+    ...(params.platform ? { platform: params.platform } : {})
+  });
+
+  const totalStreams = groups.reduce((sum, item) => sum + (item._sum.streams ?? 0), 0);
+
+  const breakdown = groups.map((item) => {
+    const name = item.platform ?? "Unknown";
+    const streams = item._sum.streams ?? 0;
+    const payStreams = item._sum.payStreams ?? 0;
+    return {
+      platform: name,
+      streams,
+      payStreams,
+      sharePercent: totalStreams > 0 ? Number((((streams / totalStreams) * 100)).toFixed(3)) : 0,
+      changePercent: null
+    };
+  });
+
+  if (breakdown.length === 0 && ((params.fallbackStreams ?? 0) > 0 || (params.fallbackPayStreams ?? 0) > 0)) {
+    breakdown.push({
+      platform: "Unknown",
+      streams: params.fallbackStreams ?? 0,
+      payStreams: params.fallbackPayStreams ?? 0,
+      sharePercent: 100,
+      changePercent: null
+    });
+  }
+
+  return breakdown;
 }
 
 export type AnalyticsTrend = "up" | "down" | "flat" | "new";
@@ -473,85 +502,12 @@ export async function getAnalyticsOverview(
       };
     }
 
-    const platformSummaryRepo = getAnalyticsPlatformSummaryRepo(prisma);
-    let platformRows: Array<{
-      platform: string;
-      streams: number;
-      payStreams: number;
-      sharePercent: Prisma.Decimal | number;
-      changePercent: Prisma.Decimal | number | null;
-    }> = [];
-    if (platformSummaryRepo) {
-      try {
-        platformRows = await platformSummaryRepo.findMany({
-          where: {
-            userId: params.userId,
-            releaseId: params.releaseId ?? null,
-            reportDate: current.reportDate
-          },
-          orderBy: [{ streams: "desc" }, { platform: "asc" }],
-          select: {
-            platform: true,
-            streams: true,
-            payStreams: true,
-            sharePercent: true,
-            changePercent: true
-          }
-        });
-      } catch {
-        platformRows = [];
-      }
-    }
-
-    if (platformRows.length === 0) {
-      const previousDate = latestRows[1]?.reportDate ?? null;
-
-      const latestSnapshotPlatforms = await groupSnapshotPlatformsCompat(prisma, {
-        userId: params.userId,
-        reportDate: current.reportDate,
-        ...(params.releaseId ? { releaseId: params.releaseId } : {})
-      });
-
-      const previousSnapshotPlatforms = previousDate
-        ? await groupSnapshotPlatformsCompat(prisma, {
-            userId: params.userId,
-            reportDate: previousDate,
-            ...(params.releaseId ? { releaseId: params.releaseId } : {})
-          })
-        : [];
-
-      const previousByPlatform = new Map(
-        previousSnapshotPlatforms.map((row) => [row.platform ?? "Unknown", row._sum.streams ?? 0])
-      );
-      const totalStreams = current.totalStreams;
-
-      platformRows = latestSnapshotPlatforms.map((row) => {
-        const platform = row.platform ?? "Unknown";
-        const streams = row._sum.streams ?? 0;
-        const payStreams = row._sum.payStreams ?? 0;
-        const prevStreams = previousByPlatform.get(platform) ?? 0;
-        return {
-          platform,
-          streams,
-          payStreams,
-          sharePercent: totalStreams > 0 ? Number((((streams / totalStreams) * 100)).toFixed(3)) : 0,
-          changePercent: calculateChangePercent(streams, prevStreams)
-        };
-      });
-    }
-
-    if (platformRows.length === 0 && (current.totalStreams > 0 || current.totalPayStreams > 0)) {
-      const previousStreams = previous?.totalStreams ?? 0;
-      platformRows = [
-        {
-          platform: "Unknown",
-          streams: current.totalStreams,
-          payStreams: current.totalPayStreams,
-          sharePercent: 100,
-          changePercent: calculateChangePercent(current.totalStreams, previousStreams)
-        }
-      ];
-    }
+    const platformsBreakdown = await buildAllTimePlatformsBreakdown(prisma, {
+      userId: params.userId,
+      ...(params.releaseId ? { releaseId: params.releaseId } : {}),
+      fallbackStreams: current.totalStreams,
+      fallbackPayStreams: current.totalPayStreams
+    });
 
     const periodStreams = chartRows.reduce((sum, row) => sum + row.totalStreams, 0);
     const periodPayStreams = chartRows.reduce((sum, row) => sum + row.totalPayStreams, 0);
@@ -568,18 +524,9 @@ export async function getAnalyticsOverview(
         previous?.totalPayStreams ?? 0
       ),
       latestReportDate: toDateKey(current.reportDate),
-      topPlatform: platformRows[0]?.platform ?? null,
-      platformsCount: platformRows.length,
-      platformsBreakdown: platformRows.map((row) => ({
-        platform: row.platform,
-        streams: row.streams,
-        payStreams: row.payStreams,
-        sharePercent: Number(row.sharePercent),
-        changePercent:
-          row.changePercent == null
-            ? null
-            : Number(clampReadableChangePercent(Number(row.changePercent)).toFixed(2))
-      })),
+      topPlatform: platformsBreakdown[0]?.platform ?? null,
+      platformsCount: platformsBreakdown.length,
+      platformsBreakdown,
       chart: chartRows.map((row) => ({
         date: toDateKey(row.reportDate),
         streams: row.totalStreams,
@@ -614,66 +561,15 @@ export async function getAnalyticsOverview(
     };
   }
 
-  const latestDate = snapshotOverview.latestReportDate
-    ? new Date(`${snapshotOverview.latestReportDate}T00:00:00.000Z`)
-    : null;
-
-  const platformGroups = latestDate
-    ? await groupSnapshotPlatformsCompat(prisma, {
-        userId: params.userId,
-        reportDate: latestDate,
-        ...(params.releaseId ? { releaseId: params.releaseId } : {}),
-        ...(country ? { country } : {}),
-        ...(upc ? { upc } : {}),
-        ...(platform ? { platform } : {})
-      })
-    : [];
-
-  const previousDate = snapshotOverview.chart.length > 1
-    ? new Date(`${snapshotOverview.chart[snapshotOverview.chart.length - 2]?.date}T00:00:00.000Z`)
-    : null;
-
-  const previousPlatformGroups = previousDate
-    ? await groupSnapshotPlatformsCompat(prisma, {
-        userId: params.userId,
-        reportDate: previousDate,
-        ...(params.releaseId ? { releaseId: params.releaseId } : {}),
-        ...(country ? { country } : {}),
-        ...(upc ? { upc } : {}),
-        ...(platform ? { platform } : {})
-      })
-    : [];
-  const previousByPlatform = new Map(
-    previousPlatformGroups.map((item) => [item.platform ?? "Unknown", item._sum.streams ?? 0])
-  );
-
-  const totalStreams = snapshotOverview.totalStreams;
-  const platformsBreakdown = platformGroups.map((item) => {
-    const name = item.platform ?? "Unknown";
-    const streams = item._sum.streams ?? 0;
-    const payStreams = item._sum.payStreams ?? 0;
-    const prev = previousByPlatform.get(name) ?? 0;
-    return {
-      platform: name,
-      streams,
-      payStreams,
-      sharePercent: totalStreams > 0 ? Number((((streams / totalStreams) * 100)).toFixed(3)) : 0,
-      changePercent: calculateChangePercent(streams, prev)
-    };
+  const platformsBreakdown = await buildAllTimePlatformsBreakdown(prisma, {
+    userId: params.userId,
+    ...(params.releaseId ? { releaseId: params.releaseId } : {}),
+    ...(country ? { country } : {}),
+    ...(upc ? { upc } : {}),
+    ...(platform ? { platform } : {}),
+    fallbackStreams: snapshotOverview.totalStreams,
+    fallbackPayStreams: snapshotOverview.totalPayStreams
   });
-
-  if (platformsBreakdown.length === 0 && (snapshotOverview.totalStreams > 0 || snapshotOverview.totalPayStreams > 0)) {
-    const previousStreams = snapshotOverview.chart.length > 1
-      ? snapshotOverview.chart[snapshotOverview.chart.length - 2]?.streams ?? 0
-      : 0;
-    platformsBreakdown.push({
-      platform: "Unknown",
-      streams: snapshotOverview.totalStreams,
-      payStreams: snapshotOverview.totalPayStreams,
-      sharePercent: 100,
-      changePercent: calculateChangePercent(snapshotOverview.totalStreams, previousStreams)
-    });
-  }
 
   return {
     ...snapshotOverview,
@@ -698,55 +594,21 @@ export async function listAnalyticsReleases(
   const usesSnapshotAggregation = Boolean(country || upc || platform);
 
   if (usesSnapshotAggregation) {
-    const latestDates = await prisma.analyticsReportSnapshot.groupBy({
-      by: ["reportDate"],
+    const totalsRows = await prisma.analyticsReportSnapshot.groupBy({
+      by: ["releaseId"],
       where: {
         userId: params.userId,
         ...(country ? { country } : {}),
         ...(upc ? { upc } : {}),
         ...(platform ? { platform } : {})
       },
-      orderBy: { reportDate: "desc" },
-      take: 2
+      _sum: {
+        streams: true,
+        payStreams: true
+      }
     });
 
-    const latest = latestDates[0]?.reportDate ?? null;
-    const previous = latestDates[1]?.reportDate ?? null;
-
-    const currentRows = latest
-      ? await prisma.analyticsReportSnapshot.groupBy({
-          by: ["releaseId"],
-          where: {
-            userId: params.userId,
-            reportDate: latest,
-            ...(country ? { country } : {}),
-            ...(upc ? { upc } : {}),
-            ...(platform ? { platform } : {})
-          },
-          _sum: {
-            streams: true,
-            payStreams: true
-          }
-        })
-      : [];
-
-    const previousRows = previous
-      ? await prisma.analyticsReportSnapshot.groupBy({
-          by: ["releaseId"],
-          where: {
-            userId: params.userId,
-            reportDate: previous,
-            ...(country ? { country } : {}),
-            ...(upc ? { upc } : {}),
-            ...(platform ? { platform } : {})
-          },
-          _sum: {
-            streams: true
-          }
-        })
-      : [];
-
-    const releaseIds = Array.from(new Set(currentRows.map((item) => item.releaseId)));
+    const releaseIds = Array.from(new Set(totalsRows.map((item) => item.releaseId)));
     const releasesMeta = releaseIds.length
       ? await prisma.release.findMany({
           where: {
@@ -769,113 +631,75 @@ export async function listAnalyticsReleases(
           orderBy: { createdAt: "desc" }
         })
       : [];
-    const metaById = new Map(releasesMeta.map((row) => [row.id, row]));
-    const previousByRelease = new Map(
-      previousRows.map((row) => [row.releaseId, row._sum.streams ?? 0])
+    const totalsByRelease = new Map(
+      totalsRows.map((row) => [
+        row.releaseId,
+        {
+          streams: row._sum.streams ?? 0,
+          payStreams: row._sum.payStreams ?? 0
+        }
+      ])
     );
 
-    return currentRows
-      .map((row) => {
-        const meta = metaById.get(row.releaseId);
-        if (!meta) return null;
-        const streams = row._sum.streams ?? 0;
-        const payStreams = row._sum.payStreams ?? 0;
-        const previousStreams = previousByRelease.get(row.releaseId) ?? 0;
-        const changePercent = calculateChangePercent(streams, previousStreams);
-        return {
-          releaseId: row.releaseId,
-          title: meta.title,
-          artist: meta.user.name,
-          upc: meta.upc ?? "",
-          streams,
-          payStreams,
-          changePercent,
-          trend: toTrend(changePercent, streams, previousStreams)
-        };
-      })
-      .filter((item): item is AnalyticsReleaseListItem => Boolean(item));
+    return releasesMeta.map((meta) => {
+      const totals = totalsByRelease.get(meta.id);
+      return {
+        releaseId: meta.id,
+        title: meta.title,
+        artist: meta.user.name,
+        upc: meta.upc ?? "",
+        streams: totals?.streams ?? 0,
+        payStreams: totals?.payStreams ?? 0,
+        changePercent: null,
+        trend: "flat" as const
+      };
+    });
   }
 
-  const latestUserSummary = await prisma.analyticsDailySummary.findMany({
-    where: {
-      userId: params.userId,
-      releaseId: null
-    },
-    orderBy: { reportDate: "desc" },
-    take: 2,
-    select: { reportDate: true }
-  });
-
-  let latestReportDate = latestUserSummary[0]?.reportDate ?? null;
-  let previousReportDate = latestUserSummary[1]?.reportDate ?? null;
-
-  if (!latestReportDate) {
-    const snapshotDates = await prisma.analyticsReportSnapshot.groupBy({
-      by: ["reportDate"],
+  let totalsByRelease = new Map<string, { streams: number; payStreams: number }>();
+  try {
+    const summaryTotals = await prisma.analyticsDailySummary.groupBy({
+      by: ["releaseId"],
+      where: {
+        userId: params.userId,
+        releaseId: {
+          not: null
+        }
+      },
+      _sum: {
+        totalStreams: true,
+        totalPayStreams: true
+      }
+    });
+    totalsByRelease = new Map(
+      summaryTotals
+        .filter((row): row is typeof row & { releaseId: string } => Boolean(row.releaseId))
+        .map((row) => [
+          row.releaseId,
+          {
+            streams: row._sum.totalStreams ?? 0,
+            payStreams: row._sum.totalPayStreams ?? 0
+          }
+        ])
+    );
+  } catch {
+    const snapshotTotals = await prisma.analyticsReportSnapshot.groupBy({
+      by: ["releaseId"],
       where: { userId: params.userId },
-      orderBy: { reportDate: "desc" },
-      take: 2
+      _sum: {
+        streams: true,
+        payStreams: true
+      }
     });
-    latestReportDate = snapshotDates[0]?.reportDate ?? null;
-    previousReportDate = snapshotDates[1]?.reportDate ?? null;
-  }
-
-  let currentRows = latestReportDate
-    ? await prisma.analyticsDailySummary.findMany({
-        where: {
-          userId: params.userId,
-          reportDate: latestReportDate,
-          releaseId: {
-            not: null
-          }
-        },
-        select: {
-          releaseId: true,
-          totalStreams: true,
-          totalPayStreams: true
+    totalsByRelease = new Map(
+      snapshotTotals.map((row) => [
+        row.releaseId,
+        {
+          streams: row._sum.streams ?? 0,
+          payStreams: row._sum.payStreams ?? 0
         }
-      })
-    : [];
-
-  let previousRows = previousReportDate
-    ? await prisma.analyticsDailySummary.findMany({
-        where: {
-          userId: params.userId,
-          reportDate: previousReportDate,
-          releaseId: {
-            not: null
-          }
-        },
-        select: {
-          releaseId: true,
-          totalStreams: true
-        }
-      })
-    : [];
-
-  if (latestReportDate && currentRows.length === 0) {
-    const currentSnapshotRows = await prisma.analyticsReportSnapshot.groupBy({
-      by: ["releaseId"],
-      where: { userId: params.userId, reportDate: latestReportDate },
-      _sum: { streams: true, payStreams: true }
-    });
-    currentRows = currentSnapshotRows.map((row) => ({
-      releaseId: row.releaseId,
-      totalStreams: row._sum.streams ?? 0,
-      totalPayStreams: row._sum.payStreams ?? 0
-    }));
-  }
-
-  if (previousReportDate && previousRows.length === 0) {
-    const previousSnapshotRows = await prisma.analyticsReportSnapshot.groupBy({
-      by: ["releaseId"],
-      where: { userId: params.userId, reportDate: previousReportDate },
-      _sum: { streams: true }
-    });
-    previousRows = previousSnapshotRows.map((row) => ({
-      releaseId: row.releaseId,
-      totalStreams: row._sum.streams ?? 0
-    }));
+      ])
+    );
   }
 
   const allReleases = await prisma.release.findMany({
@@ -899,33 +723,18 @@ export async function listAnalyticsReleases(
     orderBy: { createdAt: "desc" }
   });
 
-  const currentByRelease = new Map(
-    currentRows
-      .filter((item): item is typeof item & { releaseId: string } => Boolean(item.releaseId))
-      .map((item) => [item.releaseId, item])
-  );
-  const previousByRelease = new Map(
-    previousRows
-      .filter((item): item is typeof item & { releaseId: string } => Boolean(item.releaseId))
-      .map((item) => [item.releaseId, item])
-  );
-
   return allReleases.map((release) => {
-    const current = currentByRelease.get(release.id);
-    const previous = previousByRelease.get(release.id);
-    const currentStreams = current?.totalStreams ?? 0;
-    const previousStreams = previous?.totalStreams ?? 0;
-    const changePercent = calculateChangePercent(currentStreams, previousStreams);
+    const totals = totalsByRelease.get(release.id);
 
     return {
       releaseId: release.id,
       title: release.title,
       artist: release.user.name,
       upc: release.upc ?? "",
-      streams: currentStreams,
-      payStreams: current?.totalPayStreams ?? 0,
-      changePercent,
-      trend: toTrend(changePercent, currentStreams, previousStreams)
+      streams: totals?.streams ?? 0,
+      payStreams: totals?.payStreams ?? 0,
+      changePercent: null,
+      trend: "flat" as const
     };
   });
 }

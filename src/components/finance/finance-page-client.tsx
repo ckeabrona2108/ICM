@@ -48,14 +48,14 @@ export function FinancePageClient({
   initialAccrualSeries: Array<{ period: string; amount: number }>;
   minimumPayoutAmount: number;
 }) {
+  type PayoutMethodUi = "bank_transfer" | "paypal_soon" | "usdt_soon" | "btc_soon";
   const fieldClass =
     "mt-2 h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3.5 text-[15px] font-medium text-white outline-none transition-colors placeholder:text-white/45 focus:border-[#7b3df5]/60";
 
   const [amount, setAmount] = React.useState("");
   const [recipientName, setRecipientName] = React.useState("");
-  const [payoutMethod, setPayoutMethod] = React.useState<
-    "bank_transfer" | "paypal" | "other"
-  >("bank_transfer");
+  const [payoutMethod, setPayoutMethod] =
+    React.useState<PayoutMethodUi>("bank_transfer");
   const [accountNumber, setAccountNumber] = React.useState("");
   const [bankName, setBankName] = React.useState("");
   const [paypalEmail, setPaypalEmail] = React.useState("");
@@ -93,6 +93,10 @@ export function FinancePageClient({
       setError("Укажите корректную сумму выплаты.");
       return;
     }
+    if (payoutMethod !== "bank_transfer") {
+      setError("Этот способ получения пока недоступен.");
+      return;
+    }
 
     const payload: PayoutRequestBody = {
       amount: parsedAmount,
@@ -102,7 +106,7 @@ export function FinancePageClient({
       reportStatuses,
       requisites: {
         recipientName,
-        payoutMethod,
+        payoutMethod: "bank_transfer",
         accountNumber,
         bankName,
         paypalEmail,
@@ -262,13 +266,14 @@ export function FinancePageClient({
                     <select
                       value={payoutMethod}
                       onChange={(event) =>
-                        setPayoutMethod(event.target.value as "bank_transfer" | "paypal" | "other")
+                        setPayoutMethod(event.target.value as PayoutMethodUi)
                       }
                       className={fieldClass}
                     >
                       <option value="bank_transfer">Банковский перевод</option>
-                      <option value="paypal">PayPal</option>
-                      <option value="other">Иной способ</option>
+                      <option value="paypal_soon">PayPal (скоро)</option>
+                      <option value="usdt_soon">USDT (скоро)</option>
+                      <option value="btc_soon">BTC (скоро)</option>
                     </select>
                   </label>
                 </div>
@@ -311,18 +316,10 @@ export function FinancePageClient({
                   </div>
                 ) : null}
 
-                {payoutMethod === "paypal" ? (
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <label className="text-[13px] font-semibold text-white/70 md:col-span-2">
-                      PayPal e-mail
-                      <input
-                        value={paypalEmail}
-                        onChange={(event) => setPaypalEmail(event.target.value)}
-                        placeholder="mail@example.com"
-                        className={fieldClass}
-                      />
-                    </label>
-                  </div>
+                {payoutMethod !== "bank_transfer" ? (
+                  <p className="text-[13px] font-semibold text-white/60">
+                    Выбранный способ пока недоступен.
+                  </p>
                 ) : null}
 
                 {error ? <p className="text-[13px] font-semibold text-rose-300">{error}</p> : null}
@@ -336,7 +333,7 @@ export function FinancePageClient({
                     void requestPayout();
                   }}
                   disabled={!canRequestPayout || submitting}
-                  className="btn-shine w-full md:w-auto"
+                  className="btn-shine h-12 w-full px-6 text-[14px] leading-none md:w-auto"
                 >
                   {submitting ? "Отправка..." : "Создать заявку на выплату"}
                 </Button>

@@ -43,7 +43,7 @@ export function AdminSidebar() {
 
   return (
     <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 border-r border-white/[0.06] bg-[#08090d]/95 px-4 py-6 backdrop-blur-xl lg:block">
-      <Link href="/admin" className="mb-10 flex items-center gap-2.5 px-1">
+      <Link href="/admin" className="mb-10 flex items-center gap-2 px-1">
         <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden">
           <Image
             src="/brand/logo.png"
@@ -53,8 +53,9 @@ export function AdminSidebar() {
             className="h-10 w-10 object-contain"
           />
         </span>
-        <span className="min-w-0 leading-tight">
-          <span className="block text-[14px] font-bold tracking-wide text-white">ICECREAMMUSIC</span>
+        <span className="min-w-0 leading-[1.05]">
+          <span className="block text-[12px] font-bold tracking-[0.02em] text-white">ICECREAM</span>
+          <span className="block text-[12px] font-bold tracking-[0.02em] text-white">MUSIC</span>
         </span>
       </Link>
 

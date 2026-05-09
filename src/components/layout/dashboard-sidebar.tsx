@@ -463,18 +463,18 @@ export function DashboardSidebar({
     <>
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[4px] lg:flex">
         <div className="flex h-full flex-col overflow-y-auto px-3.5 py-5">
-          <Link href="/dashboard" className="mb-6 flex items-center gap-2 px-2">
-            <span className="grid h-8 w-8 place-items-center overflow-hidden">
+          <Link href="/dashboard" className="mb-6 flex items-center justify-start gap-2.5 px-3">
+            <span className="grid h-10 w-10 place-items-center overflow-hidden">
               <Image
                 src="/brand/logo.png"
                 alt="ICM"
                 width={317}
                 height={400}
-                className="h-6 w-auto object-contain"
+                className="h-8 w-auto object-contain"
               />
             </span>
             <span className="leading-tight">
-              <span className="block text-[12.5px] font-semibold tracking-[0.01em] text-white">
+              <span className="block text-[13px] font-semibold tracking-[0.01em] text-white">
                 ICECREAMMUSIC
               </span>
             </span>

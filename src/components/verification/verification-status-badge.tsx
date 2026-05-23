@@ -15,7 +15,7 @@ export function VerificationStatusBadge({
   return (
     <span
       title={meta.tooltip}
-      className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${meta.className} ${className}`.trim()}
+      className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold leading-none ${meta.className} ${className}`.trim()}
     >
       {meta.label}
     </span>

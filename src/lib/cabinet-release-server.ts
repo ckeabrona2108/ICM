@@ -4,6 +4,7 @@ import type { CabinetRelease, CabinetReleaseStatus, CabinetTrack } from "@/lib/c
 import { normalizeNextImageSrc } from "@/lib/image-src";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
+import { resolveStoredFileUrl } from "@/lib/s3";
 
 export interface CabinetReleaseSource {
   id: string;
@@ -140,16 +141,82 @@ function resolveCoverFromRoles(roles: unknown): string | null {
   for (const value of candidates) {
     const candidate = asString(value);
     if (!candidate) continue;
-    const normalized = normalizeNextImageSrc(candidate);
+    const normalizedFromStorage = normalizeNextImageSrc(
+      resolveStoredFileUrl({ url: candidate, storageKey: null })
+    );
+    const normalizedDirect = normalizeNextImageSrc(candidate);
+    const normalized = normalizedFromStorage ?? normalizedDirect;
     if (normalized) return normalized;
   }
 
   return null;
 }
 
-function resolveReleaseCoverUrl(preview: string, roles: unknown): string {
-  const normalizedPreview = normalizeNextImageSrc(preview);
-  if (normalizedPreview) return normalizedPreview;
+function looksLikeOnlyExtension(value: string): boolean {
+  return /^[a-z0-9]{2,8}$/iu.test(value.trim().replace(/^\./u, ""));
+}
+
+function normalizeExtension(value: string): string | null {
+  const normalized = value.trim().replace(/^\./u, "").toLowerCase();
+  if (!normalized) return null;
+  return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
+}
+
+function extractBaseFileName(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const withoutQuery = normalized.split("?")[0]?.split("#")[0] ?? normalized;
+  const raw = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
+  if (!raw || !raw.includes(".")) return null;
+  return raw;
+}
+
+function resolveReleaseCoverUrl(releaseId: string, preview: string, roles: unknown): string {
+  const rawPreview = preview.trim();
+  const normalizedPreview = normalizeNextImageSrc(rawPreview);
+  if (
+    normalizedPreview &&
+    !(normalizedPreview.startsWith("/api/uploads/object/") && !rawPreview.includes("/"))
+  ) {
+    return normalizedPreview;
+  }
+
+  const resolvedPreviewUrl = normalizeNextImageSrc(
+    resolveStoredFileUrl({ url: rawPreview, storageKey: null })
+  );
+  if (resolvedPreviewUrl) return resolvedPreviewUrl;
+
+  const legacyCandidates: string[] = [];
+  if (rawPreview) {
+    if (looksLikeOnlyExtension(rawPreview)) {
+      const ext = normalizeExtension(rawPreview);
+      if (ext) {
+        legacyCandidates.push(
+          `${releaseId}.${ext}`,
+          `previews/${releaseId}.${ext}`,
+          `covers/${releaseId}.${ext}`,
+          `uploads/${releaseId}/release-cover.${ext}`,
+          `uploads/${releaseId}.${ext}`
+        );
+      }
+    }
+
+    const baseFileName = extractBaseFileName(rawPreview);
+    if (baseFileName) {
+      legacyCandidates.push(
+        baseFileName,
+        `previews/${baseFileName}`,
+        `covers/${baseFileName}`,
+        `uploads/${baseFileName}`,
+        `uploads/${releaseId}/${baseFileName}`
+      );
+    }
+  }
+
+  for (const storageKey of legacyCandidates) {
+    const candidate = normalizeNextImageSrc(resolveStoredFileUrl({ storageKey }));
+    if (candidate) return candidate;
+  }
 
   return resolveCoverFromRoles(roles) ?? "";
 }
@@ -172,7 +239,7 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
   return {
     id: release.id,
     number,
-    coverUrl: resolveReleaseCoverUrl(release.preview, release.roles),
+    coverUrl: resolveReleaseCoverUrl(release.id, release.preview, release.roles),
     title: release.title || "Без названия",
     artist: release.performer?.trim() || "Не указан",
     upc: release.upc || "",

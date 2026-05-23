@@ -192,7 +192,8 @@ function normalizeStorageKeyCandidate(value: string | null): string | null {
   if (!normalized) return null;
   if (normalized.startsWith("http://") || normalized.startsWith("https://")) return null;
   if (normalized.startsWith("/")) return null;
-  if (!normalized.includes("/")) return null;
+  const isSimpleFile = !normalized.includes("/") && /\.[a-z0-9]{2,8}$/iu.test(normalized);
+  if (!normalized.includes("/") && !isSimpleFile) return null;
   const segments = normalized.split("/").filter(Boolean);
   if (
     segments.length === 0 ||
@@ -277,6 +278,97 @@ function toFileItem(input: {
   };
 }
 
+function splitNames(value: string | null): string[] {
+  if (!value) return [];
+  return value
+    .split(/[;,|]/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function pushNames(target: string[], names: string[]) {
+  for (const name of names) {
+    if (!name) continue;
+    target.push(name);
+  }
+}
+
+function mapRoleToBucket(roleRaw: string): keyof ReturnType<typeof parsePersons> | null {
+  const role = roleRaw.trim().toLowerCase();
+  const compact = role.replace(/[\s_-]+/gu, "");
+  if (
+    role === "performer" ||
+    role === "artist" ||
+    compact === "mainartist" ||
+    role.includes("исполн")
+  ) {
+    return "performers";
+  }
+  if (
+    role === "feat" ||
+    role === "featuring" ||
+    compact === "featuredartist" ||
+    role.includes("feat")
+  ) {
+    return "feats";
+  }
+  if (role === "remixer" || role.includes("remix")) return "remixers";
+  if (
+    compact === "coartist" ||
+    compact === "coperformer" ||
+    role === "collaborator" ||
+    role.includes("соисполн")
+  ) {
+    return "coPerformers";
+  }
+  if (role === "producer" || role.includes("продюсер")) return "producers";
+  if (
+    role === "composer" ||
+    role === "musicauthor" ||
+    role === "music_author" ||
+    role.includes("автор музыки")
+  ) {
+    return "musicAuthors";
+  }
+  if (
+    role === "lyricist" ||
+    compact === "textauthor" ||
+    role === "songwriter" ||
+    role.includes("автор слов")
+  ) {
+    return "lyricsAuthors";
+  }
+  return null;
+}
+
+function mergeRoleNamesFromValue(
+  grouped: ReturnType<typeof parsePersons>,
+  roleKey: keyof ReturnType<typeof parsePersons>,
+  value: unknown
+) {
+  if (typeof value === "string") {
+    pushNames(grouped[roleKey], splitNames(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      if (typeof item === "string") {
+        pushNames(grouped[roleKey], splitNames(item));
+        continue;
+      }
+      const itemRecord = asRecord(item);
+      if (!itemRecord) continue;
+      const name = asString(itemRecord.name) ?? asString(itemRecord.person) ?? asString(itemRecord.artist);
+      if (name) pushNames(grouped[roleKey], splitNames(name));
+    }
+    return;
+  }
+  const valueRecord = asRecord(value);
+  if (!valueRecord) return;
+  const name = asString(valueRecord.name) ?? asString(valueRecord.person) ?? asString(valueRecord.artist);
+  if (name) pushNames(grouped[roleKey], splitNames(name));
+}
+
 function parsePersons(persons: unknown): {
   performers: string[];
   feats: string[];
@@ -296,23 +388,67 @@ function parsePersons(persons: unknown): {
     lyricsAuthors: [] as string[]
   };
 
-  for (const rawPerson of asArray(persons)) {
-    const person = asRecord(rawPerson);
-    if (!person) continue;
-    const name = asString(person.name) ?? asString(person.person);
-    const role = (asString(person.role) ?? "").toLowerCase();
-    if (!name) continue;
+  const personArray = asArray(persons);
+  if (personArray.length > 0) {
+    for (const rawPerson of personArray) {
+      const person = asRecord(rawPerson);
+      if (!person) continue;
+      const name = asString(person.name) ?? asString(person.person) ?? asString(person.artist);
+      const role = asString(person.role) ?? asString(person.type) ?? asString(person.category) ?? "";
+      if (!name) continue;
+      const bucket = mapRoleToBucket(role) ?? "performers";
+      pushNames(grouped[bucket], splitNames(name));
+    }
+    return grouped;
+  }
 
-    if (role.includes("feat")) grouped.feats.push(name);
-    else if (role.includes("соисполн")) grouped.coPerformers.push(name);
-    else if (role.includes("исполн")) grouped.performers.push(name);
-    else if (role.includes("remix")) grouped.remixers.push(name);
-    else if (role.includes("продюсер") || role.includes("producer")) grouped.producers.push(name);
-    else if (role.includes("автор музыки") || role.includes("composer")) grouped.musicAuthors.push(name);
-    else if (role.includes("автор слов") || role.includes("lyric")) grouped.lyricsAuthors.push(name);
+  const personObject = asRecord(persons);
+  if (!personObject) return grouped;
+
+  const nestedPersons = asArray(personObject.persons);
+  if (nestedPersons.length > 0) {
+    const nested = parsePersons(nestedPersons);
+    return {
+      performers: [...grouped.performers, ...nested.performers],
+      feats: [...grouped.feats, ...nested.feats],
+      remixers: [...grouped.remixers, ...nested.remixers],
+      coPerformers: [...grouped.coPerformers, ...nested.coPerformers],
+      producers: [...grouped.producers, ...nested.producers],
+      musicAuthors: [...grouped.musicAuthors, ...nested.musicAuthors],
+      lyricsAuthors: [...grouped.lyricsAuthors, ...nested.lyricsAuthors]
+    };
+  }
+
+  const directName = asString(personObject.name) ?? asString(personObject.person) ?? asString(personObject.artist);
+  if (directName) {
+    const role = asString(personObject.role) ?? asString(personObject.type) ?? asString(personObject.category) ?? "";
+    const bucket = mapRoleToBucket(role) ?? "performers";
+    pushNames(grouped[bucket], splitNames(directName));
+  }
+
+  for (const [rawKey, rawValue] of Object.entries(personObject)) {
+    const key = rawKey.toLowerCase();
+    const bucket = mapRoleToBucket(key);
+    if (!bucket) continue;
+    mergeRoleNamesFromValue(grouped, bucket, rawValue);
   }
 
   return grouped;
+}
+
+function mergePersonGroups(
+  first: ReturnType<typeof parsePersons>,
+  second: ReturnType<typeof parsePersons>
+): ReturnType<typeof parsePersons> {
+  return {
+    performers: unique([...first.performers, ...second.performers]),
+    feats: unique([...first.feats, ...second.feats]),
+    remixers: unique([...first.remixers, ...second.remixers]),
+    coPerformers: unique([...first.coPerformers, ...second.coPerformers]),
+    producers: unique([...first.producers, ...second.producers]),
+    musicAuthors: unique([...first.musicAuthors, ...second.musicAuthors]),
+    lyricsAuthors: unique([...first.lyricsAuthors, ...second.lyricsAuthors])
+  };
 }
 
 function unique(values: string[]): string[] {
@@ -334,6 +470,16 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
   const releaseId = asString(release.id);
   const previewRef = pickLegacyFileRef(preview);
   const previewExt = normalizeExtension(preview);
+  const previewFileName =
+    preview && !preview.includes("/") && !looksLikeOnlyExtension(preview) ? preview.trim() : null;
+  const legacyPreviewRootRef =
+    releaseId && previewExt
+      ? {
+          storageKey: `${releaseId}.${previewExt}`,
+          url: resolveStoredFileUrl({ storageKey: `${releaseId}.${previewExt}` }),
+          fileName: `${releaseId}.${previewExt}`
+        }
+      : { storageKey: null, url: null, fileName: null };
   const legacyPreviewBucketRef =
     releaseId && previewExt
       ? {
@@ -342,13 +488,16 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
           fileName: `${releaseId}.${previewExt}`
         }
       : { storageKey: null, url: null, fileName: null };
+  const legacyPreviewFileRef = pickLegacyFileRef(previewFileName);
   const fallbackUrl = resolveStoredFileUrl({ url: legacyCoverUrl, storageKey: null });
 
   const coverUrl =
     coverUploadRef.url ??
     fallbackUrl ??
     coverImageRef.url ??
+    legacyPreviewRootRef.url ??
     legacyPreviewBucketRef.url ??
+    legacyPreviewFileRef.url ??
     previewRef.url ??
     "";
   return {
@@ -423,9 +572,13 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
   const dbTracks = asArray(release.tracks ?? release.track);
   const trackCount = Math.max(dbTracks.length, submissionTracks.length);
 
-  const releasePersons = parsePersons(submissionData?.persons ?? release.roles);
+  const releasePersons = mergePersonGroups(
+    parsePersons(submissionData?.persons),
+    parsePersons(release.roles)
+  );
   const releasePerformer = asString(release.performer) ?? asString(asRecord(release.user)?.name) ?? "";
   const releaseFeat = asString(release.feat) ?? "";
+  const releaseRemixer = asString(release.remixer) ?? "";
 
   const tracks = Array.from({ length: trackCount }).map((_, index) => {
     const dbTrack = asRecord(dbTracks[index]) ?? {};
@@ -456,7 +609,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
             : [releasePerformer].filter(Boolean)
         ),
         feats: unique(persons.feats.length ? persons.feats : [releaseFeat].filter(Boolean)),
-        remixers: unique(persons.remixers),
+        remixers: unique(persons.remixers.length ? persons.remixers : [releaseRemixer].filter(Boolean)),
         coPerformers: unique(persons.coPerformers),
         producers: unique(persons.producers),
         musicAuthors: unique(persons.musicAuthors),
@@ -536,9 +689,9 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
         names: platforms
       },
       roles: {
-        performers: unique(releasePersons.performers.length ? releasePersons.performers : [releasePerformer].filter(Boolean)),
-        feats: unique(releasePersons.feats.length ? releasePersons.feats : [releaseFeat].filter(Boolean)),
-        remixers: unique(releasePersons.remixers),
+        performers: unique([...releasePersons.performers, ...splitNames(releasePerformer)]),
+        feats: unique([...releasePersons.feats, ...splitNames(releaseFeat)]),
+        remixers: unique([...releasePersons.remixers, ...splitNames(releaseRemixer)]),
         coPerformers: unique(releasePersons.coPerformers),
         producers: unique(releasePersons.producers),
         musicAuthors: unique(releasePersons.musicAuthors),

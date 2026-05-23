@@ -76,8 +76,32 @@ function buildLocalObjectPath(key: string): string {
   return `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
 }
 
+function looksLikeSimpleFileName(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  if (normalized.includes("/")) return false;
+  return /\.[a-z0-9]{2,8}$/iu.test(normalized);
+}
+
 function normalizeStorageKey(value: string | null | undefined): string | null {
-  const normalized = (value ?? "").trim().replace(/^\/+/u, "");
+  const raw = (value ?? "").trim();
+  if (!raw) return null;
+
+  let normalized = raw;
+  if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+    try {
+      const parsed = new URL(normalized);
+      normalized = parsed.pathname;
+    } catch {
+      // Keep as-is and fallback to regular sanitization below.
+    }
+  }
+
+  normalized = normalized.replace(/^\/+/u, "");
+  normalized = normalized.replace(/^api\/uploads\/object\/+/u, "");
+  normalized = normalized.replace(/^uploads\/object\/+/u, "");
+  normalized = normalized.replace(/^object\/+/u, "");
+
   if (!normalized) return null;
   const segments = normalized.split("/").filter(Boolean);
   if (
@@ -120,6 +144,9 @@ export function resolveStoredFileUrl(input: {
       return directUrl;
     }
     if (directUrl.includes("/")) {
+      return resolvePublicStorageUrlFromKey(directUrl) ?? buildLocalObjectPath(directUrl);
+    }
+    if (looksLikeSimpleFileName(directUrl)) {
       return resolvePublicStorageUrlFromKey(directUrl) ?? buildLocalObjectPath(directUrl);
     }
   }

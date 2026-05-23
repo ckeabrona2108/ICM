@@ -39,16 +39,61 @@ function looksLikeOnlyExtension(value: string): boolean {
   return /^[a-z0-9]{2,8}$/iu.test(value.trim().replace(/^\./u, ""));
 }
 
+function normalizeExtension(value: string): string | null {
+  const normalized = value.trim().replace(/^\./u, "").toLowerCase();
+  if (!normalized) return null;
+  return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
+}
+
+function extractBaseFileName(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const withoutQuery = normalized.split("?")[0]?.split("#")[0] ?? normalized;
+  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
+  if (!fileName || !fileName.includes(".")) return null;
+  return fileName;
+}
+
 function resolveReleaseCoverUrl(releaseId: string, preview: string): string {
   const rawPreview = preview.trim();
   if (!rawPreview) return "";
 
   if (looksLikeOnlyExtension(rawPreview)) {
-    const extension = rawPreview.replace(/^\./u, "");
-    return resolveStoredFileUrl({ storageKey: `previews/${releaseId}.${extension}` }) ?? "";
+    const extension = normalizeExtension(rawPreview);
+    if (extension) {
+      const extensionCandidates = [
+        `${releaseId}.${extension}`,
+        `previews/${releaseId}.${extension}`,
+        `covers/${releaseId}.${extension}`,
+        `uploads/${releaseId}/release-cover.${extension}`,
+        `uploads/${releaseId}.${extension}`
+      ];
+      for (const key of extensionCandidates) {
+        const url = resolveStoredFileUrl({ storageKey: key });
+        if (url) return url;
+      }
+    }
   }
 
-  return resolveStoredFileUrl({ url: rawPreview, storageKey: null }) ?? rawPreview;
+  const direct = resolveStoredFileUrl({ url: rawPreview, storageKey: null });
+  if (direct) return direct;
+
+  const baseFileName = extractBaseFileName(rawPreview);
+  if (baseFileName) {
+    const fileCandidates = [
+      baseFileName,
+      `previews/${baseFileName}`,
+      `covers/${baseFileName}`,
+      `uploads/${baseFileName}`,
+      `uploads/${releaseId}/${baseFileName}`
+    ];
+    for (const key of fileCandidates) {
+      const url = resolveStoredFileUrl({ storageKey: key });
+      if (url) return url;
+    }
+  }
+
+  return rawPreview;
 }
 
 function emptyTrack(id: string): AdminReleaseDetails["tracks"][number] {

@@ -325,13 +325,13 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
               <InfoSection
                 title="Персоны и роли"
                 rows={[
-                  ["Исполнители", toList(details.release.roles.performers)],
-                  ["feat", toList(details.release.roles.feats)],
-                  ["Remixer", toList(details.release.roles.remixers)],
-                  ["Соисполнители", toList(details.release.roles.coPerformers)],
-                  ["Продюсеры", toList(details.release.roles.producers)],
-                  ["Авторы музыки", toList(details.release.roles.musicAuthors)],
-                  ["Авторы слов", toList(details.release.roles.lyricsAuthors)]
+                  ["Исполнитель(и)", toList(details.release.roles.performers)],
+                  ["feat(s)", toList(details.release.roles.feats)],
+                  ["remixer", toList(details.release.roles.remixers)],
+                  ["соисполнитель", toList(details.release.roles.coPerformers)],
+                  ["продюсер", toList(details.release.roles.producers)],
+                  ["автор(ы) музыки", toList(details.release.roles.musicAuthors)],
+                  ["автор(ы) слов", toList(details.release.roles.lyricsAuthors)]
                 ]}
               />
 

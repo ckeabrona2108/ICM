@@ -38,8 +38,6 @@ export async function POST(request: Request) {
       select: { id: true, email: true, name: true }
     });
 
-    let previewUrl: string | null = null;
-
     if (user) {
       const token = randomBytes(32).toString("hex");
       const expires = new Date(Date.now() + 1000 * 60 * 30);
@@ -62,7 +60,6 @@ export async function POST(request: Request) {
 
       const baseUrl = resolveBaseUrl(request);
       const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
-      previewUrl = resetUrl;
 
       const transporter = getSmtpBzTransporter();
       const from = getSmtpFromAddress();
@@ -83,8 +80,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      message: "Если аккаунт существует, инструкция по восстановлению отправлена.",
-      previewUrl
+      message: "Если аккаунт существует, инструкция по восстановлению отправлена."
     });
   } catch (error) {
     if (isPrismaConnectionError(error)) {

@@ -14,7 +14,6 @@ export default function ForgotPasswordPage() {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [success, setSuccess] = React.useState("");
-  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -23,7 +22,6 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError("");
     setSuccess("");
-    setPreviewUrl(null);
 
     try {
       const response = await fetch("/api/auth/forgot-password", {
@@ -33,7 +31,7 @@ export default function ForgotPasswordPage() {
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | { error?: string; message?: string; previewUrl?: string | null }
+        | { error?: string; message?: string }
         | null;
 
       if (!response.ok) {
@@ -45,7 +43,6 @@ export default function ForgotPasswordPage() {
         payload?.message ??
           "Если аккаунт существует, инструкция по восстановлению отправлена."
       );
-      setPreviewUrl(payload?.previewUrl ?? null);
     } catch {
       setError("Ошибка сети. Попробуйте снова.");
     } finally {
@@ -103,20 +100,7 @@ export default function ForgotPasswordPage() {
           <div className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-[13px] text-emerald-100">
             <div className="flex items-start gap-2">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="space-y-2">
-                <p>{success}</p>
-                {previewUrl ? (
-                  <p className="text-emerald-100/80">
-                    Локальный режим:{" "}
-                    <a
-                      href={previewUrl}
-                      className="font-semibold text-white underline underline-offset-4"
-                    >
-                      открыть ссылку восстановления
-                    </a>
-                  </p>
-                ) : null}
-              </div>
+              <p>{success}</p>
             </div>
           </div>
         ) : null}
@@ -154,4 +138,3 @@ export default function ForgotPasswordPage() {
     </div>
   );
 }
-

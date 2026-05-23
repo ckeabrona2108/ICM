@@ -222,6 +222,7 @@ export interface AdminReleaseDetailsResponse {
   cover: {
     url: string;
     download_url: string | null;
+    candidate_urls?: string[];
   };
   release: {
     metadata_language: string;

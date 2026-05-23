@@ -24,6 +24,7 @@ export interface CabinetRelease {
   id: string;
   number: number;
   coverUrl: string;
+  coverUrlCandidates?: string[];
   cover?: string;
   title?: string;
   artist?: string;

@@ -192,6 +192,19 @@ const fullNameWordsPattern = /^\S+\s+\S+/u;
 const passportNumberPattern = /^\d{4}\s\d{6}$/u;
 const innPattern = /^(\d{10}|\d{12})$/u;
 const snilsPattern = /^\d{3}-\d{3}-\d{3}\s\d{2}$/u;
+const isProductionRuntime = process.env.NODE_ENV === "production";
+const allowLocalVerificationStore = process.env.VERIFICATION_ALLOW_LOCAL_STORE === "true";
+
+function shouldUseLocalVerificationStore(): boolean {
+  return !isProductionRuntime || allowLocalVerificationStore;
+}
+
+function assertLocalVerificationStoreAvailable(): void {
+  if (shouldUseLocalVerificationStore()) return;
+  throw new Error(
+    "Верификация подписи временно недоступна: локальное хранилище отключено в production. Настройте S3/MinIO и таблицу user_contract_signatures."
+  );
+}
 
 function normalizeNullable(value: string | null | undefined): string | null {
   const trimmed = (value ?? "").trim();
@@ -264,6 +277,7 @@ function getModel(prisma: PrismaClient): ModelLike | null {
 }
 
 async function readStore(): Promise<ContractSignatureListItem[]> {
+  assertLocalVerificationStoreAvailable();
   try {
     const raw = await readFile(storeFile, "utf8");
     const parsed = JSON.parse(raw);
@@ -275,6 +289,7 @@ async function readStore(): Promise<ContractSignatureListItem[]> {
 }
 
 async function writeStore(records: ContractSignatureListItem[]): Promise<void> {
+  assertLocalVerificationStoreAvailable();
   await mkdir(storeDir, { recursive: true });
   await writeFile(storeFile, JSON.stringify(records, null, 2), "utf8");
 }
@@ -300,6 +315,11 @@ async function uploadSignaturePng(params: {
   const signed = await createPresignedUpload({ key, contentType: "image/png" });
 
   if (signed.mock || signed.url.startsWith("/")) {
+    if (!shouldUseLocalVerificationStore()) {
+      throw new Error(
+        "Не удалось сохранить подпись: S3/MinIO не настроен, а локальное хранилище отключено в production."
+      );
+    }
     return { signatureImageUrl: dataUrl };
   }
 
@@ -446,7 +466,7 @@ function isSchemaUnavailableError(error: unknown): boolean {
   return (
     isPrismaTableMissingError(error, "user_contract_signatures") ||
     (error instanceof Error &&
-      /userContractSignature|cannot read properties of undefined|can't reach database server|econnrefused|timed out|connection refused/i.test(
+      /userContractSignature|cannot read properties of undefined/i.test(
         error.message
       ))
   );

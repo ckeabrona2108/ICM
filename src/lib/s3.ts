@@ -1,4 +1,4 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function readStringEnv(...keys: string[]): string | undefined {
@@ -36,6 +36,9 @@ const secretAccessKey = readStringEnv(
 const publicStorageBaseUrl = toEndpointUrl(
   readStringEnv("NEXT_PUBLIC_S3_URL", "S3_PUBLIC_URL", "S3_ENDPOINT", "MINIO_ENDPOINT", "S3_HOST")
 );
+
+const LEGACY_IMAGE_PREFIXES = ["", "previews/", "covers/", "uploads/"] as const;
+const LEGACY_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
 
 function isPlaceholderValue(value: string | undefined): boolean {
   if (!value) return true;
@@ -110,6 +113,223 @@ function normalizeStorageKey(value: string | null | undefined): string | null {
     return null;
   }
   return segments.join("/");
+}
+
+function splitFileNameParts(value: string): { baseName: string; extension: string | null } {
+  const trimmed = value.trim();
+  const withoutQuery = trimmed.split("?")[0]?.split("#")[0] ?? trimmed;
+  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
+  if (!fileName) return { baseName: "", extension: null };
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex === fileName.length - 1) {
+    return { baseName: fileName, extension: null };
+  }
+  return {
+    baseName: fileName.slice(0, dotIndex),
+    extension: fileName.slice(dotIndex + 1)
+  };
+}
+
+function isLikelyFilename(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return true;
+  if (trimmed.startsWith("/")) return true;
+  const normalized = trimmed.split("?")[0]?.split("#")[0] ?? trimmed;
+  if (normalized.includes("/")) return true;
+  return /\.[a-z0-9]{2,8}$/iu.test(normalized);
+}
+
+function buildPublicUrlFromStorageKey(key: string): string {
+  return resolvePublicStorageUrlFromKey(key) ?? buildLocalObjectPath(key);
+}
+
+interface LegacyImageCandidateEntry {
+  key: string | null;
+  url: string;
+}
+
+function buildLegacyImageCandidateEntries(input: {
+  url?: string | null;
+  storageKey?: string | null;
+  extraStorageKeys?: string[] | null;
+}): LegacyImageCandidateEntry[] {
+  const entries: LegacyImageCandidateEntry[] = [];
+  const seenUrls = new Set<string>();
+  const seenKeys = new Set<string>();
+
+  const pushEntry = (entry: LegacyImageCandidateEntry) => {
+    const normalizedUrl = entry.url.trim();
+    if (!normalizedUrl || seenUrls.has(normalizedUrl)) return;
+    seenUrls.add(normalizedUrl);
+    if (entry.key) seenKeys.add(entry.key);
+    entries.push({ key: entry.key, url: normalizedUrl });
+  };
+
+  const addStorageKey = (storageKey: string | null | undefined) => {
+    const normalizedKey = normalizeStorageKey(storageKey ?? null);
+    if (!normalizedKey || seenKeys.has(normalizedKey)) return;
+    pushEntry({
+      key: normalizedKey,
+      url: buildPublicUrlFromStorageKey(normalizedKey)
+    });
+  };
+
+  const directUrl = (input.url ?? "").trim();
+  if (directUrl) {
+    const resolvedDirect = resolveStoredFileUrl({ url: directUrl, storageKey: null });
+    if (resolvedDirect) pushEntry({ key: null, url: resolvedDirect });
+    if (
+      directUrl.startsWith("http://") ||
+      directUrl.startsWith("https://") ||
+      directUrl.startsWith("/")
+    ) {
+      pushEntry({ key: null, url: directUrl });
+    }
+  }
+
+  const directStorageKey = normalizeStorageKey(input.storageKey ?? null);
+  if (directStorageKey) addStorageKey(directStorageKey);
+
+  for (const extraKey of input.extraStorageKeys ?? []) {
+    addStorageKey(extraKey);
+  }
+
+  const rawCandidates = [input.storageKey, input.url]
+    .map((value) => (value ?? "").trim())
+    .filter(Boolean);
+
+  for (const rawCandidate of rawCandidates) {
+    if (!isLikelyFilename(rawCandidate)) continue;
+    const { baseName, extension } = splitFileNameParts(rawCandidate);
+    if (!baseName) continue;
+
+    const extCandidates = new Set<string>();
+    if (extension) extCandidates.add(extension);
+    for (const ext of LEGACY_IMAGE_EXTENSIONS) extCandidates.add(ext);
+
+    const fileNames = Array.from(extCandidates).map((ext) => `${baseName}.${ext}`);
+    for (const fileName of fileNames) {
+      for (const prefix of LEGACY_IMAGE_PREFIXES) {
+        addStorageKey(`${prefix}${fileName}`);
+      }
+    }
+  }
+
+  return entries;
+}
+
+async function checkAbsoluteUrlExists(url: string): Promise<boolean> {
+  if (!/^https?:\/\//u.test(url)) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+  try {
+    const headResponse = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal,
+      cache: "no-store"
+    });
+    if (headResponse.ok) return true;
+    if (headResponse.status !== 405) return false;
+    const getResponse = await fetch(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+      redirect: "follow",
+      signal: controller.signal,
+      cache: "no-store"
+    });
+    return getResponse.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function checkStorageKeyExists(key: string): Promise<boolean | null> {
+  const client = getClient();
+  if (!client || !bucket) return null;
+  try {
+    await client.send(
+      new HeadObjectCommand({
+        Bucket: bucket,
+        Key: key
+      })
+    );
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const code = typeof error === "object" && error && "name" in error ? String((error as { name?: string }).name ?? "") : "";
+    if (/notfound|nosuchkey|404|no such key/i.test(`${code} ${message}`)) {
+      return false;
+    }
+    if (/accessdenied|forbidden|403/i.test(`${code} ${message}`)) {
+      return false;
+    }
+    return null;
+  }
+}
+
+export function buildLegacyImageCandidateUrls(input: {
+  url?: string | null;
+  storageKey?: string | null;
+  extraStorageKeys?: string[] | null;
+}): string[] {
+  return buildLegacyImageCandidateEntries(input).map((entry) => entry.url);
+}
+
+export async function resolveLegacyImageUrl(input: {
+  url?: string | null;
+  storageKey?: string | null;
+  extraStorageKeys?: string[] | null;
+}): Promise<{ url: string | null; candidateUrls: string[] }> {
+  const entries = buildLegacyImageCandidateEntries(input);
+  if (entries.length === 0) return { url: null, candidateUrls: [] };
+
+  for (const entry of entries) {
+    if (entry.key) {
+      const exists = await checkStorageKeyExists(entry.key);
+      if (exists === true) {
+        return { url: entry.url, candidateUrls: entries.map((item) => item.url) };
+      }
+      if (exists === false) continue;
+    }
+
+    if (/^https?:\/\//u.test(entry.url)) {
+      const exists = await checkAbsoluteUrlExists(entry.url);
+      if (exists) {
+        return { url: entry.url, candidateUrls: entries.map((item) => item.url) };
+      }
+    }
+  }
+
+  return {
+    url: entries[0]?.url ?? null,
+    candidateUrls: entries.map((entry) => entry.url)
+  };
+}
+
+export async function resolveFirstReachableImageUrlFromCandidates(
+  candidateUrls: string[]
+): Promise<string | null> {
+  const urls = Array.from(new Set(candidateUrls.map((item) => item.trim()).filter(Boolean)));
+  if (urls.length === 0) return null;
+
+  for (const url of urls) {
+    const key = normalizeStorageKey(url);
+    if (key) {
+      const exists = await checkStorageKeyExists(key);
+      if (exists === true) return url;
+      if (exists === false) continue;
+    }
+    if (/^https?:\/\//u.test(url)) {
+      const exists = await checkAbsoluteUrlExists(url);
+      if (exists) return url;
+    }
+  }
+
+  return urls[0] ?? null;
 }
 
 export function resolvePublicStorageUrlFromKey(key: string): string | null {

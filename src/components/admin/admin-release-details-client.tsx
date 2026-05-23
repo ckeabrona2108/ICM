@@ -31,6 +31,7 @@ interface AdminReleaseDetailsResponse {
   cover: {
     url: string;
     download_url: string | null;
+    candidate_urls: string[];
   };
   release: {
     metadata_language: string;
@@ -189,7 +190,24 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [reason, setReason] = React.useState("");
   const [platformsOpen, setPlatformsOpen] = React.useState(false);
   const [lyricsModal, setLyricsModal] = React.useState<{ title: string; lyrics: string } | null>(null);
-  const [coverUnavailable, setCoverUnavailable] = React.useState(false);
+  const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
+  const coverCandidates = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [details.cover.url, details.cover.download_url, ...(details.cover.candidate_urls ?? [])].filter(
+            (item): item is string => Boolean(item && item.trim())
+          )
+        )
+      ),
+    [details.cover.candidate_urls, details.cover.download_url, details.cover.url]
+  );
+  const activeCoverUrl = coverCandidates[coverCandidateIndex] ?? null;
+  const coverUnavailable = !activeCoverUrl;
+
+  React.useEffect(() => {
+    setCoverCandidateIndex(0);
+  }, [details.id, coverCandidates.length]);
 
   const approve = async () => {
     const normalized = upc.trim();
@@ -268,12 +286,16 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
           <div>
             <div className="relative h-[220px] w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-              {details.cover.url && !coverUnavailable ? (
+              {activeCoverUrl ? (
                 <img
-                  src={details.cover.url}
+                  src={activeCoverUrl}
                   alt={details.release.title}
                   className="h-full w-full object-cover"
-                  onError={() => setCoverUnavailable(true)}
+                  onError={() =>
+                    setCoverCandidateIndex((prev) =>
+                      prev + 1 <= coverCandidates.length ? prev + 1 : prev
+                    )
+                  }
                 />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[12px] text-white/50">
@@ -281,10 +303,10 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 </div>
               )}
             </div>
-            {details.cover.download_url && !coverUnavailable ? (
+            {activeCoverUrl ? (
               <a
-                href={details.cover.download_url}
-                download={guessDownloadName("cover.jpg", details.cover.url.split("/").pop())}
+                href={activeCoverUrl}
+                download={guessDownloadName("cover.jpg", activeCoverUrl.split("/").pop())}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-4 inline-flex h-10 w-full items-center justify-center gap-1 rounded-xl bg-[#7b3df5] px-3 text-[13px] font-semibold text-white transition hover:bg-[#8f5bf7]"
@@ -292,7 +314,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 <Download className="h-4 w-4" />
                 Скачать обложку
               </a>
-            ) : details.cover.download_url ? (
+            ) : coverCandidates.length > 0 ? (
               <button
                 type="button"
                 disabled

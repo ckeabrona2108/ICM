@@ -38,6 +38,7 @@ export interface AdminReleaseDetails {
   title: string;
   subtitle: string;
   coverUrl: string;
+  coverUrlCandidates?: string[];
   label: string;
   upc: string;
   preorderDate: string;

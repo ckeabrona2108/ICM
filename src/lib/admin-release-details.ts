@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
-import { resolveStoredFileUrl } from "@/lib/s3";
+import {
+  buildLegacyImageCandidateUrls,
+  resolveFirstReachableImageUrlFromCandidates,
+  resolveStoredFileUrl
+} from "@/lib/s3";
 
 interface AdminReleaseDetailsResponse {
   id: string;
@@ -13,6 +17,7 @@ interface AdminReleaseDetailsResponse {
   cover: {
     url: string;
     download_url: string | null;
+    candidate_urls: string[];
   };
   release: {
     metadata_language: string;
@@ -122,6 +127,16 @@ interface FileTarget {
   storageKey: string | null;
   url: string | null;
   fileName: string | null;
+}
+
+interface PersonGroups {
+  performers: string[];
+  feats: string[];
+  remixers: string[];
+  coPerformers: string[];
+  producers: string[];
+  musicAuthors: string[];
+  lyricsAuthors: string[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -293,62 +308,77 @@ function pushNames(target: string[], names: string[]) {
   }
 }
 
-function mapRoleToBucket(roleRaw: string): keyof ReturnType<typeof parsePersons> | null {
+function mapRoleToBucket(roleRaw: string): keyof PersonGroups | null {
   const role = roleRaw.trim().toLowerCase();
-  const compact = role.replace(/[\s_-]+/gu, "");
-  if (
-    role === "performer" ||
-    role === "artist" ||
+  if (!role) return null;
+  const compact = role.replace(/[^\p{L}\p{N}]+/gu, "");
+
+  const isPerformer =
+    compact === "performer" ||
+    compact === "artist" ||
     compact === "mainartist" ||
-    role.includes("исполн")
-  ) {
-    return "performers";
-  }
-  if (
-    role === "feat" ||
-    role === "featuring" ||
+    compact === "исполнитель" ||
+    compact === "исполнители" ||
+    compact.startsWith("исполн");
+  if (isPerformer) return "performers";
+
+  const isFeat =
+    compact === "feat" ||
+    compact === "featuring" ||
     compact === "featuredartist" ||
-    role.includes("feat")
-  ) {
-    return "feats";
-  }
-  if (role === "remixer" || role.includes("remix")) return "remixers";
-  if (
+    compact === "featuredartists" ||
+    compact.startsWith("feat");
+  if (isFeat) return "feats";
+
+  const isRemixer =
+    compact === "remixer" || compact === "remixers" || compact.startsWith("remix");
+  if (isRemixer) return "remixers";
+
+  const isCoPerformer =
     compact === "coartist" ||
+    compact === "coartists" ||
     compact === "coperformer" ||
-    role === "collaborator" ||
-    role.includes("соисполн")
-  ) {
-    return "coPerformers";
-  }
-  if (role === "producer" || role.includes("продюсер")) return "producers";
-  if (
-    role === "composer" ||
-    role === "composers" ||
-    role === "musicauthor" ||
-    role === "music_author" ||
-    role === "musicauthors" ||
-    role === "authormusic" ||
-    role === "author_music" ||
-    role === "music" ||
-    role === "songwritermusic" ||
-    role === "songwriter_music" ||
-    role.includes("автор музыки")
-  ) {
-    return "musicAuthors";
-  }
-  if (
-    role === "lyricist" ||
-    role === "lyricists" ||
+    compact === "coperformers" ||
+    compact === "collaborator" ||
+    compact === "collaborators" ||
+    compact === "соисполнитель" ||
+    compact === "соисполнители" ||
+    compact.startsWith("соисполн");
+  if (isCoPerformer) return "coPerformers";
+
+  const isProducer =
+    compact === "producer" ||
+    compact === "producers" ||
+    compact === "продюсер" ||
+    compact === "продюсеры";
+  if (isProducer) return "producers";
+
+  const isMusicAuthor =
+    compact === "composer" ||
+    compact === "composers" ||
+    compact === "musicauthor" ||
+    compact === "musicauthors" ||
+    compact === "authormusic" ||
+    compact === "music" ||
+    compact === "songwritermusic" ||
+    compact === "автормузыки" ||
+    compact === "авторымузыки";
+  if (isMusicAuthor) return "musicAuthors";
+
+  const isLyricsAuthor =
+    compact === "lyricist" ||
+    compact === "lyricists" ||
     compact === "textauthor" ||
     compact === "textauthors" ||
     compact === "authorwords" ||
     compact === "lyrics" ||
-    role === "songwriter" ||
-    role.includes("автор слов")
-  ) {
-    return "lyricsAuthors";
-  }
+    compact === "lyricsauthor" ||
+    compact === "lyricsauthors" ||
+    compact === "songwriter" ||
+    compact === "авторслов" ||
+    compact === "авторыслов";
+  if (isLyricsAuthor) return "lyricsAuthors";
+
   return null;
 }
 
@@ -483,10 +513,26 @@ function parsePersons(persons: unknown): {
   return grouped;
 }
 
+function parseTrackPersons(trackData: Record<string, unknown>): PersonGroups {
+  return mergePersonGroups(
+    parsePersons(trackData),
+    mergePersonGroups(
+      parsePersons(trackData.trackPersons),
+      mergePersonGroups(
+        parsePersons(trackData.persons),
+        mergePersonGroups(
+          parsePersons(trackData.roles),
+          parsePersons(trackData.metadata)
+        )
+      )
+    )
+  );
+}
+
 function mergePersonGroups(
-  first: ReturnType<typeof parsePersons>,
-  second: ReturnType<typeof parsePersons>
-): ReturnType<typeof parsePersons> {
+  first: PersonGroups,
+  second: PersonGroups
+): PersonGroups {
   return {
     performers: unique([...first.performers, ...second.performers]),
     feats: unique([...first.feats, ...second.feats]),
@@ -538,17 +584,37 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
     : { storageKey: null, url: null, fileName: null };
   const fallbackUrl = resolveStoredFileUrl({ url: legacyCoverUrl, storageKey: null });
 
-  const coverUrl =
-    coverUploadRef.url ??
-    fallbackUrl ??
-    coverImageRef.url ??
-    legacyPreviewBucketRef.url ??
-    legacyPreviewFileRef.url ??
-    previewRef.url ??
-    "";
+  const candidateUrls = Array.from(
+    new Set(
+      [
+        ...buildLegacyImageCandidateUrls({
+          url: coverUploadRef.url,
+          storageKey: coverUploadRef.storageKey
+        }),
+        ...buildLegacyImageCandidateUrls({
+          url: fallbackUrl,
+          storageKey: null
+        }),
+        ...buildLegacyImageCandidateUrls({
+          url: coverImageRef.url,
+          storageKey: coverImageRef.storageKey
+        }),
+        ...buildLegacyImageCandidateUrls({
+          url: previewRef.url ?? preview ?? null,
+          storageKey: preview ?? null,
+          extraStorageKeys: [
+            legacyPreviewBucketRef.storageKey ?? "",
+            legacyPreviewFileRef.storageKey ?? ""
+          ].filter(Boolean)
+        })
+      ].filter(Boolean)
+    )
+  );
+  const coverUrl = candidateUrls[0] ?? "";
   return {
     url: coverUrl,
-    download_url: coverUrl || null
+    download_url: coverUrl || null,
+    candidate_urls: candidateUrls
   };
 }
 
@@ -620,7 +686,10 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
 
   const releasePersons = mergePersonGroups(
     parsePersons(submissionData?.persons),
-    parsePersons(release.roles)
+    mergePersonGroups(
+      parsePersons(release.roles),
+      parsePersons(submissionData?.roles)
+    )
   );
   const releasePerformer = asString(release.performer) ?? asString(asRecord(release.user)?.name) ?? "";
   const releaseFeat = asString(release.feat) ?? "";
@@ -629,7 +698,10 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
   const tracks = Array.from({ length: trackCount }).map((_, index) => {
     const dbTrack = asRecord(dbTracks[index]) ?? {};
     const submissionTrack = asRecord(submissionTracks[index]) ?? {};
-    const persons = parsePersons(submissionTrack.trackPersons);
+    const persons = mergePersonGroups(
+      parseTrackPersons(submissionTrack),
+      parseTrackPersons(dbTrack)
+    );
 
     const audioRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "audio");
     const textRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "text");
@@ -886,7 +958,32 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
   });
 
   if (!release) return null;
-  return mapAdminReleaseDetails(release);
+  const details = mapAdminReleaseDetails(release);
+  const reachableCoverUrl = await resolveFirstReachableImageUrlFromCandidates(
+    details.cover.candidate_urls
+  );
+  details.cover.url = reachableCoverUrl ?? "";
+  details.cover.download_url = reachableCoverUrl;
+
+  console.log("[admin-release-roles-debug]", {
+    releaseId,
+    releaseRoles: release.roles ?? null,
+    tracksRoles: release.track.map((trackRow) => ({
+      id: trackRow.id,
+      title: trackRow.title,
+      roles: trackRow.roles ?? null
+    })),
+    mappedPersons: {
+      release: details.release.roles,
+      tracks: details.tracks.map((trackRow) => ({
+        id: trackRow.id,
+        title: trackRow.title,
+        roles: trackRow.track_roles
+      }))
+    }
+  });
+
+  return details;
 }
 
 export async function getAdminReleaseDownloadTarget(params: { releaseId: string; fileId: string }) {

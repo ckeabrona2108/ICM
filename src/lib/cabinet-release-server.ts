@@ -4,7 +4,7 @@ import type { CabinetRelease, CabinetReleaseStatus, CabinetTrack } from "@/lib/c
 import { normalizeNextImageSrc } from "@/lib/image-src";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
-import { resolveStoredFileUrl } from "@/lib/s3";
+import { buildLegacyImageCandidateUrls, resolveStoredFileUrl } from "@/lib/s3";
 
 export interface CabinetReleaseSource {
   id: string;
@@ -162,38 +162,19 @@ function normalizeExtension(value: string): string | null {
   return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
 }
 
-function extractBaseFileName(value: string): string | null {
-  const normalized = value.trim();
-  if (!normalized) return null;
-  const withoutQuery = normalized.split("?")[0]?.split("#")[0] ?? normalized;
-  const raw = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
-  if (!raw || !raw.includes(".")) return null;
-  return raw;
-}
-
-function resolveReleaseCoverUrl(releaseId: string, preview: string, roles: unknown): string {
+function resolveReleaseCoverUrls(
+  releaseId: string,
+  preview: string,
+  roles: unknown
+): { url: string; candidates: string[] } {
   const rawPreview = preview.trim();
-  const normalizedPreview = normalizeNextImageSrc(rawPreview);
-  if (
-    normalizedPreview &&
-    (rawPreview.startsWith("/") ||
-      rawPreview.startsWith("http://") ||
-      rawPreview.startsWith("https://"))
-  ) {
-    return normalizedPreview;
-  }
-
-  const resolvedPreviewUrl = normalizeNextImageSrc(
-    resolveStoredFileUrl({ url: rawPreview, storageKey: null })
-  );
-  if (resolvedPreviewUrl) return resolvedPreviewUrl;
-
-  const legacyCandidates: string[] = [];
+  const legacyStorageKeys: string[] = [];
   if (rawPreview) {
     if (looksLikeOnlyExtension(rawPreview)) {
       const ext = normalizeExtension(rawPreview);
       if (ext) {
-        legacyCandidates.push(
+        legacyStorageKeys.push(
+          `${releaseId}.${ext}`,
           `previews/${releaseId}.${ext}`,
           `covers/${releaseId}.${ext}`,
           `uploads/${releaseId}/release-cover.${ext}`,
@@ -201,24 +182,32 @@ function resolveReleaseCoverUrl(releaseId: string, preview: string, roles: unkno
         );
       }
     }
-
-    const baseFileName = extractBaseFileName(rawPreview);
-    if (baseFileName) {
-      legacyCandidates.push(
-        `previews/${baseFileName}`,
-        `covers/${baseFileName}`,
-        `uploads/${baseFileName}`,
-        `uploads/${releaseId}/${baseFileName}`
-      );
-    }
   }
 
-  for (const storageKey of legacyCandidates) {
-    const candidate = normalizeNextImageSrc(resolveStoredFileUrl({ storageKey }));
-    if (candidate) return candidate;
-  }
+  const rolesCover = resolveCoverFromRoles(roles);
+  const previewCandidates = buildLegacyImageCandidateUrls({
+    url: rawPreview,
+    storageKey: rawPreview && !rawPreview.startsWith("http") && !rawPreview.startsWith("/") ? rawPreview : null,
+    extraStorageKeys: [...legacyStorageKeys]
+  });
+  const rolesCandidates = rolesCover
+    ? buildLegacyImageCandidateUrls({
+        url: rolesCover,
+        storageKey: rolesCover.startsWith("http") || rolesCover.startsWith("/") ? null : rolesCover
+      })
+    : [];
 
-  return resolveCoverFromRoles(roles) ?? "";
+  const uniqueCandidates = Array.from(
+    new Set(
+      [...previewCandidates, ...rolesCandidates]
+        .map((value) => normalizeNextImageSrc(value))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+  return {
+    url: uniqueCandidates[0] ?? "",
+    candidates: uniqueCandidates
+  };
 }
 
 export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number: number): CabinetRelease {
@@ -236,10 +225,12 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
     "submissionData" in (release.roles as Record<string, unknown>)
       ? (release.roles as Record<string, unknown>).submissionData
       : undefined;
+  const cover = resolveReleaseCoverUrls(release.id, release.preview, release.roles);
   return {
     id: release.id,
     number,
-    coverUrl: resolveReleaseCoverUrl(release.id, release.preview, release.roles),
+    coverUrl: cover.url,
+    coverUrlCandidates: cover.candidates,
     title: release.title || "Без названия",
     artist: release.performer?.trim() || "Не указан",
     upc: release.upc || "",

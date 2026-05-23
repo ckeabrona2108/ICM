@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { Check, Loader2, Trash2, X } from "lucide-react";
 
@@ -38,6 +37,7 @@ export function AdminReleasesClient({
   const [error, setError] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
+  const [coverIndexById, setCoverIndexById] = React.useState<Record<string, number>>({});
 
   const [rejectModal, setRejectModal] = React.useState<{
     open: boolean;
@@ -248,7 +248,15 @@ export function AdminReleasesClient({
             const canApprove = release.status === "moderation";
             const canReject = release.status === "moderation";
             const isBusy = busyId === release.id;
-            const safeCoverUrl = normalizeNextImageSrc(release.coverUrl);
+            const coverCandidates = Array.from(
+              new Set(
+                [release.coverUrl, ...(release.coverUrlCandidates ?? [])]
+                  .map((item) => normalizeNextImageSrc(item))
+                  .filter((item): item is string => Boolean(item))
+              )
+            );
+            const coverIndex = coverIndexById[release.id] ?? 0;
+            const safeCoverUrl = coverCandidates[coverIndex] ?? null;
 
             return (
               <article
@@ -258,12 +266,18 @@ export function AdminReleasesClient({
                 <div className="flex flex-wrap gap-4">
                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10">
                     {safeCoverUrl ? (
-                      <Image
+                      <img
                         src={safeCoverUrl}
                         alt={release.title}
-                        fill
-                        sizes="96px"
-                        className="object-cover"
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                        onError={() =>
+                          setCoverIndexById((prev) => ({
+                            ...prev,
+                            [release.id]:
+                              coverIndex + 1 <= coverCandidates.length ? coverIndex + 1 : coverIndex
+                          }))
+                        }
                       />
                     ) : (
                       <div className="grid h-full w-full place-items-center bg-white/[0.03] text-[11px] text-white/45">

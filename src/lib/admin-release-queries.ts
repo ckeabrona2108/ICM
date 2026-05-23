@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
-import { resolveStoredFileUrl } from "@/lib/s3";
+import { buildLegacyImageCandidateUrls, resolveStoredFileUrl } from "@/lib/s3";
 
 export type AdminReleaseStatusFilter =
   | "moderation"
@@ -45,53 +45,42 @@ function normalizeExtension(value: string): string | null {
   return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
 }
 
-function extractBaseFileName(value: string): string | null {
-  const normalized = value.trim();
-  if (!normalized) return null;
-  const withoutQuery = normalized.split("?")[0]?.split("#")[0] ?? normalized;
-  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
-  if (!fileName || !fileName.includes(".")) return null;
-  return fileName;
-}
-
-function resolveReleaseCoverUrl(releaseId: string, preview: string): string {
+function resolveReleaseCoverUrls(
+  releaseId: string,
+  preview: string
+): { url: string; candidates: string[] } {
   const rawPreview = preview.trim();
-  if (!rawPreview) return "";
+  if (!rawPreview) return { url: "", candidates: [] };
+
+  const extraStorageKeys: string[] = [];
 
   if (looksLikeOnlyExtension(rawPreview)) {
     const extension = normalizeExtension(rawPreview);
     if (extension) {
-      const extensionCandidates = [
+      extraStorageKeys.push(
+        `${releaseId}.${extension}`,
         `previews/${releaseId}.${extension}`,
         `covers/${releaseId}.${extension}`,
         `uploads/${releaseId}/release-cover.${extension}`,
         `uploads/${releaseId}.${extension}`
-      ];
-      for (const key of extensionCandidates) {
-        const url = resolveStoredFileUrl({ storageKey: key });
-        if (url) return url;
-      }
+      );
     }
   }
 
-  const direct = resolveStoredFileUrl({ url: rawPreview, storageKey: null });
-  if (direct) return direct;
+  const candidates = Array.from(
+    new Set(
+      buildLegacyImageCandidateUrls({
+        url: rawPreview,
+        storageKey: rawPreview.startsWith("http") || rawPreview.startsWith("/") ? null : rawPreview,
+        extraStorageKeys
+      })
+    )
+  );
 
-  const baseFileName = extractBaseFileName(rawPreview);
-  if (baseFileName) {
-    const fileCandidates = [
-      `previews/${baseFileName}`,
-      `covers/${baseFileName}`,
-      `uploads/${baseFileName}`,
-      `uploads/${releaseId}/${baseFileName}`
-    ];
-    for (const key of fileCandidates) {
-      const url = resolveStoredFileUrl({ storageKey: key });
-      if (url) return url;
-    }
-  }
-
-  return rawPreview;
+  return {
+    url: candidates[0] ?? resolveStoredFileUrl({ url: rawPreview, storageKey: null }) ?? rawPreview,
+    candidates
+  };
 }
 
 function emptyTrack(id: string): AdminReleaseDetails["tracks"][number] {
@@ -179,7 +168,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
           }))
         : [emptyTrack(`${source.id}-track`)];
 
-      const coverUrl = resolveReleaseCoverUrl(source.id, source.preview);
+      const cover = resolveReleaseCoverUrls(source.id, source.preview);
       const paymentDisplay = source.confirmed
         ? getReleasePaymentDisplayFromRoles(source.roles)
         : null;
@@ -189,7 +178,8 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         role: source.user.isAdmin ? "label" : "artist",
         title: source.title,
         subtitle: source.subtitle ?? "",
-        coverUrl,
+        coverUrl: cover.url,
+        coverUrlCandidates: cover.candidates,
         label: source.labelName ?? "ICECREAMMUSIC",
         upc: source.upc ?? "",
         preorderDate: formatDate(source.preorderDate),
@@ -222,7 +212,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         countryStartEarly: Boolean(source.earlyStartInRussia),
         realTimeDelivery: Boolean(source.realTimeDelivery),
         yandexDate: source.yandexSoonNewRelease ? formatDate(source.yandexSoonNewRelease) : "",
-        previewUrl: coverUrl,
+        previewUrl: cover.url,
         tracks
       } satisfies AdminReleaseDetails;
     });

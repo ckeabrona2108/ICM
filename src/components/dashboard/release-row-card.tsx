@@ -207,7 +207,7 @@ function ReleaseRowCardBase({
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [paying, setPaying] = React.useState(false);
   const [payError, setPayError] = React.useState<string | null>(null);
-  const [coverFailed, setCoverFailed] = React.useState(false);
+  const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
   const timelineState = getReleaseTimelineState(release.status, release.paid);
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
@@ -215,8 +215,18 @@ function ReleaseRowCardBase({
   const editLocked = release.status === "moderation";
   const showHistoryIcon = release.status !== "draft";
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
-  const coverUrl = release.coverUrl || release.cover || "";
-  const safeCoverSrc = normalizeNextImageSrc(coverUrl);
+  const coverCandidates = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [release.coverUrl, ...(release.coverUrlCandidates ?? []), release.cover]
+            .map((item) => normalizeNextImageSrc(item ?? ""))
+            .filter((item): item is string => Boolean(item))
+        )
+      ),
+    [release.cover, release.coverUrl, release.coverUrlCandidates]
+  );
+  const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
   const title = release.title?.trim() || "Без названия";
   const artist = release.artist?.trim() || "Исполнитель не указан";
   const releaseDate = release.releaseDate?.trim() || "Дата не выбрана";
@@ -226,7 +236,7 @@ function ReleaseRowCardBase({
   const genre = release.genre?.trim() || "Не указан";
   const label = release.label?.trim() || "Не указан";
   const priorityBadge = getPriorityBadgeDescriptor(Boolean(release.priority));
-  const isRenderableCover = Boolean(safeCoverSrc) && !coverFailed;
+  const isRenderableCover = Boolean(safeCoverSrc);
   const quickPreviewData =
     quickPreviewTrackNum == null ? null : (quickPreviewCache[quickPreviewTrackNum] ?? null);
   const isQuickPreviewOpen = quickPreviewTrackNum != null;
@@ -300,6 +310,10 @@ function ReleaseRowCardBase({
       }),
     [artist, displayTracks]
   );
+
+  React.useEffect(() => {
+    setCoverCandidateIndex(0);
+  }, [release.id, coverCandidates.length]);
 
   const handleDeleteDraft = React.useCallback(async () => {
     if (release.status !== "draft") return;
@@ -525,7 +539,11 @@ function ReleaseRowCardBase({
                 alt=""
                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 loading="lazy"
-                onError={() => setCoverFailed(true)}
+                onError={() =>
+                  setCoverCandidateIndex((prev) =>
+                    prev + 1 <= coverCandidates.length ? prev + 1 : prev
+                  )
+                }
               />
             ) : (
               <div className="grid h-full w-full place-items-center bg-white/[0.02] text-[12px] font-medium text-white/45">

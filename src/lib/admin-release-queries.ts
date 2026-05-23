@@ -62,7 +62,6 @@ function resolveReleaseCoverUrl(releaseId: string, preview: string): string {
     const extension = normalizeExtension(rawPreview);
     if (extension) {
       const extensionCandidates = [
-        `${releaseId}.${extension}`,
         `previews/${releaseId}.${extension}`,
         `covers/${releaseId}.${extension}`,
         `uploads/${releaseId}/release-cover.${extension}`,
@@ -81,7 +80,6 @@ function resolveReleaseCoverUrl(releaseId: string, preview: string): string {
   const baseFileName = extractBaseFileName(rawPreview);
   if (baseFileName) {
     const fileCandidates = [
-      baseFileName,
       `previews/${baseFileName}`,
       `covers/${baseFileName}`,
       `uploads/${baseFileName}`,

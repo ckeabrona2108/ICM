@@ -176,7 +176,9 @@ function resolveReleaseCoverUrl(releaseId: string, preview: string, roles: unkno
   const normalizedPreview = normalizeNextImageSrc(rawPreview);
   if (
     normalizedPreview &&
-    !(normalizedPreview.startsWith("/api/uploads/object/") && !rawPreview.includes("/"))
+    (rawPreview.startsWith("/") ||
+      rawPreview.startsWith("http://") ||
+      rawPreview.startsWith("https://"))
   ) {
     return normalizedPreview;
   }
@@ -192,7 +194,6 @@ function resolveReleaseCoverUrl(releaseId: string, preview: string, roles: unkno
       const ext = normalizeExtension(rawPreview);
       if (ext) {
         legacyCandidates.push(
-          `${releaseId}.${ext}`,
           `previews/${releaseId}.${ext}`,
           `covers/${releaseId}.${ext}`,
           `uploads/${releaseId}/release-cover.${ext}`,
@@ -204,7 +205,6 @@ function resolveReleaseCoverUrl(releaseId: string, preview: string, roles: unkno
     const baseFileName = extractBaseFileName(rawPreview);
     if (baseFileName) {
       legacyCandidates.push(
-        baseFileName,
         `previews/${baseFileName}`,
         `covers/${baseFileName}`,
         `uploads/${baseFileName}`,

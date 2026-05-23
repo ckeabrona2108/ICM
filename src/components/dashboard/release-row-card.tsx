@@ -207,6 +207,7 @@ function ReleaseRowCardBase({
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [paying, setPaying] = React.useState(false);
   const [payError, setPayError] = React.useState<string | null>(null);
+  const [coverFailed, setCoverFailed] = React.useState(false);
   const timelineState = getReleaseTimelineState(release.status, release.paid);
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
@@ -225,7 +226,7 @@ function ReleaseRowCardBase({
   const genre = release.genre?.trim() || "Не указан";
   const label = release.label?.trim() || "Не указан";
   const priorityBadge = getPriorityBadgeDescriptor(Boolean(release.priority));
-  const isRenderableCover = Boolean(safeCoverSrc);
+  const isRenderableCover = Boolean(safeCoverSrc) && !coverFailed;
   const quickPreviewData =
     quickPreviewTrackNum == null ? null : (quickPreviewCache[quickPreviewTrackNum] ?? null);
   const isQuickPreviewOpen = quickPreviewTrackNum != null;
@@ -524,6 +525,7 @@ function ReleaseRowCardBase({
                 alt=""
                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 loading="lazy"
+                onError={() => setCoverFailed(true)}
               />
             ) : (
               <div className="grid h-full w-full place-items-center bg-white/[0.02] text-[12px] font-medium text-white/45">

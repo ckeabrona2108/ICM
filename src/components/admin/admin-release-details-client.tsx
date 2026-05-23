@@ -189,6 +189,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [reason, setReason] = React.useState("");
   const [platformsOpen, setPlatformsOpen] = React.useState(false);
   const [lyricsModal, setLyricsModal] = React.useState<{ title: string; lyrics: string } | null>(null);
+  const [coverUnavailable, setCoverUnavailable] = React.useState(false);
 
   const approve = async () => {
     const normalized = upc.trim();
@@ -267,15 +268,20 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
           <div>
             <div className="relative h-[220px] w-[220px] overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-              {details.cover.url ? (
-                <img src={details.cover.url} alt={details.release.title} className="h-full w-full object-cover" />
+              {details.cover.url && !coverUnavailable ? (
+                <img
+                  src={details.cover.url}
+                  alt={details.release.title}
+                  className="h-full w-full object-cover"
+                  onError={() => setCoverUnavailable(true)}
+                />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[12px] text-white/50">
                   Без обложки
                 </div>
               )}
             </div>
-            {details.cover.download_url ? (
+            {details.cover.download_url && !coverUnavailable ? (
               <a
                 href={details.cover.download_url}
                 download={guessDownloadName("cover.jpg", details.cover.url.split("/").pop())}
@@ -286,6 +292,15 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 <Download className="h-4 w-4" />
                 Скачать обложку
               </a>
+            ) : details.cover.download_url ? (
+              <button
+                type="button"
+                disabled
+                className="mt-4 inline-flex h-10 w-full cursor-not-allowed items-center justify-center gap-1 rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[13px] font-semibold text-white/45"
+              >
+                <Download className="h-4 w-4" />
+                Файл недоступен
+              </button>
             ) : null}
           </div>
 

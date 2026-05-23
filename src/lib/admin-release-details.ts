@@ -324,15 +324,26 @@ function mapRoleToBucket(roleRaw: string): keyof ReturnType<typeof parsePersons>
   if (role === "producer" || role.includes("продюсер")) return "producers";
   if (
     role === "composer" ||
+    role === "composers" ||
     role === "musicauthor" ||
     role === "music_author" ||
+    role === "musicauthors" ||
+    role === "authormusic" ||
+    role === "author_music" ||
+    role === "music" ||
+    role === "songwritermusic" ||
+    role === "songwriter_music" ||
     role.includes("автор музыки")
   ) {
     return "musicAuthors";
   }
   if (
     role === "lyricist" ||
+    role === "lyricists" ||
     compact === "textauthor" ||
+    compact === "textauthors" ||
+    compact === "authorwords" ||
+    compact === "lyrics" ||
     role === "songwriter" ||
     role.includes("автор слов")
   ) {
@@ -358,14 +369,26 @@ function mergeRoleNamesFromValue(
       }
       const itemRecord = asRecord(item);
       if (!itemRecord) continue;
-      const name = asString(itemRecord.name) ?? asString(itemRecord.person) ?? asString(itemRecord.artist);
+      const name =
+        asString(itemRecord.name) ??
+        asString(itemRecord.fullName) ??
+        asString(itemRecord.person) ??
+        asString(itemRecord.artist) ??
+        asString(itemRecord.value) ??
+        asString(itemRecord.title);
       if (name) pushNames(grouped[roleKey], splitNames(name));
     }
     return;
   }
   const valueRecord = asRecord(value);
   if (!valueRecord) return;
-  const name = asString(valueRecord.name) ?? asString(valueRecord.person) ?? asString(valueRecord.artist);
+  const name =
+    asString(valueRecord.name) ??
+    asString(valueRecord.fullName) ??
+    asString(valueRecord.person) ??
+    asString(valueRecord.artist) ??
+    asString(valueRecord.value) ??
+    asString(valueRecord.title);
   if (name) pushNames(grouped[roleKey], splitNames(name));
 }
 
@@ -393,8 +416,20 @@ function parsePersons(persons: unknown): {
     for (const rawPerson of personArray) {
       const person = asRecord(rawPerson);
       if (!person) continue;
-      const name = asString(person.name) ?? asString(person.person) ?? asString(person.artist);
-      const role = asString(person.role) ?? asString(person.type) ?? asString(person.category) ?? "";
+      const name =
+        asString(person.name) ??
+        asString(person.fullName) ??
+        asString(person.person) ??
+        asString(person.artist) ??
+        asString(person.value) ??
+        asString(person.title);
+      const role =
+        asString(person.role) ??
+        asString(person.type) ??
+        asString(person.kind) ??
+        asString(person.roleType) ??
+        asString(person.category) ??
+        "";
       if (!name) continue;
       const bucket = mapRoleToBucket(role) ?? "performers";
       pushNames(grouped[bucket], splitNames(name));
@@ -419,9 +454,21 @@ function parsePersons(persons: unknown): {
     };
   }
 
-  const directName = asString(personObject.name) ?? asString(personObject.person) ?? asString(personObject.artist);
+  const directName =
+    asString(personObject.name) ??
+    asString(personObject.fullName) ??
+    asString(personObject.person) ??
+    asString(personObject.artist) ??
+    asString(personObject.value) ??
+    asString(personObject.title);
   if (directName) {
-    const role = asString(personObject.role) ?? asString(personObject.type) ?? asString(personObject.category) ?? "";
+    const role =
+      asString(personObject.role) ??
+      asString(personObject.type) ??
+      asString(personObject.kind) ??
+      asString(personObject.roleType) ??
+      asString(personObject.category) ??
+      "";
     const bucket = mapRoleToBucket(role) ?? "performers";
     pushNames(grouped[bucket], splitNames(directName));
   }
@@ -468,18 +515,12 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
   const legacyCoverUrl = asString(submissionData?.cover);
   const preview = asString(release.preview);
   const releaseId = asString(release.id);
-  const previewRef = pickLegacyFileRef(preview);
-  const previewExt = normalizeExtension(preview);
   const previewFileName =
     preview && !preview.includes("/") && !looksLikeOnlyExtension(preview) ? preview.trim() : null;
-  const legacyPreviewRootRef =
-    releaseId && previewExt
-      ? {
-          storageKey: `${releaseId}.${previewExt}`,
-          url: resolveStoredFileUrl({ storageKey: `${releaseId}.${previewExt}` }),
-          fileName: `${releaseId}.${previewExt}`
-        }
-      : { storageKey: null, url: null, fileName: null };
+  const previewRef = previewFileName
+    ? { storageKey: null, url: null, fileName: null }
+    : pickLegacyFileRef(preview);
+  const previewExt = normalizeExtension(preview);
   const legacyPreviewBucketRef =
     releaseId && previewExt
       ? {
@@ -488,14 +529,19 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
           fileName: `${releaseId}.${previewExt}`
         }
       : { storageKey: null, url: null, fileName: null };
-  const legacyPreviewFileRef = pickLegacyFileRef(previewFileName);
+  const legacyPreviewFileRef = previewFileName
+    ? {
+        storageKey: `previews/${previewFileName}`,
+        url: resolveStoredFileUrl({ storageKey: `previews/${previewFileName}` }),
+        fileName: previewFileName
+      }
+    : { storageKey: null, url: null, fileName: null };
   const fallbackUrl = resolveStoredFileUrl({ url: legacyCoverUrl, storageKey: null });
 
   const coverUrl =
     coverUploadRef.url ??
     fallbackUrl ??
     coverImageRef.url ??
-    legacyPreviewRootRef.url ??
     legacyPreviewBucketRef.url ??
     legacyPreviewFileRef.url ??
     previewRef.url ??

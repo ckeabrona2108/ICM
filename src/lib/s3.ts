@@ -1,11 +1,41 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const endpoint = process.env.S3_ENDPOINT;
-const region = process.env.S3_REGION;
-const bucket = process.env.S3_BUCKET;
-const accessKeyId = process.env.S3_ACCESS_KEY_ID;
-const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
+function readStringEnv(...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function toEndpointUrl(rawValue: string | undefined): string | undefined {
+  if (!rawValue) return undefined;
+  if (rawValue.startsWith("http://") || rawValue.startsWith("https://")) {
+    return rawValue;
+  }
+  const useSsl = (process.env.S3_USE_SSL ?? "true").trim().toLowerCase() !== "false";
+  return `${useSsl ? "https" : "http"}://${rawValue}`;
+}
+
+const endpoint = toEndpointUrl(readStringEnv("S3_ENDPOINT", "MINIO_ENDPOINT", "S3_HOST"));
+const region = readStringEnv("S3_REGION") ?? "us-east-1";
+const bucket = readStringEnv("S3_BUCKET");
+const accessKeyId = readStringEnv(
+  "S3_ACCESS_KEY_ID",
+  "S3_ACCESS_KEY",
+  "MINIO_ACCESS_KEY",
+  "MINIO_ROOT_USER"
+);
+const secretAccessKey = readStringEnv(
+  "S3_SECRET_ACCESS_KEY",
+  "S3_SECRET_KEY",
+  "MINIO_SECRET_KEY",
+  "MINIO_ROOT_PASSWORD"
+);
+const publicStorageBaseUrl = toEndpointUrl(
+  readStringEnv("NEXT_PUBLIC_S3_URL", "S3_PUBLIC_URL", "S3_ENDPOINT", "MINIO_ENDPOINT", "S3_HOST")
+);
 
 function isPlaceholderValue(value: string | undefined): boolean {
   if (!value) return true;
@@ -34,6 +64,7 @@ function getClient() {
   return new S3Client({
     region,
     endpoint,
+    forcePathStyle: true,
     credentials: {
       accessKeyId,
       secretAccessKey
@@ -43,6 +74,59 @@ function getClient() {
 
 function buildLocalObjectPath(key: string): string {
   return `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
+}
+
+function normalizeStorageKey(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").trim().replace(/^\/+/u, "");
+  if (!normalized) return null;
+  const segments = normalized.split("/").filter(Boolean);
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) =>
+        segment === "." ||
+        segment === ".." ||
+        segment.includes("\\") ||
+        segment.includes("/")
+    )
+  ) {
+    return null;
+  }
+  return segments.join("/");
+}
+
+export function resolvePublicStorageUrlFromKey(key: string): string | null {
+  const normalizedKey = normalizeStorageKey(key);
+  if (!normalizedKey || !publicStorageBaseUrl) return null;
+  const encodedKey = normalizedKey
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  const base = publicStorageBaseUrl.replace(/\/+$/u, "");
+  return `${base}/${encodedKey}`;
+}
+
+export function resolveStoredFileUrl(input: {
+  url?: string | null;
+  storageKey?: string | null;
+}): string | null {
+  const directUrl = (input.url ?? "").trim();
+  if (directUrl) {
+    if (
+      directUrl.startsWith("/") ||
+      directUrl.startsWith("http://") ||
+      directUrl.startsWith("https://")
+    ) {
+      return directUrl;
+    }
+    if (directUrl.includes("/")) {
+      return resolvePublicStorageUrlFromKey(directUrl) ?? buildLocalObjectPath(directUrl);
+    }
+  }
+
+  const key = normalizeStorageKey(input.storageKey ?? null);
+  if (!key) return null;
+  return resolvePublicStorageUrlFromKey(key) ?? buildLocalObjectPath(key);
 }
 
 function buildLocalDownloadUrl(input: {
@@ -66,10 +150,14 @@ export async function createPresignedUpload(input: {
   expiresIn?: number;
 }) {
   const client = getClient();
+  const normalizedKey = normalizeStorageKey(input.key);
+  if (!normalizedKey) {
+    throw new Error("Invalid storage key");
+  }
 
   if (!client || !bucket) {
     return {
-      url: buildLocalObjectPath(input.key),
+      url: buildLocalObjectPath(normalizedKey),
       method: "PUT",
       fields: {},
       mock: false
@@ -78,7 +166,7 @@ export async function createPresignedUpload(input: {
 
   const command = new PutObjectCommand({
     Bucket: bucket,
-    Key: input.key,
+    Key: normalizedKey,
     ContentType: input.contentType
   });
 
@@ -101,17 +189,27 @@ export async function createPresignedDownload(input: {
   responseContentType?: string;
 }): Promise<{ url: string; mock: boolean }> {
   const client = getClient();
+  const normalizedKey = normalizeStorageKey(input.key);
+  if (!normalizedKey) {
+    throw new Error("Invalid storage key");
+  }
 
   if (!client || !bucket) {
+    const publicUrl = resolvePublicStorageUrlFromKey(normalizedKey);
     return {
-      url: buildLocalDownloadUrl(input),
+      url:
+        publicUrl ??
+        buildLocalDownloadUrl({
+          ...input,
+          key: normalizedKey
+        }),
       mock: false
     };
   }
 
   const command = new GetObjectCommand({
     Bucket: bucket,
-    Key: input.key,
+    Key: normalizedKey,
     ResponseContentDisposition: input.responseContentDisposition,
     ResponseContentType: input.responseContentType
   });

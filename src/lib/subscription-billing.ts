@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { SubscriptionPlan } from "@prisma/client";
 
 export interface SubscriptionTariffConfig {

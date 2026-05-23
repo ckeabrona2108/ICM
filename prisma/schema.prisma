@@ -1,122 +1,500 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
+  schemas   = ["icecream"]
 }
 
-enum Role {
-  USER
-  MODERATOR
-  ADMIN
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model accounts {
+  user_id            String    @db.Uuid
+  type               String    @db.VarChar(16)
+  provider           String    @db.VarChar(256)
+  provider_ccount_id String    @db.VarChar(256)
+  refresh_token      String?   @db.VarChar(1024)
+  access_token       String?   @db.VarChar(1024)
+  expires_at         DateTime? @db.Timestamp(6)
+  token_type         String?   @db.VarChar(256)
+  scope              String?   @db.VarChar(256)
+  id_token           String?   @db.VarChar(256)
+  session_state      String?   @db.VarChar(256)
+  user               user      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "accounts_user_id_user_id_fk")
+
+  @@ignore
+  @@schema("icecream")
 }
 
-enum ReleaseStatus {
-  DRAFT
-  PENDING_VERIFICATION
-  MODERATION
-  CHANGES_REQUIRED
-  REJECTED
-  APPROVED
-  DISTRIBUTED
-  ARCHIVED
+model analytics {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String   @db.Uuid
+  periodStart          DateTime @db.Timestamp(6)
+  periodFinish         DateTime @db.Timestamp(6)
+  reportFileUrl        String?
+  flourishReportMarkup String
+  user                 user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "analytics_userId_user_id_fk")
+
+  @@schema("icecream")
 }
 
-enum ReleaseType {
-  SINGLE
-  EP
-  ALBUM
+model faq {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  question String
+  answer   String
+
+  @@schema("icecream")
 }
 
-enum ReleaseKind {
-  STANDARD
-  SINGLE_MAXI
-  MIXTAPE
-  AUDIOBOOK
+model news {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title     String
+  content   String
+  createdAt DateTime? @default(now()) @db.Timestamp(6)
+  preview   String
+
+  @@schema("icecream")
 }
 
-enum PlatformMode {
-  ALL
-  SELECTED
+model orders {
+  id        String     @id @db.Uuid
+  createdAt DateTime?  @default(now()) @db.Timestamp(6)
+  userId    String     @db.Uuid
+  type      order_type
+  metadata  Json
+  confirmed Boolean    @default(false)
+  user      user       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "orders_userId_user_id_fk")
+
+  @@schema("icecream")
 }
 
-enum PlatformDeliveryStatus {
-  PENDING
-  IN_REVIEW
-  LIVE
-  FAILED
+model payment_methods {
+  id        String  @id @db.Uuid
+  userId    String  @db.Uuid
+  metadata  Json
+  isDefault Boolean @default(false)
+  user      user    @relation(fields: [userId], references: [id], onDelete: Cascade, map: "payment_methods_userId_user_id_fk")
+
+  @@schema("icecream")
 }
 
-enum TransactionType {
-  ROYALTY
-  PAYOUT
-  FEE
-  REFUND
+model payouts {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String    @db.Uuid
+  createdAt     DateTime? @default(now()) @db.Timestamp(6)
+  confirmed     Boolean?  @default(false)
+  recieverName  String?
+  amount        Float?
+  accountNumber String?
+  user          user      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "payouts_userId_user_id_fk")
+
+  @@schema("icecream")
 }
 
-enum TransactionStatus {
-  PENDING
-  COMPLETED
-  FAILED
+model promo_links {
+  id         String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shortName  String
+  releaseId  String       @db.Uuid
+  release    release      @relation(fields: [releaseId], references: [id], onDelete: Cascade, map: "promo_links_releaseId_release_id_fk")
+  promo_urls promo_urls[]
+
+  @@schema("icecream")
 }
 
-enum FinanceReportStatus {
-  READY_TO_CONFIRM
-  AGREED
+model promo_urls {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  url         String
+  promoLinkId String?      @db.Uuid
+  promo_links promo_links? @relation(fields: [promoLinkId], references: [id], onDelete: Cascade, map: "promo_urls_promoLinkId_promo_links_id_fk")
+
+  @@schema("icecream")
 }
 
-enum PayoutMethod {
-  BANK_TRANSFER
-  PAYPAL
-  OTHER
+model release {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  preview              String
+  title                String
+  date                 DateTime            @db.Timestamp(6)
+  upc                  String?
+  userId               String              @db.Uuid
+  language             String
+  subtitle             String?
+  performer            String?
+  feat                 String?
+  remixer              String?
+  genre                String
+  labelName            String?
+  startDate            DateTime            @db.Timestamp(6)
+  preorderDate         DateTime            @db.Timestamp(6)
+  platforms            Json?
+  area                 Json?
+  type                 release_type
+  confirmed            Boolean             @default(false)
+  rejectReason         String?
+  status               verification_status @default(moderating)
+  roles                Json?
+  moderatorComment     String?
+  earlyStartInRussia   Boolean?
+  realTimeDelivery     Boolean?
+  yandexSoonNewRelease DateTime?           @db.Timestamp(6)
+  analytics_daily_summaries analytics_daily_summaries[]
+  analytics_platform_summaries analytics_platform_summaries[]
+  analytics_report_snapshots analytics_report_snapshots[]
+  promo_links          promo_links[]
+  unmatched_analytics_imports unmatched_analytics_imports[] @relation("unmatched_analytics_imports_resolved_release")
+  user                 user                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "release_userId_user_id_fk")
+  track                track[]
+
+  @@schema("icecream")
 }
 
-enum PayoutRequestStatus {
-  REQUESTED
-  PROCESSING
-  PAID
-  REJECTED
+model sessions {
+  session_token String   @id @db.VarChar(128)
+  user_id       String   @db.Uuid
+  expires       DateTime @db.Timestamptz(6)
+  user          user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "sessions_user_id_user_id_fk")
+
+  @@schema("icecream")
 }
 
-enum SubscriptionPlan {
-  STANDARD
-  FREE
-  PRO
-  LABEL
-  ENTERPRISE
+model studio_photos {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name     String
+  url      String
+  studioId String  @db.Uuid
+  studios  studios @relation(fields: [studioId], references: [id], onDelete: Cascade, map: "studio_photos_studioId_studios_id_fk")
+
+  @@schema("icecream")
 }
 
-enum SubscriptionStatus {
-  ACTIVE
-  EXPIRED
-  TRIALING
-  PAST_DUE
-  CANCELED
+model studio_stats {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studioId String  @db.Uuid
+  name     String
+  value    String
+  studios  studios @relation(fields: [studioId], references: [id], onDelete: Cascade, map: "studio_stats_studioId_studios_id_fk")
+
+  @@schema("icecream")
 }
 
-enum SubscriptionSource {
-  PAYMENT
-  ADMIN_GRANT
+model studio_team {
+  id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  studioId String  @db.Uuid
+  photo    String
+  name     String
+  position String
+  place    String
+  studios  studios @relation(fields: [studioId], references: [id], onDelete: Cascade, map: "studio_team_studioId_studios_id_fk")
+
+  @@schema("icecream")
 }
 
-enum BalanceAdminAdjustmentType {
-  CREDIT
-  DEBIT
+model studios {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  logo          String
+  name          String
+  rating        Float           @default(0) @db.Real
+  address       String
+  description   String?
+  background    String?
+  annotation    String?
+  lattitude     Float?
+  longitude     Float?
+  contact_url   String?
+  studio_photos studio_photos[]
+  studio_stats  studio_stats[]
+  studio_team   studio_team[]
+
+  @@schema("icecream")
 }
 
-enum PaymentProvider {
-  YOOKASSA
+model track {
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  releaseId                  String    @db.Uuid
+  title                      String
+  subtitle                   String?
+  isrc                       String?
+  partner_code               String?
+  roles                      Json?
+  preview_start              String
+  instant_gratification_date DateTime? @db.Timestamp(6)
+  focus                      Boolean   @default(false)
+  explicit                   Boolean   @default(false)
+  live                       Boolean   @default(false)
+  cover                      Boolean   @default(false)
+  remix                      Boolean   @default(false)
+  instrumental               Boolean   @default(false)
+  language                   String
+  text                       String?
+  track                      String
+  text_sync                  String?
+  ringtone                   String?
+  video                      String?
+  author_rights              String
+  video_shot                 String?
+  index                      Int       @db.SmallInt
+  release                    release   @relation(fields: [releaseId], references: [id], onDelete: Cascade, map: "track_releaseId_release_id_fk")
+
+  @@schema("icecream")
 }
 
-enum PaymentStatus {
-  PENDING
-  WAITING_FOR_CAPTURE
-  SUCCEEDED
-  CANCELED
-  FAILED
+model user {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String
+  email               String                @unique(map: "user_email_unique")
+  emailVerified       DateTime?             @db.Timestamp(6)
+  avatar              String?
+  password            String?
+  verificationToken   String?
+  resetPasswordToken  String?
+  isVerifiedAuthor    Boolean               @default(false)
+  isAdmin             Boolean               @default(false)
+  isSubscribed        Boolean               @default(false)
+  subscribeLevel      subscribe_level?
+  expiresAt           DateTime?             @db.Timestamp(6)
+  freeReleases        Float                 @default(0)
+  balance             Float                 @default(0)
+  birthDate           DateTime?             @db.Timestamp(6)
+  country             String?
+  label               String?
+  personalSiteUrl     String?
+  telegram            String?
+  vk                  String?
+  whatsup             String?
+  viber               String?
+  accounts            accounts[]            @ignore
+  analytics           analytics[]
+  analytics_daily_summaries analytics_daily_summaries[]
+  analytics_import_jobs analytics_import_jobs[] @relation("analytics_import_jobs_created_by_admin")
+  analytics_platform_summaries analytics_platform_summaries[]
+  analytics_report_snapshots analytics_report_snapshots[]
+  orders              orders[]
+  payment_methods     payment_methods[]
+  payouts             payouts[]
+  release             release[]
+  sessions            sessions[]
+  unmatched_analytics_imports unmatched_analytics_imports[] @relation("unmatched_analytics_imports_resolved_by_admin")
+  verification        verification[]
+  verification_tokens verification_tokens[]
+
+  @@schema("icecream")
+}
+
+model verification {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String              @db.Uuid
+  firstName           String
+  middleName          String
+  lastName            String
+  birthDate           DateTime            @db.Timestamp(6)
+  birthPlace          String
+  tel                 String
+  passSeries          String
+  passNum             String
+  getDate             DateTime            @db.Timestamp(6)
+  givenBy             String
+  subunitCode         String
+  registrationAddress String
+  accountNumber       String
+  bankName            String
+  status              verification_status @default(moderating)
+  rejectReason        String?
+  contract            String              @default("")
+  user                user                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "verification_userId_user_id_fk")
+
+  @@schema("icecream")
+}
+
+model verification_tokens {
+  user_id String      @db.Uuid
+  token   String      @id
+  expires DateTime    @db.Timestamp(6)
+  type    token_types
+  user    user        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "verification_tokens_user_id_user_id_fk")
+
+  @@schema("icecream")
+}
+
+model analytics_report_snapshots {
+  id               String   @id
+  user_id          String   @db.Uuid
+  release_id       String   @db.Uuid
+  upc              String
+  report_date      DateTime @db.Timestamp(3)
+  period_days      Int      @default(30)
+  country          String
+  platform         String?
+  streams          Int
+  pay_streams      Int
+  track_name       String?
+  artist_name      String?
+  album_name       String?
+  source_file_name String
+  created_at       DateTime @default(now()) @db.Timestamp(3)
+  updated_at       DateTime @db.Timestamp(3)
+  user             user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_report_snapshots_user_id_fkey")
+  release          release  @relation(fields: [release_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_report_snapshots_release_id_fkey")
+
+  @@unique([release_id, report_date, country, platform], map: "ars_release_date_country_platform_uniq")
+  @@index([user_id, report_date], map: "analytics_report_snapshots_user_id_report_date_idx")
+  @@index([release_id, report_date], map: "analytics_report_snapshots_release_id_report_date_idx")
+  @@index([upc], map: "analytics_report_snapshots_upc_idx")
+  @@index([country], map: "analytics_report_snapshots_country_idx")
+  @@index([platform], map: "analytics_report_snapshots_platform_idx")
+  @@schema("icecream")
+}
+
+model analytics_daily_summaries {
+  id                String   @id
+  user_id           String   @db.Uuid
+  release_id        String?  @db.Uuid
+  report_date       DateTime @db.Timestamp(3)
+  total_streams     Int
+  total_pay_streams Int
+  countries_count   Int      @default(0)
+  top_country       String?
+  releases_count    Int      @default(0)
+  top_platform      String?
+  platforms_count   Int      @default(0)
+  created_at        DateTime @default(now()) @db.Timestamp(3)
+  updated_at        DateTime @db.Timestamp(3)
+  user              user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_daily_summaries_user_id_fkey")
+  release           release? @relation(fields: [release_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_daily_summaries_release_id_fkey")
+
+  @@unique([user_id, release_id, report_date], map: "analytics_daily_summaries_user_id_release_id_report_date_key")
+  @@index([user_id, report_date], map: "analytics_daily_summaries_user_id_report_date_idx")
+  @@index([release_id, report_date], map: "analytics_daily_summaries_release_id_report_date_idx")
+  @@schema("icecream")
+}
+
+model analytics_platform_summaries {
+  id           String   @id
+  user_id      String   @db.Uuid
+  release_id   String?  @db.Uuid
+  report_date  DateTime @db.Timestamp(3)
+  platform     String
+  streams      Int
+  pay_streams  Int
+  share_percent Decimal @default(0) @db.Decimal(7, 3)
+  change_percent Decimal? @db.Decimal(7, 3)
+  created_at   DateTime @default(now()) @db.Timestamp(3)
+  updated_at   DateTime @db.Timestamp(3)
+  user         user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_platform_summaries_user_id_fkey")
+  release      release? @relation(fields: [release_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_platform_summaries_release_id_fkey")
+
+  @@unique([user_id, release_id, report_date, platform], map: "aps_user_release_date_platform_uniq")
+  @@index([user_id, report_date], map: "analytics_platform_summaries_user_id_report_date_idx")
+  @@index([release_id, report_date], map: "analytics_platform_summaries_release_id_report_date_idx")
+  @@index([platform], map: "analytics_platform_summaries_platform_idx")
+  @@schema("icecream")
+}
+
+model analytics_import_jobs {
+  id                        String                   @id
+  source_file_name          String
+  stored_file_path          String?
+  report_date               DateTime                 @db.Timestamp(3)
+  status                    AnalyticsImportJobStatus @default(PENDING)
+  total_rows                Int                      @default(0)
+  imported_rows             Int                      @default(0)
+  matched_rows              Int                      @default(0)
+  unmatched_rows            Int                      @default(0)
+  affected_users_count      Int                      @default(0)
+  affected_releases_count   Int                      @default(0)
+  platforms_count           Int                      @default(0)
+  rows_with_unknown_platform Int                     @default(0)
+  top_platform              String?
+  error_message             String?
+  started_at                DateTime?                @db.Timestamp(3)
+  finished_at               DateTime?                @db.Timestamp(3)
+  created_by_admin_id       String                   @db.Uuid
+  created_at                DateTime                 @default(now()) @db.Timestamp(3)
+  updated_at                DateTime                 @db.Timestamp(3)
+  user                      user                     @relation("analytics_import_jobs_created_by_admin", fields: [created_by_admin_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_import_jobs_created_by_admin_id_fkey")
+  unmatched_analytics_imports unmatched_analytics_imports[]
+
+  @@index([status, created_at], map: "analytics_import_jobs_status_created_at_idx")
+  @@index([report_date], map: "analytics_import_jobs_report_date_idx")
+  @@schema("icecream")
+}
+
+model unmatched_analytics_imports {
+  id                   String               @id
+  upc                  String
+  track_name           String?
+  artist_name          String?
+  album_name           String?
+  country              String
+  streams              Int
+  pay_streams          Int
+  source_file_name     String
+  report_date          DateTime             @db.Timestamp(3)
+  reason               String
+  import_job_id        String?
+  resolved             Boolean              @default(false)
+  resolved_at          DateTime?            @db.Timestamp(3)
+  resolved_by_admin_id String?              @db.Uuid
+  resolved_release_id  String?              @db.Uuid
+  created_at           DateTime             @default(now()) @db.Timestamp(3)
+  import_job           analytics_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_import_job_id_fkey")
+  user                 user?                @relation("unmatched_analytics_imports_resolved_by_admin", fields: [resolved_by_admin_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_resolved_by_admin_id_fkey")
+  release              release?             @relation("unmatched_analytics_imports_resolved_release", fields: [resolved_release_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_resolved_release_id_fkey")
+
+  @@index([report_date], map: "unmatched_analytics_imports_report_date_idx")
+  @@index([upc], map: "unmatched_analytics_imports_upc_idx")
+  @@index([resolved, report_date], map: "unmatched_analytics_imports_resolved_report_date_idx")
+  @@schema("icecream")
+}
+
+enum order_type {
+  subscription
+  release
+
+  @@schema("icecream")
+}
+
+enum release_status {
+  moderating
+  approved
+  rejected
+  not_paid
+
+  @@schema("icecream")
+}
+
+enum release_type {
+  single
+  album
+  ep
+
+  @@schema("icecream")
+}
+
+enum subscribe_level {
+  standard
+  professional
+  premium
+  enterprise
+
+  @@schema("icecream")
+}
+
+enum token_types {
+  confirm
+  recover
+
+  @@schema("icecream")
+}
+
+enum verification_status {
+  moderating
+  approved
+  rejected
+
+  @@schema("icecream")
 }
 
 enum AnalyticsImportJobStatus {
@@ -125,771 +503,6 @@ enum AnalyticsImportJobStatus {
   SUCCESS
   PARTIAL
   FAILED
-}
 
-enum AnalyticsAiInsightStatus {
-  PROCESSING
-  SUCCESS
-  FAILED
-}
-
-enum SupportTicketStatus {
-  OPEN
-  IN_PROGRESS
-  WAITING_USER
-  RESOLVED
-  CLOSED
-}
-
-enum NewsPostStatus {
-  DRAFT
-  PUBLISHED
-  ARCHIVED
-}
-
-enum ContractSignatureStatus {
-  NOT_SIGNED
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum AiToolType {
-  RELEASE_DESCRIPTION
-  PRESS_RELEASE
-  ARTIST_BIO
-  REELS_IDEAS
-  COVER_ANALYSIS
-  PROMOTION_TIPS
-}
-
-enum CampaignStatus {
-  DRAFT
-  ACTIVE
-  PAUSED
-  COMPLETED
-}
-
-enum MessageDirection {
-  INBOUND
-  OUTBOUND
-}
-
-model User {
-  id            String            @id @default(cuid())
-  name          String
-  avatarUrl     String?
-  email         String            @unique
-  passwordHash  String?
-  role          Role              @default(USER)
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-
-  artistProfile ArtistProfile?
-  releases      Release[]
-  royalties     Royalty[]
-  transactions  Transaction[]
-  financeReports FinanceReport[]
-  payoutRequests PayoutRequest[]
-  subscription  Subscription?
-  subscriptionUsage SubscriptionUsage?
-  subscriptionPayments SubscriptionPayment[]
-  subscriptionAdminLogs SubscriptionAdminLog[] @relation("SubscriptionAdminLogsUser")
-  subscriptionGrants    Subscription[]         @relation("SubscriptionGrantedByAdmin")
-  balanceAdminLogsForUser BalanceAdminLog[]    @relation("BalanceAdminLogsUser")
-  balanceAdminLogsByAdmin BalanceAdminLog[]    @relation("BalanceAdminLogsAdmin")
-  subscriptionAdminActions SubscriptionAdminLog[] @relation("SubscriptionAdminLogsAdmin")
-  messages      Message[]
-  supportTickets SupportTicket[]
-  aiGenerations AiGeneration[]
-  campaigns     MarketingCampaign[]
-  adminLogs     AdminLog[]
-  analyticsReportSnapshots AnalyticsReportSnapshot[]
-  analyticsDailySummaries AnalyticsDailySummary[]
-  analyticsPlatformSummaries AnalyticsPlatformSummary[]
-  analyticsImportJobsCreated AnalyticsImportJob[] @relation("AnalyticsImportJobCreatedByAdmin")
-  unresolvedAnalyticsRows UnmatchedAnalyticsImport[] @relation("UnmatchedResolvedByAdmin")
-  analyticsAiInsights AnalyticsAiInsight[]
-  newsPostsCreated NewsPost[] @relation("NewsPostCreatedByAdmin")
-
-  accounts      Account[]
-  sessions      Session[]
-
-  contractSignatures UserContractSignature[]
-}
-
-model ArtistProfile {
-  id           String   @id @default(cuid())
-  userId       String   @unique
-  stageName    String
-  bio          String?
-  country      String?
-  genres       String[]
-  avatarUrl    String?
-  socialLinks  Json?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  releases     Release[]
-  analyticsAiInsights AnalyticsAiInsight[]
-}
-
-model Release {
-  id                 String               @id @default(cuid())
-  userId             String
-  artistProfileId    String?
-  title              String
-  subtitle           String?
-  slug               String               @unique
-  genre              String
-  subgenre           String?
-  language           String
-  releaseKind        ReleaseKind          @default(STANDARD)
-  platformMode       PlatformMode         @default(ALL)
-  platforms          Json?
-  partnerCode        String?
-  rightsYear         Int?
-  releaseDate        DateTime
-  type               ReleaseType
-  status             ReleaseStatus        @default(DRAFT)
-  explicit           Boolean              @default(false)
-  upc                String?
-  isrc               String?
-  lyrics             String?
-  moderationComment  String?
-  moderationRemarks  Json?
-  moderationReturnedAt DateTime?
-  moderationCancelledAt DateTime?
-  moderationStartedAt DateTime?
-  approvedAt         DateTime?
-  approvedBy         String?
-  rejectedAt         DateTime?
-  rejectedBy         String?
-  rejectionReason    String?
-  priority           Boolean              @default(false)
-  coverMeta          Json?
-  submissionData     Json?
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-
-  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  artistProfile      ArtistProfile?       @relation(fields: [artistProfileId], references: [id])
-  tracks             Track[]
-  releaseFile        ReleaseFile?
-  coverImage         CoverImage?
-  distributionStatus DistributionStatus[]
-  royalties          Royalty[]
-  campaigns          MarketingCampaign[]
-  analyticsReportSnapshots AnalyticsReportSnapshot[]
-  analyticsDailySummaries AnalyticsDailySummary[]
-  analyticsPlatformSummaries AnalyticsPlatformSummary[]
-  resolvedUnmatchedAnalyticsImports UnmatchedAnalyticsImport[]
-  analyticsAiInsights AnalyticsAiInsight[]
-
-  @@index([userId, status])
-  @@index([releaseDate])
-}
-
-model Track {
-  id            String   @id @default(cuid())
-  releaseId     String
-  title         String
-  subtitle      String?
-  durationSec   Int
-  trackNumber   Int
-  isrc          String?
-  partnerCode   String?
-  hasAudio      Boolean  @default(true)
-  metadataLanguage String?
-  previewStart  String?
-  instantGratification Boolean @default(false)
-  focusTrack    Boolean  @default(false)
-  versionExplicit Boolean @default(false)
-  versionLive   Boolean  @default(false)
-  versionCover  Boolean  @default(false)
-  versionRemix  Boolean  @default(false)
-  versionInstrumental Boolean @default(false)
-  lyrics        String?
-  ringtoneDurationSec Float?
-  copyrightPct  Float?
-  relatedRightsPct Float?
-  contributors  Json?
-  createdAt     DateTime @default(now())
-
-  release       Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-
-  @@unique([releaseId, trackNumber])
-}
-
-model ReleaseFile {
-  id          String   @id @default(cuid())
-  releaseId   String   @unique
-  storageKey  String
-  url         String
-  mimeType    String
-  sizeBytes   Int
-  checksum    String?
-  createdAt   DateTime @default(now())
-
-  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-}
-
-model CoverImage {
-  id          String   @id @default(cuid())
-  releaseId   String   @unique
-  storageKey  String
-  url         String
-  width       Int
-  height      Int
-  createdAt   DateTime @default(now())
-
-  release     Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-}
-
-model Platform {
-  id                 String               @id @default(cuid())
-  code               String               @unique
-  name               String
-  region             String?
-  isActive           Boolean              @default(true)
-  createdAt          DateTime             @default(now())
-
-  distributionStatus DistributionStatus[]
-}
-
-model DistributionStatus {
-  id           String                 @id @default(cuid())
-  releaseId    String
-  platformId   String
-  status       PlatformDeliveryStatus @default(PENDING)
-  note         String?
-  deliveredAt  DateTime?
-  updatedAt    DateTime               @updatedAt
-
-  release      Release                @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-  platform     Platform               @relation(fields: [platformId], references: [id], onDelete: Cascade)
-
-  @@unique([releaseId, platformId])
-  @@index([status])
-}
-
-model Royalty {
-  id            String    @id @default(cuid())
-  userId        String
-  releaseId     String
-  amount        Decimal   @db.Decimal(12, 2)
-  currency      String    @default("USD")
-  statementDate DateTime
-  streams       Int       @default(0)
-  createdAt     DateTime  @default(now())
-
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  release       Release   @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-
-  @@index([userId, statementDate])
-}
-
-model Transaction {
-  id           String            @id @default(cuid())
-  userId       String
-  amount       Decimal           @db.Decimal(12, 2)
-  currency     String            @default("USD")
-  type         TransactionType
-  status       TransactionStatus @default(PENDING)
-  description  String?
-  reference    String?
-  createdAt    DateTime          @default(now())
-  processedAt  DateTime?
-
-  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-}
-
-model FinanceReport {
-  id          String             @id @default(cuid())
-  userId      String
-  periodStart DateTime
-  periodEnd   DateTime
-  amount      Decimal            @db.Decimal(12, 2)
-  currency    String             @default("USD")
-  status      FinanceReportStatus @default(READY_TO_CONFIRM)
-  agreedAt    DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status])
-  @@index([userId, periodStart])
-}
-
-model PayoutRequest {
-  id          String            @id @default(cuid())
-  userId      String
-  amount      Decimal           @db.Decimal(12, 2)
-  currency    String            @default("USD")
-  method      PayoutMethod
-  requisites  Json
-  status      PayoutRequestStatus @default(REQUESTED)
-  comment     String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  processedAt DateTime?
-
-  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status])
-  @@index([createdAt])
-}
-
-model AnalyticsReportSnapshot {
-  id             String   @id @default(cuid())
-  userId         String   @map("user_id")
-  releaseId      String   @map("release_id")
-  upc            String
-  reportDate     DateTime @map("report_date")
-  periodDays     Int      @default(30) @map("period_days")
-  country        String
-  platform       String?  @map("platform")
-  streams        Int
-  payStreams     Int      @map("pay_streams")
-  trackName      String?  @map("track_name")
-  artistName     String?  @map("artist_name")
-  albumName      String?  @map("album_name")
-  sourceFileName String   @map("source_file_name")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  release        Release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-
-  @@unique([releaseId, reportDate, country, platform])
-  @@index([userId, reportDate])
-  @@index([releaseId, reportDate])
-  @@index([upc])
-  @@index([country])
-  @@index([platform])
-  @@map("analytics_report_snapshots")
-}
-
-model AnalyticsDailySummary {
-  id              String   @id @default(cuid())
-  userId          String   @map("user_id")
-  releaseId       String?  @map("release_id")
-  reportDate      DateTime @map("report_date")
-  totalStreams    Int      @map("total_streams")
-  totalPayStreams Int      @map("total_pay_streams")
-  countriesCount  Int      @default(0) @map("countries_count")
-  topCountry      String?  @map("top_country")
-  topPlatform     String?  @map("top_platform")
-  platformsCount  Int      @default(0) @map("platforms_count")
-  releasesCount   Int      @default(0) @map("releases_count")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  release         Release? @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, releaseId, reportDate])
-  @@index([userId, reportDate])
-  @@index([releaseId, reportDate])
-  @@map("analytics_daily_summaries")
-}
-
-model AnalyticsPlatformSummary {
-  id            String   @id @default(cuid())
-  userId        String   @map("user_id")
-  releaseId     String?  @map("release_id")
-  reportDate    DateTime @map("report_date")
-  platform      String
-  streams       Int
-  payStreams    Int      @map("pay_streams")
-  sharePercent  Decimal  @default(0) @db.Decimal(7, 3) @map("share_percent")
-  changePercent Decimal? @db.Decimal(7, 3) @map("change_percent")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  release       Release? @relation(fields: [releaseId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, releaseId, reportDate, platform])
-  @@index([userId, reportDate])
-  @@index([releaseId, reportDate])
-  @@index([platform])
-  @@map("analytics_platform_summaries")
-}
-
-model AnalyticsImportJob {
-  id                   String                   @id @default(cuid())
-  sourceFileName       String                   @map("source_file_name")
-  storedFilePath       String?                  @map("stored_file_path")
-  reportDate           DateTime                 @map("report_date")
-  status               AnalyticsImportJobStatus @default(PENDING)
-  totalRows            Int                      @default(0) @map("total_rows")
-  importedRows         Int                      @default(0) @map("imported_rows")
-  matchedRows          Int                      @default(0) @map("matched_rows")
-  unmatchedRows        Int                      @default(0) @map("unmatched_rows")
-  affectedUsersCount   Int                      @default(0) @map("affected_users_count")
-  affectedReleasesCount Int                     @default(0) @map("affected_releases_count")
-  platformsCount       Int                      @default(0) @map("platforms_count")
-  rowsWithUnknownPlatform Int                   @default(0) @map("rows_with_unknown_platform")
-  topPlatform          String?                  @map("top_platform")
-  errorMessage         String?                  @map("error_message")
-  startedAt            DateTime?                @map("started_at")
-  finishedAt           DateTime?                @map("finished_at")
-  createdByAdminId     String                   @map("created_by_admin_id")
-  createdAt            DateTime                 @default(now()) @map("created_at")
-  updatedAt            DateTime                 @updatedAt @map("updated_at")
-
-  createdByAdmin       User                     @relation("AnalyticsImportJobCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Cascade)
-  unmatchedRowsData    UnmatchedAnalyticsImport[]
-
-  @@index([status, createdAt])
-  @@index([reportDate])
-  @@map("analytics_import_jobs")
-}
-
-model UnmatchedAnalyticsImport {
-  id             String   @id @default(cuid())
-  upc            String
-  trackName      String?  @map("track_name")
-  artistName     String?  @map("artist_name")
-  albumName      String?  @map("album_name")
-  country        String
-  streams        Int
-  payStreams     Int      @map("pay_streams")
-  sourceFileName String   @map("source_file_name")
-  reportDate     DateTime @map("report_date")
-  reason         String
-  importJobId    String?  @map("import_job_id")
-  resolved       Boolean  @default(false)
-  resolvedAt     DateTime? @map("resolved_at")
-  resolvedByAdminId String? @map("resolved_by_admin_id")
-  resolvedReleaseId String? @map("resolved_release_id")
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  importJob      AnalyticsImportJob? @relation(fields: [importJobId], references: [id], onDelete: SetNull)
-  resolvedByAdmin User? @relation("UnmatchedResolvedByAdmin", fields: [resolvedByAdminId], references: [id], onDelete: SetNull)
-  resolvedRelease Release? @relation(fields: [resolvedReleaseId], references: [id], onDelete: SetNull)
-
-  @@index([reportDate])
-  @@index([upc])
-  @@index([resolved, reportDate])
-  @@map("unmatched_analytics_imports")
-}
-
-model AnalyticsAiInsight {
-  id              String                   @id @default(cuid())
-  userId          String                   @map("user_id")
-  artistId        String?                  @map("artist_id")
-  releaseId       String?                  @map("release_id")
-  periodDays      Int                      @map("period_days")
-  filtersHash     String                   @map("filters_hash")
-  contextSnapshot Json                     @map("context_snapshot")
-  aiResponse      Json?                    @map("ai_response")
-  status          AnalyticsAiInsightStatus @default(PROCESSING)
-  errorMessage    String?                  @map("error_message")
-  createdAt       DateTime                 @default(now()) @map("created_at")
-  updatedAt       DateTime                 @updatedAt @map("updated_at")
-
-  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  artist          ArtistProfile?           @relation(fields: [artistId], references: [id], onDelete: SetNull)
-  release         Release?                 @relation(fields: [releaseId], references: [id], onDelete: SetNull)
-
-  @@index([userId])
-  @@index([artistId])
-  @@index([releaseId])
-  @@index([createdAt])
-  @@index([filtersHash])
-  @@map("analytics_ai_insights")
-}
-
-model NewsPost {
-  id               String         @id @default(cuid())
-  title            String
-  slug             String         @unique
-  excerpt          String?
-  content          String
-  coverImage       String?        @map("cover_image")
-  status           NewsPostStatus @default(DRAFT)
-  category         String?
-  isPinned         Boolean        @default(false) @map("is_pinned")
-  publishedAt      DateTime?      @map("published_at")
-  createdByAdminId String         @map("created_by_admin_id")
-  createdAt        DateTime       @default(now()) @map("created_at")
-  updatedAt        DateTime       @updatedAt @map("updated_at")
-
-  createdByAdmin   User           @relation("NewsPostCreatedByAdmin", fields: [createdByAdminId], references: [id], onDelete: Cascade)
-
-  @@index([status])
-  @@index([publishedAt])
-  @@index([slug])
-  @@index([isPinned])
-  @@map("news_posts")
-}
-
-model Subscription {
-  id            String             @id @default(cuid())
-  userId        String             @unique
-  plan          SubscriptionPlan   @default(FREE)
-  status        SubscriptionStatus @default(TRIALING)
-  source        SubscriptionSource @default(PAYMENT)
-  adminComment  String?            @map("admin_comment")
-  grantedByAdminId String?         @map("granted_by_admin_id")
-  startedAt     DateTime           @default(now())
-  endsAt        DateTime?          @map("ends_at")
-  renewalAt     DateTime?
-  trialEndsAt   DateTime?
-  features      Json?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  grantedByAdmin User?             @relation("SubscriptionGrantedByAdmin", fields: [grantedByAdminId], references: [id], onDelete: SetNull)
-  payments      SubscriptionPayment[]
-}
-
-model SubscriptionAdminLog {
-  id         String             @id @default(cuid())
-  userId     String             @map("user_id")
-  adminId    String             @map("admin_id")
-  oldPlan    SubscriptionPlan?  @map("old_plan")
-  newPlan    SubscriptionPlan?  @map("new_plan")
-  oldStatus  SubscriptionStatus? @map("old_status")
-  newStatus  SubscriptionStatus? @map("new_status")
-  oldEndsAt  DateTime?          @map("old_ends_at")
-  newEndsAt  DateTime?          @map("new_ends_at")
-  comment    String?
-  createdAt  DateTime           @default(now()) @map("created_at")
-
-  user       User               @relation("SubscriptionAdminLogsUser", fields: [userId], references: [id], onDelete: Cascade)
-  admin      User               @relation("SubscriptionAdminLogsAdmin", fields: [adminId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@index([adminId, createdAt])
-  @@map("subscription_admin_logs")
-}
-
-model BalanceAdminLog {
-  id          String                    @id @default(cuid())
-  userId      String                    @map("user_id")
-  adminId     String                    @map("admin_id")
-  type        BalanceAdminAdjustmentType
-  amount      Decimal                   @db.Decimal(12, 2)
-  oldBalance  Decimal                   @map("old_balance") @db.Decimal(12, 2)
-  newBalance  Decimal                   @map("new_balance") @db.Decimal(12, 2)
-  comment     String?
-  createdAt   DateTime                  @default(now()) @map("created_at")
-
-  user        User                      @relation("BalanceAdminLogsUser", fields: [userId], references: [id], onDelete: Cascade)
-  admin       User                      @relation("BalanceAdminLogsAdmin", fields: [adminId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@index([adminId, createdAt])
-  @@map("balance_admin_logs")
-}
-
-model SubscriptionUsage {
-  id                  String   @id @default(cuid())
-  userId              String   @unique @map("user_id")
-  periodStart         DateTime @map("period_start")
-  periodEnd           DateTime @map("period_end")
-  releasesUsed        Int      @default(0) @map("releases_used")
-  aiRequestsUsedDay   Int      @default(0) @map("ai_requests_used_day")
-  aiRequestsUsedMonth Int      @default(0) @map("ai_requests_used_month")
-  lastAiResetDay      DateTime @map("last_ai_reset_day")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([periodStart, periodEnd])
-  @@map("subscription_usage")
-}
-
-model SubscriptionPayment {
-  id                String          @id @default(cuid())
-  userId            String
-  subscriptionId    String?
-  tariffId          String
-  amount            Decimal         @db.Decimal(12, 2)
-  currency          String          @default("RUB")
-  provider          PaymentProvider @default(YOOKASSA)
-  providerPaymentId String?         @unique
-  idempotenceKey    String          @unique
-  status            PaymentStatus   @default(PENDING)
-  confirmationUrl   String?
-  returnUrl         String?
-  description       String?
-  metadata          Json?
-  paidAt            DateTime?
-  expiresAt         DateTime?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-
-  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subscription      Subscription?   @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-
-  @@index([userId, status])
-  @@index([createdAt])
-}
-
-model Message {
-  id          String           @id @default(cuid())
-  userId      String
-  ticketId    String?
-  subject     String
-  body        String
-  direction   MessageDirection
-  isRead      Boolean          @default(false)
-  createdAt   DateTime         @default(now())
-
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ticket      SupportTicket?   @relation(fields: [ticketId], references: [id], onDelete: SetNull)
-
-  @@index([userId, createdAt])
-}
-
-model SupportTicket {
-  id            String              @id @default(cuid())
-  userId        String
-  title         String
-  description   String
-  status        SupportTicketStatus @default(OPEN)
-  priority      String              @default("normal")
-  adminComment  String?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  closedAt      DateTime?
-
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages      Message[]
-}
-
-model AiGeneration {
-  id          String     @id @default(cuid())
-  userId      String
-  tool        AiToolType
-  prompt      String
-  result      String
-  tokensUsed  Int?
-  cost        Decimal?   @db.Decimal(10, 4)
-  createdAt   DateTime   @default(now())
-
-  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, tool, createdAt])
-}
-
-model MarketingCampaign {
-  id            String         @id @default(cuid())
-  userId        String
-  releaseId     String?
-  name          String
-  channel       String
-  budget        Decimal        @db.Decimal(12, 2)
-  status        CampaignStatus @default(DRAFT)
-  startDate     DateTime
-  endDate       DateTime?
-  smartLinkUrl  String?
-  clicks        Int            @default(0)
-  conversions   Int            @default(0)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  release       Release?       @relation(fields: [releaseId], references: [id], onDelete: SetNull)
-
-  @@index([userId, status])
-}
-
-model AdminLog {
-  id          String   @id @default(cuid())
-  adminId     String
-  action      String
-  targetType  String
-  targetId    String?
-  payload     Json?
-  createdAt   DateTime @default(now())
-
-  admin       User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
-
-  @@index([adminId, createdAt])
-}
-
-model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String? @db.Text
-  access_token       String? @db.Text
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String? @db.Text
-  session_state      String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id            String   @id @default(cuid())
-  sessionToken  String   @unique
-  userId        String
-  expires       DateTime
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
-}
-
-model UserContractSignature {
-  id              String                 @id @default(cuid())
-  userId          String                 @map("user_id")
-  userEmail       String                 @map("user_email")
-  userName        String?                @map("user_name")
-  contractVersion String                 @map("contract_version")
-  contractFileName String                @map("contract_file_name")
-  contractFileUrl  String                @map("contract_file_url")
-  signatureImageUrl String               @map("signature_image_url")
-  signedAt         DateTime              @map("signed_at")
-  ipAddress        String?               @map("ip_address")
-  userAgent        String?               @map("user_agent")
-  status           ContractSignatureStatus @default(PENDING)
-  rejectionReason  String?               @map("rejection_reason")
-  approvedAt       DateTime?             @map("approved_at")
-  approvedByAdminId String?              @map("approved_by_admin_id")
-  rejectedAt       DateTime?             @map("rejected_at")
-  rejectedByAdminId String?              @map("rejected_by_admin_id")
-  createdAt        DateTime              @default(now()) @map("created_at")
-  updatedAt        DateTime              @updatedAt @map("updated_at")
-
-  fullName         String                @map("full_name")
-  birthDate        String?               @map("birth_date")
-  passportNumber   String?               @map("passport_number")
-  passportIssuedBy String?               @map("passport_issued_by")
-  passportCode     String?               @map("passport_code")
-  passportIssueDate String?              @map("passport_issue_date")
-  address          String?               @map("address")
-  ogrnip           String?               @map("ogrnip")
-  inn              String?               @map("inn")
-  snils            String?               @map("snils")
-
-  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status])
-  @@index([signedAt])
-  @@map("user_contract_signatures")
+  @@schema("icecream")
 }

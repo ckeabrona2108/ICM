@@ -30,11 +30,38 @@ export async function GET(request: Request) {
   const country = url.searchParams.get("country") ?? undefined;
   const upc = url.searchParams.get("upc") ?? undefined;
   const platform = url.searchParams.get("platform") ?? undefined;
+  const approvedReleases = await prisma.release.findMany({
+    where: {
+      userId: session.user.id,
+      confirmed: true,
+      status: "approved",
+      ...(releaseId ? { id: releaseId } : {})
+    },
+    select: { id: true }
+  });
+  const approvedReleaseIds = approvedReleases.map((release) => release.id);
+
+  if (approvedReleaseIds.length === 0) {
+    return NextResponse.json(
+      {
+        total_streams: 0,
+        total_pay_streams: 0,
+        streams_change_percent: 0,
+        pay_streams_change_percent: 0,
+        latest_report_date: null,
+        top_platform: null,
+        platforms_count: 0,
+        platforms_breakdown: [],
+        chart: []
+      },
+      { status: 200 }
+    );
+  }
 
   try {
     const data = await getAnalyticsOverview(prisma, {
-      userId: session.user.id,
-      releaseId: releaseId || undefined,
+      user_id: session.user.id,
+      release_id: releaseId || undefined,
       country: country || undefined,
       upc: upc || undefined,
       platform: platform || undefined,
@@ -49,18 +76,18 @@ export async function GET(request: Request) {
         pay_streams_change_percent: data.payStreamsChangePercent,
         latest_report_date: data.latestReportDate,
         top_platform: data.topPlatform,
-        platforms_count: data.platformsCount,
+        platforms_count: data.platforms_count,
         platforms_breakdown: data.platformsBreakdown.map((item) => ({
           platform: item.platform,
           streams: item.streams,
-          pay_streams: item.payStreams,
+          pay_streams: item.pay_streams,
           share_percent: item.sharePercent,
           change_percent: item.changePercent
         })),
         chart: data.chart.map((point) => ({
           date: point.date,
           streams: point.streams,
-          pay_streams: point.payStreams
+          pay_streams: point.pay_streams
         }))
       },
       { status: 200 }
@@ -75,6 +102,9 @@ export async function GET(request: Request) {
     try {
       const conditions: Prisma.Sql[] = [Prisma.sql`"user_id" = ${session.user.id}`];
       if (releaseId) conditions.push(Prisma.sql`"release_id" = ${releaseId}`);
+      if (!releaseId) {
+        conditions.push(Prisma.sql`"release_id" IN (${Prisma.join(approvedReleaseIds)})`);
+      }
       if (normalizedCountry) conditions.push(Prisma.sql`"country" = ${normalizedCountry}`);
       if (normalizedUpc) conditions.push(Prisma.sql`"upc" = ${normalizedUpc}`);
       if (normalizedPlatform) conditions.push(Prisma.sql`"platform" = ${normalizedPlatform}`);

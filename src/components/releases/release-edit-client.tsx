@@ -23,6 +23,7 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
     cancelledModeration && release.status === "moderation"
       ? "changes_required"
       : release.status;
+  const isDraftRelease = effectiveStatus === "draft";
 
   const editPermission = React.useMemo(
     () =>
@@ -166,18 +167,20 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
         </div>
       ) : null}
 
-      <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-[12.5px] leading-relaxed text-amber-100/90">
-        <p>
-          После редактирования релиз будет повторно отправлен на модерацию. Пока проверка не
-          завершена, итоговые изменения в каталоге считаются черновыми.
-        </p>
-      </div>
+      {!isDraftRelease ? (
+        <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-[12.5px] leading-relaxed text-amber-100/90">
+          <p>
+            После редактирования релиз будет повторно отправлен на модерацию. Пока проверка не
+            завершена, итоговые изменения в каталоге считаются черновыми.
+          </p>
+        </div>
+      ) : null}
 
       <ReleaseWizard
         key={`release-wizard-edit-${release.id}`}
         seed={seed}
         submissionMode="edit"
-        pageTitle="Редактирование релиза"
+        pageTitle={isDraftRelease ? "Новый релиз" : "Редактирование релиза"}
         sourceReleaseId={release.id}
         currentStatus={effectiveStatus}
         moderationStarted={cancelledModeration ? false : release.moderationStarted}

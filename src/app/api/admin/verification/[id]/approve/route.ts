@@ -23,11 +23,20 @@ export async function POST(
     return NextResponse.json({ error: "Verification id is required" }, { status: 400 });
   }
 
-  const result = await approveContractSignatureByAdmin({
-    prisma,
-    verificationId,
-    adminId: session.user.id
-  });
+  let result;
+  try {
+    result = await approveContractSignatureByAdmin({
+      prisma,
+      verificationId,
+      adminId: session.user.id
+    });
+  } catch (error) {
+    console.error("[admin:verification:approve] failed", error);
+    return NextResponse.json(
+      { error: "Не удалось подтвердить верификацию. Проверьте серверные логи." },
+      { status: 500 }
+    );
+  }
 
   if (!result.ok) {
     if (result.error === "Verification not found") {

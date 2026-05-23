@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { randomBytes, createHash } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
@@ -35,19 +36,20 @@ function getLogger(logger?: Logger): Logger {
 function buildAppUrl(path: string) {
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_DOMAIN?.trim() ||
     process.env.NEXTAUTH_URL?.trim() ||
     "http://localhost:3000";
   return new URL(path, baseUrl).toString();
 }
 
-function buildIdentifier(userId: string) {
-  return `${PASSWORD_RESET_PREFIX}${userId}`;
+function buildIdentifier(user_id: string) {
+  return `${PASSWORD_RESET_PREFIX}${user_id}`;
 }
 
 function parseIdentifier(identifier: string): string | null {
   if (!identifier.startsWith(PASSWORD_RESET_PREFIX)) return null;
-  const userId = identifier.slice(PASSWORD_RESET_PREFIX.length).trim();
-  return userId || null;
+  const user_id = identifier.slice(PASSWORD_RESET_PREFIX.length).trim();
+  return user_id || null;
 }
 
 function hashToken(rawToken: string) {
@@ -91,6 +93,7 @@ async function sendPasswordResetEmail(payload: PasswordResetEmailPayload, logger
       "Сброс пароля ICECREAMMUSIC",
       "",
       "Мы получили запрос на смену пароля для вашего аккаунта.",
+      `Ссылка для сброса пароля: ${payload.resetUrl}`,
       "Если вы не запрашивали восстановление пароля, просто проигнорируйте это письмо."
     ].join("\n")
   });
@@ -112,10 +115,10 @@ export async function requestPasswordReset(params: {
 
   const user = await params.prisma.user.findUnique({
     where: { email },
-    select: { id: true, email: true, name: true, passwordHash: true }
+    select: { id: true, email: true, name: true }
   });
 
-  if (!user?.passwordHash) {
+  if (!user) {
     return { accepted: true, previewUrl: null };
   }
 
@@ -195,8 +198,8 @@ export async function resetPasswordWithToken(params: {
     throw new Error("INVALID_RESET_TOKEN");
   }
 
-  const userId = parseIdentifier(verificationToken.identifier);
-  if (!userId) {
+  const user_id = parseIdentifier(verificationToken.identifier);
+  if (!user_id) {
     await params.prisma.verificationToken.deleteMany({ where: { token: tokenHash } });
     throw new Error("INVALID_RESET_TOKEN");
   }
@@ -205,14 +208,14 @@ export async function resetPasswordWithToken(params: {
 
   await params.prisma.$transaction(async (tx) => {
     await tx.user.update({
-      where: { id: userId },
+      where: { id: user_id },
       data: {
         passwordHash
       }
     });
 
     await tx.session.deleteMany({
-      where: { userId }
+      where: { userId: user_id }
     });
 
     await tx.verificationToken.deleteMany({

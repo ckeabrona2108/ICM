@@ -28,7 +28,7 @@ export function Reveal({ children, className, delay = 0, y = 24, as = "div" }: R
   return (
     <Comp
       className={className}
-      initial="hidden"
+      initial={false}
       whileInView="show"
       viewport={{ once: true, margin: "-80px" }}
       variants={variants}
@@ -49,7 +49,7 @@ export function Stagger({ children, className, delay = 0, stagger = 0.08 }: Stag
   return (
     <motion.div
       className={className}
-      initial="hidden"
+      initial={false}
       whileInView="show"
       viewport={{ once: true, margin: "-80px" }}
       variants={{

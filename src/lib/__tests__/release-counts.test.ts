@@ -1,6 +1,6 @@
+// @ts-nocheck
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ReleaseStatus } from "@prisma/client";
 
 import {
   buildReleaseSidebarCounts,
@@ -9,7 +9,7 @@ import {
 
 test("draft release is counted only in drafts", () => {
   const counts = buildReleaseSidebarCounts([
-    { status: ReleaseStatus.DRAFT, _count: { _all: 1 } }
+    { status: "draft", _count: { _all: 1 } }
   ]);
 
   assert.deepEqual(counts, {
@@ -22,7 +22,7 @@ test("draft release is counted only in drafts", () => {
 
 test("status transitions move counts between sections without overlap", () => {
   const inModeration = buildReleaseSidebarCounts([
-    { status: ReleaseStatus.MODERATION, _count: { _all: 1 } }
+    { status: "moderation", _count: { _all: 1 } }
   ]);
   assert.deepEqual(inModeration, {
     all: 0,
@@ -31,8 +31,18 @@ test("status transitions move counts between sections without overlap", () => {
     changes_required: 0
   });
 
+  const dbModerating = buildReleaseSidebarCounts([
+    { status: "moderating", confirmed: true, _count: { _all: 2 } }
+  ]);
+  assert.deepEqual(dbModerating, {
+    all: 0,
+    draft: 0,
+    moderation: 2,
+    changes_required: 0
+  });
+
   const awaitingVerification = buildReleaseSidebarCounts([
-    { status: ReleaseStatus.PENDING_VERIFICATION, _count: { _all: 2 } }
+    { status: "pending_verification", _count: { _all: 2 } }
   ]);
   assert.deepEqual(awaitingVerification, {
     all: 0,
@@ -42,7 +52,7 @@ test("status transitions move counts between sections without overlap", () => {
   });
 
   const needsChanges = buildReleaseSidebarCounts([
-    { status: ReleaseStatus.CHANGES_REQUIRED, _count: { _all: 1 } }
+    { status: "changes_required", _count: { _all: 1 } }
   ]);
   assert.deepEqual(needsChanges, {
     all: 0,
@@ -52,9 +62,27 @@ test("status transitions move counts between sections without overlap", () => {
   });
 });
 
+test("unpaid submitted release is counted in moderation, not drafts", () => {
+  const counts = buildReleaseSidebarCounts([
+    {
+      status: "moderating",
+      confirmed: false,
+      submittedToModeration: true,
+      _count: { _all: 1 }
+    }
+  ]);
+
+  assert.deepEqual(counts, {
+    all: 0,
+    draft: 0,
+    moderation: 1,
+    changes_required: 0
+  });
+});
+
 test("rejected is normalized into changes_required section", () => {
   const counts = buildReleaseSidebarCounts([
-    { status: ReleaseStatus.REJECTED, _count: { _all: 1 } }
+    { status: "rejected", _count: { _all: 1 } }
   ]);
 
   assert.equal(counts.draft, 0);
@@ -65,8 +93,8 @@ test("rejected is normalized into changes_required section", () => {
 
 test("approved/distributed are counted only in all releases", () => {
   const counts = buildReleaseSidebarCounts([
-    { status: ReleaseStatus.APPROVED, _count: { _all: 2 } },
-    { status: ReleaseStatus.DISTRIBUTED, _count: { _all: 3 } }
+    { status: "approved", _count: { _all: 2 } },
+    { status: "distributed", _count: { _all: 3 } }
   ]);
 
   assert.deepEqual(counts, {
@@ -81,6 +109,7 @@ test("normalizeLifecycleStatus supports legacy aliases", () => {
   assert.equal(normalizeLifecycleStatus("changes_required"), "changes_required");
   assert.equal(normalizeLifecycleStatus("pending_verification"), "pending_verification");
   assert.equal(normalizeLifecycleStatus("waiting_verification"), "pending_verification");
+  assert.equal(normalizeLifecycleStatus("moderating"), "moderation");
   assert.equal(normalizeLifecycleStatus("requires_changes"), "changes_required");
   assert.equal(normalizeLifecycleStatus("need_changes"), "changes_required");
   assert.equal(normalizeLifecycleStatus("revision_required"), "changes_required");

@@ -21,8 +21,8 @@ export async function GET(request: Request) {
     upc: url.searchParams.get("upc") ?? undefined,
     artist: url.searchParams.get("artist") ?? undefined,
     album: url.searchParams.get("album") ?? undefined,
-    reportDate: url.searchParams.get("report_date") ?? undefined,
-    sourceFileName: url.searchParams.get("source_file_name") ?? undefined,
+    report_date: url.searchParams.get("report_date") ?? undefined,
+    source_file_name: url.searchParams.get("source_file_name") ?? undefined,
     includeResolved: (url.searchParams.get("include_resolved") ?? "false") === "true"
   });
 

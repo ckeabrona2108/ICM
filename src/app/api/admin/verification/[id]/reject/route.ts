@@ -29,12 +29,21 @@ export async function POST(
       ? String((payload as { reason?: unknown }).reason ?? "")
       : "";
 
-  const result = await rejectContractSignatureByAdmin({
-    prisma,
-    verificationId,
-    adminId: session.user.id,
-    reason
-  });
+  let result;
+  try {
+    result = await rejectContractSignatureByAdmin({
+      prisma,
+      verificationId,
+      adminId: session.user.id,
+      reason
+    });
+  } catch (error) {
+    console.error("[admin:verification:reject] failed", error);
+    return NextResponse.json(
+      { error: "Не удалось отклонить верификацию. Проверьте серверные логи." },
+      { status: 500 }
+    );
+  }
 
   if (!result.ok) {
     if (result.error === "Verification not found") {

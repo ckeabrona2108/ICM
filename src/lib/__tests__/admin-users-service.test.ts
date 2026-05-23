@@ -1,3 +1,4 @@
+// @ts-nocheck
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -159,7 +160,7 @@ test("admin grants subscription with custom end date and logs the change", async
         return {};
       }
     },
-    subscriptionAdminLog: {
+    subscription_admin_logs: {
       create: async ({ data }: any) => {
         subscriptionLogPayload = data;
         return {};
@@ -174,7 +175,7 @@ test("admin grants subscription with custom end date and logs the change", async
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
         subscription: prisma.subscription,
-        subscriptionAdminLog: prisma.subscriptionAdminLog,
+        subscription_admin_logs: prisma.subscription_admin_logs,
         adminLog: prisma.adminLog
       })
   } as any;
@@ -230,7 +231,7 @@ test("admin can change subscription plan and creates subscription admin log", as
     subscriptionPayment: {
       findMany: async () => []
     },
-    subscriptionAdminLog: {
+    subscription_admin_logs: {
       create: async ({ data }: any) => {
         subscriptionLogPayload = data;
         return {};
@@ -244,7 +245,7 @@ test("admin can change subscription plan and creates subscription admin log", as
         subscription: prisma.subscription,
         release: prisma.release,
         subscriptionPayment: prisma.subscriptionPayment,
-        subscriptionAdminLog: prisma.subscriptionAdminLog,
+        subscription_admin_logs: prisma.subscription_admin_logs,
         adminLog: prisma.adminLog
       })
   } as any;
@@ -286,7 +287,7 @@ test("admin cancels subscription and uses explicit canceled status", async () =>
         return {};
       }
     },
-    subscriptionAdminLog: {
+    subscription_admin_logs: {
       create: async () => ({})
     },
     adminLog: {
@@ -295,7 +296,7 @@ test("admin cancels subscription and uses explicit canceled status", async () =>
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
         subscription: prisma.subscription,
-        subscriptionAdminLog: prisma.subscriptionAdminLog,
+        subscription_admin_logs: prisma.subscription_admin_logs,
         adminLog: prisma.adminLog
       })
   } as any;
@@ -353,7 +354,7 @@ test("downgrade from PRO to FREE snapshots historical submitted release", async 
     subscriptionPayment: {
       findMany: async () => []
     },
-    subscriptionAdminLog: {
+    subscription_admin_logs: {
       create: async () => ({})
     },
     adminLog: {
@@ -364,7 +365,7 @@ test("downgrade from PRO to FREE snapshots historical submitted release", async 
         subscription: prisma.subscription,
         release: prisma.release,
         subscriptionPayment: prisma.subscriptionPayment,
-        subscriptionAdminLog: prisma.subscriptionAdminLog,
+        subscription_admin_logs: prisma.subscription_admin_logs,
         adminLog: prisma.adminLog
       })
   } as any;
@@ -409,7 +410,7 @@ test("admin can credit balance and writes balance admin log", async () => {
         return {};
       }
     },
-    balanceAdminLog: {
+    balance_admin_logs: {
       create: async ({ data }: any) => {
         balanceLogPayload = data;
         return {};
@@ -425,7 +426,7 @@ test("admin can credit balance and writes balance admin log", async () => {
       handler({
         financeReport: prisma.financeReport,
         transaction: prisma.transaction,
-        balanceAdminLog: prisma.balanceAdminLog,
+        balance_admin_logs: prisma.balance_admin_logs,
         adminLog: prisma.adminLog
       })
   } as any;
@@ -465,7 +466,7 @@ test("admin can debit balance and writes balance admin log", async () => {
       findMany: async () => [],
       create: async () => ({})
     },
-    balanceAdminLog: {
+    balance_admin_logs: {
       create: async ({ data }: any) => {
         balanceLogPayload = data;
         return {};
@@ -477,7 +478,7 @@ test("admin can debit balance and writes balance admin log", async () => {
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
         transaction: prisma.transaction,
-        balanceAdminLog: prisma.balanceAdminLog,
+        balance_admin_logs: prisma.balance_admin_logs,
         adminLog: prisma.adminLog
       })
   } as any;

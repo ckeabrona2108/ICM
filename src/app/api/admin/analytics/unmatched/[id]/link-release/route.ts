@@ -30,7 +30,7 @@ export async function POST(
     const result = await linkUnmatchedRowToRelease({
       prisma,
       unmatchedId: params.id,
-      releaseId,
+      release_id: releaseId,
       adminId: session.user.id
     });
 

@@ -11,6 +11,14 @@ import type {
 } from "@/lib/api/contracts";
 import { SUPPORT_STATUS_LABEL, formatSupportDate } from "@/lib/support-ui";
 
+function publishSupportUnreadCount(count: number) {
+  window.dispatchEvent(
+    new CustomEvent("dashboard:support-unread-count", {
+      detail: { count: Math.max(0, Math.floor(count)) }
+    })
+  );
+}
+
 export function SupportTicketChat() {
   const [tickets, setTickets] = React.useState<SupportTicketResponse[]>([]);
   const [activeId, setActiveId] = React.useState<string | null>(null);
@@ -27,17 +35,16 @@ export function SupportTicketChat() {
 
   const refreshUnreadCount = React.useCallback(async () => {
     try {
-      const response = await fetch("/api/support/unread-count", { method: "GET" });
+      const response = await fetch("/api/support/unread-count", {
+        method: "GET",
+        cache: "no-store"
+      });
       const payload = (await response.json().catch(() => null)) as
         | { count?: number }
         | { error?: string }
         | null;
       if (!response.ok || !payload || !("count" in payload) || typeof payload.count !== "number") return;
-      window.dispatchEvent(
-        new CustomEvent("dashboard:support-unread-count", {
-          detail: { count: Math.max(0, Math.floor(payload.count)) }
-        })
-      );
+      publishSupportUnreadCount(payload.count);
     } catch {
       // ignore transient failures
     }
@@ -62,6 +69,7 @@ export function SupportTicketChat() {
 
       setTickets(payload.tickets);
       setActiveId((prev) => prev ?? payload.tickets[0]?.id ?? null);
+      publishSupportUnreadCount(0);
       void refreshUnreadCount();
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Не удалось загрузить тикеты.");
@@ -99,6 +107,13 @@ export function SupportTicketChat() {
       );
     }
   }, [refreshUnreadCount]);
+
+  React.useEffect(() => {
+    if (!activeId || creating) return;
+    const activeTicket = tickets.find((ticket) => ticket.id === activeId);
+    if (!activeTicket || activeTicket.messages !== undefined) return;
+    void loadTicketDetails(activeId);
+  }, [activeId, creating, loadTicketDetails, tickets]);
 
   React.useEffect(() => {
     if (!activeId || creating) return;

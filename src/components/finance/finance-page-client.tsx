@@ -58,7 +58,7 @@ export function FinancePageClient({
     React.useState<PayoutMethodUi>("bank_transfer");
   const [accountNumber, setAccountNumber] = React.useState("");
   const [bankName, setBankName] = React.useState("");
-  const [paypalEmail, setPaypalEmail] = React.useState("");
+  const [paypalEmail] = React.useState("");
   const [taxId, setTaxId] = React.useState("");
   const reports = initialReports;
   const agreedBalance = initialAgreedBalance;

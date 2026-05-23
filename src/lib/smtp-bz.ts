@@ -55,9 +55,11 @@ export function getSmtpBzTransporter(): Transporter | null {
 }
 
 export function getSmtpFromAddress(): string | null {
-  const fromEmail =
+  const configuredFromEmail =
     process.env.SMTP_FROM_EMAIL?.trim() ||
     process.env.RESEND_FROM_EMAIL?.trim();
+  const smtpConfig = readSmtpConfig();
+  const fromEmail = configuredFromEmail || smtpConfig?.user || null;
   if (!fromEmail) return null;
 
   const fromName =

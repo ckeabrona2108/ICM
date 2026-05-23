@@ -6,6 +6,8 @@ import { AdminSidebar } from "@/components/layout/admin-sidebar";
 import { ServiceWorkStatus } from "@/components/layout/service-work-status";
 import { authOptions } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
 

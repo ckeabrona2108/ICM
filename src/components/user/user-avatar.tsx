@@ -4,6 +4,7 @@ import Image from "next/image";
 import * as React from "react";
 import { UserRound } from "lucide-react";
 
+import { normalizeNextImageSrc } from "@/lib/image-src";
 import { cn } from "@/lib/utils";
 import { getInitials } from "@/lib/user-profile-policy";
 
@@ -26,6 +27,14 @@ export function UserAvatar({
         : "h-10 w-10";
 
   const initials = getInitials(name ?? "");
+  const safeAvatarUrl = normalizeNextImageSrc(avatarUrl);
+  const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setFailedSrc(null);
+  }, [safeAvatarUrl]);
+
+  const shouldShowImage = Boolean(safeAvatarUrl && failedSrc !== safeAvatarUrl);
 
   return (
     <span
@@ -35,13 +44,14 @@ export function UserAvatar({
         className
       )}
     >
-      {avatarUrl ? (
+      {shouldShowImage && safeAvatarUrl ? (
         <Image
-          src={avatarUrl}
+          src={safeAvatarUrl}
           alt={name ? `Аватар ${name}` : "Аватар пользователя"}
           fill
           sizes="64px"
           className="object-cover"
+          onError={() => setFailedSrc(safeAvatarUrl)}
         />
       ) : name ? (
         <span className="text-[12px] font-semibold uppercase tracking-[0.04em] text-white/86">

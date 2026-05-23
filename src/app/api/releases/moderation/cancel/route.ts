@@ -1,105 +1,67 @@
-import { ReleaseStatus } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
+import type { CancelModerationRequest, CancelModerationSuccessResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
-import type {
-  CancelModerationFailureResponse,
-  CancelModerationRequest,
-  CancelModerationSuccessResponse
-} from "@/lib/api/contracts";
 import { prisma } from "@/lib/prisma";
-import { canCancelModeration } from "@/lib/release-policy";
 
-const cancelModerationSchema = z.object({
-  releaseId: z.string().trim().min(1)
-});
-
-function toLifecycleStatus(status: ReleaseStatus) {
-  if (status === ReleaseStatus.MODERATION) return "moderation" as const;
-  if (status === ReleaseStatus.CHANGES_REQUIRED) return "changes_required" as const;
-  if (status === ReleaseStatus.REJECTED) return "rejected" as const;
-  if (status === ReleaseStatus.APPROVED) return "approved" as const;
-  if (status === ReleaseStatus.DISTRIBUTED) return "distributed" as const;
-  if (status === ReleaseStatus.ARCHIVED) return "archived" as const;
-  return "draft" as const;
-}
+export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let payload: unknown;
+  let payload: CancelModerationRequest;
   try {
-    payload = await request.json();
+    payload = (await request.json()) as CancelModerationRequest;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const parsed = cancelModerationSchema.safeParse(payload);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
+  if (!payload.releaseId?.trim()) {
+    return NextResponse.json({ error: "releaseId is required" }, { status: 400 });
   }
-
-  const body = parsed.data as Pick<CancelModerationRequest, "releaseId">;
 
   const release = await prisma.release.findFirst({
     where: {
-      id: body.releaseId,
+      id: payload.releaseId,
       userId: session.user.id
     },
-    select: {
-      id: true,
-      status: true,
-      moderationStartedAt: true
-    }
+    select: { id: true, status: true }
   });
 
   if (!release) {
-    return NextResponse.json({ error: "Release not found" }, { status: 404 });
+    return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
   }
 
-  const permission = canCancelModeration({
-    status: toLifecycleStatus(release.status),
-    moderationStarted: Boolean(release.moderationStartedAt)
-  });
-
-  if (!permission.allowed || release.status !== ReleaseStatus.MODERATION) {
-    const response: CancelModerationFailureResponse = {
-      ok: false,
-      errors: [
-        {
-          code: "forbidden",
-          field: "status",
-          message:
-            permission.message ??
-            "Отмена заявки на модерацию сейчас недоступна."
-        }
-      ]
-    };
-    return NextResponse.json(response, { status: 409 });
+  if (release.status !== "moderating") {
+    return NextResponse.json(
+      {
+        ok: false,
+        errors: [
+          {
+            code: "INVALID_STATUS",
+            field: "currentStatus",
+            message: "Отменить модерацию можно только для релиза на модерации."
+          }
+        ]
+      },
+      { status: 409 }
+    );
   }
 
   await prisma.release.update({
     where: { id: release.id },
     data: {
-      status: ReleaseStatus.CHANGES_REQUIRED,
-      moderationCancelledAt: new Date(),
-      moderationComment:
-        "Заявка на модерацию отозвана пользователем до начала проверки.",
-      moderationReturnedAt: new Date()
+      confirmed: false
     }
   });
 
   const response: CancelModerationSuccessResponse = {
     ok: true,
-    releaseId: body.releaseId,
+    releaseId: release.id,
     nextStatus: "changes_required",
-    message: "Заявка на модерацию отменена. Релиз переведен в «Требуются изменения»."
+    message: "Модерация отменена. Релиз снова открыт для редактирования."
   };
 
   return NextResponse.json(response, { status: 200 });

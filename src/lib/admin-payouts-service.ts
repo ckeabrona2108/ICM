@@ -1,22 +1,23 @@
-import { PayoutMethod, PayoutRequestStatus, type PrismaClient } from "@prisma/client";
-
 export interface AdminPayoutUserInfo {
   id: string;
   name: string;
   email: string;
 }
 
+export type AdminPayoutStatus = "REQUESTED" | "PROCESSING" | "PAID" | "REJECTED";
+export type AdminPayoutMethod = "BANK_TRANSFER";
+
 export interface AdminPayoutDetails {
   id: string;
   amount: number;
   currency: string;
-  status: PayoutRequestStatus;
+  status: AdminPayoutStatus;
   createdAt: string;
   updatedAt: string;
   processedAt: string | null;
   user: AdminPayoutUserInfo;
   recipientName: string;
-  method: PayoutMethod;
+  method: AdminPayoutMethod;
   accountDetails: string;
   bankName: string;
   taxId: string;
@@ -24,7 +25,7 @@ export interface AdminPayoutDetails {
   comment: string | null;
 }
 
-interface ParsedPayoutRequisites {
+export interface ParsedPayoutRequisites {
   recipientName: string;
   accountDetails: string;
   bankName: string;
@@ -32,39 +33,33 @@ interface ParsedPayoutRequisites {
   paypalEmail: string;
 }
 
-function getStringField(source: Record<string, unknown>, key: string): string {
-  const value = source[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-export function parsePayoutRequisites(raw: unknown): ParsedPayoutRequisites {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return {
-      recipientName: "",
-      accountDetails: "",
-      bankName: "",
-      taxId: "",
-      paypalEmail: ""
-    };
-  }
-
-  const data = raw as Record<string, unknown>;
-  const accountDetails = getStringField(data, "accountDetails") || getStringField(data, "accountNumber");
+export function parsePayoutRequisites(
+  input: Record<string, unknown> | null | undefined
+): ParsedPayoutRequisites {
+  const source = input ?? {};
+  const recipientName = String(source.recipientName ?? source.recieverName ?? "").trim();
+  const accountDetails = String(source.accountDetails ?? source.accountNumber ?? "").trim();
+  const bankName = String(source.bankName ?? "").trim();
+  const taxId = String(source.taxId ?? "").trim();
+  const paypalEmail = String(source.paypalEmail ?? "").trim();
 
   return {
-    recipientName: getStringField(data, "recipientName"),
+    recipientName,
     accountDetails,
-    bankName: getStringField(data, "bankName"),
-    taxId: getStringField(data, "taxId"),
-    paypalEmail: getStringField(data, "paypalEmail")
+    bankName,
+    taxId,
+    paypalEmail
   };
 }
 
-export async function listAdminPayoutRequests(
-  prisma: PrismaClient,
-  limit = 200
-): Promise<AdminPayoutDetails[]> {
-  const payouts = await prisma.payoutRequest.findMany({
+export function mapConfirmedToPayoutStatus(confirmed: boolean | null | undefined): AdminPayoutStatus {
+  if (confirmed === true) return "PAID";
+  if (confirmed === null) return "REJECTED";
+  return "REQUESTED";
+}
+
+export async function listAdminPayoutRequests(prisma: any, limit = 200): Promise<AdminPayoutDetails[]> {
+  const payouts = await prisma.payouts.findMany({
     orderBy: { createdAt: "desc" },
     take: limit,
     include: {
@@ -78,28 +73,26 @@ export async function listAdminPayoutRequests(
     }
   });
 
-  return payouts.map((payout) => {
-    const requisites = parsePayoutRequisites(payout.requisites);
-    return {
-      id: payout.id,
-      amount: Number(payout.amount),
-      currency: payout.currency,
-      status: payout.status,
-      createdAt: payout.createdAt.toISOString(),
-      updatedAt: payout.updatedAt.toISOString(),
-      processedAt: payout.processedAt?.toISOString() ?? null,
-      user: {
-        id: payout.user.id,
-        name: payout.user.name,
-        email: payout.user.email
-      },
-      recipientName: requisites.recipientName,
-      method: payout.method,
-      accountDetails: requisites.accountDetails,
-      bankName: requisites.bankName,
-      taxId: requisites.taxId,
-      paypalEmail: requisites.paypalEmail,
-      comment: payout.comment
-    } satisfies AdminPayoutDetails;
-  });
+  return payouts.map((payout: any) => ({
+    ...parsePayoutRequisites({
+      recieverName: payout.recieverName,
+      accountNumber: payout.accountNumber
+    }),
+    id: payout.id,
+    amount: Number(payout.amount ?? 0),
+    currency: "RUB",
+    status: mapConfirmedToPayoutStatus(payout.confirmed),
+    createdAt: (payout.createdAt ?? new Date()).toISOString(),
+    updatedAt: (payout.createdAt ?? new Date()).toISOString(),
+    processedAt: payout.confirmed === true || payout.confirmed === null
+      ? (payout.createdAt ?? new Date()).toISOString()
+      : null,
+    user: {
+      id: payout.user.id,
+      name: payout.user.name,
+      email: payout.user.email
+    },
+    method: "BANK_TRANSFER",
+    comment: null
+  }));
 }

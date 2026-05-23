@@ -985,29 +985,12 @@ export function canEditRelease(params: {
   status: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
 }): EditPermissionResult {
-  const { status, moderationStarted = false } = params;
+  const { status } = params;
 
   if (status === "archived") {
     return {
       allowed: false,
       message: "Архивный релиз нельзя редактировать."
-    };
-  }
-
-  if (status === "moderation" && moderationStarted) {
-    return {
-      allowed: false,
-      message:
-        "Заявка уже в работе у модератора. Редактирование станет доступно после решения модерации."
-    };
-  }
-
-  if (status === "moderation") {
-    return {
-      allowed: false,
-      requiresCancellation: true,
-      message:
-        "Перед редактированием отмените заявку на модерацию. Это возможно только пока модератор не начал проверку."
     };
   }
 

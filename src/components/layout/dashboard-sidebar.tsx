@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import * as React from "react";
 import {
   AlertCircle,
@@ -26,7 +26,6 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
-import { getCachedRequest } from "@/lib/client-request-cache";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/components/user/user-provider";
 import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
@@ -151,8 +150,15 @@ function buildNav(counts: {
       label: "Beat Market",
       icon: Store,
       badge: "Скоро",
-      badgeTone: "soon",
-      unavailable: true
+      badgeTone: "soon"
+    },
+    {
+      type: "leaf",
+      href: "/dashboard/collab-market",
+      label: "Collab Market",
+      icon: Store,
+      badge: "Скоро",
+      badgeTone: "soon"
     },
     { type: "leaf", href: "/dashboard/finance", label: "Кошелёк", icon: Wallet },
     { type: "leaf", href: "/dashboard/profile", label: "Аккаунт", icon: UserRound },
@@ -186,48 +192,42 @@ function buildNav(counts: {
         label: "AI Music Tools",
         icon: RobotStickerIcon,
         badge: "Скоро",
-        badgeTone: "soon",
-        unavailable: true
+        badgeTone: "soon"
       },
       {
         href: "/dashboard/ai-studio",
         label: "AI Studio",
         icon: RobotStickerIcon,
         badge: "Скоро",
-        badgeTone: "soon",
-        unavailable: true
+        badgeTone: "soon"
       },
       {
         href: "/dashboard/ai-artists",
         label: "AI Artists",
         icon: RobotStickerIcon,
         badge: "Скоро",
-        badgeTone: "soon",
-        unavailable: true
+        badgeTone: "soon"
       },
       {
         href: "/dashboard/ai-textbook",
         label: "TextBook",
         icon: BookOpenText,
         badge: "Скоро",
-        badgeTone: "soon",
-        unavailable: true
+        badgeTone: "soon"
       },
       {
         href: "/dashboard/ai-workspace",
         label: "Workspace",
         icon: LayoutGrid,
         badge: "Скоро",
-        badgeTone: "soon",
-        unavailable: true
+        badgeTone: "soon"
       },
       {
         href: "/dashboard/ai-tiktok-boost",
         label: "TikTok Boost",
         icon: Rocket,
         badge: "Скоро",
-        badgeTone: "soon",
-        unavailable: true
+        badgeTone: "soon"
       }
     ]
   });
@@ -249,8 +249,10 @@ export function DashboardSidebar({
   contractStatus: ContractStatusPayload;
 }) {
   const pathname = usePathname() ?? "";
+  const router = useRouter();
   const { user } = useCurrentUser();
   const effectiveVerification = user?.verification ?? contractStatus;
+  const [optimisticPath, setOptimisticPath] = React.useState<string | null>(null);
   const [liveCounts, setLiveCounts] = React.useState({
     ...counts,
     supportUnreadCount: 0,
@@ -260,6 +262,7 @@ export function DashboardSidebar({
   const [unavailableToast, setUnavailableToast] = React.useState<string | null>(null);
   const unavailableToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const nav = React.useMemo(() => buildNav(liveCounts), [liveCounts]);
+  const activePath = optimisticPath ?? pathname;
 
   const loadReleaseCounts = React.useCallback(async (force = false) => {
     try {
@@ -275,9 +278,7 @@ export function DashboardSidebar({
             }
           | null;
       };
-      const payload = force
-        ? await load()
-        : await getCachedRequest("sidebar:release-counts", 30_000, load);
+      const payload = await load();
       if (!payload) return;
 
       const all = Number(payload.all);
@@ -323,6 +324,13 @@ export function DashboardSidebar({
   React.useEffect(() => {
     setLiveCounts((prev) => ({ ...prev, ...counts }));
   }, [counts]);
+
+  React.useEffect(() => {
+    if (!optimisticPath) return;
+    if (pathname === optimisticPath || pathname.startsWith(`${optimisticPath}/`)) {
+      setOptimisticPath(null);
+    }
+  }, [optimisticPath, pathname]);
 
   React.useEffect(() => {
     const onDraftsCount = (event: Event) => {
@@ -377,18 +385,15 @@ export function DashboardSidebar({
     let cancelled = false;
     const loadUnread = async () => {
       try {
-        const payload = await getCachedRequest(
-          "sidebar:support-unread",
-          30_000,
-          async () => {
-            const response = await fetch("/api/support/unread-count", { method: "GET" });
-            if (!response.ok) return null;
-            return (await response.json().catch(() => null)) as
-              | { count?: number }
-              | { error?: string }
-              | null;
-          }
-        );
+        const response = await fetch("/api/support/unread-count", {
+          method: "GET",
+          cache: "no-store"
+        });
+        if (!response.ok) return;
+        const payload = (await response.json().catch(() => null)) as
+          | { count?: number }
+          | { error?: string }
+          | null;
         if (!payload || !("count" in payload) || typeof payload.count !== "number") return;
         if (cancelled) return;
         const next = Math.max(0, Math.floor(payload.count));
@@ -411,6 +416,10 @@ export function DashboardSidebar({
       clearInterval(timer);
     };
   }, []);
+
+  React.useEffect(() => {
+    void loadReleaseCounts(true);
+  }, [loadReleaseCounts]);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -458,10 +467,22 @@ export function DashboardSidebar({
     (href: string) => href === "/dashboard/releases/new" && !effectiveVerification.canCreateRelease,
     [effectiveVerification.canCreateRelease]
   );
+  const prefetchHref = React.useCallback(
+    (href: string) => {
+      void router.prefetch(href);
+    },
+    [router]
+  );
+  const startNavigation = React.useCallback((href: string) => {
+    setOptimisticPath(href);
+  }, []);
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[4px] lg:flex">
+      <aside
+        data-dashboard-sidebar="true"
+        className="fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[4px] lg:flex"
+      >
         <div className="flex h-full flex-col overflow-y-auto px-3.5 py-5">
           <Link href="/dashboard" className="mb-6 flex items-center justify-start gap-2.5 px-3">
             <span className="grid h-10 w-10 place-items-center overflow-hidden">
@@ -487,10 +508,12 @@ export function DashboardSidebar({
                   <NavLink
                     key={item.href}
                     item={item}
-                    pathname={pathname}
+                    pathname={activePath}
                     onUnavailableClick={showUnavailableNotice}
                     onVerificationRequired={() => setVerificationModalOpen(true)}
                     requiresVerificationGate={requiresVerificationGate}
+                    onNavigate={startNavigation}
+                    onPrefetch={prefetchHref}
                   />
                 );
               }
@@ -498,7 +521,7 @@ export function DashboardSidebar({
               const ActiveIcon = item.icon;
               const isOpen = open[item.id];
               const groupActive = item.children.some(
-                (child) => pathname === child.href || pathname.startsWith(`${child.href}/`)
+                (child) => activePath === child.href || activePath.startsWith(`${child.href}/`)
               );
 
               return (
@@ -536,10 +559,12 @@ export function DashboardSidebar({
                             <SubNavLink
                               key={child.href}
                               child={child}
-                              pathname={pathname}
+                              pathname={activePath}
                               onUnavailableClick={showUnavailableNotice}
                               onVerificationRequired={() => setVerificationModalOpen(true)}
                               requiresVerificationGate={requiresVerificationGate}
+                              onNavigate={startNavigation}
+                              onPrefetch={prefetchHref}
                             />
                           ))}
                         </div>
@@ -597,13 +622,17 @@ function NavLink({
   pathname,
   onUnavailableClick,
   onVerificationRequired,
-  requiresVerificationGate
+  requiresVerificationGate,
+  onNavigate,
+  onPrefetch
 }: {
   item: NavLeaf;
   pathname: string;
   onUnavailableClick?: () => void;
   onVerificationRequired?: () => void;
   requiresVerificationGate?: (href: string) => boolean;
+  onNavigate?: (href: string) => void;
+  onPrefetch?: (href: string) => void;
 }) {
   const Icon = item.icon;
   const active = pathname === item.href;
@@ -611,6 +640,10 @@ function NavLink({
   return (
     <Link
       href={item.href}
+      prefetch
+      data-bypass-wizard-guard="true"
+      onMouseEnter={() => onPrefetch?.(item.href)}
+      onFocus={() => onPrefetch?.(item.href)}
       onClick={(event) => {
         if (item.unavailable) {
           event.preventDefault();
@@ -620,7 +653,9 @@ function NavLink({
         if (requiresVerificationGate?.(item.href)) {
           event.preventDefault();
           onVerificationRequired?.();
+          return;
         }
+        onNavigate?.(item.href);
       }}
       className={cn(
         "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
@@ -678,13 +713,17 @@ function SubNavLink({
   pathname,
   onUnavailableClick,
   onVerificationRequired,
-  requiresVerificationGate
+  requiresVerificationGate,
+  onNavigate,
+  onPrefetch
 }: {
   child: NavChild;
   pathname: string;
   onUnavailableClick?: () => void;
   onVerificationRequired?: () => void;
   requiresVerificationGate?: (href: string) => boolean;
+  onNavigate?: (href: string) => void;
+  onPrefetch?: (href: string) => void;
 }) {
   const Icon = child.icon;
   const active = pathname === child.href;
@@ -692,7 +731,10 @@ function SubNavLink({
   return (
     <Link
       href={child.href}
-      prefetch={child.href === "/dashboard/drafts" ? false : undefined}
+      prefetch
+      data-bypass-wizard-guard="true"
+      onMouseEnter={() => onPrefetch?.(child.href)}
+      onFocus={() => onPrefetch?.(child.href)}
       onClick={(event) => {
         if (child.unavailable) {
           event.preventDefault();
@@ -702,7 +744,9 @@ function SubNavLink({
         if (requiresVerificationGate?.(child.href)) {
           event.preventDefault();
           onVerificationRequired?.();
+          return;
         }
+        onNavigate?.(child.href);
       }}
       className={cn(
         "relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-colors",

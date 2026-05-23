@@ -1,92 +1,283 @@
-import {
-  PaymentStatus,
-  Prisma,
-  ReleaseStatus,
-  SubscriptionPlan,
-  SubscriptionStatus
-} from "@prisma/client";
-
 import { prisma } from "@/lib/prisma";
-import { buildReleasePaymentBackfill } from "@/lib/release-payment-backfill";
-import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
-import {
-  buildReleasePaymentDisplay,
-  parseReleasePaymentSnapshot,
-  type ReleasePaymentSnapshot
-} from "@/lib/release-payment";
-import { allReleasePlatformCodes } from "@/lib/release-platforms";
+import { getReleasePriorityFromRoles } from "@/lib/release-priority";
+import { resolveStoredFileUrl } from "@/lib/s3";
 
-type FileKind = "audio" | "text" | "karaoke" | "video-shot" | "video-clip";
-
-interface SubmissionDataLike {
-  cover?: string | null;
-  title?: string;
-  subtitle?: string;
-  genre?: string;
-  label?: string;
-  language?: string;
-  upc?: string;
-  preorderDate?: string;
-  releaseDate?: string;
-  startDate?: string;
-  territoryCountries?: string[];
-  platforms?: string[];
-  platformMode?: "all" | "selected";
-  territoryMode?: "all" | "selected" | "exclude" | "cis";
-  moderatorComment?: string;
-  priorityRelease?: boolean;
-  realTimeDelivery?: boolean;
-  yandexPreReleaseDate?: string;
-  earlyRussiaStart?: boolean;
-  persons?: Array<{ name?: string; role?: string }>;
-  tracks?: SubmissionTrackLike[];
-  extras?: Record<string, unknown>;
-  karaoke?: string;
-  karaokeText?: string;
-  videoShot?: Record<string, unknown>;
-  videoClip?: Record<string, unknown>;
-  lyrics?: string;
-  paymentSnapshot?: unknown;
+interface AdminReleaseDetailsResponse {
+  id: string;
+  status: string;
+  payment_status: string;
+  payment_label?: string;
+  payment_usage?: string | null;
+  payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
+  priority: boolean;
+  cover: {
+    url: string;
+    download_url: string | null;
+  };
+  release: {
+    metadata_language: string;
+    title: string;
+    subtitle: string;
+    genre: string;
+    release_type: string;
+    label: string;
+    upc: string;
+    dates: {
+      preorder_date: string;
+      start_date: string;
+      release_date: string;
+    };
+    territories: {
+      mode: string;
+      label: string;
+      count: number;
+      countries: string[];
+    };
+    platforms: {
+      count: number;
+      selected_codes: string[];
+      names: string[];
+    };
+    roles: {
+      performers: string[];
+      feats: string[];
+      remixers: string[];
+      coPerformers: string[];
+      producers: string[];
+      musicAuthors: string[];
+      lyricsAuthors: string[];
+    };
+    settings: {
+      early_russia_start: boolean;
+      real_time_delivery: boolean;
+      yandex_pre_release_date: string;
+    };
+  };
+  tracks: Array<{
+    id: string;
+    title: string;
+    subtitle: string;
+    identification: {
+      isrc: string;
+      partner_code: string;
+    };
+    track_roles: {
+      performers: string[];
+      feats: string[];
+      remixers: string[];
+      coPerformers: string[];
+      producers: string[];
+      musicAuthors: string[];
+      lyricsAuthors: string[];
+    };
+    rights: {
+      copyright_pct: string | number | null;
+      related_rights_pct: string | number | null;
+    };
+    additional: {
+      preview_start: string;
+      instant_gratification: boolean;
+      focus_track: boolean;
+    };
+    version: {
+      explicit: boolean;
+      live: boolean;
+      cover: boolean;
+      remix: boolean;
+      instrumental: boolean;
+    };
+    usage: {
+      metadata_language: string;
+    };
+    duration_sec: number;
+    files: {
+      audio: FileItem;
+      text: FileItem;
+      karaoke: FileItem;
+      video_shot: FileItem;
+      video_clip: FileItem;
+    };
+    raw_commentary: {
+      lyrics: string;
+    };
+  }>;
+  comment: string;
+  extras: {
+    lyrics: string | null;
+    karaoke: string | null;
+    video_shot: Record<string, unknown> | null;
+    video_clip: Record<string, unknown> | null;
+    additional: Record<string, unknown> | null;
+  };
 }
 
-interface SubmissionTrackLike {
-  fileName?: string;
-  hasAudio?: boolean;
-  durationSec?: number;
-  title?: string;
-  subtitle?: string;
-  isrc?: string;
-  partnerCode?: string;
-  metadataLanguage?: string;
-  trackPersons?: Array<{ name?: string; role?: string }>;
-  copyrightPct?: string;
-  relatedRightsPct?: string;
-  previewStart?: string;
-  instantGratification?: boolean;
-  focusTrack?: boolean;
-  versionExplicit?: boolean;
-  versionLive?: boolean;
-  versionCover?: boolean;
-  versionRemix?: boolean;
-  versionInstrumental?: boolean;
-  lyrics?: string;
-  audioFile?: unknown;
-  syncedLyricsFile?: unknown;
-  ringtoneFile?: unknown;
-  videoFile?: unknown;
-  textFile?: unknown;
-  karaokeFile?: unknown;
-  videoShotFile?: unknown;
-  videoClipFile?: unknown;
+interface FileItem {
+  available: boolean;
+  file_name: string | null;
+  download_url: string | null;
 }
 
-interface FileRefLike {
-  fileName?: string | null;
+interface FileTarget {
+  kind: string;
+  storageKey: string | null;
+  url: string | null;
+  fileName: string | null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function looksLikeOnlyExtension(value: string | null): boolean {
+  if (!value) return false;
+  return /^[a-z0-9]{2,5}$/iu.test(value);
+}
+
+function normalizeExtension(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim().replace(/^\./u, "").toLowerCase();
+  if (!/^[a-z0-9]{2,8}$/u.test(normalized)) return null;
+  return normalized;
+}
+
+function parseDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toDate(value: Date | string | null | undefined): string {
+  const date = parseDate(value);
+  if (!date) return "-";
+  return date.toISOString().slice(0, 10);
+}
+
+function toSeconds(duration: string | null | undefined): number {
+  const value = (duration ?? "").trim();
+  if (!value) return 0;
+  const parts = value.split(":");
+  if (parts.length !== 2) return 0;
+  const minutes = Number(parts[0]);
+  const seconds = Number(parts[1]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return 0;
+  return Math.max(0, minutes * 60 + seconds);
+}
+
+function fileNameFromUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value, "http://localhost");
+    const candidate = parsed.pathname.split("/").filter(Boolean).at(-1) ?? "";
+    return candidate ? decodeURIComponent(candidate) : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStorageKeyCandidate(value: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (normalized.startsWith("http://") || normalized.startsWith("https://")) return null;
+  if (normalized.startsWith("/")) return null;
+  if (!normalized.includes("/")) return null;
+  const segments = normalized.split("/").filter(Boolean);
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) =>
+        segment === "." ||
+        segment === ".." ||
+        segment.includes("\\") ||
+        segment.includes("/")
+    )
+  ) {
+    return null;
+  }
+  return segments.join("/");
+}
+
+function pickStoredFileRef(input: unknown): { storageKey: string | null; url: string | null; fileName: string | null } {
+  const source = asRecord(input);
+  if (!source) return { storageKey: null, url: null, fileName: null };
+
+  const rawUrl = asString(source.url);
+  const rawStorageKey =
+    asString(source.storageKey) ??
+    asString(source.key) ??
+    asString(source.path) ??
+    asString(source.filePath);
+  const rawFileName = asString(source.fileName) ?? asString(source.filename);
+
+  const storageKey = normalizeStorageKeyCandidate(rawStorageKey) ?? normalizeStorageKeyCandidate(rawUrl);
+  const resolvedUrl = resolveStoredFileUrl({ url: rawUrl, storageKey });
+  const fileName = rawFileName ?? fileNameFromUrl(rawUrl) ?? fileNameFromUrl(resolvedUrl);
+
+  return { storageKey, url: resolvedUrl, fileName };
+}
+
+function pickLegacyFileRef(value: unknown): { storageKey: string | null; url: string | null; fileName: string | null } {
+  const asValue = asString(value);
+  if (!asValue || looksLikeOnlyExtension(asValue)) {
+    return { storageKey: null, url: null, fileName: null };
+  }
+  if (asValue.startsWith("http://") || asValue.startsWith("https://") || asValue.startsWith("/")) {
+    const resolved = resolveStoredFileUrl({ url: asValue, storageKey: null });
+    return {
+      storageKey: null,
+      url: resolved,
+      fileName: fileNameFromUrl(resolved) ?? fileNameFromUrl(asValue)
+    };
+  }
+
+  const storageKey = normalizeStorageKeyCandidate(asValue);
+  if (!storageKey) {
+    return { storageKey: null, url: null, fileName: null };
+  }
+
+  return {
+    storageKey,
+    url: resolveStoredFileUrl({ storageKey }),
+    fileName: fileNameFromUrl(storageKey)
+  };
+}
+
+function toFileItem(input: {
   storageKey?: string | null;
   url?: string | null;
+  fileName?: string | null;
+  fallbackName?: string | null;
+}): FileItem {
+  const downloadUrl = resolveStoredFileUrl({
+    url: input.url ?? null,
+    storageKey: input.storageKey ?? null
+  });
+  const fileName =
+    input.fileName ??
+    input.fallbackName ??
+    fileNameFromUrl(downloadUrl) ??
+    fileNameFromUrl(input.url ?? null);
+
+  return {
+    available: Boolean(downloadUrl),
+    file_name: fileName ?? null,
+    download_url: downloadUrl
+  };
 }
 
-interface PersonGroups {
+function parsePersons(persons: unknown): {
   performers: string[];
   feats: string[];
   remixers: string[];
@@ -94,297 +285,8 @@ interface PersonGroups {
   producers: string[];
   musicAuthors: string[];
   lyricsAuthors: string[];
-}
-
-type TrackRoleGroups = PersonGroups;
-
-type FullReleaseRow = Prisma.ReleaseGetPayload<{
-  include: {
-    user: { select: { id: true; name: true } };
-    tracks: true;
-    coverImage: true;
-    releaseFile: true;
-    distributionStatus: {
-      include: {
-        platform: {
-          select: {
-            code: true;
-            name: true;
-          };
-        };
-      };
-    };
-  };
-}>;
-
-type LegacyReleaseRow = Omit<
-  FullReleaseRow,
-  "approvedAt" | "approvedBy" | "rejectedAt" | "rejectedBy" | "rejectionReason"
->;
-
-function readReleaseIdFromPaymentMetadata(metadata: unknown): string | null {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-  const record = metadata as Record<string, unknown>;
-  const kind = typeof record.kind === "string" ? record.kind.trim().toLowerCase() : "";
-  const releaseId =
-    typeof record.releaseId === "string" ? record.releaseId.trim() : "";
-  if (!releaseId) return null;
-  if (!kind || kind === "release") return releaseId;
-  return null;
-}
-
-async function getPaidReleaseIdSetByUser(userId: string): Promise<Set<string>> {
-  const payments = await prisma.subscriptionPayment.findMany({
-    where: {
-      userId,
-      status: PaymentStatus.SUCCEEDED
-    },
-    select: {
-      metadata: true
-    },
-    orderBy: {
-      createdAt: "desc"
-    }
-  });
-
-  const paidReleaseIds = new Set<string>();
-  for (const payment of payments) {
-    const releaseId = readReleaseIdFromPaymentMetadata(payment.metadata);
-    if (releaseId) paidReleaseIds.add(releaseId);
-  }
-  return paidReleaseIds;
-}
-
-function parseSubmissionData(value: unknown): SubmissionDataLike | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as SubmissionDataLike;
-}
-
-function readSubmissionData(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function hasPaymentSnapshot(value: unknown): boolean {
-  const data = readSubmissionData(value);
-  if (!data || !data.paymentSnapshot || typeof data.paymentSnapshot !== "object") return false;
-  const snapshot = data.paymentSnapshot as Record<string, unknown>;
-  return snapshot.kind === "subscription_included" && snapshot.version === 1;
-}
-
-function toEffectivePlan(plan: SubscriptionPlan): "STANDARD" | "PRO" | "ENTERPRISE" | null {
-  if (plan === SubscriptionPlan.STANDARD) return "STANDARD";
-  if (plan === SubscriptionPlan.PRO) return "PRO";
-  if (plan === SubscriptionPlan.ENTERPRISE || plan === SubscriptionPlan.LABEL) return "ENTERPRISE";
-  return null;
-}
-
-function planReleaseLimit(plan: "STANDARD" | "PRO" | "ENTERPRISE"): number | null {
-  if (plan === "ENTERPRISE") return null;
-  if (plan === "PRO") return 6;
-  return 1;
-}
-
-function resolveSubmitMoment(
-  release: Pick<FullReleaseRow, "createdAt" | "updatedAt" | "moderationStartedAt">
-): Date {
-  return release.moderationStartedAt ?? release.updatedAt ?? release.createdAt;
-}
-
-function resolveSubmitMomentInWindow(params: {
-  release: Pick<FullReleaseRow, "createdAt" | "updatedAt" | "moderationStartedAt">;
-  windowStart: Date;
-  windowEnd: Date;
-}): Date {
-  const { release, windowStart, windowEnd } = params;
-  if (release.moderationStartedAt) return release.moderationStartedAt;
-
-  const start = windowStart.getTime();
-  const end = windowEnd.getTime();
-  const created = release.createdAt.getTime();
-  const updated = release.updatedAt.getTime();
-
-  if (created >= start && created < end) return release.createdAt;
-  if (updated >= start && updated < end) return release.updatedAt;
-  if (created < start && updated >= start) return new Date(start);
-  return release.createdAt;
-}
-
-function buildSnapshot(params: {
-  plan: "STANDARD" | "PRO" | "ENTERPRISE";
-  releasesUsedAfterSubmit: number;
-}): ReleasePaymentSnapshot {
-  return {
-    version: 1,
-    kind: "subscription_included",
-    plan: params.plan,
-    releasesUsedAfterSubmit: params.releasesUsedAfterSubmit,
-    releasesLimit: planReleaseLimit(params.plan)
-  };
-}
-
-async function inferMissingPaymentSnapshotForRelease(params: {
-  release: FullReleaseRow;
-  paidReleaseIds: Set<string>;
-}): Promise<ReleasePaymentSnapshot | null> {
-  const successfulSubscriptionPayments = await prisma.subscriptionPayment.findMany({
-    where: {
-      userId: params.release.userId,
-      status: PaymentStatus.SUCCEEDED
-    },
-    select: {
-      userId: true,
-      tariffId: true,
-      paidAt: true,
-      createdAt: true
-    },
-    orderBy: {
-      createdAt: "asc"
-    }
-  });
-
-  const userReleases = await prisma.release.findMany({
-    where: {
-      userId: params.release.userId,
-      status: {
-        not: ReleaseStatus.DRAFT
-      }
-    },
-    select: {
-      id: true,
-      status: true,
-      createdAt: true,
-      updatedAt: true,
-      moderationStartedAt: true,
-      submissionData: true
-    },
-    orderBy: {
-      createdAt: "asc"
-    }
-  });
-
-  const inferredItems = buildReleasePaymentBackfill({
-    releases: userReleases.map((release) => ({
-      id: release.id,
-      userId: params.release.userId,
-      status: release.status,
-      createdAt: release.createdAt,
-      updatedAt: release.updatedAt,
-      moderationStartedAt: release.moderationStartedAt,
-      submissionData: release.submissionData
-    })),
-    successfulSubscriptionPayments,
-    oneTimePaidReleaseIds: params.paidReleaseIds
-  });
-
-  const inferredFromPayments =
-    inferredItems.find((item) => item.releaseId === params.release.id)?.snapshot ?? null;
-  if (inferredFromPayments) return inferredFromPayments;
-
-  const subscription = await prisma.subscription.findUnique({
-    where: { userId: params.release.userId },
-    select: {
-      plan: true,
-      status: true,
-      startedAt: true,
-      endsAt: true,
-      renewalAt: true
-    }
-  });
-  if (!subscription) return null;
-  const plan = toEffectivePlan(subscription.plan);
-  if (!plan) return null;
-
-  const effectiveEnd = getSubscriptionEffectiveEndDate({
-    endsAt: subscription.endsAt ?? null,
-    renewalAt: subscription.renewalAt ?? null
-  });
-  if (!effectiveEnd || effectiveEnd.getTime() <= subscription.startedAt.getTime()) return null;
-
-  const isActiveLike =
-    subscription.status === SubscriptionStatus.ACTIVE ||
-    subscription.status === SubscriptionStatus.TRIALING;
-  const now = Date.now();
-  if (!isActiveLike && effectiveEnd.getTime() < now) {
-    // Expired subscription still can label historical releases in its active window.
-  }
-
-  const eligible = userReleases
-    .filter((release) => !params.paidReleaseIds.has(release.id))
-    .filter((release) => {
-      const submitAt = resolveSubmitMomentInWindow({
-        release,
-        windowStart: subscription.startedAt,
-        windowEnd: effectiveEnd
-      }).getTime();
-      return submitAt >= subscription.startedAt.getTime() && submitAt < effectiveEnd.getTime();
-    })
-    .sort((a, b) => {
-      const left = resolveSubmitMomentInWindow({
-        release: a,
-        windowStart: subscription.startedAt,
-        windowEnd: effectiveEnd
-      }).getTime();
-      const right = resolveSubmitMomentInWindow({
-        release: b,
-        windowStart: subscription.startedAt,
-        windowEnd: effectiveEnd
-      }).getTime();
-      return left - right;
-    });
-
-  const limit = planReleaseLimit(plan);
-  const included = limit == null ? eligible : eligible.slice(0, Math.max(0, limit));
-  let usage = 0;
-  for (const release of included) {
-    usage += 1;
-    if (release.id !== params.release.id) continue;
-    if (hasPaymentSnapshot(release.submissionData)) return null;
-    return buildSnapshot({
-      plan,
-      releasesUsedAfterSubmit: usage
-    });
-  }
-
-  return null;
-}
-
-function toDateOnly(value: Date | null): string {
-  if (!value) return "";
-  return value.toISOString().slice(0, 10);
-}
-
-function toIsoDateTime(value: Date | null): string {
-  if (!value) return "";
-  return value.toISOString();
-}
-
-function readObject(input: unknown): Record<string, unknown> | null {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
-  return input as Record<string, unknown>;
-}
-
-function uniqueNames(values: string[]): string[] {
-  const seen = new Set<string>();
-  const list: string[] = [];
-  for (const value of values) {
-    const normalized = value.trim();
-    if (!normalized) continue;
-    const key = normalized.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    list.push(normalized);
-  }
-  return list;
-}
-
-function roleMatch(role: string, patterns: string[]): boolean {
-  const normalized = role.trim().toLowerCase();
-  return patterns.some((pattern) => normalized.includes(pattern));
-}
-
-function groupPersons(persons: Array<{ name?: string; role?: string }>): PersonGroups {
-  const values = {
+} {
+  const grouped = {
     performers: [] as string[],
     feats: [] as string[],
     remixers: [] as string[],
@@ -394,523 +296,419 @@ function groupPersons(persons: Array<{ name?: string; role?: string }>): PersonG
     lyricsAuthors: [] as string[]
   };
 
-  for (const item of persons) {
-    const name = String(item.name ?? "").trim();
-    const role = String(item.role ?? "").trim();
-    if (!name || !role) continue;
+  for (const rawPerson of asArray(persons)) {
+    const person = asRecord(rawPerson);
+    if (!person) continue;
+    const name = asString(person.name) ?? asString(person.person);
+    const role = (asString(person.role) ?? "").toLowerCase();
+    if (!name) continue;
 
-    if (roleMatch(role, ["исполн", "artist"])) values.performers.push(name);
-    if (roleMatch(role, ["feat"])) values.feats.push(name);
-    if (roleMatch(role, ["remix"])) values.remixers.push(name);
-    if (roleMatch(role, ["соисполн", "co"])) values.coPerformers.push(name);
-    if (roleMatch(role, ["продюсер", "producer"])) values.producers.push(name);
-    if (roleMatch(role, ["автор музыки", "music author", "composer"])) values.musicAuthors.push(name);
-    if (roleMatch(role, ["автор слов", "автор текста", "lyrics author", "lyricist"])) values.lyricsAuthors.push(name);
+    if (role.includes("feat")) grouped.feats.push(name);
+    else if (role.includes("соисполн")) grouped.coPerformers.push(name);
+    else if (role.includes("исполн")) grouped.performers.push(name);
+    else if (role.includes("remix")) grouped.remixers.push(name);
+    else if (role.includes("продюсер") || role.includes("producer")) grouped.producers.push(name);
+    else if (role.includes("автор музыки") || role.includes("composer")) grouped.musicAuthors.push(name);
+    else if (role.includes("автор слов") || role.includes("lyric")) grouped.lyricsAuthors.push(name);
   }
 
-  return {
-    performers: uniqueNames(values.performers),
-    feats: uniqueNames(values.feats),
-    remixers: uniqueNames(values.remixers),
-    coPerformers: uniqueNames(values.coPerformers),
-    producers: uniqueNames(values.producers),
-    musicAuthors: uniqueNames(values.musicAuthors),
-    lyricsAuthors: uniqueNames(values.lyricsAuthors)
-  };
+  return grouped;
 }
 
-function isMissingReleaseDecisionColumnError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("column `release.approvedat` does not exist") ||
-    message.includes("column \"release\".\"approvedat\" does not exist") ||
-    message.includes("column `release.rejectedat` does not exist") ||
-    message.includes("column \"release\".\"rejectedat\" does not exist") ||
-    message.includes("column `release.rejectionreason` does not exist") ||
-    message.includes("column \"release\".\"rejectionreason\" does not exist")
-  );
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function parseFileRef(input: unknown): FileRefLike | null {
-  if (!input) return null;
-
-  if (typeof input === "string") {
-    const url = input.trim();
-    if (!url) return null;
-    return { url };
-  }
-
-  if (typeof input !== "object" || Array.isArray(input)) return null;
-  const obj = input as Record<string, unknown>;
-
-  const url = typeof obj.url === "string" ? obj.url.trim() : "";
-  const storageKey =
-    typeof obj.storageKey === "string"
-      ? obj.storageKey.trim()
-      : typeof obj.key === "string"
-        ? obj.key.trim()
-        : "";
-  const fileName =
-    typeof obj.fileName === "string"
-      ? obj.fileName.trim()
-      : typeof obj.name === "string"
-        ? obj.name.trim()
-        : "";
-
-  if (!url && !storageKey) return null;
-  return {
-    url: url || null,
-    storageKey: storageKey || null,
-    fileName: fileName || null
-  };
+function parseSubmissionData(release: Record<string, unknown>): Record<string, unknown> | null {
+  const inline = asRecord(release.submissionData);
+  if (inline) return inline;
+  const roles = asRecord(release.roles);
+  return asRecord(roles?.submissionData);
 }
 
-function trackFileId(trackId: string, kind: FileKind): string {
-  return `track-${trackId}-${kind}`;
-}
-
-export function mapAdminReleaseDetails(
-  source: FullReleaseRow,
-  oneTimePaid = false,
-  inferredSnapshot: ReleasePaymentSnapshot | null = null
-) {
-  const submission = parseSubmissionData(source.submissionData);
-  const paymentSnapshot =
-    parseReleasePaymentSnapshot(submission?.paymentSnapshot) ?? inferredSnapshot;
-  const payment = buildReleasePaymentDisplay({
-    paid: oneTimePaid,
-    snapshot: paymentSnapshot
-  });
-  const submissionTracks = submission?.tracks ?? [];
-  const releasePersons = groupPersons(submission?.persons ?? []);
-
-  const coverUrl = submission?.cover?.trim() || source.coverImage?.url || "";
-  const preorderDate = submission?.preorderDate?.trim() || toDateOnly(source.releaseDate);
-  const startDate = submission?.startDate?.trim() || toDateOnly(source.releaseDate);
-  const releaseDate = submission?.releaseDate?.trim() || toDateOnly(source.releaseDate);
-  const metadataLanguage = submission?.language?.trim() || source.language || "";
-  const subtitle = submission?.subtitle?.trim() || source.subtitle || "";
-  const releaseType = source.type.toLowerCase();
-  const genre = submission?.genre?.trim() || source.genre || "";
-  const label = submission?.label?.trim() || "ICECREAMMUSIC";
-  const upc = submission?.upc?.trim() || source.upc || "";
-
-  const territoryCountries =
-    (submission?.territoryCountries ?? [])
-      .map((country) => String(country).trim())
-      .filter(Boolean);
-  const territoryMode = submission?.territoryMode ?? "all";
-  const territoriesLabel =
-    territoryMode === "all"
-      ? "Все страны"
-      : territoryCountries.length > 0
-        ? `${territoryCountries.length} стран`
-        : "Страны не выбраны";
-
-  const selectedPlatformCodes =
-    source.distributionStatus.length > 0
-      ? source.distributionStatus.map((row) => row.platform.code)
-      : (submission?.platforms ?? []).map((code) => String(code).trim()).filter(Boolean);
-  const platformNames =
-    source.distributionStatus.length > 0
-      ? source.distributionStatus.map((row) => row.platform.name)
-      : selectedPlatformCodes;
-  const platformCount =
-    submission?.platformMode === "all"
-      ? allReleasePlatformCodes.length
-      : selectedPlatformCodes.length;
-
-  const hasGlobalAudio = Boolean(source.releaseFile?.storageKey || source.releaseFile?.url);
-  const globalAudioFileName = source.releaseFile?.storageKey?.split("/").pop() ?? null;
-
-  const tracks = source.tracks
-    .slice()
-    .sort((a, b) => a.trackNumber - b.trackNumber)
-    .map((track, index) => {
-      const sTrack = submissionTracks[index];
-      const contributorsFromSubmission = sTrack?.trackPersons ?? [];
-      const contributorsFromDb = Array.isArray(track.contributors)
-        ? track.contributors
-        : [];
-
-      const contributors = (contributorsFromSubmission.length > 0
-        ? contributorsFromSubmission
-        : contributorsFromDb
-      )
-        .map((item) => {
-          if (!item || typeof item !== "object" || Array.isArray(item)) return null;
-          const obj = item as Record<string, unknown>;
-          const name = String(obj.name ?? "").trim();
-          const role = String(obj.role ?? "").trim();
-          if (!name || !role) return null;
-          return { name, role };
-        })
-        .filter((item): item is { name: string; role: string } => Boolean(item));
-
-      const grouped = groupPersons(contributors);
-      const trackAudioFile = parseFileRef(sTrack?.audioFile);
-      const textFile = parseFileRef(sTrack?.syncedLyricsFile ?? sTrack?.textFile);
-      const karaokeFile = parseFileRef(sTrack?.ringtoneFile ?? sTrack?.karaokeFile);
-      const videoShotFile = parseFileRef(sTrack?.videoFile ?? sTrack?.videoShotFile);
-      const videoClipFile = parseFileRef(sTrack?.videoClipFile);
-      const hasLyricsText = Boolean((sTrack?.lyrics ?? track.lyrics ?? "").trim());
-
-      return {
-        id: track.id,
-        title: sTrack?.title?.trim() || track.title,
-        subtitle: sTrack?.subtitle?.trim() || track.subtitle || "",
-        identification: {
-          isrc: sTrack?.isrc?.trim() || track.isrc || "",
-          partner_code: sTrack?.partnerCode?.trim() || track.partnerCode || ""
-        },
-        track_roles: grouped as TrackRoleGroups,
-        rights: {
-          copyright_pct: sTrack?.copyrightPct ?? track.copyrightPct,
-          related_rights_pct: sTrack?.relatedRightsPct ?? track.relatedRightsPct
-        },
-        additional: {
-          preview_start: sTrack?.previewStart?.trim() || track.previewStart || "",
-          instant_gratification: Boolean(sTrack?.instantGratification ?? track.instantGratification),
-          focus_track: Boolean(sTrack?.focusTrack ?? track.focusTrack)
-        },
-        version: {
-          explicit: Boolean(sTrack?.versionExplicit ?? track.versionExplicit),
-          live: Boolean(sTrack?.versionLive ?? track.versionLive),
-          cover: Boolean(sTrack?.versionCover ?? track.versionCover),
-          remix: Boolean(sTrack?.versionRemix ?? track.versionRemix),
-          instrumental: Boolean(sTrack?.versionInstrumental ?? track.versionInstrumental)
-        },
-        usage: {
-          metadata_language: sTrack?.metadataLanguage?.trim() || track.metadataLanguage || ""
-        },
-        duration_sec:
-          typeof sTrack?.durationSec === "number" ? sTrack.durationSec : track.durationSec,
-        files: {
-          audio: {
-            available: Boolean(trackAudioFile) || hasGlobalAudio,
-            file_name:
-              trackAudioFile?.fileName ??
-              sTrack?.fileName?.trim() ??
-              globalAudioFileName ??
-              null,
-            url: trackAudioFile?.url ?? source.releaseFile?.url ?? null,
-            download_url: trackAudioFile
-              ? `/api/admin/releases/${source.id}/files/${trackFileId(track.id, "audio")}/download`
-              : hasGlobalAudio
-                ? `/api/admin/releases/${source.id}/files/release-file/download`
-                : null
-          },
-          text: {
-            available: hasLyricsText || Boolean(textFile),
-            file_name: textFile?.fileName ?? null,
-            url: textFile?.url ?? null,
-            download_url: textFile
-              ? `/api/admin/releases/${source.id}/files/${trackFileId(track.id, "text")}/download`
-              : null
-          },
-          karaoke: {
-            available: Boolean(karaokeFile),
-            file_name: karaokeFile?.fileName ?? null,
-            url: karaokeFile?.url ?? null,
-            download_url: karaokeFile
-              ? `/api/admin/releases/${source.id}/files/${trackFileId(track.id, "karaoke")}/download`
-              : null
-          },
-          video_shot: {
-            available: Boolean(videoShotFile),
-            file_name: videoShotFile?.fileName ?? null,
-            url: videoShotFile?.url ?? null,
-            download_url: videoShotFile
-              ? `/api/admin/releases/${source.id}/files/${trackFileId(track.id, "video-shot")}/download`
-              : null
-          },
-          video_clip: {
-            available: Boolean(videoClipFile),
-            file_name: videoClipFile?.fileName ?? null,
-            url: videoClipFile?.url ?? null,
-            download_url: videoClipFile
-              ? `/api/admin/releases/${source.id}/files/${trackFileId(track.id, "video-clip")}/download`
-              : null
-          }
-        },
-        raw_commentary: {
-          lyrics: sTrack?.lyrics ?? track.lyrics ?? ""
+function resolveCoverItem(release: Record<string, unknown>, submissionData: Record<string, unknown> | null) {
+  const coverImageRef = pickStoredFileRef(release.coverImage);
+  const coverUploadRef = pickStoredFileRef(submissionData?.coverUpload);
+  const legacyCoverUrl = asString(submissionData?.cover);
+  const preview = asString(release.preview);
+  const releaseId = asString(release.id);
+  const previewRef = pickLegacyFileRef(preview);
+  const previewExt = normalizeExtension(preview);
+  const legacyPreviewBucketRef =
+    releaseId && previewExt
+      ? {
+          storageKey: `previews/${releaseId}.${previewExt}`,
+          url: resolveStoredFileUrl({ storageKey: `previews/${releaseId}.${previewExt}` }),
+          fileName: `${releaseId}.${previewExt}`
         }
-      };
-    });
+      : { storageKey: null, url: null, fileName: null };
+  const fallbackUrl = resolveStoredFileUrl({ url: legacyCoverUrl, storageKey: null });
 
-  const extrasObject = readObject(submission?.extras);
-  const karaokeText = submission?.karaokeText ?? submission?.karaoke ?? null;
+  const coverUrl =
+    coverUploadRef.url ??
+    fallbackUrl ??
+    coverImageRef.url ??
+    legacyPreviewBucketRef.url ??
+    previewRef.url ??
+    "";
+  return {
+    url: coverUrl,
+    download_url: coverUrl || null
+  };
+}
+
+function resolveReleaseStatus(raw: unknown): string {
+  const normalized = (asString(raw) ?? "").toLowerCase();
+  if (normalized === "moderating" || normalized === "moderation") return "moderation";
+  if (normalized === "rejected") return "changes_required";
+  if (normalized === "approved") return "approved";
+  if (normalized === "draft") return "draft";
+  if (normalized === "pending_verification") return "pending_verification";
+  return normalized || "moderation";
+}
+
+function getTrackFileRefByType(trackData: Record<string, unknown>, type: "audio" | "text" | "karaoke" | "video_shot" | "video_clip") {
+  if (type === "audio") {
+    const fromUploaded = pickStoredFileRef(trackData.audioFile);
+    if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
+
+    const legacyDb = pickLegacyFileRef(asString(trackData.track));
+    if (legacyDb.url || legacyDb.storageKey) return legacyDb;
+
+    const trackId = asString(trackData.id);
+    const ext = normalizeExtension(asString(trackData.track));
+    if (trackId && ext) {
+      const legacyKey = `tracks/${trackId}.${ext}`;
+      return {
+        storageKey: null,
+        url: resolveStoredFileUrl({ storageKey: legacyKey }),
+        fileName: `${trackId}.${ext}`
+      };
+    }
+
+    return {
+      storageKey: null,
+      url: null,
+      fileName: asString(trackData.fileName) ?? null
+    };
+  }
+
+  if (type === "text") {
+    const fromUploaded = pickStoredFileRef(trackData.syncedLyricsFile ?? trackData.textFile);
+    if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
+    return pickLegacyFileRef(asString(trackData.text_sync));
+  }
+
+  if (type === "karaoke") {
+    const fromUploaded = pickStoredFileRef(trackData.ringtoneFile ?? trackData.karaokeFile);
+    if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
+    return pickLegacyFileRef(asString(trackData.ringtone));
+  }
+
+  if (type === "video_shot") {
+    const fromUploaded = pickStoredFileRef(trackData.videoShotFile);
+    if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
+    return pickLegacyFileRef(asString(trackData.video_shot));
+  }
+
+  const fromUploaded = pickStoredFileRef(trackData.videoFile ?? trackData.videoClipFile);
+  if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
+  return pickLegacyFileRef(asString(trackData.video));
+}
+
+export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsResponse {
+  const release = (releaseInput ?? {}) as Record<string, unknown>;
+  const submissionData = parseSubmissionData(release);
+  const submissionTracks = asArray(submissionData?.tracks);
+  const dbTracks = asArray(release.tracks ?? release.track);
+  const trackCount = Math.max(dbTracks.length, submissionTracks.length);
+
+  const releasePersons = parsePersons(submissionData?.persons ?? release.roles);
+  const releasePerformer = asString(release.performer) ?? asString(asRecord(release.user)?.name) ?? "";
+  const releaseFeat = asString(release.feat) ?? "";
+
+  const tracks = Array.from({ length: trackCount }).map((_, index) => {
+    const dbTrack = asRecord(dbTracks[index]) ?? {};
+    const submissionTrack = asRecord(submissionTracks[index]) ?? {};
+    const persons = parsePersons(submissionTrack.trackPersons);
+
+    const audioRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "audio");
+    const textRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "text");
+    const karaokeRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "karaoke");
+    const videoShotRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "video_shot");
+    const videoClipRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "video_clip");
+
+    return {
+      id:
+        asString(dbTrack.id) ??
+        asString(submissionTrack.id) ??
+        `track-${index + 1}`,
+      title: asString(submissionTrack.title) ?? asString(dbTrack.title) ?? "",
+      subtitle: asString(submissionTrack.subtitle) ?? asString(dbTrack.subtitle) ?? "",
+      identification: {
+        isrc: asString(submissionTrack.isrc) ?? asString(dbTrack.isrc) ?? "",
+        partner_code: asString(submissionTrack.partnerCode) ?? asString(dbTrack.partner_code) ?? ""
+      },
+      track_roles: {
+        performers: unique(
+          persons.performers.length
+            ? persons.performers
+            : [releasePerformer].filter(Boolean)
+        ),
+        feats: unique(persons.feats.length ? persons.feats : [releaseFeat].filter(Boolean)),
+        remixers: unique(persons.remixers),
+        coPerformers: unique(persons.coPerformers),
+        producers: unique(persons.producers),
+        musicAuthors: unique(persons.musicAuthors),
+        lyricsAuthors: unique(persons.lyricsAuthors)
+      },
+      rights: {
+        copyright_pct: asString(submissionTrack.copyrightPct) ?? asString(dbTrack.author_rights) ?? null,
+        related_rights_pct: asString(submissionTrack.relatedRightsPct) ?? null
+      },
+      additional: {
+        preview_start: asString(submissionTrack.previewStart) ?? asString(dbTrack.preview_start) ?? "00:00",
+        instant_gratification: Boolean(submissionTrack.instantGratification ?? dbTrack.instant_gratification_date),
+        focus_track: Boolean(submissionTrack.focusTrack ?? dbTrack.focus)
+      },
+      version: {
+        explicit: Boolean(submissionTrack.versionExplicit ?? dbTrack.explicit),
+        live: Boolean(submissionTrack.versionLive ?? dbTrack.live),
+        cover: Boolean(submissionTrack.versionCover ?? dbTrack.cover),
+        remix: Boolean(submissionTrack.versionRemix ?? dbTrack.remix),
+        instrumental: Boolean(submissionTrack.versionInstrumental ?? dbTrack.instrumental)
+      },
+      usage: {
+        metadata_language: asString(submissionTrack.metadataLanguage) ?? asString(dbTrack.language) ?? ""
+      },
+      duration_sec:
+        typeof submissionTrack.durationSec === "number"
+          ? submissionTrack.durationSec
+          : toSeconds(asString(dbTrack.track)),
+      files: {
+        audio: toFileItem({ ...audioRef, fallbackName: asString(submissionTrack.fileName) }),
+        text: toFileItem(textRef),
+        karaoke: toFileItem(karaokeRef),
+        video_shot: toFileItem(videoShotRef),
+        video_clip: toFileItem(videoClipRef)
+      },
+      raw_commentary: {
+        lyrics: asString(submissionTrack.lyrics) ?? asString(dbTrack.text) ?? ""
+      }
+    };
+  });
+
+  const cover = resolveCoverItem(release, submissionData);
+  const platforms = asArray(submissionData?.platforms).map((item) => asString(item)).filter(Boolean) as string[];
+  const countries = asArray(submissionData?.territoryCountries).map((item) => asString(item)).filter(Boolean) as string[];
 
   return {
-    id: source.id,
-    status: source.status.toLowerCase(),
-    payment_status: payment.kind,
-    payment_label: payment.label,
-    payment_usage: payment.usageLabel,
-    payment_plan: payment.plan,
-    priority: Boolean(source.priority || submission?.priorityRelease),
-    cover: {
-      url: coverUrl,
-      download_url: source.coverImage
-        ? `/api/admin/releases/${source.id}/files/cover/download`
-        : coverUrl || null
-    },
+    id: asString(release.id) ?? "",
+    status: resolveReleaseStatus(release.status),
+    payment_status: Boolean(release.confirmed) ? "paid" : "unpaid",
+    payment_label: Boolean(release.confirmed) ? "Оплачен" : "Не оплачен",
+    payment_usage: null,
+    payment_plan: null,
+    priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),
+    cover,
     release: {
-      metadata_language: metadataLanguage || "-",
-      title: submission?.title?.trim() || source.title,
-      subtitle: subtitle || "-",
-      genre: genre || "-",
-      release_type: releaseType || "-",
-      label: label || "-",
-      upc: upc || "-",
+      metadata_language: asString(submissionData?.language) ?? asString(release.language) ?? "",
+      title: asString(submissionData?.title) ?? asString(release.title) ?? "",
+      subtitle: asString(submissionData?.subtitle) ?? asString(release.subtitle) ?? "",
+      genre: asString(submissionData?.genre) ?? asString(release.genre) ?? "",
+      release_type: asString(submissionData?.releaseType) ?? asString(release.type) ?? "",
+      label: asString(submissionData?.label) ?? asString(release.labelName) ?? "ICECREAMMUSIC",
+      upc: asString(submissionData?.upc) ?? asString(release.upc) ?? "",
       dates: {
-        preorder_date: preorderDate || "-",
-        start_date: startDate || "-",
-        release_date: releaseDate || "-"
+        preorder_date: toDate(submissionData?.preorderDate as string | undefined ?? (release.preorderDate as Date | undefined)),
+        start_date: toDate(submissionData?.startDate as string | undefined ?? (release.startDate as Date | undefined)),
+        release_date: toDate(submissionData?.releaseDate as string | undefined ?? (release.date as Date | undefined))
       },
       territories: {
-        mode: territoryMode,
-        label: territoriesLabel,
-        count: territoryCountries.length,
-        countries: territoryCountries
+        mode: asString(submissionData?.territoryMode) ?? "all",
+        label: countries.length ? "Выбранные страны" : "Все страны",
+        count: countries.length || 244,
+        countries
       },
       platforms: {
-        count: platformCount,
-        selected_codes: selectedPlatformCodes,
-        names: platformNames
+        count: platforms.length,
+        selected_codes: platforms,
+        names: platforms
       },
-      roles: releasePersons,
+      roles: {
+        performers: unique(releasePersons.performers.length ? releasePersons.performers : [releasePerformer].filter(Boolean)),
+        feats: unique(releasePersons.feats.length ? releasePersons.feats : [releaseFeat].filter(Boolean)),
+        remixers: unique(releasePersons.remixers),
+        coPerformers: unique(releasePersons.coPerformers),
+        producers: unique(releasePersons.producers),
+        musicAuthors: unique(releasePersons.musicAuthors),
+        lyricsAuthors: unique(releasePersons.lyricsAuthors)
+      },
       settings: {
-        early_russia_start: Boolean(submission?.earlyRussiaStart),
-        real_time_delivery: Boolean(submission?.realTimeDelivery),
-        yandex_pre_release_date: submission?.yandexPreReleaseDate?.trim() || ""
+        early_russia_start: Boolean(submissionData?.priorityRelease ?? release.earlyStartInRussia),
+        real_time_delivery: Boolean(submissionData?.realTimeDelivery ?? release.realTimeDelivery),
+        yandex_pre_release_date: toDate(submissionData?.yandexPreReleaseDate as string | undefined ?? (release.yandexSoonNewRelease as Date | undefined))
       }
     },
     tracks,
-    comment: source.moderationComment?.trim() || submission?.moderatorComment?.trim() || "",
+    comment:
+      asString(release.moderatorComment) ??
+      asString(release.moderationComment) ??
+      asString(release.rejectReason) ??
+      asString(submissionData?.moderatorComment) ??
+      "",
     extras: {
-      lyrics: submission?.lyrics ?? source.lyrics ?? null,
-      karaoke: karaokeText,
-      video_shot: readObject(submission?.videoShot),
-      video_clip: readObject(submission?.videoClip),
-      additional: extrasObject
-    },
-    created_at: toIsoDateTime(source.createdAt),
-    submitted_to_moderation_at: toIsoDateTime(source.moderationStartedAt)
+      lyrics: null,
+      karaoke: null,
+      video_shot: null,
+      video_clip: null,
+      additional: null
+    }
+  };
+}
+
+function parseTrackFileId(fileId: string): { trackId: string; kind: "audio" | "text" | "karaoke" | "video_shot" | "video_clip" } | null {
+  const match = /^track-(.+)-(audio|text|karaoke|video_shot|video_clip)$/u.exec(fileId);
+  if (!match?.[1] || !match?.[2]) return null;
+  return {
+    trackId: match[1],
+    kind: match[2] as "audio" | "text" | "karaoke" | "video_shot" | "video_clip"
+  };
+}
+
+function resolveTrackIndex(release: Record<string, unknown>, trackId: string): number {
+  const tracks = asArray(release.tracks ?? release.track);
+  const index = tracks.findIndex((item) => {
+    const row = asRecord(item);
+    if (!row) return false;
+    const id = asString(row.id);
+    if (id === trackId) return true;
+    const num = row.trackNumber;
+    return typeof num === "number" && String(num) === trackId;
+  });
+  return index;
+}
+
+export function resolveAdminReleaseFileTargetFromRelease(
+  input:
+    | { release: any; fileId: string }
+    | any,
+  maybeFileId?: string
+): FileTarget | null {
+  const maybeObject = asRecord(input);
+  const release = asRecord(maybeObject?.release ?? input);
+  const fileId = asString(maybeObject?.fileId ?? maybeFileId);
+  if (!release || !fileId) return null;
+
+  if (fileId === "cover") {
+    const submissionData = parseSubmissionData(release);
+    const coverImage = pickStoredFileRef(release.coverImage);
+    if (coverImage.url || coverImage.storageKey) {
+      return {
+        kind: "cover",
+        storageKey: coverImage.storageKey,
+        url: coverImage.url,
+        fileName: coverImage.fileName
+      };
+    }
+
+    const coverUpload = pickStoredFileRef(submissionData?.coverUpload);
+    if (coverUpload.url || coverUpload.storageKey) {
+      return {
+        kind: "cover",
+        storageKey: coverUpload.storageKey,
+        url: coverUpload.url,
+        fileName: coverUpload.fileName
+      };
+    }
+
+    const previewRef = pickLegacyFileRef(asString(release.preview));
+    if (previewRef.url || previewRef.storageKey) {
+      return {
+        kind: "cover",
+        storageKey: previewRef.storageKey,
+        url: previewRef.url,
+        fileName: previewRef.fileName
+      };
+    }
+    return null;
+  }
+
+  if (fileId === "audio") {
+    const releaseFile = asRecord(release.releaseFile);
+    const resolved = pickStoredFileRef(releaseFile);
+    if (resolved.url || resolved.storageKey) {
+      return {
+        kind: "release-file",
+        storageKey: resolved.storageKey,
+        url: resolved.url,
+        fileName: resolved.fileName
+      };
+    }
+  }
+
+  const parsedTrackFile = parseTrackFileId(fileId);
+  if (!parsedTrackFile) return null;
+
+  const submissionData = parseSubmissionData(release);
+  const trackIndex = resolveTrackIndex(release, parsedTrackFile.trackId);
+  if (trackIndex < 0) return null;
+  const submissionTracks = asArray(submissionData?.tracks);
+  const dbTracks = asArray(release.tracks ?? release.track);
+  const trackData = {
+    ...(asRecord(dbTracks[trackIndex]) ?? {}),
+    ...(asRecord(submissionTracks[trackIndex]) ?? {})
+  };
+
+  const resolved = getTrackFileRefByType(trackData, parsedTrackFile.kind);
+  if (!resolved.url && !resolved.storageKey) return null;
+
+  return {
+    kind: `track-${parsedTrackFile.kind}`,
+    storageKey: resolved.storageKey,
+    url: resolved.url,
+    fileName: resolved.fileName
   };
 }
 
 export async function getAdminReleaseDetailsById(releaseId: string) {
-  try {
-    const release = await prisma.release.findUnique({
-      where: { id: releaseId },
-      include: {
-        user: { select: { id: true, name: true } },
-        tracks: true,
-        coverImage: true,
-        releaseFile: true,
-        distributionStatus: {
-          include: {
-            platform: {
-              select: { code: true, name: true }
-            }
-          }
-        }
-      }
-    });
-    if (!release) return null;
-    const paidReleaseIds = await getPaidReleaseIdSetByUser(release.userId);
-    const inferredSnapshot = await inferMissingPaymentSnapshotForRelease({
-      release,
-      paidReleaseIds
-    });
-    return mapAdminReleaseDetails(release, paidReleaseIds.has(releaseId), inferredSnapshot);
-  } catch (error) {
-    if (!isMissingReleaseDecisionColumnError(error)) throw error;
-
-    const legacy = (await prisma.release.findUnique({
-      where: { id: releaseId },
-      select: {
-        id: true,
-        userId: true,
-        artistProfileId: true,
-        title: true,
-        subtitle: true,
-        slug: true,
-        genre: true,
-        subgenre: true,
-        language: true,
-        releaseKind: true,
-        platformMode: true,
-        platforms: true,
-        partnerCode: true,
-        rightsYear: true,
-        releaseDate: true,
-        type: true,
-        status: true,
-        explicit: true,
-        upc: true,
-        isrc: true,
-        lyrics: true,
-        moderationComment: true,
-        moderationRemarks: true,
-        moderationReturnedAt: true,
-        moderationCancelledAt: true,
-        moderationStartedAt: true,
-        priority: true,
-        coverMeta: true,
-        submissionData: true,
-        createdAt: true,
-        updatedAt: true,
-        user: { select: { id: true, name: true } },
-        tracks: true,
-        coverImage: true,
-        releaseFile: true,
-        distributionStatus: {
-          include: {
-            platform: {
-              select: { code: true, name: true }
-            }
-          }
-        }
-      }
-    })) as LegacyReleaseRow | null;
-
-    if (!legacy) return null;
-
-    const synthetic = {
-      ...legacy,
-      approvedAt: null,
-      approvedBy: null,
-      rejectedAt: null,
-      rejectedBy: null,
-      rejectionReason: null
-    } as FullReleaseRow;
-
-    const paidReleaseIds = await getPaidReleaseIdSetByUser(synthetic.userId);
-    const inferredSnapshot = await inferMissingPaymentSnapshotForRelease({
-      release: synthetic,
-      paidReleaseIds
-    });
-
-    return mapAdminReleaseDetails(
-      synthetic,
-      paidReleaseIds.has(releaseId),
-      inferredSnapshot
-    );
-  }
-}
-
-function resolveTrackFileRefFromSubmission(
-  submission: SubmissionDataLike | null,
-  tracks: Array<{ id: string; trackNumber: number }>,
-  trackId: string,
-  kind: FileKind
-): FileRefLike | null {
-  if (!submission?.tracks || submission.tracks.length === 0) return null;
-  const ordered = tracks.slice().sort((a, b) => a.trackNumber - b.trackNumber);
-  const index = ordered.findIndex((track) => track.id === trackId);
-  if (index < 0) return null;
-  const sTrack = submission.tracks[index];
-  if (!sTrack) return null;
-
-  if (kind === "audio") return parseFileRef(sTrack.audioFile);
-  if (kind === "text") return parseFileRef(sTrack.syncedLyricsFile ?? sTrack.textFile);
-  if (kind === "karaoke") return parseFileRef(sTrack.ringtoneFile ?? sTrack.karaokeFile);
-  if (kind === "video-shot") return parseFileRef(sTrack.videoFile ?? sTrack.videoShotFile);
-  if (kind === "video-clip") return parseFileRef(sTrack.videoClipFile);
-  return null;
-}
-
-export function resolveAdminReleaseFileTargetFromRelease(params: {
-  fileId: string;
-  release: {
-    tracks?: Array<{ id: string; trackNumber: number }>;
-    submissionData?: Prisma.JsonValue | null;
-    coverImage: { storageKey: string; url: string } | null;
-    releaseFile: { storageKey: string; url: string } | null;
-  };
-}): { kind: string; storageKey?: string; url?: string } | null {
-  const normalizedFileId = params.fileId.trim().toLowerCase();
-  const submission = parseSubmissionData(params.release.submissionData);
-  if (normalizedFileId === "cover") {
-    if (params.release.coverImage) {
-      return {
-        kind: "cover",
-        storageKey: params.release.coverImage.storageKey,
-        url: params.release.coverImage.url
-      };
-    }
-    const submissionCover = submission?.cover?.trim();
-    if (!submissionCover) return null;
-    return {
-      kind: "cover",
-      url: submissionCover
-    };
-  }
-
-  if (normalizedFileId === "release-file" || normalizedFileId === "audio") {
-    if (!params.release.releaseFile) return null;
-    return {
-      kind: "release-file",
-      storageKey: params.release.releaseFile.storageKey,
-      url: params.release.releaseFile.url
-    };
-  }
-
-  const match = /^track-(.+)-(audio|text|karaoke|video-shot|video-clip)$/u.exec(normalizedFileId);
-  if (!match) return null;
-
-  const trackId = match[1];
-  const kind = match[2] as FileKind;
-  const trackRef = resolveTrackFileRefFromSubmission(
-    submission,
-    params.release.tracks ?? [],
-    trackId,
-    kind
-  );
-  if (!trackRef) return null;
-
-  return {
-    kind: `track-${kind}`,
-    storageKey: trackRef.storageKey ?? undefined,
-    url: trackRef.url ?? undefined
-  };
-}
-
-export async function getAdminReleaseDownloadTarget(params: { releaseId: string; fileId: string }) {
   const release = await prisma.release.findUnique({
-    where: { id: params.releaseId },
-    select: {
-      id: true,
-      submissionData: true,
-      tracks: {
+    where: { id: releaseId },
+    include: {
+      user: {
         select: {
-          id: true,
-          trackNumber: true
+          name: true
         }
       },
-      coverImage: {
-        select: {
-          storageKey: true,
-          url: true
-        }
-      },
-      releaseFile: {
-        select: {
-          storageKey: true,
-          url: true
-        }
+      track: {
+        orderBy: { index: "asc" }
       }
     }
   });
 
   if (!release) return null;
+  return mapAdminReleaseDetails(release);
+}
 
-  return resolveAdminReleaseFileTargetFromRelease({
-    fileId: params.fileId,
-    release
+export async function getAdminReleaseDownloadTarget(params: { releaseId: string; fileId: string }) {
+  const release = await prisma.release.findUnique({
+    where: { id: params.releaseId },
+    include: {
+      track: {
+        orderBy: { index: "asc" }
+      }
+    }
   });
+  if (!release) return null;
+
+  const target = resolveAdminReleaseFileTargetFromRelease({
+    release,
+    fileId: params.fileId
+  });
+  if (!target) return null;
+
+  return {
+    storageKey: target.storageKey,
+    url: target.url
+  };
 }

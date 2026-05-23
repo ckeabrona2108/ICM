@@ -123,7 +123,7 @@ async function syncStoreToDb() {
     });
     if (!user) continue;
 
-    await prisma.userContractSignature.upsert({
+    await prisma.user_contract_signatures.upsert({
       where: { id: item.id },
       update: {
         userEmail: item.userEmail,
@@ -196,7 +196,7 @@ const run = async () => {
   await ensureVerificationSchema();
   const synced = await syncStoreToDb();
   await convertLegacyAutoApprovedToPending();
-  const count = await prisma.userContractSignature.count();
+  const count = await prisma.user_contract_signatures.count();
   console.log(`Verification schema ready. Synced ${synced} store records. Total DB records: ${count}.`);
 };
 

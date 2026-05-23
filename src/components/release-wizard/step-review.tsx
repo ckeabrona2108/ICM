@@ -4,6 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import { ExternalLink, ImageIcon } from "lucide-react";
 
+import { normalizeNextImageSrc } from "@/lib/image-src";
 import { getReleasePlatformLabel } from "@/lib/release-platforms";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
 import { cn } from "@/lib/utils";
@@ -52,6 +53,7 @@ export function StepReview({
   submitPhase?: "idle" | "saving" | "uploading" | "submitting";
 }) {
   const { data } = useWizard();
+  const safeCoverSrc = normalizeNextImageSrc(data.cover);
   const hasBlockingErrors = blockingErrors.length > 0;
   const reviewErrors = hasBlockingErrors
     ? [...new Set([...blockingErrors, ...errors])]
@@ -149,8 +151,8 @@ export function StepReview({
       <div className="overflow-hidden rounded-2xl border border-white/[0.05] bg-[#13141a]/80">
         <div className="grid gap-5 p-5 sm:grid-cols-[140px_1fr] sm:p-6">
           <div className="relative aspect-square w-full max-w-[140px] overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02]">
-            {data.cover ? (
-              <Image src={data.cover} alt="cover" fill sizes="140px" className="object-cover" />
+            {safeCoverSrc ? (
+              <Image src={safeCoverSrc} alt="cover" fill sizes="140px" className="object-cover" />
             ) : (
               <div className="grid h-full w-full place-items-center text-white/30">
                 <ImageIcon className="h-6 w-6" />

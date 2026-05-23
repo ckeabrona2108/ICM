@@ -1,50 +1,49 @@
-import { PayoutRequestStatus } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
+import type { AdminPayoutStatus } from "@/lib/admin-payouts-service";
+import { mapConfirmedToPayoutStatus } from "@/lib/admin-payouts-service";
 import { prisma } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(
   _request: Request,
   { params }: { params: { id: string } }
 ) {
   const session = await getServerSession(authOptions);
-
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
   if (session.user.role !== "ADMIN") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const payoutId = params.id;
-
-  const payout = await prisma.payoutRequest.findUnique({
-    where: { id: payoutId },
-    select: { id: true, status: true }
+  const payout = await prisma.payouts.findUnique({
+    where: { id: params.id },
+    select: { id: true, confirmed: true }
   });
 
   if (!payout) {
-    return NextResponse.json({ error: "Payout request not found" }, { status: 404 });
+    return NextResponse.json({ error: "Заявка на выплату не найдена." }, { status: 404 });
   }
 
-  if (payout.status !== PayoutRequestStatus.REQUESTED) {
+  const currentStatus = mapConfirmedToPayoutStatus(payout.confirmed);
+  if (currentStatus === "PAID" || currentStatus === "REJECTED") {
     return NextResponse.json(
-      { ok: true, payoutRequestId: payout.id, status: payout.status },
-      { status: 200 }
+      { error: "Нельзя перевести в обработку завершенную заявку." },
+      { status: 409 }
     );
   }
 
-  const updated = await prisma.payoutRequest.update({
-    where: { id: payoutId },
-    data: { status: PayoutRequestStatus.PROCESSING }
-  });
-
+  const status: AdminPayoutStatus = "PROCESSING";
   return NextResponse.json(
-    { ok: true, payoutRequestId: updated.id, status: updated.status },
+    {
+      ok: true,
+      payoutRequestId: payout.id,
+      status
+    },
     { status: 200 }
   );
 }
-

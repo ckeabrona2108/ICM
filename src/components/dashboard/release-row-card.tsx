@@ -8,7 +8,9 @@ import {
   ClipboardList,
   Diamond,
   ExternalLink,
+  Pause,
   Pencil,
+  Play,
   ScrollText,
   Smartphone,
   Trash2,
@@ -27,6 +29,7 @@ import {
   buildTrackQuickPreviewData,
   type TrackQuickPreviewData
 } from "@/lib/track-quick-preview";
+import { normalizeNextImageSrc } from "@/lib/image-src";
 
 import { PaymentStatusBadge } from "@/components/releases/payment-status-badge";
 import { StatusBadge } from "@/components/releases/status-badge";
@@ -48,9 +51,13 @@ interface SubmissionTrackPersonLike {
 }
 
 interface SubmissionTrackLike {
+  fileName?: string;
+  title?: string;
   subtitle?: string;
-  lyrics?: string;
+  isrc?: string;
+  audioFile?: unknown;
   durationSec?: number;
+  lyrics?: string;
   syncedLyricsFile?: unknown;
   textFile?: unknown;
   ringtoneFile?: unknown;
@@ -92,6 +99,20 @@ function readFileRef(input: unknown): { url?: string; storageKey?: string } | nu
     ...(url ? { url } : {}),
     ...(storageKey ? { storageKey } : {})
   };
+}
+
+function resolveFileRefUrl(input: unknown): string | null {
+  const ref = readFileRef(input);
+  if (!ref) return null;
+  if (ref.url) return ref.url;
+  if (!ref.storageKey) return null;
+  const encoded = ref.storageKey
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  if (!encoded) return null;
+  return `/api/uploads/object/${encoded}`;
 }
 
 function parsePercentValue(value: string | undefined): number | null {
@@ -194,6 +215,7 @@ function ReleaseRowCardBase({
   const showHistoryIcon = release.status !== "draft";
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
   const coverUrl = release.coverUrl || release.cover || "";
+  const safeCoverSrc = normalizeNextImageSrc(coverUrl);
   const title = release.title?.trim() || "Без названия";
   const artist = release.artist?.trim() || "Исполнитель не указан";
   const releaseDate = release.releaseDate?.trim() || "Дата не выбрана";
@@ -203,13 +225,7 @@ function ReleaseRowCardBase({
   const genre = release.genre?.trim() || "Не указан";
   const label = release.label?.trim() || "Не указан";
   const priorityBadge = getPriorityBadgeDescriptor(Boolean(release.priority));
-  const isDataCover = coverUrl.startsWith("data:");
-  const isBlobCover = coverUrl.startsWith("blob:");
-  const isRelativeCover = coverUrl.startsWith("/");
-  const isHttpCover = coverUrl.startsWith("http://") || coverUrl.startsWith("https://");
-  const isRenderableCover = Boolean(
-    coverUrl && (isDataCover || isBlobCover || isRelativeCover || isHttpCover)
-  );
+  const isRenderableCover = Boolean(safeCoverSrc);
   const quickPreviewData =
     quickPreviewTrackNum == null ? null : (quickPreviewCache[quickPreviewTrackNum] ?? null);
   const isQuickPreviewOpen = quickPreviewTrackNum != null;
@@ -219,10 +235,34 @@ function ReleaseRowCardBase({
     () => parseSubmissionData(release.submissionData),
     [release.submissionData]
   );
+  const submissionTracks = React.useMemo(
+    () => (Array.isArray(parsedSubmissionData?.tracks) ? parsedSubmissionData.tracks : []),
+    [parsedSubmissionData]
+  );
+  const displayTracks = React.useMemo(() => {
+    if (release.tracks.length > 0) {
+      return release.tracks.map((track) => ({
+        num: track.num,
+        title: track.title,
+        duration: track.duration,
+        submissionTrack: submissionTracks[Math.max(0, track.num - 1)]
+      }));
+    }
+
+    return submissionTracks.map((track, index) => ({
+      num: index + 1,
+      title: track.title?.trim() || track.fileName?.trim() || `Трек ${index + 1}`,
+      duration: resolveTrackDuration({
+        fallback: "00:00",
+        durationSec: track.durationSec
+      }),
+      submissionTrack: track
+    }));
+  }, [release.tracks, submissionTracks]);
   const trackServices = React.useMemo(
     () =>
-      release.tracks.map((track) => {
-        const submissionTrack = parsedSubmissionData?.tracks?.[Math.max(0, track.num - 1)];
+      displayTracks.map((track) => {
+        const submissionTrack = track.submissionTrack;
         const hasSyncedText =
           hasTrackFile(submissionTrack?.syncedLyricsFile) ||
           hasTrackFile(submissionTrack?.textFile);
@@ -234,6 +274,7 @@ function ReleaseRowCardBase({
           hasTrackFile(submissionTrack?.videoFile) ||
           hasTrackFile(submissionTrack?.videoShotFile) ||
           hasTrackFile(submissionTrack?.videoClipFile);
+        const audioUrl = resolveFileRefUrl(submissionTrack?.audioFile);
 
         return {
           trackNum: track.num,
@@ -247,6 +288,7 @@ function ReleaseRowCardBase({
             copyrightPct: submissionTrack?.copyrightPct,
             relatedRightsPct: submissionTrack?.relatedRightsPct
           }),
+          audioUrl,
           services: {
             ringtone: hasRingtone,
             plainText: hasPlainText,
@@ -255,7 +297,7 @@ function ReleaseRowCardBase({
           }
         };
       }),
-    [artist, parsedSubmissionData, release.tracks]
+    [artist, displayTracks]
   );
 
   const handleDeleteDraft = React.useCallback(async () => {
@@ -478,7 +520,7 @@ function ReleaseRowCardBase({
             {isRenderableCover ? (
               // Keep release cards stable even when remote host is not configured in next/image.
               <img
-                src={coverUrl}
+                src={safeCoverSrc ?? ""}
                 alt=""
                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 loading="lazy"
@@ -621,21 +663,22 @@ function ReleaseRowCardBase({
               className="overflow-hidden"
             >
               <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.05] bg-black/20">
-                {release.tracks.length === 0 ? (
+                {displayTracks.length === 0 ? (
                   <p className="px-4 py-4 text-center text-[12.5px] text-white/40">
                     Треков пока нет
                   </p>
                 ) : (
                   <div className="min-w-[900px]">
-                    <div className="grid grid-cols-[44px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.07] px-4 py-2 text-[12px] font-semibold text-white/48">
+                    <div className="grid grid-cols-[44px_52px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.07] px-4 py-2 text-[12px] font-semibold text-white/48">
                       <span>#</span>
+                      <span className="text-center">▶</span>
                       <span>Название</span>
                       <span className="text-center">Исполнитель</span>
                       <span className="text-center">Длительность</span>
                       <span className="text-center">Доля прав</span>
                       <span className="text-center">Сервисы</span>
                     </div>
-                    {release.tracks.map((t) => {
+                    {displayTracks.map((t) => {
                       const extra = trackServices.find((item) => item.trackNum === t.num);
                       return (
                         <div
@@ -645,13 +688,16 @@ function ReleaseRowCardBase({
                           onClick={(event) => openTrackQuickPreview(t.num, event)}
                           onKeyDown={(event) => openTrackQuickPreview(t.num, event)}
                           className={cn(
-                            "grid grid-cols-[44px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.04] px-4 py-2.5 text-[13px] transition-colors last:border-b-0 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
+                            "grid grid-cols-[44px_52px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.04] px-4 py-2.5 text-[13px] transition-colors last:border-b-0 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
                             isQuickPreviewOpen &&
                               quickPreviewTrackNum === t.num &&
                               "bg-[#7b3df5]/12 ring-1 ring-inset ring-[#7b3df5]/40"
                           )}
                         >
                           <span className="tabular-nums text-white/42">{t.num}</span>
+                          <div className="flex justify-center">
+                            <TrackAudioButton audioUrl={extra?.audioUrl} />
+                          </div>
                           <div className="min-w-0 truncate font-medium text-white/88">
                             <span>{t.title}</span>
                             {extra?.subtitle ? (
@@ -822,6 +868,7 @@ ReleaseRowCard.displayName = "ReleaseRowCard";
 
 function StatusFieldValue({ release }: { release: CabinetRelease }) {
   const showPaymentBadge =
+    release.paymentKind === "paid" ||
     release.paymentKind === "subscription" ||
     release.paymentKind === "unpaid" ||
     !release.paid;
@@ -998,5 +1045,51 @@ function TrackServiceIndicator({
     >
       {icon}
     </span>
+  );
+}
+
+function TrackAudioButton({ audioUrl }: { audioUrl?: string | null }) {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = React.useState(false);
+
+  if (!audioUrl) {
+    return (
+      <span
+        title="Аудио не загружено"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.12] bg-white/[0.03] text-white/30"
+      >
+        <Play className="h-3.5 w-3.5" />
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        const audio = audioRef.current;
+        if (!audio) return;
+        if (audio.paused) {
+          void audio.play();
+        } else {
+          audio.pause();
+        }
+      }}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-300/35 bg-cyan-500/10 text-cyan-200 transition-colors hover:bg-cyan-500/20"
+      title={playing ? "Пауза" : "Воспроизвести"}
+      aria-label={playing ? "Пауза" : "Воспроизвести"}
+    >
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        preload="none"
+        className="hidden"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+      {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+    </button>
   );
 }

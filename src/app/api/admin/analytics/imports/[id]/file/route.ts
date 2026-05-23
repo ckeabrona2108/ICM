@@ -1,10 +1,15 @@
+import { promises as fs } from "node:fs";
+import { basename } from "node:path";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
 
 import { authOptions } from "@/lib/auth";
-import { ANALYTICS_STORED_CSV_UNAVAILABLE_MESSAGE } from "@/lib/admin-analytics-service";
 import { prisma } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
+
+const unavailableMessage =
+  "Analytics import jobs are unavailable in current icecream schema: table analytics_import_jobs is missing.";
 
 export async function GET(
   _request: Request,
@@ -18,38 +23,51 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const job = await prisma.analyticsImportJob.findUnique({
+  const repo = (prisma as unknown as {
+    analytics_import_jobs?: {
+      findUnique: (args: unknown) => Promise<{
+        source_file_name?: string | null;
+        stored_file_path?: string | null;
+      } | null>;
+    };
+  }).analytics_import_jobs;
+
+  if (!repo) {
+    return NextResponse.json({ error: unavailableMessage }, { status: 501 });
+  }
+
+  const job = await repo.findUnique({
     where: { id: params.id },
     select: {
-      sourceFileName: true,
-      storedFilePath: true
+      source_file_name: true,
+      stored_file_path: true
     }
   });
 
   if (!job) {
     return NextResponse.json({ error: "Import job not found" }, { status: 404 });
   }
-  if (!job.storedFilePath) {
-    return NextResponse.json({ error: "Stored file is not available" }, { status: 404 });
+
+  if (!job.stored_file_path) {
+    return NextResponse.json({ error: "Stored CSV file is unavailable for this import job." }, { status: 404 });
   }
 
+  let bytes: Buffer;
   try {
-    const fileContent = await fs.readFile(job.storedFilePath, "utf8");
-    return new NextResponse(fileContent, {
-      status: 200,
-      headers: {
-        "content-type": "text/csv; charset=utf-8",
-        "content-disposition": `attachment; filename="${job.sourceFileName}"`
-      }
-    });
+    bytes = await fs.readFile(job.stored_file_path);
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return NextResponse.json(
-        { error: ANALYTICS_STORED_CSV_UNAVAILABLE_MESSAGE },
-        { status: 404 }
-      );
+    if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") {
+      return NextResponse.json({ error: "Stored CSV file is not found on disk." }, { status: 404 });
     }
-
-    return NextResponse.json({ error: "Failed to read stored CSV" }, { status: 404 });
+    throw error;
   }
+
+  const safeFileName = basename(job.source_file_name || "analytics.csv");
+  return new NextResponse(new Uint8Array(bytes), {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename=\"${safeFileName}\"`
+    }
+  });
 }

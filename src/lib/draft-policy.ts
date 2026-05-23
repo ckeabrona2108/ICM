@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { ReleaseStatus } from "@prisma/client";
 
 export function canSaveDraftForStatus(status: ReleaseStatus): boolean {

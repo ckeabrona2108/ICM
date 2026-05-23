@@ -41,8 +41,8 @@ test("getAnalyticsOverview falls back to snapshots when summary rows are missing
   } as never;
 
   const result = await getAnalyticsOverview(prisma, {
-    userId: "user_1",
-    releaseId: "release_1",
+    user_id: "user_1",
+    release_id: "release_1",
     days: 30
   });
 
@@ -52,4 +52,3 @@ test("getAnalyticsOverview falls back to snapshots when summary rows are missing
   assert.equal(result.chart.length, 2);
   assert.equal(result.chart[1]?.streams, 3628);
 });
-

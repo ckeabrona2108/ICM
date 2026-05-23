@@ -11,7 +11,8 @@ import type {
 import {
   createSupportTicket,
   createSupportTicketSchema,
-  listUserSupportTickets
+  listUserSupportTickets,
+  markUserSupportTicketsRead
 } from "@/lib/support-service";
 
 export async function GET() {
@@ -20,6 +21,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  await markUserSupportTicketsRead(prisma, session.user.id);
   const tickets = await listUserSupportTickets(prisma, session.user.id);
   const response: SupportTicketListResponse = { tickets };
   return NextResponse.json(response, { status: 200 });

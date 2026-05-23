@@ -67,14 +67,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const storedFilePath = await storeAnalyticsCsvFile({ sourceFileName, csvText });
+    const storedFilePath = await storeAnalyticsCsvFile({ source_file_name: sourceFileName, csvText });
     const sizeBytes = Buffer.byteLength(csvText, "utf8");
     try {
       const job = await createAnalyticsImportJob({
         prisma,
         adminId: session.user.id,
-        sourceFileName,
-        storedFilePath
+        source_file_name: sourceFileName,
+        stored_file_path: storedFilePath
       });
 
       if (sizeBytes <= INLINE_PROCESS_MAX_BYTES) {
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
             ok: true,
             mode: "inline",
             job_id: job.id,
-            report_date: job.reportDate.toISOString().slice(0, 10),
+            report_date: job.report_date.toISOString().slice(0, 10),
             result
           },
           { status: 200 }
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
           ok: true,
           mode: "background",
           job_id: job.id,
-          report_date: job.reportDate.toISOString().slice(0, 10),
+          report_date: job.report_date.toISOString().slice(0, 10),
           message:
             "Import job created and scheduled. Poll import status in /api/admin/analytics/imports."
         },
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
       try {
         const result = await importAnalyticsCsvDirect({
           prisma,
-          sourceFileName,
+          source_file_name: sourceFileName,
           csvText
         });
 
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
           {
             ok: true,
             mode: "direct_fallback",
-            report_date: result.reportDate,
+            report_date: result.report_date,
             result,
             message:
               "Импорт выполнен без журнала импортов: таблица analytics_import_jobs пока недоступна."
@@ -140,9 +140,9 @@ export async function POST(request: Request) {
           return NextResponse.json(
             {
               error:
-                "Импорт аналитики временно недоступен: не применены миграции analytics_report_snapshots / analytics_daily_summaries / unmatched_analytics_imports / analytics_platform_summaries."
+                "Импорт аналитики недоступен в текущей schema icecream: отсутствуют таблицы analytics_report_snapshots / analytics_daily_summaries / unmatched_analytics_imports / analytics_platform_summaries."
             },
-            { status: 503 }
+            { status: 501 }
           );
         }
         throw directError;
@@ -153,9 +153,9 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Импорт аналитики временно недоступен: не применены миграции analytics_report_snapshots / analytics_daily_summaries / unmatched_analytics_imports / analytics_platform_summaries."
+            "Импорт аналитики недоступен в текущей schema icecream: отсутствуют таблицы analytics_report_snapshots / analytics_daily_summaries / unmatched_analytics_imports / analytics_platform_summaries."
         },
-        { status: 503 }
+        { status: 501 }
       );
     }
 

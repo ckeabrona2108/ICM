@@ -1,45 +1,57 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
 import { getUserContractStatus } from "@/lib/contract-verification";
-import type {
-  CurrentUserProfileResponse,
-  UpdateCurrentUserAvatarRequest
-} from "@/lib/api/contracts";
+import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
-import {
-  updateUserAvatarSchema,
-  validateAvatarDataUrl
-} from "@/lib/user-profile-policy";
+import { updateUserAvatarSchema, validateAvatarDataUrl } from "@/lib/user-profile-policy";
 
-function isAvatarColumnMissingError(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
-  if (error.code !== "P2022") return false;
-  return String(error.message).toLowerCase().includes("avatarurl");
+export const dynamic = "force-dynamic";
+
+const uuidV4LikePattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getSessionUserId(session: Awaited<ReturnType<typeof getServerSession>>): string | null {
+  const user =
+    session && typeof session === "object" && "user" in session ? session.user : null;
+  const userId =
+    user && typeof user === "object" && "id" in user && typeof user.id === "string"
+      ? user.id.trim()
+      : "";
+  if (!userId) return null;
+  return uuidV4LikePattern.test(userId) ? userId : null;
 }
 
-function toProfileResponse(data: {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl: string | null;
-}, verification: Awaited<ReturnType<typeof getUserContractStatus>>): CurrentUserProfileResponse {
+async function mapCurrentUserProfile(userId: string) {
+  const [user, verification] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true
+      }
+    }),
+    getUserContractStatus({ prisma, userId })
+  ]);
+
+  if (!user) return null;
+
   return {
-    id: data.id,
-    name: data.name,
-    email: data.email,
-    avatarUrl: data.avatarUrl,
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatar,
     verification
   };
 }
 
 export async function PUT(request: Request) {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const userId = getSessionUserId(session);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let payload: unknown;
   try {
@@ -50,109 +62,59 @@ export async function PUT(request: Request) {
 
   const parsed = updateUserAvatarSchema.safeParse(payload);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
+    return NextResponse.json({ error: "Некорректный аватар" }, { status: 400 });
   }
 
-  const body: UpdateCurrentUserAvatarRequest = parsed.data;
-
-  const avatarCheck = validateAvatarDataUrl(body.imageDataUrl);
-  if (!avatarCheck.ok) {
-    return NextResponse.json(
-      { error: avatarCheck.error ?? "Некорректный аватар." },
-      { status: 422 }
-    );
+  const validation = validateAvatarDataUrl(parsed.data.imageDataUrl);
+  if (!validation.ok) {
+    return NextResponse.json({ error: validation.error ?? "Некорректный аватар" }, { status: 400 });
   }
 
   try {
-    const updated = await prisma.user.update({
-      where: { id: session.user.id },
+    await prisma.user.update({
+      where: { id: userId },
       data: {
-        avatarUrl: body.imageDataUrl.trim()
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        avatarUrl: true
+        avatar: parsed.data.imageDataUrl
       }
     });
 
-    const verification = await getUserContractStatus({
-      prisma,
-      userId: updated.id
-    });
-    return NextResponse.json(toProfileResponse(updated, verification), { status: 200 });
+    const profile = await mapCurrentUserProfile(userId);
+    if (!profile) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(profile, { status: 200 });
   } catch (error) {
-    if (isAvatarColumnMissingError(error)) {
-      return NextResponse.json(
-        { error: "В базе данных отсутствует поле avatarUrl. Выполните миграции Prisma и повторите попытку." },
-        { status: 503 }
-      );
+    if (isPrismaConnectionError(error)) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
     }
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2025"
-    ) {
-      return NextResponse.json(
-        { error: "Пользователь не найден." },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Не удалось загрузить аватар." },
-      { status: 500 }
-    );
+    throw error;
   }
 }
 
 export async function DELETE() {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const userId = getSessionUserId(session);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const updated = await prisma.user.update({
-      where: { id: session.user.id },
+    await prisma.user.update({
+      where: { id: userId },
       data: {
-        avatarUrl: null
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        avatarUrl: true
+        avatar: null
       }
     });
 
-    const verification = await getUserContractStatus({
-      prisma,
-      userId: updated.id
-    });
-    return NextResponse.json(toProfileResponse(updated, verification), { status: 200 });
+    const profile = await mapCurrentUserProfile(userId);
+    if (!profile) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(profile, { status: 200 });
   } catch (error) {
-    if (isAvatarColumnMissingError(error)) {
-      return NextResponse.json(
-        { error: "В базе данных отсутствует поле avatarUrl. Выполните миграции Prisma и повторите попытку." },
-        { status: 503 }
-      );
+    if (isPrismaConnectionError(error)) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
     }
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2025"
-    ) {
-      return NextResponse.json(
-        { error: "Пользователь не найден." },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Не удалось удалить аватар." },
-      { status: 500 }
-    );
+    throw error;
   }
 }

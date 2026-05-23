@@ -99,7 +99,8 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
       earlyRussiaStart: false,
       realTimeDelivery: Boolean(submission.realTimeDelivery),
       yandexPreReleaseDate: submission.yandexPreReleaseDate ?? "",
-      moderatorComment: submission.moderatorComment ?? ""
+      moderatorComment: submission.moderatorComment ?? "",
+      priorityRelease: Boolean(submission.priorityRelease)
     };
   }
 
@@ -139,6 +140,7 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
     earlyRussiaStart: false,
     realTimeDelivery: false,
     yandexPreReleaseDate: "",
-    moderatorComment: ""
+    moderatorComment: "",
+    priorityRelease: Boolean(r.priority)
   };
 }

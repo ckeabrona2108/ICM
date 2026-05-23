@@ -6,6 +6,8 @@ import type { SupportUnreadCountResponse } from "@/lib/api/contracts";
 import { prisma } from "@/lib/prisma";
 import { getUserUnreadSupportTicketCount } from "@/lib/support-service";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -17,7 +19,7 @@ export async function GET() {
   return NextResponse.json(response, {
     status: 200,
     headers: {
-      "Cache-Control": "private, max-age=30, stale-while-revalidate=30"
+      "Cache-Control": "no-store"
     }
   });
 }

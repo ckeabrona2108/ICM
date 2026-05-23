@@ -45,13 +45,13 @@ export async function POST(request: Request) {
 
   try {
     const result = await analyticsAIService.requestAnalysis({
-      userId: session.user.id,
+      user_id: session.user.id,
       role: session.user.role,
       targetUserId,
-      releaseId,
+      release_id: releaseId,
       artistId,
       platform,
-      periodDays,
+      period_days: periodDays,
       question
     });
 

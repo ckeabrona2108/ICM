@@ -1,21 +1,6 @@
-import {
-  FinanceReportStatus,
-  ReleaseStatus,
-  Role,
-  SubscriptionPlan,
-  SubscriptionStatus,
-  TransactionStatus,
-  TransactionType,
-  type Prisma,
-  type PrismaClient
-} from "@prisma/client";
 import { z } from "zod";
-import { computeSettlementDelta } from "@/lib/finance-service";
-import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
-
-function toNumber(value: Prisma.Decimal | number | null | undefined): number {
-  return Number(value ?? 0);
-}
+import type { PrismaClient, subscribe_level } from "@prisma/client";
+import { resolveStoredFileUrl } from "@/lib/s3";
 
 export type AdminUserAccountStatus = "ACTIVE" | "INACTIVE";
 
@@ -24,10 +9,10 @@ export interface AdminUserTableItem {
   name: string;
   email: string;
   avatarUrl: string | null;
-  role: Role;
+  role: "USER" | "ADMIN";
   createdAt: string;
-  subscriptionPlan: SubscriptionPlan | null;
-  subscriptionStatus: SubscriptionStatus | null;
+  subscriptionPlan: subscribe_level | null;
+  subscriptionStatus: string | null;
   accountStatus: AdminUserAccountStatus;
   balance: number;
   releaseCount: number;
@@ -44,7 +29,7 @@ export interface AdminUsersListResult {
 export interface AdminUserRelease {
   id: string;
   title: string;
-  status: ReleaseStatus;
+  status: string;
   createdAt: string;
   updatedAt: string;
   moderationStartedAt: string | null;
@@ -57,22 +42,20 @@ export interface AdminUserProfileDetails {
   name: string;
   email: string;
   avatarUrl: string | null;
-  role: Role;
+  role: "USER" | "ADMIN";
   createdAt: string;
   updatedAt: string;
   accountStatus: AdminUserAccountStatus;
-  subscriptionPlan: SubscriptionPlan | null;
-  subscriptionStatus: SubscriptionStatus | null;
+  subscriptionPlan: subscribe_level | null;
+  subscriptionStatus: string | null;
   balance: number;
   releaseCount: number;
 }
 
 export const adminUsersListQuerySchema = z.object({
   q: z.string().trim().optional(),
-  subscription: z.nativeEnum(SubscriptionPlan).optional(),
-  status: z
-    .enum(["ACTIVE", "INACTIVE", "ACTIVE_ONLY", "INACTIVE_ONLY"])
-    .optional(),
+  subscription: z.enum(["standard", "professional", "premium", "enterprise"]).optional(),
+  status: z.enum(["ACTIVE", "INACTIVE", "ACTIVE_ONLY", "INACTIVE_ONLY"]).optional(),
   sortBy: z.enum(["createdAt", "balance", "releaseCount"]).default("createdAt"),
   sortOrder: z.enum(["asc", "desc"]).default("desc"),
   page: z.coerce.number().int().min(1).default(1),
@@ -80,27 +63,13 @@ export const adminUsersListQuerySchema = z.object({
 });
 
 export const adminUserReleasesQuerySchema = z.object({
-  status: z.nativeEnum(ReleaseStatus).optional(),
+  status: z.enum(["moderating", "approved", "rejected"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   perPage: z.coerce.number().int().min(1).max(100).default(20)
 });
 
 export function canManageUsers(role: string | null | undefined): boolean {
   return role === "ADMIN";
-}
-
-function mapAccountStatus(
-  status: SubscriptionStatus | null | undefined,
-  endsAt: Date | null | undefined
-): AdminUserAccountStatus {
-  if (!status) return "INACTIVE";
-  if (status === SubscriptionStatus.CANCELED || status === SubscriptionStatus.EXPIRED) {
-    return "INACTIVE";
-  }
-  if (endsAt && endsAt.getTime() < Date.now()) {
-    return "INACTIVE";
-  }
-  return "ACTIVE";
 }
 
 function includesQuery(user: { id: string; name: string; email: string }, query: string): boolean {
@@ -112,88 +81,67 @@ function includesQuery(user: { id: string; name: string; email: string }, query:
   );
 }
 
+function mapAccountStatus(isSubscribed: boolean | null | undefined): AdminUserAccountStatus {
+  return isSubscribed ? "ACTIVE" : "INACTIVE";
+}
+
+function looksLikeOnlyExtension(value: string): boolean {
+  return /^[a-z0-9]{2,8}$/iu.test(value.trim().replace(/^\./u, ""));
+}
+
+function resolveUserAvatarUrl(userId: string, avatar: string | null): string | null {
+  const rawAvatar = avatar?.trim();
+  if (!rawAvatar) return null;
+
+  if (looksLikeOnlyExtension(rawAvatar)) {
+    const extension = rawAvatar.replace(/^\./u, "");
+    return resolveStoredFileUrl({ storageKey: `avatars/${userId}.${extension}` });
+  }
+
+  return resolveStoredFileUrl({ url: rawAvatar, storageKey: null }) ?? rawAvatar;
+}
+
 export async function listAdminUsers(
   prisma: PrismaClient,
   params: z.infer<typeof adminUsersListQuerySchema>
 ): Promise<AdminUsersListResult> {
   const baseUsers = await prisma.user.findMany({
-    where: {
-      role: {
-        not: Role.ADMIN
-      }
-    },
     select: {
       id: true,
       name: true,
       email: true,
-      avatarUrl: true,
-      role: true,
-      createdAt: true,
-      subscription: {
-        select: {
-          plan: true,
-          status: true,
-          endsAt: true,
-          renewalAt: true
-        }
-      },
+      avatar: true,
+      isAdmin: true,
+      isSubscribed: true,
+      subscribeLevel: true,
+      balance: true,
+      emailVerified: true,
       _count: {
         select: {
-          releases: true
-        }
-      },
-      financeReports: {
-        where: { status: FinanceReportStatus.AGREED },
-        select: { amount: true }
-      },
-      transactions: {
-        where: {
-          status: TransactionStatus.COMPLETED,
-          type: {
-            in: [TransactionType.PAYOUT, TransactionType.REFUND, TransactionType.FEE]
-          }
-        },
-        select: {
-          type: true,
-          amount: true
+          release: true
         }
       }
     }
   });
 
-  let items = baseUsers.map((user) => {
-    const reportsBalance = user.financeReports.reduce((sum, report) => sum + toNumber(report.amount), 0);
-    const settlementDelta = computeSettlementDelta(user.transactions);
-    const balance = reportsBalance + settlementDelta;
-    const subscriptionPlan = user.subscription?.plan ?? null;
-    const subscriptionStatus = user.subscription?.status ?? null;
-    const subscriptionEndsAt = user.subscription
-      ? getSubscriptionEffectiveEndDate({
-          endsAt: user.subscription.endsAt ?? null,
-          renewalAt: user.subscription.renewalAt ?? null
-        })
-      : null;
-    return {
+  let items = baseUsers
+    .filter((user) => !user.isAdmin)
+    .map((user) => ({
       id: user.id,
       name: user.name,
       email: user.email,
-      avatarUrl: user.avatarUrl,
-      role: user.role,
-      createdAt: user.createdAt.toISOString(),
-      subscriptionPlan,
-      subscriptionStatus,
-      accountStatus: mapAccountStatus(subscriptionStatus, subscriptionEndsAt),
-      balance,
-      releaseCount: user._count.releases
-    } satisfies AdminUserTableItem;
-  });
+      avatarUrl: resolveUserAvatarUrl(user.id, user.avatar),
+      role: user.isAdmin ? "ADMIN" : "USER",
+      createdAt: (user.emailVerified ?? new Date(0)).toISOString(),
+      subscriptionPlan: user.subscribeLevel,
+      subscriptionStatus: user.isSubscribed ? "active" : null,
+      accountStatus: mapAccountStatus(user.isSubscribed),
+      balance: Number(user.balance ?? 0),
+      releaseCount: user._count.release
+    } satisfies AdminUserTableItem));
 
-  if (params.q) {
-    items = items.filter((item) => includesQuery(item, params.q ?? ""));
-  }
-  if (params.subscription) {
-    items = items.filter((item) => item.subscriptionPlan === params.subscription);
-  }
+  if (params.q) items = items.filter((item) => includesQuery(item, params.q ?? ""));
+  if (params.subscription) items = items.filter((item) => item.subscriptionPlan === params.subscription);
   if (params.status === "ACTIVE" || params.status === "ACTIVE_ONLY") {
     items = items.filter((item) => item.accountStatus === "ACTIVE");
   }
@@ -203,12 +151,8 @@ export async function listAdminUsers(
 
   const direction = params.sortOrder === "asc" ? 1 : -1;
   items.sort((a, b) => {
-    if (params.sortBy === "balance") {
-      return (a.balance - b.balance) * direction;
-    }
-    if (params.sortBy === "releaseCount") {
-      return (a.releaseCount - b.releaseCount) * direction;
-    }
+    if (params.sortBy === "balance") return (a.balance - b.balance) * direction;
+    if (params.sortBy === "releaseCount") return (a.releaseCount - b.releaseCount) * direction;
     const da = new Date(a.createdAt).getTime();
     const db = new Date(b.createdAt).getTime();
     return (da - db) * direction;
@@ -218,10 +162,9 @@ export async function listAdminUsers(
   const totalPages = Math.max(1, Math.ceil(total / params.perPage));
   const page = Math.min(params.page, totalPages);
   const start = (page - 1) * params.perPage;
-  const paged = items.slice(start, start + params.perPage);
 
   return {
-    items: paged,
+    items: items.slice(start, start + params.perPage),
     page,
     perPage: params.perPage,
     total,
@@ -239,67 +182,36 @@ export async function getAdminUserProfileDetails(
       id: true,
       name: true,
       email: true,
-      avatarUrl: true,
-      role: true,
-      createdAt: true,
-      updatedAt: true,
-      subscription: {
-        select: {
-          plan: true,
-          status: true,
-          endsAt: true,
-          renewalAt: true
-        }
-      },
+      avatar: true,
+      isAdmin: true,
+      isSubscribed: true,
+      subscribeLevel: true,
+      balance: true,
+      emailVerified: true,
       _count: {
         select: {
-          releases: true
-        }
-      },
-      financeReports: {
-        where: { status: FinanceReportStatus.AGREED },
-        select: { amount: true }
-      },
-      transactions: {
-        where: {
-          status: TransactionStatus.COMPLETED,
-          type: {
-            in: [TransactionType.PAYOUT, TransactionType.REFUND, TransactionType.FEE]
-          }
-        },
-        select: {
-          type: true,
-          amount: true
+          release: true
         }
       }
     }
   });
-  if (!user) return null;
-  const reportsBalance = user.financeReports.reduce((sum, report) => sum + toNumber(report.amount), 0);
-  const settlementDelta = computeSettlementDelta(user.transactions);
-  const balance = reportsBalance + settlementDelta;
-  const subscriptionPlan = user.subscription?.plan ?? null;
-  const subscriptionStatus = user.subscription?.status ?? null;
-  const subscriptionEndsAt = user.subscription
-    ? getSubscriptionEffectiveEndDate({
-        endsAt: user.subscription.endsAt ?? null,
-        renewalAt: user.subscription.renewalAt ?? null
-      })
-    : null;
 
+  if (!user) return null;
+
+  const createdAt = user.emailVerified ?? new Date(0);
   return {
     id: user.id,
     name: user.name,
     email: user.email,
-    avatarUrl: user.avatarUrl,
-    role: user.role,
-    createdAt: user.createdAt.toISOString(),
-    updatedAt: user.updatedAt.toISOString(),
-    accountStatus: mapAccountStatus(subscriptionStatus, subscriptionEndsAt),
-    subscriptionPlan,
-    subscriptionStatus,
-    balance,
-    releaseCount: user._count.releases
+    avatarUrl: resolveUserAvatarUrl(user.id, user.avatar),
+    role: user.isAdmin ? "ADMIN" : "USER",
+    createdAt: createdAt.toISOString(),
+    updatedAt: createdAt.toISOString(),
+    accountStatus: mapAccountStatus(user.isSubscribed),
+    subscriptionPlan: user.subscribeLevel,
+    subscriptionStatus: user.isSubscribed ? "active" : null,
+    balance: Number(user.balance ?? 0),
+    releaseCount: user._count.release
   };
 }
 
@@ -308,25 +220,23 @@ export async function listUserReleasesForAdmin(
   userId: string,
   params: z.infer<typeof adminUserReleasesQuerySchema>
 ): Promise<{ items: AdminUserRelease[]; page: number; perPage: number; total: number; totalPages: number }> {
-  const where: Prisma.ReleaseWhereInput = {
-    userId
+  const where = {
+    userId,
+    ...(params.status ? { status: params.status } : {})
   };
-  if (params.status) where.status = params.status;
 
   const [total, releases] = await Promise.all([
     prisma.release.count({ where }),
     prisma.release.findMany({
       where,
-      orderBy: { updatedAt: "desc" },
+      orderBy: { date: "desc" },
       skip: (params.page - 1) * params.perPage,
       take: params.perPage,
       select: {
         id: true,
         title: true,
         status: true,
-        createdAt: true,
-        updatedAt: true,
-        moderationStartedAt: true
+        date: true
       }
     })
   ]);
@@ -337,11 +247,11 @@ export async function listUserReleasesForAdmin(
       id: release.id,
       title: release.title,
       status: release.status,
-      createdAt: release.createdAt.toISOString(),
-      updatedAt: release.updatedAt.toISOString(),
-      moderationStartedAt: release.moderationStartedAt?.toISOString() ?? null,
-      approvedAt: null,
-      rejectedAt: null
+      createdAt: release.date.toISOString(),
+      updatedAt: release.date.toISOString(),
+      moderationStartedAt: null,
+      approvedAt: release.status === "approved" ? release.date.toISOString() : null,
+      rejectedAt: release.status === "rejected" ? release.date.toISOString() : null
     })),
     page: params.page,
     perPage: params.perPage,

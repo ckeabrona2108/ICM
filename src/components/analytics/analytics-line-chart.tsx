@@ -131,7 +131,7 @@ function ActiveDotGlow({ cx, cy, stroke, glowFilterId }: ActiveDotInput & { glow
   );
 }
 
-function AnalyticsLineChartBase({ data, days: _days }: AnalyticsLineChartProps) {
+function AnalyticsLineChartBase({ data }: AnalyticsLineChartProps) {
   const dotFilterId = "analytics-dot-glow";
 
   return (

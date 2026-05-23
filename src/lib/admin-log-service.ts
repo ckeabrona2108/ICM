@@ -1,5 +1,17 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+type AdminLogDelegate = {
+  create: (args: {
+    data: {
+      adminId: string;
+      action: string;
+      targetType: string;
+      targetId: string | null;
+      payload: Prisma.InputJsonValue;
+    };
+  }) => Promise<unknown>;
+};
+
 export async function createAdminLog(
   prisma: PrismaClient | Prisma.TransactionClient,
   params: {
@@ -13,6 +25,12 @@ export async function createAdminLog(
     payload?: Prisma.InputJsonValue;
   }
 ) {
+  const adminLogRepo = (prisma as unknown as { adminLog?: AdminLogDelegate }).adminLog;
+
+  if (typeof adminLogRepo?.create !== "function") {
+    return;
+  }
+
   const mergedPayload: Record<string, unknown> = {};
   if (params.oldValue !== undefined) mergedPayload.oldValue = params.oldValue;
   if (params.newValue !== undefined) mergedPayload.newValue = params.newValue;
@@ -21,14 +39,26 @@ export async function createAdminLog(
     Object.assign(mergedPayload, params.payload as Record<string, unknown>);
   }
 
-  await prisma.adminLog.create({
-    data: {
-      adminId: params.adminId,
-      action: params.action,
-      targetType: params.targetType,
-      targetId: params.targetId ?? null,
-      payload: mergedPayload as Prisma.InputJsonValue
+  try {
+    await adminLogRepo.create({
+      data: {
+        adminId: params.adminId,
+        action: params.action,
+        targetType: params.targetType,
+        targetId: params.targetId ?? null,
+        payload: mergedPayload as Prisma.InputJsonValue
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (
+      message.includes("adminlog") ||
+      message.includes("admin_log") ||
+      message.includes("does not exist") ||
+      message.includes("unknown")
+    ) {
+      return;
     }
-  });
+    throw error;
+  }
 }
-

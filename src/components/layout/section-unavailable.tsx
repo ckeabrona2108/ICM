@@ -22,7 +22,7 @@ export function DashboardSectionUnavailable({
           </p>
           <div className="mt-7 flex justify-center">
             <Link href="/dashboard">
-              <Button variant="outline" className="gap-2">
+              <Button variant="outline" className="h-12 gap-2 px-6 text-[18px]">
                 <Wrench className="h-4 w-4" />
                 На главную
               </Button>

@@ -1,12 +1,12 @@
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+
 import { verifyPassword } from "@/lib/password";
+import { prisma } from "@/lib/prisma";
 
 const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
-const nextAuthSecret =
-  process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
+const nextAuthSecret = process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -20,8 +20,9 @@ const adminEmails = new Set(
     .filter(Boolean)
 );
 
-function resolveUserRole(email: string, role: "USER" | "MODERATOR" | "ADMIN"): "USER" | "MODERATOR" | "ADMIN" {
-  return adminEmails.has(email.toLowerCase()) ? "ADMIN" : role;
+function resolveUserRole(params: { email: string; isAdmin: boolean | null | undefined }) {
+  if (params.isAdmin || adminEmails.has(params.email.toLowerCase())) return "ADMIN" as const;
+  return "USER" as const;
 }
 
 export const authOptions: NextAuthOptions = {
@@ -41,54 +42,31 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         const parsed = loginSchema.safeParse(credentials);
+        if (!parsed.success) return null;
 
-        if (!parsed.success) {
-          return null;
-        }
+        const email = parsed.data.email.toLowerCase();
+        const user = await prisma.user.findUnique({
+          where: { email },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            password: true,
+            isAdmin: true
+          }
+        });
 
-        let user:
-          | {
-              id: string;
-              email: string;
-              name: string;
-              passwordHash: string | null;
-              role: "USER" | "MODERATOR" | "ADMIN";
-            }
-          | null = null;
-        try {
-          user = await prisma.user.findUnique({
-            where: { email: parsed.data.email.toLowerCase() },
-            // Keep auth query minimal so login does not break on optional profile columns.
-            select: {
-              id: true,
-              email: true,
-              name: true,
-              passwordHash: true,
-              role: true
-            }
-          });
-        } catch (error) {
-          console.error("[auth] authorize query failed", error);
-          return null;
-        }
+        if (!user?.password) return null;
 
-        if (!user?.passwordHash) {
-          return null;
-        }
-
-        const isPasswordValid = await verifyPassword(parsed.data.password, user.passwordHash);
-        if (!isPasswordValid) {
-          return null;
-        }
-
-        const role = resolveUserRole(user.email, user.role);
+        const isPasswordValid = await verifyPassword(parsed.data.password, user.password);
+        if (!isPasswordValid) return null;
 
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           image: null,
-          role
+          role: resolveUserRole({ email: user.email, isAdmin: user.isAdmin })
         };
       }
     })
@@ -97,31 +75,17 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.role = user.role;
-        if (typeof user.name === "string") {
-          token.name = user.name;
-        }
-        if ("image" in user) {
-          token.picture = typeof user.image === "string" ? user.image : undefined;
-        }
-      }
-      if (token.email) {
-        token.role = resolveUserRole(
-          token.email,
-          (token.role as "USER" | "MODERATOR" | "ADMIN" | undefined) ?? "USER"
-        );
+        if (typeof user.name === "string") token.name = user.name;
+        if ("image" in user) token.picture = typeof user.image === "string" ? user.image : undefined;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub ?? "";
-        session.user.role = (token.role as "USER" | "ADMIN" | "MODERATOR" | undefined) ?? "USER";
-        if (typeof token.name === "string") {
-          session.user.name = token.name;
-        }
-        if (typeof token.picture === "string") {
-          session.user.image = token.picture;
-        }
+        session.user.role = (token.role as "USER" | "ADMIN" | undefined) ?? "USER";
+        if (typeof token.name === "string") session.user.name = token.name;
+        if (typeof token.picture === "string") session.user.image = token.picture;
       }
       return session;
     }

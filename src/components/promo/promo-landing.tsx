@@ -11,6 +11,7 @@ import {
   YandexMusicLogo,
   YouTubeMusicLogo
 } from "@/components/landing/platform-logos";
+import { normalizeNextImageSrc } from "@/lib/image-src";
 
 const TEAL = "border-teal-500/55";
 
@@ -50,6 +51,7 @@ export function PromoLanding({
   artist: string;
 }) {
   const [copied, setCopied] = React.useState(false);
+  const safeCoverSrc = normalizeNextImageSrc(cover);
 
   const share = () => {
     const url = typeof window !== "undefined" ? window.location.href : "";
@@ -63,7 +65,9 @@ export function PromoLanding({
     <main className="min-h-screen bg-[#e4e4e8] px-4 py-10">
       <article className="mx-auto w-full max-w-[380px] overflow-hidden rounded-xl border border-black/[0.12] bg-white shadow-[0_12px_40px_-12px_rgba(0,0,0,0.18)]">
         <div className="relative aspect-[4/3] w-full bg-neutral-200">
-          <Image src={cover} alt="" fill className="object-cover" sizes="380px" priority />
+          {safeCoverSrc ? (
+            <Image src={safeCoverSrc} alt="" fill className="object-cover" sizes="380px" priority />
+          ) : null}
         </div>
 
         <div className="flex items-start justify-between gap-3 border-b border-black/[0.06] bg-white px-4 py-4">

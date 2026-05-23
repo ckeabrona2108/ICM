@@ -4,6 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import { ExternalLink, Plus, Search, Trash2, Upload } from "lucide-react";
 
+import { normalizeNextImageSrc } from "@/lib/image-src";
 import { cn } from "@/lib/utils";
 import { CIS_CODES, COUNTRIES, GENRES, LANGUAGES, flagEmoji } from "@/lib/countries";
 import { releasePersonRoleOptions } from "@/lib/person-roles";
@@ -71,6 +72,7 @@ async function readAsDataUrl(file: File): Promise<string> {
 export function StepInfo() {
   const { data, set, patch } = useWizard();
   const [coverError, setCoverError] = React.useState<string | null>(null);
+  const safeCoverSrc = normalizeNextImageSrc(data.cover);
 
   const onCoverPick = React.useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -150,9 +152,9 @@ export function StepInfo() {
             htmlFor="cover-upload"
             className="group relative grid aspect-square w-full cursor-pointer place-items-center overflow-hidden rounded-xl border-2 border-dashed border-white/[0.08] bg-white/[0.015] transition-colors hover:border-[#7b3df5]/50 hover:bg-white/[0.03]"
           >
-            {data.cover ? (
+            {safeCoverSrc ? (
               <Image
-                src={data.cover}
+                src={safeCoverSrc}
                 alt="cover"
                 fill
                 sizes="280px"

@@ -4,6 +4,7 @@ interface YooKassaCreatePaymentParams {
   amountRub: number;
   description: string;
   returnUrl: string;
+  customerEmail?: string | null;
   metadata?: Record<string, string>;
   idempotenceKey?: string;
 }
@@ -14,6 +15,8 @@ interface YooKassaCreatePaymentResult {
   confirmationUrl?: string;
   expiresAt?: string;
 }
+
+export type YooKassaPaymentStatus = "pending" | "waiting_for_capture" | "succeeded" | "canceled";
 
 interface YooKassaWebhookPayload {
   event?: string;
@@ -50,11 +53,17 @@ function mapYooKassaStatus(status: string | undefined) {
   return "pending" as const;
 }
 
+function normalizeReceiptDescription(value: string): string {
+  const normalized = value.trim() || "Оплата ICECREAMMUSIC";
+  return normalized.length > 128 ? normalized.slice(0, 128) : normalized;
+}
+
 export async function createYooKassaPayment(
   params: YooKassaCreatePaymentParams
 ): Promise<YooKassaCreatePaymentResult> {
   const { shopId, secretKey } = readYooKassaCredentials();
   const idempotenceKey = params.idempotenceKey ?? randomUUID();
+  const customerEmail = params.customerEmail?.trim();
 
   const response = await fetch(`${YOOKASSA_API_BASE}/payments`, {
     method: "POST",
@@ -74,6 +83,28 @@ export async function createYooKassaPayment(
         return_url: params.returnUrl
       },
       description: params.description,
+      ...(customerEmail
+        ? {
+            receipt: {
+              customer: {
+                email: customerEmail
+              },
+              items: [
+                {
+                  description: normalizeReceiptDescription(params.description),
+                  quantity: "1.00",
+                  amount: {
+                    value: params.amountRub.toFixed(2),
+                    currency: "RUB"
+                  },
+                  vat_code: 1,
+                  payment_mode: "full_payment",
+                  payment_subject: "service"
+                }
+              ]
+            }
+          }
+        : {}),
       metadata: params.metadata ?? {}
     })
   });
@@ -102,6 +133,35 @@ export async function createYooKassaPayment(
     confirmationUrl: json.confirmation?.confirmation_url,
     expiresAt: json.expires_at
   };
+}
+
+export async function getYooKassaPaymentStatus(
+  providerPaymentId: string
+): Promise<YooKassaPaymentStatus> {
+  const { shopId, secretKey } = readYooKassaCredentials();
+  const response = await fetch(`${YOOKASSA_API_BASE}/payments/${encodeURIComponent(providerPaymentId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Basic ${toBasicAuth(shopId, secretKey)}`
+    }
+  });
+
+  const json = (await response.json().catch(() => null)) as
+    | {
+        status?: string;
+        description?: string;
+      }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      `YooKassa get payment failed: ${response.status}${
+        json?.description ? ` (${json.description})` : ""
+      }`
+    );
+  }
+
+  return mapYooKassaStatus(json?.status);
 }
 
 export function parseYooKassaWebhookPayload(payload: unknown): YooKassaWebhookPayload | null {

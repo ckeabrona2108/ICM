@@ -32,6 +32,52 @@ interface ImportResultView {
   status: "success" | "partial" | "failed";
 }
 
+function normalizeImportJob(input: Record<string, unknown>): ImportJobItem {
+  const readString = (...keys: string[]): string => {
+    for (const key of keys) {
+      const value = input[key];
+      if (typeof value === "string") return value;
+      if (value instanceof Date) return value.toISOString();
+    }
+    return "";
+  };
+
+  const readNumber = (...keys: string[]): number => {
+    for (const key of keys) {
+      const value = input[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+    return 0;
+  };
+
+  const statusRaw = readString("status");
+  const status: ImportJobItem["status"] =
+    statusRaw === "PENDING" ||
+    statusRaw === "PROCESSING" ||
+    statusRaw === "SUCCESS" ||
+    statusRaw === "PARTIAL" ||
+    statusRaw === "FAILED"
+      ? statusRaw
+      : "FAILED";
+
+  return {
+    id: readString("id"),
+    sourceFileName: readString("sourceFileName", "source_file_name"),
+    reportDate: readString("reportDate", "report_date"),
+    status,
+    totalRows: readNumber("totalRows", "total_rows"),
+    importedRows: readNumber("importedRows", "imported_rows"),
+    matchedRows: readNumber("matchedRows", "matched_rows"),
+    unmatchedRows: readNumber("unmatchedRows", "unmatched_rows"),
+    affectedUsersCount: readNumber("affectedUsersCount", "affected_users_count"),
+    affectedReleasesCount: readNumber("affectedReleasesCount", "affected_releases_count"),
+    errorMessage: readString("errorMessage", "error_message") || null,
+    createdAt: readString("createdAt", "created_at"),
+    finishedAt: readString("finishedAt", "finished_at") || null,
+    storedFilePath: readString("storedFilePath", "stored_file_path") || null
+  };
+}
+
 function statusLabel(status: ImportJobItem["status"]): string {
   if (status === "PENDING") return "pending";
   if (status === "PROCESSING") return "processing";
@@ -57,14 +103,14 @@ export function AdminAnalyticsClient() {
   const loadJobs = React.useCallback(async () => {
     const response = await fetch("/api/admin/analytics/imports?limit=200", { method: "GET" });
     const payload = (await response.json().catch(() => null)) as
-      | { items?: ImportJobItem[]; error?: string }
+      | { items?: Array<Record<string, unknown>>; error?: string }
       | null;
 
     if (!response.ok || !payload?.items) {
       throw new Error(payload?.error ?? "Не удалось загрузить историю импортов");
     }
 
-    setJobs(payload.items);
+    setJobs(payload.items.map(normalizeImportJob));
   }, []);
 
   React.useEffect(() => {

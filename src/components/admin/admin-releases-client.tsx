@@ -8,6 +8,7 @@ import { Check, Loader2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/releases/status-badge";
 import type { AdminReleaseDetails } from "@/lib/admin-data";
+import { normalizeNextImageSrc } from "@/lib/image-src";
 
 type AdminReleaseTab =
   | "moderation"
@@ -247,6 +248,7 @@ export function AdminReleasesClient({
             const canApprove = release.status === "moderation";
             const canReject = release.status === "moderation";
             const isBusy = busyId === release.id;
+            const safeCoverUrl = normalizeNextImageSrc(release.coverUrl);
 
             return (
               <article
@@ -255,7 +257,19 @@ export function AdminReleasesClient({
               >
                 <div className="flex flex-wrap gap-4">
                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10">
-                    <Image src={release.coverUrl} alt={release.title} fill sizes="96px" className="object-cover" />
+                    {safeCoverUrl ? (
+                      <Image
+                        src={safeCoverUrl}
+                        alt={release.title}
+                        fill
+                        sizes="96px"
+                        className="object-cover"
+                      />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center bg-white/[0.03] text-[11px] text-white/45">
+                        Нет обложки
+                      </div>
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <Link

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import * as React from "react";
-import { SubscriptionPlan } from "@prisma/client";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import { UserAvatar } from "@/components/user/user-avatar";
@@ -15,7 +14,9 @@ export function AdminUsersClient({ initialData }: { initialData: AdminUsersListR
   const [error, setError] = React.useState<string | null>(null);
 
   const [q, setQ] = React.useState("");
-  const [subscription, setSubscription] = React.useState<"" | SubscriptionPlan>("");
+  const [subscription, setSubscription] = React.useState<
+    "" | "standard" | "professional" | "premium" | "enterprise"
+  >("");
   const [status, setStatus] = React.useState<"" | "ACTIVE" | "INACTIVE">("");
   const [sortBy, setSortBy] = React.useState<"createdAt" | "balance" | "releaseCount">("createdAt");
   const [sortOrder, setSortOrder] = React.useState<"asc" | "desc">("desc");
@@ -80,11 +81,15 @@ export function AdminUsersClient({ initialData }: { initialData: AdminUsersListR
         </div>
         <select
           value={subscription}
-          onChange={(event) => setSubscription(event.target.value as "" | SubscriptionPlan)}
+          onChange={(event) =>
+            setSubscription(
+              event.target.value as "" | "standard" | "professional" | "premium" | "enterprise"
+            )
+          }
           className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
         >
           <option value="">Подписка: все</option>
-          {Object.values(SubscriptionPlan).map((plan) => (
+          {["standard", "professional", "premium", "enterprise"].map((plan) => (
             <option key={plan} value={plan}>
               {plan}
             </option>

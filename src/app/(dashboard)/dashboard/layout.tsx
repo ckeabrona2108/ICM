@@ -15,6 +15,8 @@ import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { getReleaseSidebarCountsForUser } from "@/lib/release-counts";
 import { getSubscriptionOverview } from "@/lib/subscription-limits";
 
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions);
 

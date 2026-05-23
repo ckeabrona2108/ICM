@@ -1,7 +1,5 @@
-import { NewsPostStatus, type PrismaClient } from "@prisma/client";
-
-const MAX_COVER_IMAGE_BYTES = 5 * 1024 * 1024;
-const IMAGE_DATA_URL_RE = /^data:(image\/(?:jpeg|jpg|png|webp));base64,([a-zA-Z0-9+/=\s]+)$/;
+import type { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 
 export interface AdminNewsPostDto {
   id: string;
@@ -54,13 +52,36 @@ export class NewsValidationError extends Error {
   }
 }
 
+type NewsRow = {
+  id: string;
+  title: string;
+  content: string;
+  preview: string;
+  createdAt: Date | null;
+};
+
+type NewsRepo = {
+  findMany: (args?: unknown) => Promise<NewsRow[]>;
+  findUnique: (args: unknown) => Promise<NewsRow | null>;
+  create: (args: unknown) => Promise<NewsRow>;
+  update: (args: unknown) => Promise<NewsRow>;
+  deleteMany: (args: unknown) => Promise<{ count: number }>;
+};
+
+function getNewsRepo(prisma: PrismaClient): NewsRepo {
+  const repo = (prisma as unknown as { news?: NewsRepo }).news;
+  if (!repo) {
+    throw new Error("Prisma model news is unavailable. Run prisma generate for the current schema.");
+  }
+  return repo;
+}
+
 function normalizeWhitespace(value: string): string {
   return value.replace(/\u0000/g, "").trim();
 }
 
 function normalizeOptionalText(value: unknown): string | null {
-  if (value === undefined) return null;
-  if (value === null) return null;
+  if (value === undefined || value === null) return null;
   const text = normalizeWhitespace(String(value));
   return text.length > 0 ? text : null;
 }
@@ -72,20 +93,6 @@ function sanitizePublicContent(content: string): string {
     .trim();
 }
 
-function mapStatusToApi(status: NewsPostStatus): "draft" | "published" | "archived" {
-  if (status === NewsPostStatus.PUBLISHED) return "published";
-  if (status === NewsPostStatus.ARCHIVED) return "archived";
-  return "draft";
-}
-
-function mapApiStatusToDb(status: string | undefined): NewsPostStatus | undefined {
-  if (!status) return undefined;
-  if (status === "published") return NewsPostStatus.PUBLISHED;
-  if (status === "archived") return NewsPostStatus.ARCHIVED;
-  if (status === "draft") return NewsPostStatus.DRAFT;
-  throw new NewsValidationError("Некорректный status. Ожидается draft/published/archived.");
-}
-
 function slugify(input: string): string {
   const base = input
     .normalize("NFKD")
@@ -93,72 +100,22 @@ function slugify(input: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return base || `news-${Date.now()}`;
+  return base || "news";
 }
 
-async function ensureUniqueSlug(
-  prisma: PrismaClient,
-  requestedSlug: string,
-  excludeId?: string
-): Promise<string> {
-  const root = slugify(requestedSlug);
-  let candidate = root;
-  let suffix = 2;
-
-  while (true) {
-    const existing = await prisma.newsPost.findUnique({
-      where: { slug: candidate },
-      select: { id: true }
-    });
-
-    if (!existing || (excludeId && existing.id === excludeId)) {
-      return candidate;
-    }
-
-    candidate = `${root}-${suffix}`;
-    suffix += 1;
-  }
+function buildSlug(row: Pick<NewsRow, "id" | "title">): string {
+  return `${slugify(row.title)}-${row.id.slice(0, 8)}`;
 }
 
-function parsePublishedAt(value: string | null | undefined): Date | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  const trimmed = normalizeWhitespace(value);
-  if (!trimmed) return null;
-  const date = new Date(trimmed);
-  if (Number.isNaN(date.getTime())) {
-    throw new NewsValidationError("Некорректная дата published_at.");
-  }
-  return date;
+function parseSlugId(slug: string): string | null {
+  const normalized = slug.trim();
+  const maybeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+  if (maybeUuid.test(normalized)) return normalized;
+  const suffix = /-([0-9a-f]{8})$/iu.exec(normalized)?.[1];
+  return suffix ?? null;
 }
 
-function resolveCoverImage(value: unknown): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const match = raw.match(IMAGE_DATA_URL_RE);
-  if (!match) {
-    throw new NewsValidationError(
-      "cover_image должен быть data URL изображения jpg/png/webp."
-    );
-  }
-
-  const base64 = match[2].replace(/\s+/g, "");
-  const bytes = Buffer.byteLength(base64, "base64");
-  if (bytes <= 0) {
-    throw new NewsValidationError("cover_image пустой.");
-  }
-  if (bytes > MAX_COVER_IMAGE_BYTES) {
-    throw new NewsValidationError("cover_image превышает лимит 5MB.");
-  }
-
-  return `${raw.slice(0, raw.indexOf(",") + 1)}${base64}`;
-}
-
-function requireAdminWritableFields(input: UpsertNewsInput) {
+function requireWritableFields(input: UpsertNewsInput) {
   if (!input.title || !normalizeWhitespace(input.title)) {
     throw new NewsValidationError("title обязателен.");
   }
@@ -167,77 +124,74 @@ function requireAdminWritableFields(input: UpsertNewsInput) {
   }
 }
 
-function mapAdminPost(post: {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt: string | null;
-  content: string;
-  coverImage: string | null;
-  status: NewsPostStatus;
-  category: string | null;
-  isPinned: boolean;
-  publishedAt: Date | null;
-  createdByAdminId: string;
-  createdAt: Date;
-  updatedAt: Date;
-}): AdminNewsPostDto {
+function parseNewsDate(value: string | null | undefined): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const raw = normalizeWhitespace(value);
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    throw new NewsValidationError("Некорректная дата published_at.");
+  }
+  return date;
+}
+
+function resolvePreview(input: UpsertNewsInput, fallback = ""): string {
+  return (
+    normalizeOptionalText(input.excerpt) ??
+    normalizeOptionalText(input.cover_image) ??
+    normalizeOptionalText(input.category) ??
+    fallback
+  );
+}
+
+function toCreatedAt(row: NewsRow): Date {
+  return row.createdAt ?? new Date(0);
+}
+
+function mapAdminPost(row: NewsRow): AdminNewsPostDto {
+  const createdAt = toCreatedAt(row).toISOString();
   return {
-    id: post.id,
-    title: post.title,
-    slug: post.slug,
-    excerpt: post.excerpt,
-    content: post.content,
-    cover_image: post.coverImage,
-    status: mapStatusToApi(post.status),
-    category: post.category,
-    is_pinned: post.isPinned,
-    published_at: post.publishedAt ? post.publishedAt.toISOString() : null,
-    created_by_admin_id: post.createdByAdminId,
-    created_at: post.createdAt.toISOString(),
-    updated_at: post.updatedAt.toISOString()
+    id: row.id,
+    title: row.title,
+    slug: buildSlug(row),
+    excerpt: row.preview || null,
+    content: row.content,
+    cover_image: null,
+    status: "published",
+    category: null,
+    is_pinned: false,
+    published_at: createdAt,
+    created_by_admin_id: "",
+    created_at: createdAt,
+    updated_at: createdAt
   };
 }
 
 function isNewPost(publishedAt: Date): boolean {
-  const now = Date.now();
-  const diffMs = now - publishedAt.getTime();
+  const diffMs = Date.now() - publishedAt.getTime();
   return diffMs >= 0 && diffMs <= 7 * 24 * 60 * 60 * 1000;
 }
 
-function mapPublicCard(post: {
-  id: string;
-  title: string;
-  slug: string;
-  excerpt: string | null;
-  coverImage: string | null;
-  category: string | null;
-  isPinned: boolean;
-  publishedAt: Date | null;
-  content?: string;
-}): PublicNewsCardDto {
-  if (!post.publishedAt) {
-    throw new NewsValidationError("Published news must have publishedAt");
-  }
-
+function mapPublicCard(row: NewsRow): PublicNewsCardDto {
+  const publishedAt = toCreatedAt(row);
   return {
-    id: post.id,
-    title: sanitizePublicContent(post.title),
-    slug: post.slug,
-    excerpt: post.excerpt ? sanitizePublicContent(post.excerpt) : null,
-    cover_image: post.coverImage,
-    category: post.category ? sanitizePublicContent(post.category) : null,
-    is_pinned: post.isPinned,
-    published_at: post.publishedAt.toISOString(),
-    is_new: isNewPost(post.publishedAt)
+    id: row.id,
+    title: sanitizePublicContent(row.title),
+    slug: buildSlug(row),
+    excerpt: row.preview ? sanitizePublicContent(row.preview) : null,
+    cover_image: null,
+    category: null,
+    is_pinned: false,
+    published_at: publishedAt.toISOString(),
+    is_new: isNewPost(publishedAt)
   };
 }
 
 export async function listAdminNewsPosts(prisma: PrismaClient): Promise<AdminNewsPostDto[]> {
-  const rows = await prisma.newsPost.findMany({
-    orderBy: [{ createdAt: "desc" }]
+  const rows = await getNewsRepo(prisma).findMany({
+    orderBy: { createdAt: "desc" }
   });
-
   return rows.map(mapAdminPost);
 }
 
@@ -246,47 +200,28 @@ export async function createAdminNewsPost(params: {
   adminId: string;
   input: UpsertNewsInput;
 }): Promise<AdminNewsPostDto> {
-  requireAdminWritableFields(params.input);
+  requireWritableFields(params.input);
+  const publishedAt = parseNewsDate(params.input.published_at) ?? new Date();
 
-  const title = normalizeWhitespace(params.input.title as string);
-  const slugSource = normalizeOptionalText(params.input.slug) ?? title;
-  const slug = await ensureUniqueSlug(params.prisma, slugSource);
-  const excerpt = normalizeOptionalText(params.input.excerpt);
-  const content = normalizeWhitespace(params.input.content as string);
-  const coverImage = resolveCoverImage(params.input.cover_image);
-  const category = normalizeOptionalText(params.input.category);
-  const isPinned = Boolean(params.input.is_pinned ?? false);
-  const requestedStatus = mapApiStatusToDb(params.input.status) ?? NewsPostStatus.DRAFT;
-  let publishedAt = parsePublishedAt(params.input.published_at);
-
-  if (requestedStatus === NewsPostStatus.PUBLISHED && !publishedAt) {
-    publishedAt = new Date();
-  }
-
-  const created = await params.prisma.newsPost.create({
+  const row = await getNewsRepo(params.prisma).create({
     data: {
-      title,
-      slug,
-      excerpt,
-      content,
-      coverImage: coverImage ?? null,
-      status: requestedStatus,
-      category,
-      isPinned,
-      publishedAt: publishedAt ?? null,
-      createdByAdminId: params.adminId
+      id: randomUUID(),
+      title: normalizeWhitespace(params.input.title as string),
+      content: normalizeWhitespace(params.input.content as string),
+      preview: resolvePreview(params.input),
+      createdAt: publishedAt
     }
   });
 
-  return mapAdminPost(created);
+  return mapAdminPost(row);
 }
 
 export async function getAdminNewsPostById(
   prisma: PrismaClient,
   id: string
 ): Promise<AdminNewsPostDto | null> {
-  const post = await prisma.newsPost.findUnique({ where: { id } });
-  return post ? mapAdminPost(post) : null;
+  const row = await getNewsRepo(prisma).findUnique({ where: { id } });
+  return row ? mapAdminPost(row) : null;
 }
 
 export async function updateAdminNewsPost(params: {
@@ -294,7 +229,8 @@ export async function updateAdminNewsPost(params: {
   id: string;
   input: UpsertNewsInput;
 }): Promise<AdminNewsPostDto> {
-  const existing = await params.prisma.newsPost.findUnique({ where: { id: params.id } });
+  const repo = getNewsRepo(params.prisma);
+  const existing = await repo.findUnique({ where: { id: params.id } });
   if (!existing) {
     throw new NewsValidationError("Новость не найдена.");
   }
@@ -306,60 +242,34 @@ export async function updateAdminNewsPost(params: {
       ? normalizeWhitespace(String(params.input.content))
       : existing.content;
 
-  if (!nextTitle) {
-    throw new NewsValidationError("title обязателен.");
-  }
-  if (!nextContent) {
-    throw new NewsValidationError("content обязателен.");
-  }
+  if (!nextTitle) throw new NewsValidationError("title обязателен.");
+  if (!nextContent) throw new NewsValidationError("content обязателен.");
+  const requestedPublishedAt = parseNewsDate(params.input.published_at);
 
-  const requestedSlugRaw =
-    params.input.slug !== undefined
-      ? normalizeOptionalText(params.input.slug) ?? nextTitle
-      : existing.slug;
-  const nextSlug = await ensureUniqueSlug(params.prisma, requestedSlugRaw, existing.id);
-
-  const requestedStatus = mapApiStatusToDb(params.input.status);
-  const nextStatus = requestedStatus ?? existing.status;
-
-  const requestedPublishedAt = parsePublishedAt(params.input.published_at);
-  let nextPublishedAt =
-    requestedPublishedAt === undefined ? existing.publishedAt : requestedPublishedAt;
-
-  if (nextStatus === NewsPostStatus.PUBLISHED && !nextPublishedAt) {
-    nextPublishedAt = new Date();
-  }
-
-  const updated = await params.prisma.newsPost.update({
+  const row = await repo.update({
     where: { id: existing.id },
     data: {
       title: nextTitle,
-      slug: nextSlug,
-      excerpt:
-        params.input.excerpt !== undefined
-          ? normalizeOptionalText(params.input.excerpt)
-          : existing.excerpt,
       content: nextContent,
-      coverImage:
-        params.input.cover_image !== undefined
-          ? (resolveCoverImage(params.input.cover_image) ?? null)
-          : existing.coverImage,
-      category:
+      preview:
+        params.input.excerpt !== undefined ||
+        params.input.cover_image !== undefined ||
         params.input.category !== undefined
-          ? normalizeOptionalText(params.input.category)
-          : existing.category,
-      isPinned:
-        params.input.is_pinned !== undefined ? Boolean(params.input.is_pinned) : existing.isPinned,
-      status: nextStatus,
-      publishedAt: nextPublishedAt
+          ? resolvePreview(params.input, existing.preview)
+          : existing.preview,
+      ...(requestedPublishedAt !== undefined
+        ? {
+            createdAt: requestedPublishedAt ?? existing.createdAt ?? new Date()
+          }
+        : {})
     }
   });
 
-  return mapAdminPost(updated);
+  return mapAdminPost(row);
 }
 
 export async function deleteAdminNewsPost(prisma: PrismaClient, id: string): Promise<boolean> {
-  const result = await prisma.newsPost.deleteMany({ where: { id } });
+  const result = await getNewsRepo(prisma).deleteMany({ where: { id } });
   return result.count > 0;
 }
 
@@ -368,23 +278,9 @@ export async function setAdminNewsPostPublished(params: {
   id: string;
   published: boolean;
 }): Promise<AdminNewsPostDto> {
-  const existing = await params.prisma.newsPost.findUnique({ where: { id: params.id } });
-  if (!existing) throw new NewsValidationError("Новость не найдена.");
-
-  const updated = await params.prisma.newsPost.update({
-    where: { id: existing.id },
-    data: params.published
-      ? {
-          status: NewsPostStatus.PUBLISHED,
-          publishedAt: existing.publishedAt ?? new Date()
-        }
-      : {
-          status: NewsPostStatus.DRAFT,
-          publishedAt: null
-        }
-  });
-
-  return mapAdminPost(updated);
+  const item = await getAdminNewsPostById(params.prisma, params.id);
+  if (!item) throw new NewsValidationError("Новость не найдена.");
+  return item;
 }
 
 export async function setAdminNewsPostPinned(params: {
@@ -392,47 +288,41 @@ export async function setAdminNewsPostPinned(params: {
   id: string;
   pinned: boolean;
 }): Promise<AdminNewsPostDto> {
-  const updated = await params.prisma.newsPost.update({
-    where: { id: params.id },
-    data: { isPinned: params.pinned }
-  });
-  return mapAdminPost(updated);
+  const item = await getAdminNewsPostById(params.prisma, params.id);
+  if (!item) throw new NewsValidationError("Новость не найдена.");
+  return item;
 }
 
 export async function archiveAdminNewsPost(prisma: PrismaClient, id: string): Promise<AdminNewsPostDto> {
-  const updated = await prisma.newsPost.update({
-    where: { id },
-    data: { status: NewsPostStatus.ARCHIVED }
-  });
-  return mapAdminPost(updated);
+  const item = await getAdminNewsPostById(prisma, id);
+  if (!item) throw new NewsValidationError("Новость не найдена.");
+  return item;
 }
 
 export async function listPublicNews(prisma: PrismaClient): Promise<PublicNewsCardDto[]> {
-  const rows = await prisma.newsPost.findMany({
-    where: {
-      status: NewsPostStatus.PUBLISHED,
-      publishedAt: { not: null }
-    },
-    orderBy: [{ isPinned: "desc" }, { publishedAt: "desc" }]
+  const rows = await getNewsRepo(prisma).findMany({
+    orderBy: { createdAt: "desc" }
   });
-
-  return rows.map((post) => mapPublicCard(post));
+  return rows.map(mapPublicCard);
 }
 
 export async function getPublicNewsBySlug(
   prisma: PrismaClient,
   slug: string
 ): Promise<PublicNewsPostDto | null> {
-  const post = await prisma.newsPost.findUnique({
-    where: { slug }
-  });
+  const repo = getNewsRepo(prisma);
+  const parsed = parseSlugId(slug);
+  let row = parsed?.includes("-") ? await repo.findUnique({ where: { id: parsed } }) : null;
 
-  if (!post || post.status !== NewsPostStatus.PUBLISHED || !post.publishedAt) {
-    return null;
+  if (!row) {
+    const rows = await repo.findMany({ orderBy: { createdAt: "desc" } });
+    row = rows.find((item) => item.id.startsWith(parsed ?? "") || buildSlug(item) === slug) ?? null;
   }
 
+  if (!row) return null;
+
   return {
-    ...mapPublicCard(post),
-    content: sanitizePublicContent(post.content)
+    ...mapPublicCard(row),
+    content: sanitizePublicContent(row.content)
   };
 }

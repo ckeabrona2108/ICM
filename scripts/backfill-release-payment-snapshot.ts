@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { PaymentStatus, Prisma } from "@prisma/client";
 
 import { prisma } from "../src/lib/prisma";

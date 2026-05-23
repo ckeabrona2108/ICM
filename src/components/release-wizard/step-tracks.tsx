@@ -7,7 +7,9 @@ import {
   ChevronUp,
   FilePlus2,
   Music2,
+  Pause,
   Pencil,
+  Play,
   Trash2,
   Upload
 } from "lucide-react";
@@ -97,6 +99,169 @@ function inferContentTypeFromName(name: string): string {
   return "application/octet-stream";
 }
 
+function resolveLocalObjectUrl(storageKey: string | undefined): string | undefined {
+  const key = storageKey?.trim();
+  if (!key) return undefined;
+  const encoded = key
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  if (!encoded) return undefined;
+  return `/api/uploads/object/${encoded}`;
+}
+
+function resolveTrackAudioUrl(track: TrackFile): string | undefined {
+  const directUrl = track.audioUrl?.trim();
+  if (directUrl) return directUrl;
+
+  const uploadedUrl = track.audioUpload?.url?.trim();
+  if (uploadedUrl) return uploadedUrl;
+
+  return resolveLocalObjectUrl(track.audioUpload?.storageKey);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function resolveAudioDuration(audio: HTMLAudioElement | null, fallbackSec = 0): number {
+  if (!audio) return fallbackSec;
+
+  if (Number.isFinite(audio.duration) && audio.duration > 0) {
+    return audio.duration;
+  }
+
+  if (audio.seekable.length > 0) {
+    const seekableEnd = audio.seekable.end(audio.seekable.length - 1);
+    if (Number.isFinite(seekableEnd) && seekableEnd > 0) {
+      return seekableEnd;
+    }
+  }
+
+  return fallbackSec;
+}
+
+function TrackAudioPreview({
+  src,
+  fallbackDurationSec
+}: {
+  src: string;
+  fallbackDurationSec?: number;
+}) {
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [durationSec, setDurationSec] = React.useState(Math.max(0, fallbackDurationSec ?? 0));
+  const [currentSec, setCurrentSec] = React.useState(0);
+  const [playing, setPlaying] = React.useState(false);
+
+  const seekMax = Math.max(durationSec, currentSec, 0.01);
+  const progress = seekMax > 0 ? clamp((currentSec / seekMax) * 100, 0, 100) : 0;
+
+  const syncDurationFromAudio = () => {
+    const resolved = resolveAudioDuration(audioRef.current, fallbackDurationSec ?? 0);
+    if (resolved > 0) {
+      setDurationSec(resolved);
+    }
+  };
+
+  const onLoadedMetadata = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    syncDurationFromAudio();
+    setCurrentSec(audio.currentTime || 0);
+  };
+
+  const onTimeUpdate = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    setCurrentSec(audio.currentTime || 0);
+    if (durationSec <= 0) {
+      syncDurationFromAudio();
+    }
+  };
+
+  const togglePlay = async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      try {
+        await audio.play();
+      } catch {
+        // Browser can reject autoplay/playback; keep controls responsive.
+      }
+      return;
+    }
+    audio.pause();
+  };
+
+  const onSeek = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const next = Number(event.target.value);
+    if (!Number.isFinite(next)) return;
+    const bounded = clamp(next, 0, seekMax);
+    audio.currentTime = bounded;
+    setCurrentSec(bounded);
+  };
+
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-gradient-to-r from-[#171b24] via-[#1a1f29] to-[#151923] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] sm:px-4">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        className="hidden"
+        onLoadedMetadata={onLoadedMetadata}
+        onDurationChange={syncDurationFromAudio}
+        onTimeUpdate={onTimeUpdate}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            void togglePlay();
+          }}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[#a78bfa]/30 bg-[#7b3df5]/15 text-[#ddceff] transition-colors hover:bg-[#7b3df5]/25"
+          title={playing ? "Пауза" : "Воспроизвести"}
+          aria-label={playing ? "Пауза" : "Воспроизвести"}
+        >
+          {playing ? (
+            <Pause className="h-3.5 w-3.5" />
+          ) : (
+            <Play className="h-3.5 w-3.5 fill-current" />
+          )}
+        </button>
+
+        <div className="min-w-0 flex-1">
+          <input
+            type="range"
+            min={0}
+            max={seekMax}
+            step={0.01}
+            value={currentSec}
+            onChange={onSeek}
+            className="icm-audio-slider h-6 w-full"
+            style={
+              {
+                "--slider-progress": `${progress}%`
+              } as React.CSSProperties
+            }
+            aria-label="Позиция воспроизведения"
+          />
+          <div className="mt-0.5 flex items-center justify-between text-[11px] tabular-nums text-white/55">
+            <span>{formatDuration(currentSec)}</span>
+            <span>{formatDuration(seekMax)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 async function readDuration(file: File): Promise<number | undefined> {
   const objectUrl = URL.createObjectURL(file);
 
@@ -135,6 +300,7 @@ export function StepTracks() {
   const [drag, setDrag] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [openMetaId, setOpenMetaId] = React.useState<string | null>(null);
+  const [previewTrackId, setPreviewTrackId] = React.useState<string | null>(null);
   const [loadingDuration, setLoadingDuration] = React.useState(false);
   const [uploadingAsset, setUploadingAsset] = React.useState<{
     trackId: string;
@@ -326,6 +492,7 @@ export function StepTracks() {
     const removed = data.tracks.find((t) => t.id === id);
     if (removed?.audioUrl?.startsWith("blob:")) URL.revokeObjectURL(removed.audioUrl);
     setOpenMetaId((cur) => (cur === id ? null : cur));
+    setPreviewTrackId((cur) => (cur === id ? null : cur));
     set("tracks", data.tracks.filter((t) => t.id !== id));
   };
 
@@ -451,6 +618,8 @@ export function StepTracks() {
           <div className="space-y-2">
             {data.tracks.map((t, i) => {
               const open = openMetaId === t.id;
+              const previewOpen = previewTrackId === t.id;
+              const previewUrl = t.hasAudio ? resolveTrackAudioUrl(t) : undefined;
               const displayTitle = t.meta.title.trim() || t.name;
               const authorCoverage = getTrackAuthorCoverage(t.meta.trackPersons);
               const authorsIncomplete =
@@ -497,6 +666,31 @@ export function StepTracks() {
                     <span className="shrink-0 text-[12px] tabular-nums text-white/45">
                       {t.hasAudio ? t.durationLabel ?? formatSize(t.size) : "—"}
                     </span>
+
+                    {previewUrl ? (
+                      <button
+                        type="button"
+                        title={previewOpen ? "Скрыть плеер" : "Прослушать трек"}
+                        onClick={() =>
+                          setPreviewTrackId((current) => (current === t.id ? null : t.id))
+                        }
+                        className={cn(
+                          "inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1.5 text-[10.5px] transition-colors sm:gap-1.5 sm:px-2.5 sm:text-[11px]",
+                          previewOpen
+                            ? "border-[#7b3df5]/50 bg-[#7b3df5]/15 text-white"
+                            : "border-white/[0.08] bg-white/[0.03] text-white/75 hover:border-[#7b3df5]/40 hover:text-white"
+                        )}
+                      >
+                        {previewOpen ? (
+                          <Pause className="h-3 w-3 shrink-0 opacity-80" />
+                        ) : (
+                          <Play className="h-3 w-3 shrink-0 fill-current opacity-80" />
+                        )}
+                        <span className="max-w-[4.5rem] truncate sm:max-w-none">
+                          {previewOpen ? "Скрыть" : "Прослушать"}
+                        </span>
+                      </button>
+                    ) : null}
 
                     <button
                       type="button"
@@ -562,6 +756,15 @@ export function StepTracks() {
                           void uploadTrackAsset({ trackId: t.id, kind, file });
                         }}
                         onRemoveAsset={(kind) => removeTrackAsset({ trackId: t.id, kind })}
+                      />
+                    </div>
+                  ) : null}
+
+                  {previewOpen && previewUrl ? (
+                    <div className="border-t border-white/[0.05] bg-black/30 px-3 py-3 sm:px-4">
+                      <TrackAudioPreview
+                        src={previewUrl}
+                        fallbackDurationSec={t.durationSec}
                       />
                     </div>
                   ) : null}

@@ -1,4 +1,4 @@
-import { PayoutRequestStatus } from "@prisma/client";
+import type { AdminPayoutStatus } from "@/lib/admin-payouts-service";
 
 export function computeAvailableToWithdraw(input: {
   agreedBalance: number;
@@ -9,19 +9,14 @@ export function computeAvailableToWithdraw(input: {
   return Math.max(0, agreed - pending);
 }
 
-export function canMoveToProcessing(status: PayoutRequestStatus): boolean {
-  return status === PayoutRequestStatus.REQUESTED;
+export function canMoveToProcessing(status: AdminPayoutStatus): boolean {
+  return status === "REQUESTED";
 }
 
-export function canMoveToPaid(status: PayoutRequestStatus): boolean {
-  return (
-    status === PayoutRequestStatus.REQUESTED || status === PayoutRequestStatus.PROCESSING
-  );
+export function canMoveToPaid(status: AdminPayoutStatus): boolean {
+  return status === "REQUESTED" || status === "PROCESSING";
 }
 
-export function canMoveToRejected(status: PayoutRequestStatus): boolean {
-  return (
-    status === PayoutRequestStatus.REQUESTED || status === PayoutRequestStatus.PROCESSING
-  );
+export function canMoveToRejected(status: AdminPayoutStatus): boolean {
+  return status === "REQUESTED" || status === "PROCESSING";
 }
-

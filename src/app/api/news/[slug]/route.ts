@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getPublicNewsBySlug } from "@/lib/news-service";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _request: Request,
   context: { params: { slug: string } }

@@ -313,8 +313,8 @@ test("import same CSV twice does not double snapshot totals", async () => {
   const fileName = "report_summary_2026-04-30_20-13-45.csv";
   const csv = csvFor({ upc: 5063635661195, streamsRu: 3481, payRu: 1979 });
 
-  await importAnalyticsCsvReport({ prisma, sourceFileName: fileName, csvText: csv });
-  await importAnalyticsCsvReport({ prisma, sourceFileName: fileName, csvText: csv });
+  await importAnalyticsCsvReport({ prisma, source_file_name: fileName, csvText: csv });
+  await importAnalyticsCsvReport({ prisma, source_file_name: fileName, csvText: csv });
 
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0]?.streams, 3481);
@@ -328,12 +328,12 @@ test("different report dates are stored independently without cross-date summati
 
   await importAnalyticsCsvReport({
     prisma,
-    sourceFileName: "report_summary_2026-04-29_20-13-45.csv",
+    source_file_name: "report_summary_2026-04-29_20-13-45.csv",
     csvText: csvDay1
   });
   await importAnalyticsCsvReport({
     prisma,
-    sourceFileName: "report_summary_2026-04-30_20-13-45.csv",
+    source_file_name: "report_summary_2026-04-30_20-13-45.csv",
     csvText: csvDay2
   });
 
@@ -350,13 +350,13 @@ test("re-import same day overwrites values instead of accumulating", async () =>
 
   await importAnalyticsCsvReport({
     prisma,
-    sourceFileName: fileName,
+    source_file_name: fileName,
     csvText: csvFor({ upc: "5063635661195", streamsRu: 3000, payRu: 1700 })
   });
 
   await importAnalyticsCsvReport({
     prisma,
-    sourceFileName: fileName,
+    source_file_name: fileName,
     csvText: csvFor({ upc: "5063635661195", streamsRu: 2500, payRu: 1500 })
   });
 
@@ -371,7 +371,7 @@ test("daily summary is recalculated from snapshots and not accumulated", async (
 
   await importAnalyticsCsvReport({
     prisma,
-    sourceFileName: fileName,
+    source_file_name: fileName,
     csvText: csvFor({
       upc: "5063635661195",
       streamsRu: 1200,
@@ -383,7 +383,7 @@ test("daily summary is recalculated from snapshots and not accumulated", async (
 
   await importAnalyticsCsvReport({
     prisma,
-    sourceFileName: fileName,
+    source_file_name: fileName,
     csvText: csvFor({
       upc: "5063635661195",
       streamsRu: 1000,

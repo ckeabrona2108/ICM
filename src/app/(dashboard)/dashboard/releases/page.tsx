@@ -10,14 +10,13 @@ export default async function ReleasesPage() {
   if (!session) redirect("/login");
 
   const cabinetReleases = await getCabinetReleasesByUser(session.user.id);
-  const nonDraftReleases = cabinetReleases.filter(
-    (release) => release.status === "approved" || release.status === "distributed"
-  );
+  const approvedReleases = cabinetReleases.filter((release) => release.status === "approved");
+
   return (
-      <ReleasesListShell
-        title="Все релизы"
-        description="Каталог принятых и опубликованных релизов"
-        releases={nonDraftReleases}
-      />
+    <ReleasesListShell
+      title="Все релизы"
+      description="Каталог принятых и опубликованных релизов"
+      releases={approvedReleases}
+    />
   );
 }

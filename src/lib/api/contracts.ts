@@ -393,6 +393,34 @@ export interface SubscriptionCheckoutResponse {
   confirmationUrl: string;
 }
 
+export interface TelegramCreateBonusTokenResponse {
+  ok: boolean;
+  token?: string;
+  telegramLink?: string;
+  expiresAt?: string;
+  status?: "alreadyActivated";
+  proUntil?: string | null;
+  message?: string;
+}
+
+export interface TelegramActivateProRequest {
+  token: string;
+  telegramId: string;
+  telegramUsername?: string;
+}
+
+export interface TelegramActivateProResponse {
+  ok: boolean;
+  status: "success" | "alreadyActivated" | "invalidToken" | "expired";
+  proUntil?: string | null;
+  message?: string;
+}
+
+export interface TelegramBonusStatusResponse {
+  activated: boolean;
+  proUntil?: string;
+}
+
 export interface SubscriptionLimitsResponse {
   releasesLimit: number | null;
   aiDayLimit: number | null;

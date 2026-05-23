@@ -115,6 +115,21 @@ test("requestPasswordReset ignores unknown email", async () => {
   assert.equal(stub.tokens.length, 0);
 });
 
+test("requestPasswordReset works for oauth user without password hash", async () => {
+  const stub = makePrismaStub();
+  stub.users[0]!.passwordHash = null as unknown as string;
+
+  const result = await requestPasswordReset({
+    prisma: stub.prisma,
+    email: "artist@example.com",
+    notify: async (payload) => payload.resetUrl
+  });
+
+  assert.equal(result.accepted, true);
+  assert.ok(result.previewUrl);
+  assert.equal(stub.tokens.length, 1);
+});
+
 test("resetPasswordWithToken updates password and clears sessions", async () => {
   const stub = makePrismaStub();
 
@@ -165,4 +180,3 @@ test("resetPasswordWithToken rejects expired token", async () => {
     (error: unknown) => error instanceof Error && error.message === "INVALID_RESET_TOKEN"
   );
 });
-

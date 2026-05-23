@@ -1,10 +1,11 @@
-import { ReleaseStatus } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { listAnalyticsReleases } from "@/lib/analytics-query-service";
+import type { AnalyticsReleaseListItemResponse } from "@/lib/api/contracts";
 import { prisma } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
@@ -13,74 +14,53 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const country = url.searchParams.get("country") ?? undefined;
-  const upc = url.searchParams.get("upc") ?? undefined;
-  const platform = url.searchParams.get("platform") ?? undefined;
+  const upcRaw = (url.searchParams.get("upc") ?? "").trim();
+  const upc = upcRaw.length > 0 ? upcRaw : undefined;
 
-  try {
-    const releases = await listAnalyticsReleases(prisma, {
+  const releases = await prisma.release.findMany({
+    where: {
       userId: session.user.id,
-      country: country || undefined,
-      upc: upc || undefined,
-      platform: platform || undefined
-    });
-
-    return NextResponse.json(
-      releases.map((item) => ({
-        release_id: item.releaseId,
-        title: item.title,
-        artist: item.artist,
-        upc: item.upc,
-        streams: item.streams,
-        pay_streams: item.payStreams,
-        change_percent: item.changePercent,
-        trend: item.trend
-      })),
-      { status: 200 }
-    );
-  } catch (error) {
-    console.error("[analytics/releases] fallback due to query error", error);
-
-    const upcFilter = (upc ?? "").trim();
-    const fallbackReleases = await prisma.release.findMany({
-      where: {
-        userId: session.user.id,
-        status: {
-          in: [ReleaseStatus.APPROVED, ReleaseStatus.DISTRIBUTED]
-        },
-        ...(upcFilter
-          ? {
-              upc: {
-                contains: upcFilter
-              }
+      confirmed: true,
+      status: "approved",
+      ...(upc
+        ? {
+            upc: {
+              contains: upc,
+              mode: "insensitive"
             }
-          : {})
-      },
-      select: {
-        id: true,
-        title: true,
-        upc: true,
-        user: {
-          select: {
-            name: true
           }
+        : {})
+    },
+    orderBy: { date: "desc" },
+    select: {
+      id: true,
+      title: true,
+      upc: true,
+      performer: true,
+      feat: true,
+      user: {
+        select: {
+          name: true
         }
-      },
-      orderBy: { createdAt: "desc" }
-    });
+      }
+    },
+    take: 500
+  });
 
-    return NextResponse.json(
-      fallbackReleases.map((item) => ({
-        release_id: item.id,
-        title: item.title,
-        artist: item.user.name,
-        upc: item.upc ?? "",
-        streams: 0,
-        pay_streams: 0,
-        change_percent: 0,
-        trend: "flat" as const
-      })),
-      { status: 200 }
-    );
-  }
+  const items: AnalyticsReleaseListItemResponse[] = releases.map((release) => ({
+    release_id: release.id,
+    title: release.title,
+    artist:
+      release.performer?.trim() ||
+      release.feat?.trim() ||
+      release.user.name ||
+      "Unknown Artist",
+    upc: release.upc ?? "",
+    streams: 0,
+    pay_streams: 0,
+    change_percent: null,
+    trend: "flat"
+  }));
+
+  return NextResponse.json(items, { status: 200 });
 }

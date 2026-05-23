@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getUserReleaseQuota } from "@/lib/release-quota";
 import { getSubscriptionOverview } from "@/lib/subscription-limits";
 
 function mapPlan(plan: "STANDARD" | "PRO" | "ENTERPRISE") {
@@ -17,7 +18,10 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const subscription = await getSubscriptionOverview(prisma, session.user.id);
+  const [subscription, releaseQuota] = await Promise.all([
+    getSubscriptionOverview(prisma, session.user.id),
+    getUserReleaseQuota(session.user.id, prisma)
+  ]);
   return NextResponse.json(
     {
       has_active_subscription: subscription.hasActiveSubscription,
@@ -25,6 +29,7 @@ export async function GET() {
       status: subscription.hasActiveSubscription ? "active" : "none",
       ends_at: subscription.endsAt,
       days_left: subscription.countdownDays,
+      release_quota: releaseQuota,
       features: {
         releases_limit: subscription.limits.releasesLimit,
         ai_day_limit: subscription.limits.aiDayLimit,
@@ -36,7 +41,7 @@ export async function GET() {
     {
       status: 200,
       headers: {
-        "Cache-Control": "private, max-age=30, stale-while-revalidate=30"
+        "Cache-Control": "no-store"
       }
     }
   );

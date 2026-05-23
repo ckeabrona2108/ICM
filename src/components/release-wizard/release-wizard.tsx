@@ -38,7 +38,7 @@ import {
   mapReleaseValidationStep,
   validateReleaseSubmission
 } from "@/lib/release-policy";
-import { resolveDraftReleaseId } from "@/lib/release-wizard-mode";
+import { resolveDraftReleaseId, resolveReleaseSubmitMode } from "@/lib/release-wizard-mode";
 import { shouldGuardUnsavedChanges } from "@/lib/wizard-dirty";
 import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
@@ -294,7 +294,7 @@ function WizardInner({
   const [submitErrors, setSubmitErrors] = React.useState<string[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [submitPhase, setSubmitPhase] = React.useState<SubmitPhase>("idle");
-  const [draftReleaseId, setDraftReleaseId] = React.useState<string | undefined>(
+  const [, setDraftReleaseId] = React.useState<string | undefined>(
     resolveDraftReleaseId(submissionMode, sourceReleaseId)
   );
   const draftReleaseIdRef = React.useRef<string | undefined>(
@@ -313,6 +313,7 @@ function WizardInner({
   const [stepNavError, setStepNavError] = React.useState<string | null>(null);
   const [contractModalOpen, setContractModalOpen] = React.useState(false);
   const [contractGateStatus, setContractGateStatus] = React.useState<ContractStatusPayload | null>(null);
+  const wizardRootRef = React.useRef<HTMLDivElement | null>(null);
   const [lastSubmitResult, setLastSubmitResult] = React.useState<ReleaseSubmitSuccessResponse | null>(null);
   const [submitErrorsBySection, setSubmitErrorsBySection] = React.useState<
     Record<WizardErrorSection, string[]>
@@ -713,7 +714,7 @@ function WizardInner({
           setSubmitPhase("submitting");
 
           const payload: ReleaseSubmitRequest = {
-            mode: "edit",
+            mode: resolveReleaseSubmitMode(submissionMode, currentStatus),
             releaseId,
             currentStatus,
             moderationStarted,
@@ -807,7 +808,6 @@ function WizardInner({
         // optional refresh for sidebar counters; ignore failure
       }
 
-      router.refresh();
     } catch (error) {
       if (error instanceof Error && error.message === "submit_failed") {
         return;
@@ -843,7 +843,6 @@ function WizardInner({
     moderationStarted,
     prepareSubmissionDataWithUploads,
     persistDraft,
-    router,
     setStep,
     submissionDataSnapshot,
     sourceReleaseId,
@@ -1013,8 +1012,15 @@ function WizardInner({
     const onDocumentClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
+      if (!wizardRootRef.current?.contains(target)) return;
       const anchor = target.closest("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
+      if (
+        anchor.dataset.bypassWizardGuard === "true" ||
+        anchor.closest("[data-dashboard-sidebar='true']")
+      ) {
+        return;
+      }
       const href = anchor.getAttribute("href");
       if (!href) return;
       if (href.startsWith("#")) return;
@@ -1082,7 +1088,7 @@ function WizardInner({
   };
 
   return (
-    <div className="pb-12">
+    <div ref={wizardRootRef} className="pb-12">
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-[30px] font-bold tracking-tight text-white sm:text-[34px]">{pageTitle}</h1>

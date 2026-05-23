@@ -30,11 +30,11 @@ export async function GET(request: Request) {
 
   try {
     const insight = await analyticsAIService.getLatestInsight({
-      userId: targetUserId ?? session.user.id,
-      releaseId,
+      user_id: targetUserId ?? session.user.id,
+      release_id: releaseId,
       artistId,
       platform,
-      periodDays,
+      period_days: periodDays,
       question
     });
 

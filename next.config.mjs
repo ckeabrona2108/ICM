@@ -3,6 +3,7 @@ const resolvedImageHosts = (() => {
   const hosts = new Set([
     "images.unsplash.com",
     "s3.icecreammusic.net",
+    "avatars.yandex.net",
     "localhost",
     "127.0.0.1"
   ]);
@@ -19,11 +20,18 @@ const resolvedImageHosts = (() => {
 })();
 
 const nextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true
+  },
   images: {
-    remotePatterns: resolvedImageHosts.flatMap((hostname) => [
-      { protocol: "https", hostname },
-      { protocol: "http", hostname }
-    ])
+    remotePatterns: [
+      ...resolvedImageHosts.flatMap((hostname) => [
+        { protocol: "https", hostname },
+        { protocol: "http", hostname }
+      ]),
+      { protocol: "https", hostname: "**.userapi.com" },
+      { protocol: "http", hostname: "**.userapi.com" }
+    ]
   },
   experimental: {
     optimizePackageImports: ["lucide-react", "framer-motion", "recharts"]

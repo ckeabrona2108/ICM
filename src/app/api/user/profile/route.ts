@@ -1,92 +1,77 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
 import { getUserContractStatus } from "@/lib/contract-verification";
-import type {
-  CurrentUserProfileResponse,
-  UpdateCurrentUserProfileRequest
-} from "@/lib/api/contracts";
+import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
-import {
-  updateUserProfileSchema
-} from "@/lib/user-profile-policy";
+import { updateUserProfileSchema } from "@/lib/user-profile-policy";
 
-function isAvatarColumnMissingError(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
-  if (error.code !== "P2022") return false;
-  return String(error.message).toLowerCase().includes("avatarurl");
+export const dynamic = "force-dynamic";
+
+const uuidV4LikePattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function getSessionUserId(session: Awaited<ReturnType<typeof getServerSession>>): string | null {
+  const user =
+    session && typeof session === "object" && "user" in session ? session.user : null;
+  const userId =
+    user && typeof user === "object" && "id" in user && typeof user.id === "string"
+      ? user.id.trim()
+      : "";
+  if (!userId) return null;
+  return uuidV4LikePattern.test(userId) ? userId : null;
 }
 
-function toProfileResponse(data: {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl: string | null;
-}, verification: Awaited<ReturnType<typeof getUserContractStatus>>): CurrentUserProfileResponse {
+async function mapCurrentUserProfile(userId: string) {
+  const [user, verification] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true
+      }
+    }),
+    getUserContractStatus({ prisma, userId })
+  ]);
+
+  if (!user) return null;
+
   return {
-    id: data.id,
-    name: data.name,
-    email: data.email,
-    avatarUrl: data.avatarUrl,
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    avatarUrl: user.avatar,
     verification
   };
 }
 
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  let user:
-    | { id: string; name: string; email: string; avatarUrl: string | null }
-    | null = null;
+  const userId = getSessionUserId(session);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        avatarUrl: true
-      }
-    });
-  } catch (error) {
-    if (isAvatarColumnMissingError(error)) {
-      const fallback = await prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: {
-          id: true,
-          name: true,
-          email: true
-        }
-      });
-      user = fallback ? { ...fallback, avatarUrl: null } : null;
-    } else {
-      throw error;
+    const profile = await mapCurrentUserProfile(userId);
+    if (!profile) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
+
+    return NextResponse.json(profile, { status: 200 });
+  } catch (error) {
+    if (isPrismaConnectionError(error)) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
+    }
+    throw error;
   }
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const verification = await getUserContractStatus({
-    prisma,
-    userId: user.id
-  });
-
-  return NextResponse.json(toProfileResponse(user, verification), { status: 200 });
 }
 
 export async function PATCH(request: Request) {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const userId = getSessionUserId(session);
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let payload: unknown;
   try {
@@ -98,72 +83,44 @@ export async function PATCH(request: Request) {
   const parsed = updateUserProfileSchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json(
-      {
-        error: parsed.error.issues[0]?.message ?? "Invalid request payload"
-      },
+      { error: parsed.error.issues[0]?.message ?? "Invalid payload" },
       { status: 400 }
     );
   }
 
-  const body: UpdateCurrentUserProfileRequest = parsed.data;
-
   try {
-    const updatedBase = await prisma.user.update({
-      where: { id: session.user.id },
-      data: {
-        name: body.name.trim(),
-        ...(body.email ? { email: body.email.toLowerCase().trim() } : {})
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true
-      }
-    });
-
-    let avatarUrl: string | null = null;
-    try {
-      const withAvatar = await prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: { avatarUrl: true }
+    const email = parsed.data.email?.trim().toLowerCase();
+    if (email) {
+      const duplicate = await prisma.user.findFirst({
+        where: {
+          email,
+          id: { not: userId }
+        },
+        select: { id: true }
       });
-      avatarUrl = withAvatar?.avatarUrl ?? null;
-    } catch (error) {
-      if (!isAvatarColumnMissingError(error)) {
-        throw error;
+      if (duplicate) {
+        return NextResponse.json({ error: "Этот email уже используется" }, { status: 409 });
       }
     }
 
-    const updated = { ...updatedBase, avatarUrl };
-    const verification = await getUserContractStatus({
-      prisma,
-      userId: updated.id
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        name: parsed.data.name,
+        ...(email ? { email } : {})
+      }
     });
-    return NextResponse.json(toProfileResponse(updated, verification), { status: 200 });
+
+    const profile = await mapCurrentUserProfile(userId);
+    if (!profile) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(profile, { status: 200 });
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      return NextResponse.json(
-        { error: "Пользователь с таким email уже существует." },
-        { status: 409 }
-      );
+    if (isPrismaConnectionError(error)) {
+      return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
     }
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2025"
-    ) {
-      return NextResponse.json(
-        { error: "Пользователь не найден." },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "Не удалось обновить профиль." },
-      { status: 500 }
-    );
+    throw error;
   }
 }

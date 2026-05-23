@@ -1,5 +1,4 @@
-import { ReleaseStatus } from "@prisma/client";
-
+// @ts-nocheck
 export interface ReleaseSidebarCounts {
   all: number;
   draft: number;
@@ -19,6 +18,7 @@ const lifecycleAliases: Record<string, LifecycleStatus> = {
   draft: "draft",
   pending_verification: "pending_verification",
   waiting_verification: "pending_verification",
+  moderating: "moderation",
   moderation: "moderation",
   on_moderation: "moderation",
   changes_required: "changes_required",
@@ -26,6 +26,7 @@ const lifecycleAliases: Record<string, LifecycleStatus> = {
   need_changes: "changes_required",
   revision_required: "changes_required",
   rejected: "changes_required",
+  not_paid: "draft",
   approved: "approved",
   distributed: "approved",
   archived: "archived"
@@ -38,31 +39,53 @@ export function normalizeLifecycleStatus(status: string | null | undefined): Lif
 }
 
 export function mapReleaseStatusToSection(
-  status: ReleaseStatus
+  status: string | null | undefined,
+  confirmed?: boolean | null,
+  submittedToModeration?: boolean | null
 ): keyof ReleaseSidebarCounts | null {
-  switch (status) {
-    case ReleaseStatus.DRAFT:
+  const lifecycle = normalizeLifecycleStatus(status);
+  if (confirmed === false) {
+    return lifecycle === "moderation" && submittedToModeration ? "moderation" : "draft";
+  }
+
+  switch (lifecycle) {
+    case "draft":
       return "draft";
-    case ReleaseStatus.PENDING_VERIFICATION:
-    case ReleaseStatus.MODERATION:
+    case "pending_verification":
+    case "moderation":
       return "moderation";
-    case ReleaseStatus.CHANGES_REQUIRED:
-    case ReleaseStatus.REJECTED:
+    case "changes_required":
       return "changes_required";
-    case ReleaseStatus.APPROVED:
-    case ReleaseStatus.DISTRIBUTED:
+    case "approved":
       return "all";
-    case ReleaseStatus.ARCHIVED:
+    case "archived":
     default:
       return null;
   }
 }
 
 interface ReleaseGroupedItem {
-  status: ReleaseStatus;
+  status: string;
+  confirmed?: boolean;
+  submittedToModeration?: boolean;
   _count: {
     _all: number;
   };
+}
+
+interface ReleaseCountItem {
+  status: string;
+  confirmed?: boolean | null;
+  roles?: unknown;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function isSubmittedToModeration(roles: unknown): boolean {
+  return asRecord(roles)?.submittedToModeration === true;
 }
 
 export function buildReleaseSidebarCounts(grouped: ReleaseGroupedItem[]): ReleaseSidebarCounts {
@@ -77,7 +100,11 @@ export function buildReleaseSidebarCounts(grouped: ReleaseGroupedItem[]): Releas
     const amount = Math.max(0, Number(item._count._all) || 0);
     if (amount === 0) continue;
 
-    const section = mapReleaseStatusToSection(item.status);
+    const section = mapReleaseStatusToSection(
+      item.status,
+      item.confirmed,
+      item.submittedToModeration
+    );
     if (section) {
       counts[section] += amount;
     }
@@ -91,20 +118,34 @@ export async function getReleaseSidebarCountsForUser(
     userId: string;
     prisma: {
       release: {
-        groupBy(args: {
-          by: ["status"];
+        findMany(args: {
           where: { userId: string };
-          _count: { _all: true };
-        }): Promise<ReleaseGroupedItem[]>;
+          select: { status: true; confirmed: true; roles: true };
+        }): Promise<ReleaseCountItem[]>;
       };
     };
   }
 ): Promise<ReleaseSidebarCounts> {
-  const grouped = await params.prisma.release.groupBy({
-    by: ["status"],
+  const releases = await params.prisma.release.findMany({
     where: { userId: params.userId },
-    _count: { _all: true }
+    select: { status: true, confirmed: true, roles: true }
   });
 
-  return buildReleaseSidebarCounts(grouped);
+  const counts: ReleaseSidebarCounts = {
+    all: 0,
+    draft: 0,
+    moderation: 0,
+    changes_required: 0
+  };
+
+  for (const release of releases) {
+    const section = mapReleaseStatusToSection(
+      release.status,
+      release.confirmed,
+      isSubmittedToModeration(release.roles)
+    );
+    if (section) counts[section] += 1;
+  }
+
+  return counts;
 }

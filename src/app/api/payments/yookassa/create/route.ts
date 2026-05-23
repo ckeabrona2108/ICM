@@ -1,153 +1,137 @@
-import { PaymentProvider, PaymentStatus, Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
-import type {
-  SubscriptionCheckoutRequest,
-  SubscriptionCheckoutResponse
-} from "@/lib/api/contracts";
 import { prisma } from "@/lib/prisma";
-import { getSubscriptionTariffConfig } from "@/lib/subscription-billing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
-const createCheckoutSchema = z.object({
-  tariffId: z.enum(["standard", "pro", "enterprise"]),
-  returnUrl: z.string().trim().url().optional()
-});
+export const dynamic = "force-dynamic";
 
-function resolveReturnUrl(input?: string): string {
-  if (input) return input;
-  const baseUrl = process.env.NEXTAUTH_URL?.trim() || "http://localhost:3000";
-  return `${baseUrl.replace(/\/$/u, "")}/dashboard/subscription?payment=return`;
-}
+const RELEASE_PAYMENT_AMOUNT_RUB = 350;
 
-function mapProviderStatus(status: "pending" | "waiting_for_capture" | "succeeded" | "canceled") {
-  if (status === "waiting_for_capture") return PaymentStatus.WAITING_FOR_CAPTURE;
-  if (status === "succeeded") return PaymentStatus.SUCCEEDED;
-  if (status === "canceled") return PaymentStatus.CANCELED;
-  return PaymentStatus.PENDING;
+const TARIFFS: Record<"standard" | "pro" | "enterprise", { title: string; amountRub: number }> = {
+  standard: { title: "STANDART", amountRub: 350 },
+  pro: { title: "PRO", amountRub: 990 },
+  enterprise: { title: "ENTERPRISE", amountRub: 1990 }
+};
+
+function getAppBaseUrl(request: Request): string {
+  const configured = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_DOMAIN?.trim();
+  if (configured) return configured.replace(/\/+$/u, "");
+  return new URL(request.url).origin;
 }
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const payload = (await request.json().catch(() => ({}))) as {
+    kind?: "release" | "subscription";
+    releaseId?: string;
+    tariffId?: "standard" | "pro" | "enterprise";
+    returnUrl?: string;
+  };
+
+  const kind = payload.kind === "subscription" ? "subscription" : "release";
+  const orderId = randomUUID();
+  const baseUrl = getAppBaseUrl(request);
+
+  if (kind === "release" && !payload.releaseId?.trim()) {
+    return NextResponse.json({ error: "releaseId is required" }, { status: 400 });
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  if (kind === "subscription" && payload.tariffId && !(payload.tariffId in TARIFFS)) {
+    return NextResponse.json({ error: "Unknown tariff" }, { status: 400 });
   }
 
-  const parsed = createCheckoutSchema.safeParse(payload);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
-  }
+  const returnUrl =
+    payload.returnUrl ??
+    (kind === "subscription"
+      ? `${baseUrl}/dashboard/subscription?pay_order=${orderId}`
+      : `${baseUrl}/dashboard/releases${payload.releaseId ? `/${payload.releaseId}` : ""}?pay_order=${orderId}`);
 
-  const body: SubscriptionCheckoutRequest = parsed.data;
-  const tariff = getSubscriptionTariffConfig(body.tariffId);
-  if (!tariff) {
-    return NextResponse.json({ error: "Unknown tariff" }, { status: 422 });
-  }
+  let amountRub = RELEASE_PAYMENT_AMOUNT_RUB;
+  let description = "Оплата релиза ICECREAMMUSIC";
 
-  const returnUrl = resolveReturnUrl(body.returnUrl);
-  const idempotenceKey = randomUUID();
-
-  const localPayment = await prisma.subscriptionPayment.create({
-    data: {
-      userId: session.user.id,
-      tariffId: tariff.id,
-      amount: new Prisma.Decimal(tariff.amountRub),
-      currency: "RUB",
-      provider: PaymentProvider.YOOKASSA,
-      idempotenceKey,
-      status: PaymentStatus.PENDING,
-      returnUrl,
-      description: `Подписка ICM: ${tariff.title}`,
-      metadata: {
-        tariffId: tariff.id
-      }
-    },
-    select: {
-      id: true
-    }
-  });
-
-  try {
-    const yookassaPayment = await createYooKassaPayment({
-      amountRub: tariff.amountRub,
-      description: `Подписка ICM: ${tariff.title}`,
-      returnUrl,
-      idempotenceKey,
-      metadata: {
-        userId: session.user.id,
-        paymentId: localPayment.id,
-        tariffId: tariff.id
+  if (kind === "subscription") {
+    const tariffId = payload.tariffId ?? "standard";
+    const tariff = TARIFFS[tariffId];
+    amountRub = tariff.amountRub;
+    description = `Подписка ICECREAMMUSIC ${tariff.title}`;
+  } else if (payload.releaseId) {
+    const release = await prisma.release.findFirst({
+      where: {
+        id: payload.releaseId,
+        userId: session.user.id
+      },
+      select: {
+        title: true
       }
     });
 
-    if (!yookassaPayment.confirmationUrl) {
-      await prisma.subscriptionPayment.update({
-        where: { id: localPayment.id },
-        data: {
-          status: PaymentStatus.FAILED,
-          providerPaymentId: yookassaPayment.providerPaymentId,
-          metadata: {
-            error: "No confirmation_url returned by YooKassa"
-          }
-        }
-      });
-      return NextResponse.json(
-        { error: "YooKassa did not return confirmation URL" },
-        { status: 502 }
-      );
+    if (!release) {
+      return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
     }
 
-    await prisma.subscriptionPayment.update({
-      where: { id: localPayment.id },
-      data: {
-        providerPaymentId: yookassaPayment.providerPaymentId,
-        status: mapProviderStatus(yookassaPayment.status),
-        confirmationUrl: yookassaPayment.confirmationUrl,
-        expiresAt: yookassaPayment.expiresAt ? new Date(yookassaPayment.expiresAt) : null,
-        metadata: {
-          tariffId: tariff.id,
-          providerPaymentId: yookassaPayment.providerPaymentId
-        }
+    description = `Оплата релиза: ${release.title}`;
+  }
+
+  let payment;
+  try {
+    payment = await createYooKassaPayment({
+      amountRub,
+      description,
+      returnUrl,
+      customerEmail: session.user.email,
+      idempotenceKey: orderId,
+      metadata: {
+        orderId,
+        kind,
+        releaseId: payload.releaseId ?? "",
+        tariffId: payload.tariffId ?? "",
+        userId: session.user.id
       }
     });
-
-    const response: SubscriptionCheckoutResponse = {
-      ok: true,
-      paymentId: localPayment.id,
-      providerPaymentId: yookassaPayment.providerPaymentId,
-      confirmationUrl: yookassaPayment.confirmationUrl
-    };
-
-    return NextResponse.json(response, { status: 201 });
   } catch (error) {
-    await prisma.subscriptionPayment.update({
-      where: { id: localPayment.id },
-      data: {
-        status: PaymentStatus.FAILED,
-        metadata: {
-          tariffId: tariff.id,
-          error: error instanceof Error ? error.message : "Unknown error"
-        }
-      }
-    });
-
+    console.error("[payments:yookassa:create] failed to create payment", error);
     return NextResponse.json(
       {
         error:
-          "Не удалось создать платеж в ЮKassa. Проверьте настройки YOOKASSA_SHOP_ID/YOOKASSA_SECRET_KEY."
+          error instanceof Error
+            ? `Не удалось создать платёж в YooKassa: ${error.message}`
+            : "Не удалось создать платёж в YooKassa. Проверьте настройки платежного шлюза."
       },
       { status: 502 }
     );
   }
+
+  if (!payment.confirmationUrl) {
+    return NextResponse.json({ error: "Платёжный шлюз не вернул ссылку на оплату." }, { status: 502 });
+  }
+
+  await prisma.orders.create({
+    data: {
+      id: orderId,
+      userId: session.user.id,
+      type: kind,
+      confirmed: false,
+      metadata: {
+        releaseId: payload.releaseId ?? null,
+        tariffId: payload.tariffId ?? null,
+        providerPaymentId: payment.providerPaymentId,
+        returnUrl
+      }
+    }
+  });
+
+  return NextResponse.json(
+    {
+      ok: true,
+      paymentId: orderId,
+      providerPaymentId: payment.providerPaymentId,
+      confirmationUrl: payment.confirmationUrl
+    },
+    { status: 200 }
+  );
 }

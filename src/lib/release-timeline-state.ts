@@ -43,6 +43,13 @@ const VERIFICATION_STEPS: ReleaseTimelineStep[] = [
   { id: "published", label: "Опубликован" }
 ];
 
+function withPaymentLabel(steps: ReleaseTimelineStep[], paid: boolean): ReleaseTimelineStep[] {
+  if (!paid) return steps;
+  return steps.map((step) =>
+    step.id === "unpaid" ? { ...step, label: "Оплачен" } : step
+  );
+}
+
 function indexOfStep(steps: ReleaseTimelineStep[], id: ReleaseTimelineStepId): number {
   const idx = steps.findIndex((step) => step.id === id);
   return idx >= 0 ? idx : 0;
@@ -53,46 +60,51 @@ export function getReleaseTimelineState(
   paid: boolean
 ): ReleaseTimelineState {
   if (releaseStatus === "draft") {
+    const steps = withPaymentLabel(BASE_STEPS, paid);
     return {
-      steps: BASE_STEPS,
+      steps,
       currentStep: "draft",
-      activeIndex: indexOfStep(BASE_STEPS, "draft"),
+      activeIndex: indexOfStep(steps, "draft"),
       showPayButton: false
     };
   }
 
   if (releaseStatus === "moderation" && !paid) {
+    const steps = withPaymentLabel(BASE_STEPS, paid);
     return {
-      steps: BASE_STEPS,
-      currentStep: "unpaid",
-      activeIndex: indexOfStep(BASE_STEPS, "unpaid"),
+      steps,
+      currentStep: "moderation",
+      activeIndex: indexOfStep(steps, "moderation"),
       showPayButton: true
     };
   }
 
   if (releaseStatus === "moderation" && paid) {
+    const steps = withPaymentLabel(BASE_STEPS, paid);
     return {
-      steps: BASE_STEPS,
+      steps,
       currentStep: "moderation",
-      activeIndex: indexOfStep(BASE_STEPS, "moderation"),
+      activeIndex: indexOfStep(steps, "moderation"),
       showPayButton: false
     };
   }
 
   if (releaseStatus === "pending_verification") {
+    const steps = withPaymentLabel(VERIFICATION_STEPS, paid);
     return {
-      steps: VERIFICATION_STEPS,
+      steps,
       currentStep: "verification",
-      activeIndex: indexOfStep(VERIFICATION_STEPS, "verification"),
+      activeIndex: indexOfStep(steps, "verification"),
       showPayButton: false
     };
   }
 
   if (releaseStatus === "changes_required" || releaseStatus === "rejected") {
+    const steps = withPaymentLabel(CHANGES_STEPS, paid);
     return {
-      steps: CHANGES_STEPS,
+      steps,
       currentStep: "changes_required",
-      activeIndex: indexOfStep(CHANGES_STEPS, "changes_required"),
+      activeIndex: indexOfStep(steps, "changes_required"),
       showPayButton: false
     };
   }
@@ -102,18 +114,20 @@ export function getReleaseTimelineState(
     releaseStatus === "distributed" ||
     releaseStatus === "archived"
   ) {
+    const steps = withPaymentLabel(BASE_STEPS, paid);
     return {
-      steps: BASE_STEPS,
+      steps,
       currentStep: "published",
-      activeIndex: indexOfStep(BASE_STEPS, "published"),
+      activeIndex: indexOfStep(steps, "published"),
       showPayButton: false
     };
   }
 
+  const steps = withPaymentLabel(BASE_STEPS, paid);
   return {
-    steps: BASE_STEPS,
+    steps,
     currentStep: "draft",
-    activeIndex: indexOfStep(BASE_STEPS, "draft"),
+    activeIndex: indexOfStep(steps, "draft"),
     showPayButton: false
   };
 }

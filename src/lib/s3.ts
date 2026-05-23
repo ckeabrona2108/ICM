@@ -1,4 +1,11 @@
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  CreateBucketCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 function readStringEnv(...keys: string[]): string | undefined {
@@ -20,7 +27,12 @@ function toEndpointUrl(rawValue: string | undefined): string | undefined {
 
 const endpoint = toEndpointUrl(readStringEnv("S3_ENDPOINT", "MINIO_ENDPOINT", "S3_HOST"));
 const region = readStringEnv("S3_REGION") ?? "us-east-1";
-const bucket = readStringEnv("S3_BUCKET");
+const configuredBucket = readStringEnv(
+  "S3_BUCKET",
+  "S3_BUCKET_NAME",
+  "MINIO_BUCKET",
+  "MINIO_BUCKET_NAME"
+);
 const accessKeyId = readStringEnv(
   "S3_ACCESS_KEY_ID",
   "S3_ACCESS_KEY",
@@ -39,6 +51,8 @@ const publicStorageBaseUrl = toEndpointUrl(
 
 const LEGACY_IMAGE_PREFIXES = ["", "previews/", "covers/", "uploads/"] as const;
 const LEGACY_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+const FALLBACK_BUCKET_CANDIDATES = ["uploads", "signatures", "verification", "contracts"] as const;
+let resolvedBucketPromise: Promise<string | null> | null = null;
 
 function isPlaceholderValue(value: string | undefined): boolean {
   if (!value) return true;
@@ -73,6 +87,70 @@ function getClient() {
       secretAccessKey
     }
   });
+}
+
+function buildBucketCandidates(): string[] {
+  const candidates = [configuredBucket, ...FALLBACK_BUCKET_CANDIDATES]
+    .map((value) => (value ?? "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(candidates));
+}
+
+export function getStorageBucketHint(): string {
+  return configuredBucket?.trim() || "uploads";
+}
+
+export function getStorageBucketCandidates(): string[] {
+  return buildBucketCandidates();
+}
+
+async function canUseBucket(client: S3Client, bucketName: string): Promise<boolean> {
+  try {
+    await client.send(
+      new HeadBucketCommand({
+        Bucket: bucketName
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function createBucketIfMissing(client: S3Client, bucketName: string): Promise<boolean> {
+  try {
+    await client.send(
+      new CreateBucketCommand({
+        Bucket: bucketName
+      })
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveBucketName(client: S3Client | null): Promise<string | null> {
+  if (!client) return null;
+  if (!resolvedBucketPromise) {
+    resolvedBucketPromise = (async () => {
+      const candidates = buildBucketCandidates();
+      for (const bucketName of candidates) {
+        if (await canUseBucket(client, bucketName)) {
+          return bucketName;
+        }
+      }
+
+      const createTarget = candidates[0] ?? "uploads";
+      const created = await createBucketIfMissing(client, createTarget);
+      if (created && (await canUseBucket(client, createTarget))) {
+        return createTarget;
+      }
+
+      return null;
+    })();
+  }
+  return resolvedBucketPromise;
 }
 
 function buildLocalObjectPath(key: string): string {
@@ -249,11 +327,12 @@ async function checkAbsoluteUrlExists(url: string): Promise<boolean> {
 
 async function checkStorageKeyExists(key: string): Promise<boolean | null> {
   const client = getClient();
-  if (!client || !bucket) return null;
+  const bucketName = await resolveBucketName(client);
+  if (!client || !bucketName) return null;
   try {
     await client.send(
       new HeadObjectCommand({
-        Bucket: bucket,
+        Bucket: bucketName,
         Key: key
       })
     );
@@ -387,12 +466,13 @@ export async function createPresignedUpload(input: {
   expiresIn?: number;
 }) {
   const client = getClient();
+  const bucketName = await resolveBucketName(client);
   const normalizedKey = normalizeStorageKey(input.key);
   if (!normalizedKey) {
     throw new Error("Invalid storage key");
   }
 
-  if (!client || !bucket) {
+  if (!client || !bucketName) {
     return {
       url: buildLocalObjectPath(normalizedKey),
       method: "PUT",
@@ -402,7 +482,7 @@ export async function createPresignedUpload(input: {
   }
 
   const command = new PutObjectCommand({
-    Bucket: bucket,
+    Bucket: bucketName,
     Key: normalizedKey,
     ContentType: input.contentType
   });
@@ -426,12 +506,13 @@ export async function createPresignedDownload(input: {
   responseContentType?: string;
 }): Promise<{ url: string; mock: boolean }> {
   const client = getClient();
+  const bucketName = await resolveBucketName(client);
   const normalizedKey = normalizeStorageKey(input.key);
   if (!normalizedKey) {
     throw new Error("Invalid storage key");
   }
 
-  if (!client || !bucket) {
+  if (!client || !bucketName) {
     const publicUrl = resolvePublicStorageUrlFromKey(normalizedKey);
     return {
       url:
@@ -445,7 +526,7 @@ export async function createPresignedDownload(input: {
   }
 
   const command = new GetObjectCommand({
-    Bucket: bucket,
+    Bucket: bucketName,
     Key: normalizedKey,
     ResponseContentDisposition: input.responseContentDisposition,
     ResponseContentType: input.responseContentType

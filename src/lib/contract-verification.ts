@@ -5,7 +5,12 @@ import path from "node:path";
 
 import type { PrismaClient } from "@prisma/client";
 
-import { createPresignedDownload, createPresignedUpload } from "@/lib/s3";
+import {
+  createPresignedDownload,
+  createPresignedUpload,
+  getStorageBucketCandidates,
+  getStorageBucketHint
+} from "@/lib/s3";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import {
   notifyAdminContractSigned,
@@ -72,34 +77,55 @@ interface CreateContractSignatureParams {
 
 interface ContractSignatureRecordLike {
   id: string;
-  user_id: string;
-  user_email: string;
-  user_name: string | null;
-  contract_version: string;
-  contract_file_name: string;
-  contract_file_url: string;
-  signature_image_url: string;
-  signed_at: Date | string;
-  ip_address: string | null;
-  user_agent: string | null;
+  userId: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  birthDate: Date | string;
+  birthPlace: string;
+  tel: string;
+  passSeries: string;
+  passNum: string;
+  getDate: Date | string;
+  givenBy: string;
+  subunitCode: string;
+  registrationAddress: string;
+  accountNumber: string;
+  bankName: string;
   status: string;
-  rejection_reason: string | null;
-  approved_at: Date | string | null;
-  approved_by_admin_id: string | null;
-  rejected_at: Date | string | null;
-  rejected_by_admin_id: string | null;
-  created_at: Date | string;
-  updated_at: Date | string;
-  full_name: string;
-  birth_date: string | null;
-  passport_number: string | null;
-  passport_issued_by: string | null;
-  passport_code: string | null;
-  passport_issue_date: string | null;
-  address: string | null;
-  ogrnip: string | null;
-  inn: string | null;
-  snils: string | null;
+  rejectReason: string | null;
+  contract: string;
+  user?: {
+    email?: string | null;
+    name?: string | null;
+  } | null;
+}
+
+interface VerificationContractMeta {
+  contractVersion?: string;
+  contractFileName?: string;
+  contractFileUrl?: string;
+  signatureImageUrl?: string;
+  signedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  approvedAt?: string | null;
+  approvedByAdminId?: string | null;
+  rejectedAt?: string | null;
+  rejectedByAdminId?: string | null;
+  rejectionReason?: string | null;
+  fullName?: string;
+  birthDate?: string | null;
+  passportNumber?: string | null;
+  passportIssuedBy?: string | null;
+  passportCode?: string | null;
+  passportIssueDate?: string | null;
+  address?: string | null;
+  ogrnip?: string | null;
+  inn?: string | null;
+  snils?: string | null;
 }
 
 type ModelLike = {
@@ -202,7 +228,7 @@ function shouldUseLocalVerificationStore(): boolean {
 function assertLocalVerificationStoreAvailable(): void {
   if (shouldUseLocalVerificationStore()) return;
   throw new Error(
-    "Верификация подписи временно недоступна: локальное хранилище отключено в production. Настройте S3/MinIO и таблицу user_contract_signatures."
+    "Верификация подписи временно недоступна: локальное хранилище отключено в production. Настройте S3/MinIO и таблицу verification."
   );
 }
 
@@ -250,6 +276,7 @@ function isDataUrlPng(value: string): boolean {
 function normalizeContractStatusValue(value: string | null | undefined): ContractSignatureStatus {
   const normalized = (value ?? "").trim().toLowerCase();
   if (normalized === "pending") return "pending";
+  if (normalized === "moderating") return "pending";
   if (normalized === "approved") return "approved";
   if (normalized === "signed") return "pending";
   if (normalized === "rejected" || normalized === "revoked") return "rejected";
@@ -264,16 +291,146 @@ export function isVerificationSignatureUnavailable(rawValue: string | null | und
   return value === LEGACY_SIGNATURE_PLACEHOLDER_DATA_URL;
 }
 
-function toDbStatus(value: ContractSignatureStatus): "NOT_SIGNED" | "PENDING" | "APPROVED" | "REJECTED" {
-  if (value === "pending") return "PENDING";
-  if (value === "approved") return "APPROVED";
-  if (value === "rejected") return "REJECTED";
-  return "NOT_SIGNED";
+function toDbStatus(value: ContractSignatureStatus): "moderating" | "approved" | "rejected" {
+  if (value === "approved") return "approved";
+  if (value === "rejected") return "rejected";
+  return "moderating";
 }
 
 function getModel(prisma: PrismaClient): ModelLike | null {
-  const model = (prisma as unknown as { user_contract_signatures?: ModelLike }).user_contract_signatures;
+  const model = (prisma as unknown as { verification?: ModelLike }).verification;
   return model ?? null;
+}
+
+function safeParseContractMeta(rawValue: string | null | undefined): VerificationContractMeta {
+  const raw = (rawValue ?? "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return {};
+    return {
+      contractVersion:
+        (parsed.contractVersion as string | undefined) ??
+        (parsed.contract_version as string | undefined),
+      contractFileName:
+        (parsed.contractFileName as string | undefined) ??
+        (parsed.contract_file_name as string | undefined),
+      contractFileUrl:
+        (parsed.contractFileUrl as string | undefined) ??
+        (parsed.contract_file_url as string | undefined),
+      signatureImageUrl:
+        (parsed.signatureImageUrl as string | undefined) ??
+        (parsed.signature_image_url as string | undefined),
+      signedAt:
+        (parsed.signedAt as string | undefined) ??
+        (parsed.signed_at as string | undefined),
+      createdAt:
+        (parsed.createdAt as string | undefined) ??
+        (parsed.created_at as string | undefined),
+      updatedAt:
+        (parsed.updatedAt as string | undefined) ??
+        (parsed.updated_at as string | undefined),
+      ipAddress:
+        (parsed.ipAddress as string | null | undefined) ??
+        (parsed.ip_address as string | null | undefined) ??
+        null,
+      userAgent:
+        (parsed.userAgent as string | null | undefined) ??
+        (parsed.user_agent as string | null | undefined) ??
+        null,
+      approvedAt:
+        (parsed.approvedAt as string | null | undefined) ??
+        (parsed.approved_at as string | null | undefined) ??
+        null,
+      approvedByAdminId:
+        (parsed.approvedByAdminId as string | null | undefined) ??
+        (parsed.approved_by_admin_id as string | null | undefined) ??
+        null,
+      rejectedAt:
+        (parsed.rejectedAt as string | null | undefined) ??
+        (parsed.rejected_at as string | null | undefined) ??
+        null,
+      rejectedByAdminId:
+        (parsed.rejectedByAdminId as string | null | undefined) ??
+        (parsed.rejected_by_admin_id as string | null | undefined) ??
+        null,
+      rejectionReason:
+        (parsed.rejectionReason as string | null | undefined) ??
+        (parsed.rejection_reason as string | null | undefined) ??
+        null,
+      fullName:
+        (parsed.fullName as string | undefined) ??
+        (parsed.full_name as string | undefined),
+      birthDate:
+        (parsed.birthDate as string | null | undefined) ??
+        (parsed.birth_date as string | null | undefined) ??
+        null,
+      passportNumber:
+        (parsed.passportNumber as string | null | undefined) ??
+        (parsed.passport_number as string | null | undefined) ??
+        null,
+      passportIssuedBy:
+        (parsed.passportIssuedBy as string | null | undefined) ??
+        (parsed.passport_issued_by as string | null | undefined) ??
+        null,
+      passportCode:
+        (parsed.passportCode as string | null | undefined) ??
+        (parsed.passport_code as string | null | undefined) ??
+        null,
+      passportIssueDate:
+        (parsed.passportIssueDate as string | null | undefined) ??
+        (parsed.passport_issue_date as string | null | undefined) ??
+        null,
+      address:
+        (parsed.address as string | null | undefined) ??
+        null,
+      ogrnip:
+        (parsed.ogrnip as string | null | undefined) ??
+        null,
+      inn:
+        (parsed.inn as string | null | undefined) ??
+        null,
+      snils:
+        (parsed.snils as string | null | undefined) ??
+        null
+    };
+  } catch {
+    return {};
+  }
+}
+
+function toVerificationContractMetaString(value: VerificationContractMeta): string {
+  return JSON.stringify(value);
+}
+
+function splitFullName(fullName: string): { firstName: string; middleName: string; lastName: string } {
+  const parts = fullName.trim().split(/\s+/u).filter(Boolean);
+  const lastName = parts[0] ?? "Не указано";
+  const firstName = parts[1] ?? parts[0] ?? "Не указано";
+  const middleName = parts.slice(2).join(" ") || "—";
+  return { firstName, middleName, lastName };
+}
+
+function splitPassportNumber(passportNumber: string | null | undefined): { passSeries: string; passNum: string } {
+  const normalized = (passportNumber ?? "").replace(/\s+/gu, "");
+  return {
+    passSeries: normalized.slice(0, 4) || "0000",
+    passNum: normalized.slice(4) || "000000"
+  };
+}
+
+function chooseLatestVerificationRow(rows: ContractSignatureRecordLike[]): ContractSignatureRecordLike | null {
+  if (rows.length === 0) return null;
+  const sorted = rows
+    .slice()
+    .sort((a, b) => {
+      const aMeta = safeParseContractMeta(a.contract);
+      const bMeta = safeParseContractMeta(b.contract);
+      const aTime = new Date(aMeta.signedAt ?? aMeta.updatedAt ?? aMeta.createdAt ?? 0).getTime();
+      const bTime = new Date(bMeta.signedAt ?? bMeta.updatedAt ?? bMeta.createdAt ?? 0).getTime();
+      return bTime - aTime;
+    });
+  return sorted[0] ?? null;
 }
 
 async function readStore(): Promise<ContractSignatureListItem[]> {
@@ -337,36 +494,54 @@ async function uploadSignaturePng(params: {
 }
 
 function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem {
+  const contractMeta = safeParseContractMeta(row.contract);
+  const fallbackBirthDate = toIsoString(row.birthDate);
+  const fallbackPassportNumber = `${row.passSeries ?? ""} ${row.passNum ?? ""}`.trim();
+  const fullName =
+    contractMeta.fullName?.trim() ||
+    [row.lastName, row.firstName, row.middleName].filter(Boolean).join(" ").trim() ||
+    "—";
+  const signatureImageUrl =
+    contractMeta.signatureImageUrl?.trim() || LEGACY_SIGNATURE_PLACEHOLDER_DATA_URL;
+  const signedAt =
+    contractMeta.signedAt ??
+    contractMeta.updatedAt ??
+    contractMeta.createdAt ??
+    toIsoString(row.getDate) ??
+    new Date(0).toISOString();
+  const status = normalizeContractStatusValue(row.status);
+  const rejectionReason = normalizeNullable(row.rejectReason ?? contractMeta.rejectionReason);
+
   return {
     id: row.id,
-    userId: row.user_id,
-    userEmail: row.user_email,
-    userName: row.user_name,
-    contractVersion: row.contract_version,
-    contractFileName: row.contract_file_name,
-    contractFileUrl: row.contract_file_url,
-    signatureImageUrl: row.signature_image_url,
-    signedAt: toIsoString(row.signed_at) ?? new Date(0).toISOString(),
-    ipAddress: row.ip_address,
-    userAgent: row.user_agent,
-    status: normalizeContractStatusValue(row.status),
-    rejectionReason: normalizeNullable(row.rejection_reason),
-    approvedAt: toIsoString(row.approved_at),
-    approvedByAdminId: normalizeNullable(row.approved_by_admin_id),
-    rejectedAt: toIsoString(row.rejected_at),
-    rejectedByAdminId: normalizeNullable(row.rejected_by_admin_id),
-    createdAt: toIsoString(row.created_at) ?? new Date(0).toISOString(),
-    updatedAt: toIsoString(row.updated_at) ?? new Date(0).toISOString(),
-    fullName: row.full_name,
-    birthDate: row.birth_date,
-    passportNumber: row.passport_number,
-    passportIssuedBy: row.passport_issued_by,
-    passportCode: row.passport_code,
-    passportIssueDate: row.passport_issue_date,
-    address: row.address,
-    ogrnip: row.ogrnip,
-    inn: row.inn,
-    snils: row.snils
+    userId: row.userId,
+    userEmail: row.user?.email ?? "",
+    userName: row.user?.name ?? null,
+    contractVersion: contractMeta.contractVersion ?? CONTRACT_VERSION,
+    contractFileName: contractMeta.contractFileName ?? CONTRACT_FILE_NAME,
+    contractFileUrl: contractMeta.contractFileUrl ?? CONTRACT_FILE_URL,
+    signatureImageUrl,
+    signedAt,
+    ipAddress: normalizeNullable(contractMeta.ipAddress),
+    userAgent: normalizeNullable(contractMeta.userAgent),
+    status,
+    rejectionReason,
+    approvedAt: normalizeNullable(contractMeta.approvedAt),
+    approvedByAdminId: normalizeNullable(contractMeta.approvedByAdminId),
+    rejectedAt: normalizeNullable(contractMeta.rejectedAt),
+    rejectedByAdminId: normalizeNullable(contractMeta.rejectedByAdminId),
+    createdAt: contractMeta.createdAt ?? signedAt,
+    updatedAt: contractMeta.updatedAt ?? signedAt,
+    fullName,
+    birthDate: contractMeta.birthDate ?? fallbackBirthDate,
+    passportNumber: contractMeta.passportNumber ?? fallbackPassportNumber,
+    passportIssuedBy: contractMeta.passportIssuedBy ?? normalizeNullable(row.givenBy),
+    passportCode: contractMeta.passportCode ?? normalizeNullable(row.subunitCode),
+    passportIssueDate: contractMeta.passportIssueDate ?? toIsoString(row.getDate),
+    address: contractMeta.address ?? normalizeNullable(row.registrationAddress),
+    ogrnip: contractMeta.ogrnip ?? null,
+    inn: contractMeta.inn ?? null,
+    snils: contractMeta.snils ?? null
   };
 }
 
@@ -464,9 +639,9 @@ function toContractStatusPayload(item: ContractSignatureListItem | null): Contra
 
 function isSchemaUnavailableError(error: unknown): boolean {
   return (
-    isPrismaTableMissingError(error, "user_contract_signatures") ||
+    isPrismaTableMissingError(error, "verification") ||
     (error instanceof Error &&
-      /userContractSignature|cannot read properties of undefined/i.test(
+      /verification|cannot read properties of undefined/i.test(
         error.message
       ))
   );
@@ -501,12 +676,18 @@ function extractStorageKeyFromUrl(rawUrl: string): string | null {
   try {
     const url = new URL(rawUrl);
     const pathname = url.pathname.replace(/^\/+/u, "");
-    const bucket = process.env.S3_BUCKET?.trim();
-    if (bucket && pathname.startsWith(`${bucket}/`)) {
-      return pathname.slice(bucket.length + 1);
+    const bucketCandidates = Array.from(
+      new Set([getStorageBucketHint(), ...getStorageBucketCandidates()].filter(Boolean))
+    );
+    for (const bucket of bucketCandidates) {
+      if (pathname.startsWith(`${bucket}/`)) {
+        return pathname.slice(bucket.length + 1);
+      }
     }
-    if (bucket && url.hostname.startsWith(`${bucket}.`)) {
-      return pathname;
+    for (const bucket of bucketCandidates) {
+      if (url.hostname.startsWith(`${bucket}.`)) {
+        return pathname;
+      }
     }
     return pathname || null;
   } catch {
@@ -577,10 +758,19 @@ export async function getUserContractStatus(params: {
   }
 
   try {
-    const row = (await model.findFirst({
-      where: { user_id: params.userId },
-      orderBy: [{ signed_at: "desc" }, { created_at: "desc" }]
-    })) as ContractSignatureRecordLike | null;
+    const rows = (await model.findMany({
+      where: { userId: params.userId },
+      include: {
+        user: {
+          select: {
+            email: true,
+            name: true
+          }
+        }
+      }
+    })) as ContractSignatureRecordLike[];
+
+    const row = chooseLatestVerificationRow(rows);
 
     return toContractStatusPayload(row ? toListItem(row) : null);
   } catch (error) {
@@ -625,6 +815,38 @@ export async function createContractSignature(
   });
 
   const now = new Date();
+  const nowIso = now.toISOString();
+  const normalizedIp = normalizeNullable(params.ipAddress);
+  const normalizedUserAgent = normalizeNullable(params.userAgent);
+  const fullNameParts = splitFullName(signerData.fullName);
+  const passportParts = splitPassportNumber(signerData.passportNumber);
+  const contractMeta: VerificationContractMeta = {
+    contractVersion: params.contractVersion,
+    contractFileName: CONTRACT_FILE_NAME,
+    contractFileUrl: CONTRACT_FILE_URL,
+    signatureImageUrl,
+    signedAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    ipAddress: normalizedIp,
+    userAgent: normalizedUserAgent,
+    approvedAt: null,
+    approvedByAdminId: null,
+    rejectedAt: null,
+    rejectedByAdminId: null,
+    rejectionReason: null,
+    fullName: signerData.fullName,
+    birthDate: signerData.birthDate ?? null,
+    passportNumber: signerData.passportNumber ?? null,
+    passportIssuedBy: signerData.passportIssuedBy ?? null,
+    passportCode: signerData.passportCode ?? null,
+    passportIssueDate: signerData.passportIssueDate ?? null,
+    address: signerData.address ?? null,
+    ogrnip: signerData.ogrnip ?? null,
+    inn: signerData.inn ?? null,
+    snils: signerData.snils ?? null
+  };
+
   const listItemBase = {
     userId: params.userId,
     userEmail: params.userEmail,
@@ -634,8 +856,8 @@ export async function createContractSignature(
     contractFileUrl: CONTRACT_FILE_URL,
     signatureImageUrl,
     signedAt: now,
-    ipAddress: normalizeNullable(params.ipAddress),
-    userAgent: normalizeNullable(params.userAgent),
+    ipAddress: normalizedIp,
+    userAgent: normalizedUserAgent,
     status: "PENDING" as const,
     rejectionReason: null,
     approvedAt: null,
@@ -654,38 +876,29 @@ export async function createContractSignature(
     snils: signerData.snils ?? null
   };
   const dbRecordBase = {
-    user_id: params.userId,
-    user_email: params.userEmail,
-    user_name: params.userName,
-    contract_version: params.contractVersion,
-    contract_file_name: CONTRACT_FILE_NAME,
-    contract_file_url: CONTRACT_FILE_URL,
-    signature_image_url: signatureImageUrl,
-    signed_at: now,
-    ip_address: normalizeNullable(params.ipAddress),
-    user_agent: normalizeNullable(params.userAgent),
-    status: "PENDING" as const,
-    rejection_reason: null,
-    approved_at: null,
-    approved_by_admin_id: null,
-    rejected_at: null,
-    rejected_by_admin_id: null,
-    full_name: signerData.fullName,
-    birth_date: signerData.birthDate ?? null,
-    passport_number: signerData.passportNumber ?? null,
-    passport_issued_by: signerData.passportIssuedBy ?? null,
-    passport_code: signerData.passportCode ?? null,
-    passport_issue_date: signerData.passportIssueDate ?? null,
-    address: signerData.address ?? null,
-    ogrnip: signerData.ogrnip ?? null,
-    inn: signerData.inn ?? null,
-    snils: signerData.snils ?? null
+    userId: params.userId,
+    firstName: fullNameParts.firstName,
+    middleName: fullNameParts.middleName,
+    lastName: fullNameParts.lastName,
+    birthDate: signerData.birthDate ? new Date(signerData.birthDate) : now,
+    birthPlace: "Не указано",
+    tel: "Не указано",
+    passSeries: passportParts.passSeries,
+    passNum: passportParts.passNum,
+    getDate: signerData.passportIssueDate ? new Date(signerData.passportIssueDate) : now,
+    givenBy: signerData.passportIssuedBy ?? "Не указано",
+    subunitCode: signerData.passportCode ?? "Не указано",
+    registrationAddress: signerData.address ?? "Не указано",
+    accountNumber: "Не указано",
+    bankName: "Не указано",
+    status: toDbStatus("pending"),
+    rejectReason: null,
+    contract: toVerificationContractMetaString(contractMeta)
   };
 
   const model = getModel(params.prisma);
   if (!model) {
     const records = await readStore();
-    const nowIso = now.toISOString();
     const record: ContractSignatureListItem = {
       id: `contract_${Date.now()}`,
       ...listItemBase,
@@ -709,9 +922,43 @@ export async function createContractSignature(
   }
 
   try {
-    const created = (await model.create({
-      data: dbRecordBase
-    })) as ContractSignatureRecordLike;
+    const existingRows = (await model.findMany({
+      where: { userId: params.userId },
+      include: {
+        user: {
+          select: {
+            email: true,
+            name: true
+          }
+        }
+      }
+    })) as ContractSignatureRecordLike[];
+    const existing = chooseLatestVerificationRow(existingRows);
+
+    const created = (existing
+      ? await model.update({
+          where: { id: existing.id },
+          data: dbRecordBase,
+          include: {
+            user: {
+              select: {
+                email: true,
+                name: true
+              }
+            }
+          }
+        })
+      : await model.create({
+          data: dbRecordBase,
+          include: {
+            user: {
+              select: {
+                email: true,
+                name: true
+              }
+            }
+          }
+        })) as ContractSignatureRecordLike;
     try {
       await notify({
         userId: params.userId,
@@ -783,7 +1030,14 @@ export async function listContractSignaturesForAdmin(params: {
 
   try {
     const rows = (await model.findMany({
-      orderBy: [{ signed_at: "desc" }, { created_at: "desc" }]
+      include: {
+        user: {
+          select: {
+            email: true,
+            name: true
+          }
+        }
+      }
     })) as ContractSignatureRecordLike[];
     return dedupeLatestPerUser(rows.map(toListItem));
   } catch (error) {
@@ -807,7 +1061,15 @@ export async function getContractSignatureById(params: {
 
   try {
     const row = (await model.findUnique({
-      where: { id: params.id }
+      where: { id: params.id },
+      include: {
+        user: {
+          select: {
+            email: true,
+            name: true
+          }
+        }
+      }
     })) as ContractSignatureRecordLike | null;
     return row ? toListItem(row) : null;
   } catch (error) {
@@ -948,8 +1210,16 @@ export async function approveContractSignatureByAdmin(params: {
 
   try {
     const result = await params.prisma.$transaction(async (tx) => {
-      const current = (await tx.user_contract_signatures.findUnique({
-        where: { id: params.verificationId }
+      const current = (await tx.verification.findUnique({
+        where: { id: params.verificationId },
+        include: {
+          user: {
+            select: {
+              email: true,
+              name: true
+            }
+          }
+        }
       })) as ContractSignatureRecordLike | null;
 
       if (!current) {
@@ -959,21 +1229,27 @@ export async function approveContractSignatureByAdmin(params: {
         return { ok: false, error: "STATUS_TRANSITION_NOT_ALLOWED" } as VerificationReviewResult;
       }
 
-      await tx.user_contract_signatures.update({
+      const currentMeta = safeParseContractMeta(current.contract);
+      await tx.verification.update({
         where: { id: params.verificationId },
         data: {
           status: toDbStatus("approved"),
-          rejection_reason: null,
-          approved_at: now,
-          approved_by_admin_id: params.adminId,
-          rejected_at: null,
-          rejected_by_admin_id: null
+          rejectReason: null,
+          contract: toVerificationContractMetaString({
+            ...currentMeta,
+            updatedAt: now.toISOString(),
+            approvedAt: now.toISOString(),
+            approvedByAdminId: params.adminId,
+            rejectedAt: null,
+            rejectedByAdminId: null,
+            rejectionReason: null
+          })
         }
       });
 
       const movedReleaseIds = await movePendingVerificationReleasesToModeration({
         prismaLike: tx as unknown as PrismaClient,
-        userId: current.user_id,
+        userId: current.userId,
         now
       });
 
@@ -985,7 +1261,7 @@ export async function approveContractSignatureByAdmin(params: {
           targetType: "UserContractSignature",
           targetId: params.verificationId,
           payload: {
-            userId: current.user_id,
+            userId: current.userId,
             movedReleaseIds
           }
         }
@@ -1090,8 +1366,16 @@ export async function rejectContractSignatureByAdmin(params: {
 
   try {
     return await params.prisma.$transaction(async (tx) => {
-      const current = (await tx.user_contract_signatures.findUnique({
-        where: { id: params.verificationId }
+      const current = (await tx.verification.findUnique({
+        where: { id: params.verificationId },
+        include: {
+          user: {
+            select: {
+              email: true,
+              name: true
+            }
+          }
+        }
       })) as ContractSignatureRecordLike | null;
 
       if (!current) {
@@ -1102,23 +1386,33 @@ export async function rejectContractSignatureByAdmin(params: {
         return { ok: false, error: "STATUS_TRANSITION_NOT_ALLOWED" } as VerificationReviewResult;
       }
 
-      await tx.user_contract_signatures.update({
+      const currentMeta = safeParseContractMeta(current.contract);
+      await tx.verification.update({
         where: { id: params.verificationId },
         data: {
           status: toDbStatus("rejected"),
-          rejection_reason: reason,
-          approved_at:
-            currentStatus === "approved" ? current.approved_at ?? now : null,
-          approved_by_admin_id:
-            currentStatus === "approved" ? current.approved_by_admin_id : null,
-          rejected_at: now,
-          rejected_by_admin_id: params.adminId
+          rejectReason: reason,
+          contract: toVerificationContractMetaString({
+            ...currentMeta,
+            updatedAt: now.toISOString(),
+            rejectionReason: reason,
+            approvedAt:
+              currentStatus === "approved"
+                ? currentMeta.approvedAt ?? now.toISOString()
+                : null,
+            approvedByAdminId:
+              currentStatus === "approved"
+                ? currentMeta.approvedByAdminId ?? params.adminId
+                : null,
+            rejectedAt: now.toISOString(),
+            rejectedByAdminId: params.adminId
+          })
         }
       });
 
       const movedReleaseIds = await movePendingVerificationReleasesToChangesRequired({
         prismaLike: tx as unknown as PrismaClient,
-        userId: current.user_id,
+        userId: current.userId,
         adminId: params.adminId,
         reason,
         now
@@ -1135,7 +1429,7 @@ export async function rejectContractSignatureByAdmin(params: {
           targetType: "UserContractSignature",
           targetId: params.verificationId,
           payload: {
-            userId: current.user_id,
+            userId: current.userId,
             reason,
             movedReleaseIds
           }
@@ -1252,7 +1546,7 @@ export async function getAdminVerificationCounts(params: {
 
   try {
     const [verificationPending, releasesModeration, releasesPendingVerification] = await Promise.all([
-      params.prisma.user_contract_signatures.count({
+      params.prisma.verification.count({
         where: { status: toDbStatus("pending") }
       }),
       params.prisma.release.count({

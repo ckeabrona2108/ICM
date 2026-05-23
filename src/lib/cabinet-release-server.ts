@@ -46,12 +46,13 @@ function toCabinetStatus(
   confirmed: boolean,
   roles: unknown
 ): CabinetReleaseStatus {
-  if (!confirmed) {
-    return status === "moderating" && isSubmittedToModeration(roles) ? "moderation" : "draft";
-  }
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
-  return "moderation";
+  if (status === "moderating") {
+    if (isSubmittedToModeration(roles)) return "moderation";
+    return confirmed ? "moderation" : "draft";
+  }
+  return confirmed ? "moderation" : "draft";
 }
 
 function formatDate(date: Date): string {

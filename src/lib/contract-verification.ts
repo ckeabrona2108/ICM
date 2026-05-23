@@ -820,7 +820,7 @@ async function movePendingVerificationReleasesToModeration(params: {
     where: { id: { in: ids } },
     data: {
       status: RELEASE_STATUS_MODERATION,
-      moderationComment: null,
+      moderatorComment: null,
       rejectionReason: null,
       rejectedAt: null,
       rejectedBy: null
@@ -854,7 +854,7 @@ async function movePendingVerificationReleasesToChangesRequired(params: {
     where: { id: { in: ids } },
     data: {
       status: RELEASE_STATUS_CHANGES_REQUIRED,
-      moderationComment: rejectionMessage,
+      moderatorComment: rejectionMessage,
       rejectionReason: rejectionMessage,
       rejectedAt: params.now,
       rejectedBy: params.adminId

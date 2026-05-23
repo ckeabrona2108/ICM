@@ -38,18 +38,8 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
 }
 
 export async function getCabinetDraftReleasesByUser(userId: string): Promise<CabinetRelease[]> {
-  const releases = await prisma.release.findMany({
-    where: {
-      userId,
-      confirmed: false
-    },
-    orderBy: { date: "desc" },
-    select: cabinetReleaseSelect
-  });
-
-  return releases
-    .map((release, index) => mapReleaseToCabinetRelease(release, index + 1))
-    .filter((release) => release.status === "draft");
+  const releases = await getCabinetReleasesByUser(userId);
+  return releases.filter((release) => release.status === "draft");
 }
 
 export async function getCabinetReleaseByIdForUser(userId: string, releaseId: string) {

@@ -44,20 +44,18 @@ export function mapReleaseStatusToSection(
   submittedToModeration?: boolean | null
 ): keyof ReleaseSidebarCounts | null {
   const lifecycle = normalizeLifecycleStatus(status);
-  if (confirmed === false) {
-    return lifecycle === "moderation" && submittedToModeration ? "moderation" : "draft";
-  }
-
   switch (lifecycle) {
-    case "draft":
-      return "draft";
-    case "pending_verification":
-    case "moderation":
-      return "moderation";
-    case "changes_required":
-      return "changes_required";
     case "approved":
       return "all";
+    case "changes_required":
+      return "changes_required";
+    case "pending_verification":
+      return "moderation";
+    case "moderation":
+      if (submittedToModeration) return "moderation";
+      return confirmed === false ? "draft" : "moderation";
+    case "draft":
+      return "draft";
     case "archived":
     default:
       return null;

@@ -4,8 +4,30 @@ import { NextResponse } from "next/server";
 import type { ReleaseDraftDeleteResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { mapReleaseStatusToSection } from "@/lib/release-counts";
 
 export const dynamic = "force-dynamic";
+
+async function draftsCount(userId: string): Promise<number> {
+  const releases = await prisma.release.findMany({
+    where: { userId },
+    select: { status: true, confirmed: true, roles: true }
+  });
+
+  return releases.reduce((count, release) => {
+    const submittedToModeration =
+      Boolean(release.roles) &&
+      typeof release.roles === "object" &&
+      !Array.isArray(release.roles) &&
+      (release.roles as Record<string, unknown>).submittedToModeration === true;
+    const section = mapReleaseStatusToSection(
+      release.status,
+      release.confirmed,
+      submittedToModeration
+    );
+    return section === "draft" ? count + 1 : count;
+  }, 0);
+}
 
 export async function DELETE(_request: Request, context: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
@@ -19,13 +41,21 @@ export async function DELETE(_request: Request, context: { params: { id: string 
   const draft = await prisma.release.findFirst({
     where: {
       id: releaseId,
-      userId: session.user.id,
-      confirmed: false
+      userId: session.user.id
     },
-    select: { id: true }
+    select: { id: true, status: true, confirmed: true, roles: true }
   });
 
-  if (!draft) {
+  const submittedToModeration =
+    Boolean(draft?.roles) &&
+    typeof draft?.roles === "object" &&
+    !Array.isArray(draft?.roles) &&
+    (draft?.roles as Record<string, unknown>).submittedToModeration === true;
+  const section = draft
+    ? mapReleaseStatusToSection(draft.status, draft.confirmed, submittedToModeration)
+    : null;
+
+  if (!draft || section !== "draft") {
     return NextResponse.json({ error: "Черновик не найден" }, { status: 404 });
   }
 
@@ -34,7 +64,7 @@ export async function DELETE(_request: Request, context: { params: { id: string 
   const response: ReleaseDraftDeleteResponse = {
     ok: true,
     releaseId,
-    draftsCount: await prisma.release.count({ where: { userId: session.user.id, confirmed: false } }),
+    draftsCount: await draftsCount(session.user.id),
     message: "Черновик удалён."
   };
 

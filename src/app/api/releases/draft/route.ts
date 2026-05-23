@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import type { ReleaseDraftSaveRequest, ReleaseDraftSaveResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { mapReleaseStatusToSection } from "@/lib/release-counts";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,24 @@ function mergeSubmissionData(roles: unknown, submissionData: Record<string, unkn
 }
 
 async function draftsCount(userId: string) {
-  return prisma.release.count({ where: { userId, confirmed: false } });
+  const releases = await prisma.release.findMany({
+    where: { userId },
+    select: { status: true, confirmed: true, roles: true }
+  });
+
+  return releases.reduce((count, release) => {
+    const submittedToModeration =
+      Boolean(release.roles) &&
+      typeof release.roles === "object" &&
+      !Array.isArray(release.roles) &&
+      (release.roles as Record<string, unknown>).submittedToModeration === true;
+    const section = mapReleaseStatusToSection(
+      release.status,
+      release.confirmed,
+      submittedToModeration
+    );
+    return section === "draft" ? count + 1 : count;
+  }, 0);
 }
 
 export async function POST(request: Request) {

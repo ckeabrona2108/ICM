@@ -16,12 +16,22 @@ function readStringEnv(...keys: string[]): string | undefined {
   return undefined;
 }
 
+function readBooleanEnv(key: string, defaultValue: boolean): boolean {
+  const raw = process.env[key];
+  if (typeof raw !== "string") return defaultValue;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
 function toEndpointUrl(rawValue: string | undefined): string | undefined {
   if (!rawValue) return undefined;
   if (rawValue.startsWith("http://") || rawValue.startsWith("https://")) {
     return rawValue;
   }
-  const useSsl = (process.env.S3_USE_SSL ?? "true").trim().toLowerCase() !== "false";
+  const useSsl = readBooleanEnv("S3_USE_SSL", true);
   return `${useSsl ? "https" : "http"}://${rawValue}`;
 }
 
@@ -112,7 +122,15 @@ async function canUseBucket(client: S3Client, bucketName: string): Promise<boole
       })
     );
     return true;
-  } catch {
+  } catch (error) {
+    const code =
+      typeof error === "object" && error && "name" in error
+        ? String((error as { name?: string }).name ?? "")
+        : "";
+    const message = error instanceof Error ? error.message : "";
+    if (/accessdenied|forbidden|403/i.test(`${code} ${message}`)) {
+      return true;
+    }
     return false;
   }
 }
@@ -473,12 +491,9 @@ export async function createPresignedUpload(input: {
   }
 
   if (!client || !bucketName) {
-    return {
-      url: buildLocalObjectPath(normalizedKey),
-      method: "PUT",
-      fields: {},
-      mock: false
-    };
+    throw new Error(
+      "S3/MinIO upload is not configured. Required env: S3_HOST, S3_ACCESS_KEY (or MINIO_ROOT_USER), S3_SECRET_KEY (or MINIO_ROOT_PASSWORD)."
+    );
   }
 
   const command = new PutObjectCommand({

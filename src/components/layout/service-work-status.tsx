@@ -49,8 +49,8 @@ export function ServiceWorkStatus({
           <span className="relative inline-flex h-2 w-2 rounded-full bg-rose-400" />
         )}
       </span>
-      <span className="text-[14px] font-medium text-white/86">{status.label}</span>
-      <span className="hidden text-[13px] font-medium text-white/65 sm:inline">
+      <span className="whitespace-nowrap text-[14px] font-medium text-white/86">{status.label}</span>
+      <span className="hidden whitespace-nowrap text-[13px] font-medium text-white/65 sm:inline">
         · {status.description}
       </span>
     </div>

@@ -116,12 +116,12 @@ export function DashboardTopbar({
 
       <div className="ml-auto flex min-w-0 items-center gap-3">
         {hasSubscription && planLabel ? (
-          <div className="flex items-end flex-col">
-            <span className="rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold tracking-[0.14em] text-white/88">
+          <div className="flex shrink-0 flex-col items-end">
+            <span className="whitespace-nowrap rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1 text-[11px] font-semibold tracking-[0.14em] text-white/88">
               {planLabel}
             </span>
             {subscriptionExpiresLabel ? (
-              <span className="mt-1 hidden text-[11px] font-medium text-white/55 sm:block">
+              <span className="mt-1 hidden whitespace-nowrap text-[11px] font-medium text-white/55 sm:block">
                 {subscriptionExpiresLabel}
               </span>
             ) : null}

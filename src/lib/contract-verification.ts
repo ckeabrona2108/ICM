@@ -7,9 +7,9 @@ import type { PrismaClient } from "@prisma/client";
 
 import {
   createPresignedDownload,
-  createPresignedUpload,
   getStorageBucketCandidates,
-  getStorageBucketHint
+  getStorageBucketHint,
+  uploadObjectToStorage
 } from "@/lib/s3";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import {
@@ -469,29 +469,12 @@ async function uploadSignaturePng(params: {
 
   const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
   const key = `contracts/signatures/${params.userId}/${Date.now()}-${hash}.png`;
-
-  const signed = await createPresignedUpload({ key, contentType: "image/png" });
-
-  if (signed.mock || signed.url.startsWith("/")) {
-    if (!shouldUseLocalVerificationStore()) {
-      throw new Error(
-        "Не удалось сохранить подпись: S3/MinIO не настроен, а локальное хранилище отключено в production."
-      );
-    }
-    return { signatureImageUrl: dataUrl };
-  }
-
-  const uploadResponse = await fetch(signed.url, {
-    method: signed.method ?? "PUT",
-    headers: { "Content-Type": "image/png" },
+  const uploaded = await uploadObjectToStorage({
+    key,
+    contentType: "image/png",
     body: bytes
   });
-
-  if (!uploadResponse.ok) {
-    throw new Error("Не удалось загрузить подпись в хранилище.");
-  }
-
-  return { signatureImageUrl: (signed.url.split("?")[0] ?? signed.url).trim() };
+  return { signatureImageUrl: uploaded.url.trim() };
 }
 
 function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem {

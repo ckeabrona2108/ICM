@@ -482,6 +482,86 @@ function buildLocalDownloadUrl(input: {
   return `${url.pathname}${url.search}`;
 }
 
+function buildPathStyleStorageUrl(bucketName: string, key: string): string | null {
+  if (!endpoint) return null;
+  const encodedKey = key
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  const base = endpoint.replace(/\/+$/u, "");
+  return `${base}/${bucketName}/${encodedKey}`;
+}
+
+function logS3UploadConfigDebug(bucketValue?: string | null): void {
+  const accessKey = readStringEnv(
+    "S3_ACCESS_KEY_ID",
+    "S3_ACCESS_KEY",
+    "MINIO_ACCESS_KEY",
+    "MINIO_ROOT_USER"
+  );
+  const secretKey = readStringEnv(
+    "S3_SECRET_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "MINIO_SECRET_KEY",
+    "MINIO_ROOT_PASSWORD"
+  );
+  console.log("[s3-upload-config-debug]", {
+    endpoint,
+    publicBaseUrl: publicStorageBaseUrl,
+    accessKeyPresent: !!accessKey,
+    secretKeyPresent: !!secretKey,
+    bucket: bucketValue ?? configuredBucket ?? getDefaultBucketName(),
+    rawS3Host: process.env.S3_HOST,
+    rawS3Endpoint: process.env.S3_ENDPOINT,
+    rawMinioEndpoint: process.env.MINIO_ENDPOINT,
+    rawPublicS3: process.env.NEXT_PUBLIC_S3_URL
+  });
+}
+
+export async function uploadObjectToStorage(input: {
+  key: string;
+  body: Buffer | Uint8Array | string;
+  contentType: string;
+}): Promise<{ bucket: string; key: string; url: string }> {
+  const client = getClient();
+  const bucketName = await resolveBucketName(client);
+  const normalizedKey = normalizeStorageKey(input.key);
+  if (!normalizedKey) {
+    throw new Error("Invalid storage key");
+  }
+
+  const bucketForUpload = bucketName ?? (client ? getDefaultBucketName() : null);
+  if (!client || !bucketForUpload) {
+    logS3UploadConfigDebug(bucketForUpload);
+    throw new Error(
+      "S3/MinIO upload is not configured. Required env: S3_HOST, S3_ACCESS_KEY (or MINIO_ROOT_USER), S3_SECRET_KEY (or MINIO_ROOT_PASSWORD)."
+    );
+  }
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucketForUpload,
+      Key: normalizedKey,
+      Body: input.body,
+      ContentType: input.contentType
+    })
+  );
+
+  const url =
+    resolvePublicStorageUrlFromKey(normalizedKey) ??
+    buildPathStyleStorageUrl(bucketForUpload, normalizedKey) ??
+    "";
+  if (!url) {
+    throw new Error("S3 object uploaded, but public URL could not be resolved.");
+  }
+
+  return {
+    bucket: bucketForUpload,
+    key: normalizedKey,
+    url
+  };
+}
+
 export async function createPresignedUpload(input: {
   key: string;
   contentType: string;
@@ -497,29 +577,7 @@ export async function createPresignedUpload(input: {
   const bucketForSigning = bucketName ?? (client ? getDefaultBucketName() : null);
 
   if (!client || !bucketForSigning) {
-    const accessKey = readStringEnv(
-      "S3_ACCESS_KEY_ID",
-      "S3_ACCESS_KEY",
-      "MINIO_ACCESS_KEY",
-      "MINIO_ROOT_USER"
-    );
-    const secretKey = readStringEnv(
-      "S3_SECRET_ACCESS_KEY",
-      "S3_SECRET_KEY",
-      "MINIO_SECRET_KEY",
-      "MINIO_ROOT_PASSWORD"
-    );
-    console.log("[s3-upload-config-debug]", {
-      endpoint,
-      publicBaseUrl: publicStorageBaseUrl,
-      accessKeyPresent: !!accessKey,
-      secretKeyPresent: !!secretKey,
-      bucket: bucketForSigning ?? configuredBucket ?? getDefaultBucketName(),
-      rawS3Host: process.env.S3_HOST,
-      rawS3Endpoint: process.env.S3_ENDPOINT,
-      rawMinioEndpoint: process.env.MINIO_ENDPOINT,
-      rawPublicS3: process.env.NEXT_PUBLIC_S3_URL
-    });
+    logS3UploadConfigDebug(bucketForSigning);
     throw new Error(
       "S3/MinIO upload is not configured. Required env: S3_HOST, S3_ACCESS_KEY (or MINIO_ROOT_USER), S3_SECRET_KEY (or MINIO_ROOT_PASSWORD)."
     );

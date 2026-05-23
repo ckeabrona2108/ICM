@@ -6,9 +6,10 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json package-lock.json ./
+COPY scripts ./scripts
+COPY prisma ./prisma
 RUN npm ci
 
-COPY prisma ./prisma
 RUN npx prisma generate
 
 COPY . .

@@ -24,6 +24,7 @@ const nextConfig = {
     ignoreDuringBuilds: true
   },
   images: {
+    unoptimized: true,
     remotePatterns: [
       ...resolvedImageHosts.flatMap((hostname) => [
         { protocol: "https", hostname },

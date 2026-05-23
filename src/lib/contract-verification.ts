@@ -19,6 +19,7 @@ import {
 import {
   CONTRACT_FILE_NAME,
   CONTRACT_FILE_URL,
+  CONTRACT_VERSION,
   type ContractSignerFormData,
   type ContractSignerValidationIssue,
   type ContractSignatureStatus,

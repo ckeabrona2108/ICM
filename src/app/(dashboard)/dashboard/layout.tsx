@@ -84,7 +84,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="relative h-screen min-w-0 overflow-hidden">
         <DashboardSidebar counts={sidebarCounts} contractStatus={contractStatus} />
         <div className="h-screen min-w-0 lg:pl-[258px]">
-          <div className="h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 sm:px-6 lg:px-8">
+          <div className="h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 pb-24 sm:px-6 lg:px-8 lg:pb-0">
             <DashboardPrefetch />
             <DashboardVerificationStatusModal initialStatus={contractStatus} />
             <DashboardTopbar

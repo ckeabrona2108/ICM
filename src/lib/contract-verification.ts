@@ -656,7 +656,7 @@ function decodeLegacyLocalSignatureUrl(rawValue: string): Buffer | null {
   return Buffer.from(LEGACY_SIGNATURE_PLACEHOLDER_PNG, "base64");
 }
 
-function extractStorageKeyFromUrl(rawUrl: string): string | null {
+function extractStorageLocationFromUrl(rawUrl: string): { bucket: string | null; key: string | null } {
   try {
     const url = new URL(rawUrl);
     const pathname = url.pathname.replace(/^\/+/u, "");
@@ -665,17 +665,23 @@ function extractStorageKeyFromUrl(rawUrl: string): string | null {
     );
     for (const bucket of bucketCandidates) {
       if (pathname.startsWith(`${bucket}/`)) {
-        return pathname.slice(bucket.length + 1);
+        return {
+          bucket,
+          key: pathname.slice(bucket.length + 1) || null
+        };
       }
     }
     for (const bucket of bucketCandidates) {
       if (url.hostname.startsWith(`${bucket}.`)) {
-        return pathname;
+        return {
+          bucket,
+          key: pathname || null
+        };
       }
     }
-    return pathname || null;
+    return { bucket: null, key: pathname || null };
   } catch {
-    return null;
+    return { bucket: null, key: null };
   }
 }
 
@@ -1459,11 +1465,12 @@ export async function getContractSignatureDownloadAsset(params: {
   const legacyBody = decodeLegacyLocalSignatureUrl(item.signatureImageUrl);
   if (legacyBody) return null;
 
-  const storageKey = extractStorageKeyFromUrl(item.signatureImageUrl);
-  if (storageKey) {
+  const storageLocation = extractStorageLocationFromUrl(item.signatureImageUrl);
+  if (storageLocation.key) {
     const disposition = `${params.inline ? "inline" : "attachment"}; filename="${buildSignatureFileName(item)}"`;
     const signed = await createPresignedDownload({
-      key: storageKey,
+      key: storageLocation.key,
+      bucket: storageLocation.bucket ?? undefined,
       expiresIn: 600,
       responseContentDisposition: disposition,
       responseContentType: "image/png"

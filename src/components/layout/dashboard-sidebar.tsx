@@ -476,6 +476,16 @@ export function DashboardSidebar({
   const startNavigation = React.useCallback((href: string) => {
     setOptimisticPath(href);
   }, []);
+  const mobileNavItems = React.useMemo(
+    () => [
+      { href: "/dashboard", label: "Новости", icon: Bell },
+      { href: "/dashboard/releases", label: "Релизы", icon: Package },
+      { href: "/dashboard/statistics", label: "Аналитика", icon: BarChart3 },
+      { href: "/dashboard/finance", label: "Кошелёк", icon: Wallet },
+      { href: "/dashboard/profile", label: "Аккаунт", icon: UserRound }
+    ],
+    []
+  );
 
   return (
     <>
@@ -588,6 +598,31 @@ export function DashboardSidebar({
           </nav>
         </div>
       </aside>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.1] bg-[#0d0f16]/96 px-1.5 pb-[calc(env(safe-area-inset-bottom)+6px)] pt-1.5 backdrop-blur-md lg:hidden">
+        <div className="mx-auto grid max-w-xl grid-cols-5 gap-1">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = activePath === item.href || activePath.startsWith(`${item.href}/`);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                prefetch
+                data-bypass-wizard-guard="true"
+                onClick={() => startNavigation(item.href)}
+                className={cn(
+                  "flex flex-col items-center justify-center rounded-lg px-1 py-2 text-center transition-colors",
+                  active ? "bg-[#7b3df5]/20 text-white" : "text-white/60 hover:bg-white/[0.04] hover:text-white"
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="mt-1 text-[10px] font-medium leading-none">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
 
       <AnimatePresence initial={false}>
         {unavailableToast ? (

@@ -436,12 +436,36 @@ export async function resolveFirstReachableImageUrlFromCandidates(
 export function resolvePublicStorageUrlFromKey(key: string): string | null {
   const normalizedKey = normalizeStorageKey(key);
   if (!normalizedKey || !publicStorageBaseUrl) return null;
+  return resolvePublicStorageUrlFromBucketKey(undefined, normalizedKey);
+}
+
+export function resolvePublicStorageUrlFromBucketKey(
+  bucketName: string | null | undefined,
+  key: string
+): string | null {
+  const normalizedKey = normalizeStorageKey(key);
+  if (!normalizedKey || !publicStorageBaseUrl) return null;
   const encodedKey = normalizedKey
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-  const base = publicStorageBaseUrl.replace(/\/+$/u, "");
-  return `${base}/${encodedKey}`;
+  try {
+    const parsedBase = new URL(publicStorageBaseUrl);
+    const pathSegments = parsedBase.pathname.split("/").filter(Boolean);
+    const normalizedBucket = (bucketName ?? "").trim();
+    if (normalizedBucket) {
+      const lastSegment = pathSegments[pathSegments.length - 1];
+      if (lastSegment !== normalizedBucket) {
+        pathSegments.push(normalizedBucket);
+      }
+    }
+    const prefix = pathSegments.join("/");
+    const base = `${parsedBase.origin}/${prefix}`.replace(/\/+$/u, "");
+    return `${base}/${encodedKey}`;
+  } catch {
+    const base = publicStorageBaseUrl.replace(/\/+$/u, "");
+    return `${base}/${encodedKey}`;
+  }
 }
 
 export function resolveStoredFileUrl(input: {
@@ -548,12 +572,18 @@ export async function uploadObjectToStorage(input: {
   );
 
   const url =
-    resolvePublicStorageUrlFromKey(normalizedKey) ??
+    resolvePublicStorageUrlFromBucketKey(bucketForUpload, normalizedKey) ??
     buildPathStyleStorageUrl(bucketForUpload, normalizedKey) ??
     "";
   if (!url) {
     throw new Error("S3 object uploaded, but public URL could not be resolved.");
   }
+
+  console.log("[signature-upload-success]", {
+    bucket: bucketForUpload,
+    key: normalizedKey,
+    publicUrl: url
+  });
 
   return {
     bucket: bucketForUpload,
@@ -603,19 +633,26 @@ export async function createPresignedUpload(input: {
 
 export async function createPresignedDownload(input: {
   key: string;
+  bucket?: string;
   expiresIn?: number;
   responseContentDisposition?: string;
   responseContentType?: string;
 }): Promise<{ url: string; mock: boolean }> {
   const client = getClient();
-  const bucketName = await resolveBucketName(client);
+  const requestedBucket = (input.bucket ?? "").trim();
+  const bucketName = requestedBucket || (await resolveBucketName(client));
   const normalizedKey = normalizeStorageKey(input.key);
   if (!normalizedKey) {
     throw new Error("Invalid storage key");
   }
 
-  if (!client || !bucketName) {
-    const publicUrl = resolvePublicStorageUrlFromKey(normalizedKey);
+  const bucketForDownload = bucketName || (client ? getDefaultBucketName() : null);
+
+  if (!client || !bucketForDownload) {
+    const publicUrl = resolvePublicStorageUrlFromBucketKey(
+      bucketForDownload ?? requestedBucket ?? undefined,
+      normalizedKey
+    );
     return {
       url:
         publicUrl ??
@@ -628,7 +665,7 @@ export async function createPresignedDownload(input: {
   }
 
   const command = new GetObjectCommand({
-    Bucket: bucketName,
+    Bucket: bucketForDownload,
     Key: normalizedKey,
     ResponseContentDisposition: input.responseContentDisposition,
     ResponseContentType: input.responseContentType

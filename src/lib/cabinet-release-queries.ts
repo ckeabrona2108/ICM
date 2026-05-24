@@ -2,6 +2,9 @@ import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
 import { prisma } from "@/lib/prisma";
 import { resolveFirstReachableImageCandidateFromCandidates } from "@/lib/s3";
+const ENABLE_COVER_RESOLVER_DEBUG = process.env.COVER_RESOLVER_DEBUG === "1";
+const coverResolveCache = new Map<string, { url: string | null; failedReason: string | null }>();
+const MAX_COVER_RESOLVE_CACHE_SIZE = 1000;
 
 const cabinetReleaseSelect = {
   id: true,
@@ -67,7 +70,17 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
       const candidateUrls = Array.from(
         new Set([release.coverUrl, ...(release.coverUrlCandidates ?? [])].filter(Boolean))
       );
-      const resolved = await resolveFirstReachableImageCandidateFromCandidates(candidateUrls);
+      const cacheKey = `${release.id}\n${candidateUrls.join("\n")}`;
+      const cached = coverResolveCache.get(cacheKey);
+      const resolved =
+        cached ?? (await resolveFirstReachableImageCandidateFromCandidates(candidateUrls));
+      if (!cached) {
+        if (coverResolveCache.size >= MAX_COVER_RESOLVE_CACHE_SIZE) {
+          const firstKey = coverResolveCache.keys().next().value;
+          if (firstKey) coverResolveCache.delete(firstKey);
+        }
+        coverResolveCache.set(cacheKey, resolved);
+      }
       const rawCover = source
         ? extractRawCover({
             preview: source.preview,
@@ -78,14 +91,16 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
             submissionCover: null,
             submissionCoverUploadUrl: null
           };
-      console.log("[cover-resolver-debug]", {
-        releaseId: release.id,
-        title: release.title ?? "Без названия",
-        rawCover,
-        candidates: candidateUrls,
-        foundUrl: resolved.url,
-        failedReason: resolved.failedReason
-      });
+      if (ENABLE_COVER_RESOLVER_DEBUG) {
+        console.log("[cover-resolver-debug]", {
+          releaseId: release.id,
+          title: release.title ?? "Без названия",
+          rawCover,
+          candidates: candidateUrls,
+          foundUrl: resolved.url,
+          failedReason: resolved.failedReason
+        });
+      }
       return resolved.url
         ? {
             ...release,
@@ -114,19 +129,30 @@ export async function getCabinetReleaseByIdForUser(userId: string, releaseId: st
   const candidateUrls = Array.from(
     new Set([mapped.coverUrl, ...(mapped.coverUrlCandidates ?? [])].filter(Boolean))
   );
-  const resolved = await resolveFirstReachableImageCandidateFromCandidates(candidateUrls);
+  const cacheKey = `${mapped.id}\n${candidateUrls.join("\n")}`;
+  const cached = coverResolveCache.get(cacheKey);
+  const resolved = cached ?? (await resolveFirstReachableImageCandidateFromCandidates(candidateUrls));
+  if (!cached) {
+    if (coverResolveCache.size >= MAX_COVER_RESOLVE_CACHE_SIZE) {
+      const firstKey = coverResolveCache.keys().next().value;
+      if (firstKey) coverResolveCache.delete(firstKey);
+    }
+    coverResolveCache.set(cacheKey, resolved);
+  }
   const rawCover = extractRawCover({
     preview: release.preview,
     roles: release.roles
   });
-  console.log("[cover-resolver-debug]", {
-    releaseId: mapped.id,
-    title: mapped.title ?? "Без названия",
-    rawCover,
-    candidates: candidateUrls,
-    foundUrl: resolved.url,
-    failedReason: resolved.failedReason
-  });
+  if (ENABLE_COVER_RESOLVER_DEBUG) {
+    console.log("[cover-resolver-debug]", {
+      releaseId: mapped.id,
+      title: mapped.title ?? "Без названия",
+      rawCover,
+      candidates: candidateUrls,
+      foundUrl: resolved.url,
+      failedReason: resolved.failedReason
+    });
+  }
   if (!resolved.url) return mapped;
   return {
     ...mapped,

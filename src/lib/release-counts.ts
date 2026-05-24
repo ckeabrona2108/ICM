@@ -64,9 +64,11 @@ function readLegacyReleaseSignals(roles: unknown): {
   hasDistributedAt: boolean;
   isPublished: boolean;
   needsChanges: boolean | null;
+  upcValues: string[];
 } {
   const records = collectRoleRecords(roles);
   const statusValues: string[] = [];
+  const upcValues: string[] = [];
   let hasApprovedAt = false;
   let hasDistributedAt = false;
   let isPublished = false;
@@ -76,6 +78,10 @@ function readLegacyReleaseSignals(roles: unknown): {
     for (const key of ["status", "moderationStatus", "releaseStatus", "distributionStatus"]) {
       const value = normalizeOptionalString(record[key]);
       if (value) statusValues.push(value);
+    }
+    for (const key of ["upc", "releaseUpc", "release_upc"]) {
+      const value = normalizeOptionalString(record[key]);
+      if (value) upcValues.push(value);
     }
     if (normalizeOptionalString(record.approvedAt)) hasApprovedAt = true;
     if (normalizeOptionalString(record.distributedAt)) hasDistributedAt = true;
@@ -94,7 +100,8 @@ function readLegacyReleaseSignals(roles: unknown): {
     hasApprovedAt,
     hasDistributedAt,
     isPublished,
-    needsChanges
+    needsChanges,
+    upcValues
   };
 }
 
@@ -107,8 +114,12 @@ export function shouldTreatReleaseAsApproved(params: {
   const lifecycle = normalizeLifecycleStatus(params.status);
   if (lifecycle === "approved") return true;
 
-  const upc = normalizeOptionalString(params.upc);
   const signals = readLegacyReleaseSignals(params.roles);
+  const explicitUpc = normalizeOptionalString(params.upc);
+  const upc = explicitUpc ?? signals.upcValues[0] ?? null;
+  // Production rule: a release with assigned UPC is considered accepted in cabinet views.
+  if (upc) return true;
+
   const hasApprovedStatusSignal = signals.statusValues.some((value) => {
     const normalized = normalizeLifecycleStatus(value);
     return normalized === "approved";

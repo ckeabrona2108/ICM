@@ -37,7 +37,7 @@ export function AdminReleasesClient({
   const [error, setError] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
-  const [coverIndexById, setCoverIndexById] = React.useState<Record<string, number>>({});
+  const [coverBrokenById, setCoverBrokenById] = React.useState<Record<string, boolean>>({});
 
   const [rejectModal, setRejectModal] = React.useState<{
     open: boolean;
@@ -102,6 +102,10 @@ export function AdminReleasesClient({
     const timer = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  React.useEffect(() => {
+    setCoverBrokenById({});
+  }, [releases]);
 
   async function submitApprove() {
     if (!approveModal.release) return;
@@ -248,15 +252,11 @@ export function AdminReleasesClient({
             const canApprove = release.status === "moderation";
             const canReject = release.status === "moderation";
             const isBusy = busyId === release.id;
-            const coverCandidates = Array.from(
-              new Set(
-                [release.coverUrl, ...(release.coverUrlCandidates ?? [])]
-                  .map((item) => normalizeNextImageSrc(item))
-                  .filter((item): item is string => Boolean(item))
-              )
+            const safeCoverUrl = normalizeNextImageSrc(
+              release.coverUrl || release.coverUrlCandidates?.[0] || ""
             );
-            const coverIndex = coverIndexById[release.id] ?? 0;
-            const safeCoverUrl = coverCandidates[coverIndex] ?? null;
+            const isCoverBroken = Boolean(coverBrokenById[release.id]);
+            const activeCoverUrl = !isCoverBroken && safeCoverUrl ? safeCoverUrl : null;
 
             return (
               <article
@@ -265,17 +265,16 @@ export function AdminReleasesClient({
               >
                 <div className="flex flex-wrap gap-4">
                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10">
-                    {safeCoverUrl ? (
+                    {activeCoverUrl ? (
                       <img
-                        src={safeCoverUrl}
+                        src={activeCoverUrl}
                         alt={release.title}
                         className="h-full w-full object-cover"
                         loading="lazy"
                         onError={() =>
-                          setCoverIndexById((prev) => ({
+                          setCoverBrokenById((prev) => ({
                             ...prev,
-                            [release.id]:
-                              coverIndex + 1 <= coverCandidates.length ? coverIndex + 1 : coverIndex
+                            [release.id]: true
                           }))
                         }
                       />

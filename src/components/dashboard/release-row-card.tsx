@@ -207,7 +207,7 @@ function ReleaseRowCardBase({
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [paying, setPaying] = React.useState(false);
   const [payError, setPayError] = React.useState<string | null>(null);
-  const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
+  const [coverBroken, setCoverBroken] = React.useState(false);
   const timelineState = getReleaseTimelineState(release.status, release.paid);
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
@@ -215,18 +215,14 @@ function ReleaseRowCardBase({
   const editLocked = release.status === "moderation";
   const showHistoryIcon = release.status !== "draft";
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
-  const coverCandidates = React.useMemo(
+  const safeCoverSrc = React.useMemo(
     () =>
-      Array.from(
-        new Set(
-          [release.coverUrl, ...(release.coverUrlCandidates ?? []), release.cover]
-            .map((item) => normalizeNextImageSrc(item ?? ""))
-            .filter((item): item is string => Boolean(item))
-        )
+      normalizeNextImageSrc(
+        release.coverUrl || release.coverUrlCandidates?.[0] || release.cover || ""
       ),
     [release.cover, release.coverUrl, release.coverUrlCandidates]
   );
-  const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
+  const activeCoverSrc = !coverBroken && safeCoverSrc ? safeCoverSrc : null;
   const title = release.title?.trim() || "Без названия";
   const artist = release.artist?.trim() || "Исполнитель не указан";
   const releaseDate = release.releaseDate?.trim() || "Дата не выбрана";
@@ -236,7 +232,7 @@ function ReleaseRowCardBase({
   const genre = release.genre?.trim() || "Не указан";
   const label = release.label?.trim() || "Не указан";
   const priorityBadge = getPriorityBadgeDescriptor(Boolean(release.priority));
-  const isRenderableCover = Boolean(safeCoverSrc);
+  const isRenderableCover = Boolean(activeCoverSrc);
   const quickPreviewData =
     quickPreviewTrackNum == null ? null : (quickPreviewCache[quickPreviewTrackNum] ?? null);
   const isQuickPreviewOpen = quickPreviewTrackNum != null;
@@ -312,8 +308,8 @@ function ReleaseRowCardBase({
   );
 
   React.useEffect(() => {
-    setCoverCandidateIndex(0);
-  }, [release.id, coverCandidates.length]);
+    setCoverBroken(false);
+  }, [release.id, safeCoverSrc]);
 
   const handleDeleteDraft = React.useCallback(async () => {
     if (release.status !== "draft") return;
@@ -535,15 +531,11 @@ function ReleaseRowCardBase({
             {isRenderableCover ? (
               // Keep release cards stable even when remote host is not configured in next/image.
               <img
-                src={safeCoverSrc ?? ""}
+                src={activeCoverSrc ?? ""}
                 alt=""
                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 loading="lazy"
-                onError={() =>
-                  setCoverCandidateIndex((prev) =>
-                    prev + 1 <= coverCandidates.length ? prev + 1 : prev
-                  )
-                }
+                onError={() => setCoverBroken(true)}
               />
             ) : (
               <div className="grid h-full w-full place-items-center bg-white/[0.02] px-2 text-center text-[12px] font-medium text-white/45">

@@ -139,6 +139,40 @@ interface PersonGroups {
   lyricsAuthors: string[];
 }
 
+const COVER_EXTENSIONS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "jpng",
+  "PNG",
+  "JPG",
+  "JPEG",
+  "WEBP",
+  "JPNG"
+] as const;
+
+function getExtensionHint(rawPreview: string | null): string | null {
+  if (!rawPreview) return null;
+  if (looksLikeOnlyExtension(rawPreview)) {
+    return normalizeExtension(rawPreview);
+  }
+  const withoutQuery = rawPreview.split("?")[0]?.split("#")[0] ?? rawPreview;
+  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex >= fileName.length - 1) return null;
+  return normalizeExtension(fileName.slice(dotIndex + 1));
+}
+
+function getCoverExtensionsByPriority(rawPreview: string | null): string[] {
+  const hint = getExtensionHint(rawPreview);
+  const ordered = [...COVER_EXTENSIONS];
+  if (!hint) return ordered;
+  const exacts = ordered.filter((ext) => ext === hint || ext.toLowerCase() === hint);
+  const rest = ordered.filter((ext) => !exacts.includes(ext));
+  return [...exacts, ...rest];
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -404,8 +438,7 @@ function mergeRoleNamesFromValue(
         asString(itemRecord.fullName) ??
         asString(itemRecord.person) ??
         asString(itemRecord.artist) ??
-        asString(itemRecord.value) ??
-        asString(itemRecord.title);
+        asString(itemRecord.value);
       if (name) pushNames(grouped[roleKey], splitNames(name));
     }
     return;
@@ -417,8 +450,7 @@ function mergeRoleNamesFromValue(
     asString(valueRecord.fullName) ??
     asString(valueRecord.person) ??
     asString(valueRecord.artist) ??
-    asString(valueRecord.value) ??
-    asString(valueRecord.title);
+    asString(valueRecord.value);
   if (name) pushNames(grouped[roleKey], splitNames(name));
 }
 
@@ -451,8 +483,7 @@ function parsePersons(persons: unknown): {
         asString(person.fullName) ??
         asString(person.person) ??
         asString(person.artist) ??
-        asString(person.value) ??
-        asString(person.title);
+        asString(person.value);
       const role =
         asString(person.role) ??
         asString(person.type) ??
@@ -461,7 +492,8 @@ function parsePersons(persons: unknown): {
         asString(person.category) ??
         "";
       if (!name) continue;
-      const bucket = mapRoleToBucket(role) ?? "performers";
+      const bucket = mapRoleToBucket(role);
+      if (!bucket) continue;
       pushNames(grouped[bucket], splitNames(name));
     }
     return grouped;
@@ -489,8 +521,7 @@ function parsePersons(persons: unknown): {
     asString(personObject.fullName) ??
     asString(personObject.person) ??
     asString(personObject.artist) ??
-    asString(personObject.value) ??
-    asString(personObject.title);
+    asString(personObject.value);
   if (directName) {
     const role =
       asString(personObject.role) ??
@@ -499,8 +530,10 @@ function parsePersons(persons: unknown): {
       asString(personObject.roleType) ??
       asString(personObject.category) ??
       "";
-    const bucket = mapRoleToBucket(role) ?? "performers";
-    pushNames(grouped[bucket], splitNames(directName));
+    const bucket = mapRoleToBucket(role);
+    if (bucket) {
+      pushNames(grouped[bucket], splitNames(directName));
+    }
   }
 
   for (const [rawKey, rawValue] of Object.entries(personObject)) {
@@ -548,6 +581,28 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function normalizePersonName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function removeAccountNameFromPerformersIfLeaked(
+  performers: string[],
+  accountName: string | null,
+  explicitPerformers: string[]
+): string[] {
+  if (!accountName) return performers;
+  if (performers.length <= 1) return performers;
+
+  const normalizedAccount = normalizePersonName(accountName);
+  if (!normalizedAccount) return performers;
+
+  const explicitSet = new Set(explicitPerformers.map(normalizePersonName));
+  if (explicitSet.has(normalizedAccount)) return performers;
+
+  const filtered = performers.filter((value) => normalizePersonName(value) !== normalizedAccount);
+  return filtered.length > 0 ? filtered : performers;
+}
+
 function parseSubmissionData(release: Record<string, unknown>): Record<string, unknown> | null {
   const inline = asRecord(release.submissionData);
   if (inline) return inline;
@@ -560,6 +615,7 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
   const coverUploadRef = pickStoredFileRef(submissionData?.coverUpload);
   const legacyCoverUrl = asString(submissionData?.cover);
   const preview = asString(release.preview);
+  const previewSeed = preview && !looksLikeOnlyExtension(preview) ? preview : null;
   const releaseId = asString(release.id);
   const previewFileName =
     preview && !preview.includes("/") && !looksLikeOnlyExtension(preview) ? preview.trim() : null;
@@ -583,6 +639,21 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
       }
     : { storageKey: null, url: null, fileName: null };
   const fallbackUrl = resolveStoredFileUrl({ url: legacyCoverUrl, storageKey: null });
+  const prioritizedExtensions = getCoverExtensionsByPriority(preview);
+  const legacyStorageKeys =
+    releaseId == null
+      ? []
+      : prioritizedExtensions.flatMap((extension) => [
+          `previews/${releaseId}.${extension}`,
+    `covers/${releaseId}.${extension}`,
+    `uploads/${releaseId}/release-cover.${extension}`,
+    `uploads/${releaseId}.${extension}`,
+    `${releaseId}.${extension}`,
+    `previews/release-cover.${extension}`,
+    `covers/release-cover.${extension}`,
+    `uploads/release-cover.${extension}`,
+    `release-cover.${extension}`
+        ]);
 
   const candidateUrls = Array.from(
     new Set(
@@ -600,11 +671,12 @@ function resolveCoverItem(release: Record<string, unknown>, submissionData: Reco
           storageKey: coverImageRef.storageKey
         }),
         ...buildLegacyImageCandidateUrls({
-          url: previewRef.url ?? preview ?? null,
-          storageKey: preview ?? null,
+          url: previewRef.url ?? previewSeed ?? null,
+          storageKey: previewSeed ?? null,
           extraStorageKeys: [
             legacyPreviewBucketRef.storageKey ?? "",
-            legacyPreviewFileRef.storageKey ?? ""
+            legacyPreviewFileRef.storageKey ?? "",
+            ...legacyStorageKeys
           ].filter(Boolean)
         })
       ].filter(Boolean)
@@ -691,9 +763,17 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
       parsePersons(submissionData?.roles)
     )
   );
-  const releasePerformer = asString(release.performer) ?? asString(asRecord(release.user)?.name) ?? "";
+  const releasePerformer = asString(release.performer) ?? "";
   const releaseFeat = asString(release.feat) ?? "";
   const releaseRemixer = asString(release.remixer) ?? "";
+  const releaseOwnerName = asString(asRecord(release.user)?.name);
+  const explicitPerformers = splitNames(releasePerformer);
+  const mergedPerformers = unique([...releasePersons.performers, ...explicitPerformers]);
+  const sanitizedPerformers = removeAccountNameFromPerformersIfLeaked(
+    mergedPerformers,
+    releaseOwnerName,
+    explicitPerformers
+  );
 
   const tracks = Array.from({ length: trackCount }).map((_, index) => {
     const dbTrack = asRecord(dbTracks[index]) ?? {};
@@ -807,7 +887,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
         names: platforms
       },
       roles: {
-        performers: unique([...releasePersons.performers, ...splitNames(releasePerformer)]),
+        performers: sanitizedPerformers,
         feats: unique([...releasePersons.feats, ...splitNames(releaseFeat)]),
         remixers: unique([...releasePersons.remixers, ...splitNames(releaseRemixer)]),
         coPerformers: unique(releasePersons.coPerformers),
@@ -873,36 +953,15 @@ export function resolveAdminReleaseFileTargetFromRelease(
 
   if (fileId === "cover") {
     const submissionData = parseSubmissionData(release);
-    const coverImage = pickStoredFileRef(release.coverImage);
-    if (coverImage.url || coverImage.storageKey) {
-      return {
-        kind: "cover",
-        storageKey: coverImage.storageKey,
-        url: coverImage.url,
-        fileName: coverImage.fileName
-      };
-    }
-
-    const coverUpload = pickStoredFileRef(submissionData?.coverUpload);
-    if (coverUpload.url || coverUpload.storageKey) {
-      return {
-        kind: "cover",
-        storageKey: coverUpload.storageKey,
-        url: coverUpload.url,
-        fileName: coverUpload.fileName
-      };
-    }
-
-    const previewRef = pickLegacyFileRef(asString(release.preview));
-    if (previewRef.url || previewRef.storageKey) {
-      return {
-        kind: "cover",
-        storageKey: previewRef.storageKey,
-        url: previewRef.url,
-        fileName: previewRef.fileName
-      };
-    }
-    return null;
+    const cover = resolveCoverItem(release, submissionData);
+    const firstCoverCandidate = cover.candidate_urls[0] ?? cover.url ?? null;
+    if (!firstCoverCandidate) return null;
+    return {
+      kind: "cover",
+      storageKey: normalizeStorageKeyCandidate(firstCoverCandidate),
+      url: firstCoverCandidate,
+      fileName: fileNameFromUrl(firstCoverCandidate)
+    };
   }
 
   if (fileId === "audio") {
@@ -964,24 +1023,27 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
   );
   details.cover.url = reachableCoverUrl ?? "";
   details.cover.download_url = reachableCoverUrl;
+  details.cover.candidate_urls = reachableCoverUrl ? [reachableCoverUrl] : [];
 
-  console.log("[admin-release-roles-debug]", {
-    releaseId,
-    releaseRoles: release.roles ?? null,
-    tracksRoles: release.track.map((trackRow) => ({
-      id: trackRow.id,
-      title: trackRow.title,
-      roles: trackRow.roles ?? null
-    })),
-    mappedPersons: {
-      release: details.release.roles,
-      tracks: details.tracks.map((trackRow) => ({
+  if (process.env.ADMIN_RELEASE_ROLES_DEBUG === "1") {
+    console.log("[admin-release-roles-debug]", {
+      releaseId,
+      releaseRoles: release.roles ?? null,
+      tracksRoles: release.track.map((trackRow) => ({
         id: trackRow.id,
         title: trackRow.title,
-        roles: trackRow.track_roles
-      }))
-    }
-  });
+        roles: trackRow.roles ?? null
+      })),
+      mappedPersons: {
+        release: details.release.roles,
+        tracks: details.tracks.map((trackRow) => ({
+          id: trackRow.id,
+          title: trackRow.title,
+          roles: trackRow.track_roles
+        }))
+      }
+    });
+  }
 
   return details;
 }
@@ -996,6 +1058,18 @@ export async function getAdminReleaseDownloadTarget(params: { releaseId: string;
     }
   });
   if (!release) return null;
+
+  if (params.fileId === "cover") {
+    const details = mapAdminReleaseDetails(release);
+    const resolvedCoverUrl = await resolveFirstReachableImageUrlFromCandidates(
+      details.cover.candidate_urls
+    );
+    if (!resolvedCoverUrl) return null;
+    return {
+      storageKey: null,
+      url: resolvedCoverUrl
+    };
+  }
 
   const target = resolveAdminReleaseFileTargetFromRelease({
     release,

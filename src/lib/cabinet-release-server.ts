@@ -38,7 +38,39 @@ interface SubmissionTrackLike {
   isrc?: string;
 }
 
-const COVER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+const COVER_EXTENSIONS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "jpng",
+  "PNG",
+  "JPG",
+  "JPEG",
+  "WEBP",
+  "JPNG"
+] as const;
+
+function getExtensionHint(rawPreview: string): string | null {
+  if (!rawPreview) return null;
+  if (looksLikeOnlyExtension(rawPreview)) {
+    return normalizeExtension(rawPreview);
+  }
+  const withoutQuery = rawPreview.split("?")[0]?.split("#")[0] ?? rawPreview;
+  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex >= fileName.length - 1) return null;
+  return normalizeExtension(fileName.slice(dotIndex + 1));
+}
+
+function getCoverExtensionsByPriority(rawPreview: string): string[] {
+  const hint = getExtensionHint(rawPreview);
+  const ordered = [...COVER_EXTENSIONS];
+  if (!hint) return ordered;
+  const exacts = ordered.filter((ext) => ext === hint || ext.toLowerCase() === hint);
+  const rest = ordered.filter((ext) => !exacts.includes(ext));
+  return [...exacts, ...rest];
+}
 
 function isSubmittedToModeration(roles: unknown): boolean {
   const root = asRecord(roles);
@@ -101,6 +133,19 @@ function parseSubmissionTracks(roles: unknown): SubmissionTrackLike[] {
   return tracksRaw
     .filter((item) => item && typeof item === "object" && !Array.isArray(item))
     .map((item) => item as SubmissionTrackLike);
+}
+
+function resolveReleaseUpc(source: { upc: string | null; roles: unknown }): string | null {
+  const explicitUpc = source.upc?.trim() || null;
+  if (explicitUpc) return explicitUpc;
+  const root = asRecord(source.roles);
+  const submission = root ? asRecord(root.submissionData) : null;
+  const fallbackUpc =
+    asString(submission?.upc) ??
+    asString(root?.upc) ??
+    asString(root?.releaseUpc) ??
+    asString(root?.release_upc);
+  return fallbackUpc ?? null;
 }
 
 function mapTracks(
@@ -183,38 +228,44 @@ function resolveReleaseCoverUrls(
   roles: unknown
 ): { url: string; candidates: string[] } {
   const rawPreview = preview.trim();
-  const legacyStorageKeys: string[] = COVER_EXTENSIONS.flatMap((extension) => [
-    `${releaseId}.${extension}`,
+  const previewIsExtensionOnly = rawPreview ? looksLikeOnlyExtension(rawPreview) : false;
+  const previewSeed = previewIsExtensionOnly ? "" : rawPreview;
+  const prioritizedExtensions = getCoverExtensionsByPriority(rawPreview);
+  const legacyStorageKeys: string[] = prioritizedExtensions.flatMap((extension) => [
     `previews/${releaseId}.${extension}`,
     `covers/${releaseId}.${extension}`,
     `uploads/${releaseId}/release-cover.${extension}`,
     `uploads/${releaseId}.${extension}`,
-    `release-cover.${extension}`,
+    `${releaseId}.${extension}`,
     `previews/release-cover.${extension}`,
     `covers/release-cover.${extension}`,
-    `uploads/release-cover.${extension}`
+    `uploads/release-cover.${extension}`,
+    `release-cover.${extension}`
   ]);
   if (rawPreview && looksLikeOnlyExtension(rawPreview)) {
     const ext = normalizeExtension(rawPreview);
     if (ext) {
       legacyStorageKeys.push(
-        `${releaseId}.${ext}`,
         `previews/${releaseId}.${ext}`,
         `covers/${releaseId}.${ext}`,
         `uploads/${releaseId}/release-cover.${ext}`,
         `uploads/${releaseId}.${ext}`,
-        `release-cover.${ext}`,
+        `${releaseId}.${ext}`,
         `previews/release-cover.${ext}`,
         `covers/release-cover.${ext}`,
-        `uploads/release-cover.${ext}`
+        `uploads/release-cover.${ext}`,
+        `release-cover.${ext}`
       );
     }
   }
 
   const rolesCover = resolveCoverFromRoles(roles);
   const previewCandidates = buildLegacyImageCandidateUrls({
-    url: rawPreview,
-    storageKey: rawPreview && !rawPreview.startsWith("http") && !rawPreview.startsWith("/") ? rawPreview : null,
+    url: previewSeed,
+    storageKey:
+      previewSeed && !previewSeed.startsWith("http") && !previewSeed.startsWith("/")
+        ? previewSeed
+        : null,
     extraStorageKeys: [...legacyStorageKeys]
   });
   const rolesCandidates = rolesCover
@@ -253,6 +304,10 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
     "submissionData" in (release.roles as Record<string, unknown>)
       ? (release.roles as Record<string, unknown>).submissionData
       : undefined;
+  const resolvedUpc = resolveReleaseUpc({
+    upc: release.upc,
+    roles: release.roles
+  });
   const cover = resolveReleaseCoverUrls(release.id, release.preview, release.roles);
   return {
     id: release.id,
@@ -261,7 +316,7 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
     coverUrlCandidates: cover.candidates,
     title: release.title || "Без названия",
     artist: release.performer?.trim() || "Не указан",
-    upc: release.upc || "",
+    upc: resolvedUpc || "",
     isrc: firstDbTrack?.isrc || firstSubmissionTrack?.isrc?.trim() || "",
     label: release.labelName?.trim() || "ICECREAMMUSIC",
     createdAt: formatDate(release.date),
@@ -273,7 +328,7 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
     platforms: "Все площадки",
     platformsCount: 0,
     genre: release.genre || "Не указан",
-    status: toCabinetStatus(release.status, release.confirmed, release.roles, release.upc),
+    status: toCabinetStatus(release.status, release.confirmed, release.roles, resolvedUpc),
     paid: Boolean(release.confirmed),
     paymentKind: release.confirmed ? paymentDisplay?.kind ?? "paid" : "unpaid",
     paymentLabel: release.confirmed ? paymentDisplay?.label ?? "Оплачен" : "Не оплачен",

@@ -60,9 +60,43 @@ const publicStorageBaseUrl = toEndpointUrl(
 );
 
 const LEGACY_IMAGE_PREFIXES = ["", "previews/", "covers/", "uploads/"] as const;
-const LEGACY_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+const LEGACY_IMAGE_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "jpng",
+  "JPG",
+  "JPEG",
+  "PNG",
+  "WEBP",
+  "JPNG"
+] as const;
 const FALLBACK_BUCKET_CANDIDATES = ["uploads", "signatures", "verification", "contracts"] as const;
 let resolvedBucketPromise: Promise<string | null> | null = null;
+const storageHeadCache = new Map<string, boolean | null>();
+const reachableImageCandidateCache = new Map<string, { url: string | null; failedReason: string | null }>();
+const MAX_REACHABLE_CANDIDATE_CACHE_SIZE = 500;
+const MAX_STORAGE_HEAD_CACHE_SIZE = 2000;
+const MAX_REACHABLE_PROBE_CANDIDATES = 40;
+
+function getUrlHost(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const publicStorageHost = getUrlHost(publicStorageBaseUrl);
+const endpointHost = getUrlHost(endpoint);
+
+function isStorageAbsoluteUrl(value: string): boolean {
+  const urlHost = getUrlHost(value);
+  if (!urlHost) return false;
+  return urlHost === publicStorageHost || urlHost === endpointHost;
+}
 
 function isPlaceholderValue(value: string | undefined): boolean {
   if (!value) return true;
@@ -230,6 +264,25 @@ function splitFileNameParts(value: string): { baseName: string; extension: strin
   };
 }
 
+function extractFileNameLikeValue(rawValue: string): string | null {
+  const value = rawValue.trim();
+  if (!value) return null;
+  if (value.startsWith("http://") || value.startsWith("https://")) {
+    try {
+      const parsed = new URL(value);
+      const fileName = parsed.pathname.split("/").filter(Boolean).at(-1) ?? "";
+      return fileName || null;
+    } catch {
+      return null;
+    }
+  }
+  if (value.startsWith("/")) {
+    const fileName = value.split("/").filter(Boolean).at(-1) ?? "";
+    return fileName || null;
+  }
+  return value;
+}
+
 function isLikelyFilename(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) return false;
@@ -300,8 +353,9 @@ function buildLegacyImageCandidateEntries(input: {
     .filter(Boolean);
 
   for (const rawCandidate of rawCandidates) {
-    if (!isLikelyFilename(rawCandidate)) continue;
-    const { baseName, extension } = splitFileNameParts(rawCandidate);
+    const normalizedFileNameValue = extractFileNameLikeValue(rawCandidate);
+    if (!normalizedFileNameValue || !isLikelyFilename(normalizedFileNameValue)) continue;
+    const { baseName, extension } = splitFileNameParts(normalizedFileNameValue);
     if (!baseName) continue;
 
     const extCandidates = new Set<string>();
@@ -351,6 +405,10 @@ async function checkStorageKeyExists(key: string): Promise<boolean | null> {
   const client = getClient();
   const bucketName = await resolveBucketName(client);
   if (!client || !bucketName) return null;
+  const cacheKey = `${bucketName}:${key}`;
+  if (storageHeadCache.has(cacheKey)) {
+    return storageHeadCache.get(cacheKey) ?? null;
+  }
   try {
     await client.send(
       new HeadObjectCommand({
@@ -358,16 +416,36 @@ async function checkStorageKeyExists(key: string): Promise<boolean | null> {
         Key: key
       })
     );
+    if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
+      const firstKey = storageHeadCache.keys().next().value;
+      if (firstKey) storageHeadCache.delete(firstKey);
+    }
+    storageHeadCache.set(cacheKey, true);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     const code = typeof error === "object" && error && "name" in error ? String((error as { name?: string }).name ?? "") : "";
     if (/notfound|nosuchkey|404|no such key/i.test(`${code} ${message}`)) {
+      if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
+        const firstKey = storageHeadCache.keys().next().value;
+        if (firstKey) storageHeadCache.delete(firstKey);
+      }
+      storageHeadCache.set(cacheKey, false);
       return false;
     }
     if (/accessdenied|forbidden|403/i.test(`${code} ${message}`)) {
+      if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
+        const firstKey = storageHeadCache.keys().next().value;
+        if (firstKey) storageHeadCache.delete(firstKey);
+      }
+      storageHeadCache.set(cacheKey, null);
       return null;
     }
+    if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
+      const firstKey = storageHeadCache.keys().next().value;
+      if (firstKey) storageHeadCache.delete(firstKey);
+    }
+    storageHeadCache.set(cacheKey, null);
     return null;
   }
 }
@@ -425,13 +503,37 @@ export async function resolveFirstReachableImageCandidateFromCandidates(
   if (urls.length === 0) {
     return { url: null, failedReason: "no-candidates" };
   }
+  const cacheKey = urls.join("\n");
+  const cached = reachableImageCandidateCache.get(cacheKey);
+  if (cached) return cached;
 
   const errors: string[] = [];
 
-  for (const url of urls) {
+  const probeUrls = urls.slice(0, MAX_REACHABLE_PROBE_CANDIDATES);
+  for (const url of probeUrls) {
     if (/^https?:\/\//u.test(url)) {
-      // Absolute URLs are treated as authoritative read targets.
-      return { url, failedReason: null };
+      if (isStorageAbsoluteUrl(url)) {
+        const exists = await checkAbsoluteUrlExists(url);
+        if (exists) {
+          const result = { url, failedReason: null };
+          if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+            const firstKey = reachableImageCandidateCache.keys().next().value;
+            if (firstKey) reachableImageCandidateCache.delete(firstKey);
+          }
+          reachableImageCandidateCache.set(cacheKey, result);
+          return result;
+        }
+        errors.push(`not-reachable:${url}`);
+        continue;
+      }
+      // External absolute URLs are treated as authoritative read targets.
+      const result = { url, failedReason: null };
+      if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+        const firstKey = reachableImageCandidateCache.keys().next().value;
+        if (firstKey) reachableImageCandidateCache.delete(firstKey);
+      }
+      reachableImageCandidateCache.set(cacheKey, result);
+      return result;
     }
 
     const key = normalizeStorageKey(url);
@@ -441,20 +543,40 @@ export async function resolveFirstReachableImageCandidateFromCandidates(
     }
 
     const exists = await checkStorageKeyExists(key);
-    if (exists === true) return { url, failedReason: null };
+    if (exists === true) {
+      const result = { url, failedReason: null };
+      if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+        const firstKey = reachableImageCandidateCache.keys().next().value;
+        if (firstKey) reachableImageCandidateCache.delete(firstKey);
+      }
+      reachableImageCandidateCache.set(cacheKey, result);
+      return result;
+    }
     if (exists === false) {
       errors.push(`not-found:${key}`);
       continue;
     }
 
     // HeadObject unavailable/forbidden: keep URL usable for frontend fallback.
-    return { url, failedReason: null };
+    const result = { url, failedReason: null };
+    if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+      const firstKey = reachableImageCandidateCache.keys().next().value;
+      if (firstKey) reachableImageCandidateCache.delete(firstKey);
+    }
+    reachableImageCandidateCache.set(cacheKey, result);
+    return result;
   }
 
-  return {
-    url: urls[0] ?? null,
-    failedReason: errors.length > 0 ? errors.join("; ") : "fallback-first-candidate"
+  const result = {
+    url: null,
+    failedReason: errors.length > 0 ? errors.join("; ") : "no-reachable-candidates"
   };
+  if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+    const firstKey = reachableImageCandidateCache.keys().next().value;
+    if (firstKey) reachableImageCandidateCache.delete(firstKey);
+  }
+  reachableImageCandidateCache.set(cacheKey, result);
+  return result;
 }
 
 export function resolvePublicStorageUrlFromKey(key: string): string | null {

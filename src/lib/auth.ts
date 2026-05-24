@@ -45,7 +45,7 @@ export const authOptions: NextAuthOptions = {
         if (!parsed.success) return null;
 
         const email = parsed.data.email;
-        const user = await prisma.user.findFirst({
+        const users = await prisma.user.findMany({
           where: {
             email: {
               equals: email,
@@ -58,8 +58,23 @@ export const authOptions: NextAuthOptions = {
             name: true,
             password: true,
             isAdmin: true
+          },
+          take: 2,
+          orderBy: {
+            id: "asc"
           }
         });
+
+        if (users.length !== 1) {
+          if (users.length > 1) {
+            console.error("[auth] ambiguous email match during login", {
+              email
+            });
+          }
+          return null;
+        }
+
+        const user = users[0];
 
         if (!user?.password) return null;
 

@@ -1,7 +1,18 @@
 const IMAGE_PLACEHOLDER_RE = /^(?:image\/)?(?:jpe?g|png|webp|gif)$/iu;
-const IMAGE_FILE_RE = /\.(?:jpe?g|png|webp|gif|avif)(?:[?#].*)?$/iu;
+const IMAGE_FILE_RE = /\.(?:jpe?g|png|jpng|webp|gif|avif)(?:[?#].*)?$/iu;
 const LEGACY_IMAGE_PREFIXES = ["", "previews/", "covers/", "uploads/"] as const;
-const LEGACY_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+const LEGACY_IMAGE_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "jpng",
+  "JPG",
+  "JPEG",
+  "PNG",
+  "WEBP",
+  "JPNG"
+] as const;
 
 function toLocalObjectPath(value: string): string | null {
   const raw = value.trim();

@@ -33,15 +33,26 @@ export async function POST(request: Request) {
   }
 
   try {
-    const user = await prisma.user.findFirst({
+    const users = await prisma.user.findMany({
       where: {
         email: {
           equals: parsed.data.email,
           mode: "insensitive"
         }
       },
-      select: { id: true, email: true, name: true }
+      select: { id: true, email: true, name: true },
+      take: 2,
+      orderBy: {
+        id: "asc"
+      }
     });
+
+    const user = users.length === 1 ? users[0] : null;
+    if (users.length > 1) {
+      console.error("[auth/forgot-password] ambiguous email match", {
+        email: parsed.data.email
+      });
+    }
 
     if (user) {
       const token = randomBytes(32).toString("hex");

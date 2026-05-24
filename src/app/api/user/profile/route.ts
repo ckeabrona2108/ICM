@@ -93,7 +93,10 @@ export async function PATCH(request: Request) {
     if (email) {
       const duplicate = await prisma.user.findFirst({
         where: {
-          email,
+          email: {
+            equals: email,
+            mode: "insensitive"
+          },
           id: { not: userId }
         },
         select: { id: true }

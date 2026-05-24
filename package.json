@@ -10,7 +10,7 @@
     "start": "next start",
     "test": "tsx --test src/lib/__tests__/*.test.ts",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json --noEmit --incremental false",
     "postinstall": "node scripts/copy-pdf-worker.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

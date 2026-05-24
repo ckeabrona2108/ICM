@@ -190,24 +190,18 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [reason, setReason] = React.useState("");
   const [platformsOpen, setPlatformsOpen] = React.useState(false);
   const [lyricsModal, setLyricsModal] = React.useState<{ title: string; lyrics: string } | null>(null);
-  const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
-  const coverCandidates = React.useMemo(
-    () =>
-      Array.from(
-        new Set(
-          [details.cover.url, details.cover.download_url, ...(details.cover.candidate_urls ?? [])].filter(
-            (item): item is string => Boolean(item && item.trim())
-          )
-        )
-      ),
-    [details.cover.candidate_urls, details.cover.download_url, details.cover.url]
-  );
-  const activeCoverUrl = coverCandidates[coverCandidateIndex] ?? null;
-  const coverUnavailable = !activeCoverUrl;
+  const primaryCoverUrl = React.useMemo(() => {
+    const candidates = [details.cover.download_url, details.cover.url, ...(details.cover.candidate_urls ?? [])]
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean);
+    return candidates[0] ?? null;
+  }, [details.cover.candidate_urls, details.cover.download_url, details.cover.url]);
+  const [coverBroken, setCoverBroken] = React.useState(false);
+  const activeCoverUrl = coverBroken ? null : primaryCoverUrl;
 
   React.useEffect(() => {
-    setCoverCandidateIndex(0);
-  }, [details.id, coverCandidates.length]);
+    setCoverBroken(false);
+  }, [details.id, primaryCoverUrl]);
 
   const approve = async () => {
     const normalized = upc.trim();
@@ -291,11 +285,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                   src={activeCoverUrl}
                   alt={details.release.title}
                   className="h-full w-full object-cover"
-                  onError={() =>
-                    setCoverCandidateIndex((prev) =>
-                      prev + 1 <= coverCandidates.length ? prev + 1 : prev
-                    )
-                  }
+                  onError={() => setCoverBroken(true)}
                 />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[12px] text-white/50">
@@ -314,7 +304,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 <Download className="h-4 w-4" />
                 Скачать обложку
               </a>
-            ) : coverCandidates.length > 0 ? (
+            ) : primaryCoverUrl ? (
               <button
                 type="button"
                 disabled

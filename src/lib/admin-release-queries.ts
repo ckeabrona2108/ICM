@@ -2,7 +2,12 @@ import { prisma } from "@/lib/prisma";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
-import { buildLegacyImageCandidateUrls, resolveStoredFileUrl } from "@/lib/s3";
+import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import {
+  buildLegacyImageCandidateUrls,
+  resolveFirstReachableImageCandidateFromCandidates,
+  resolveStoredFileUrl
+} from "@/lib/s3";
 
 export type AdminReleaseStatusFilter =
   | "moderation"
@@ -28,10 +33,58 @@ function toAdminStatus(status: string): AdminReleaseStatus {
   return "moderation";
 }
 
-function matchStatus(status: string, filter: AdminReleaseStatusFilter): boolean {
-  if (filter === "all") return status === "approved";
-  if (filter === "approved") return status === "approved";
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function resolveReleaseUpc(source: { upc: string | null; roles: unknown }): string | null {
+  const explicitUpc = source.upc?.trim() || null;
+  if (explicitUpc) return explicitUpc;
+  const root = asRecord(source.roles);
+  const submission = root ? asRecord(root.submissionData) : null;
+  return (
+    asString(submission?.upc) ??
+    asString(root?.upc) ??
+    asString(root?.releaseUpc) ??
+    asString(root?.release_upc) ??
+    null
+  );
+}
+
+function isAcceptedForAdminView(source: {
+  status: string;
+  confirmed: boolean;
+  upc: string | null;
+  roles: unknown;
+}): boolean {
+  return shouldTreatReleaseAsApproved({
+    status: source.status,
+    confirmed: source.confirmed,
+    upc: source.upc,
+    roles: source.roles
+  });
+}
+
+function matchStatus(source: {
+  status: string;
+  confirmed: boolean;
+  upc: string | null;
+  roles: unknown;
+}, filter: AdminReleaseStatusFilter): boolean {
+  const status = source.status;
+  const accepted = isAcceptedForAdminView(source);
+
+  if (filter === "all") return true;
+  if (filter === "approved") return accepted;
   if (filter === "rejected") return status === "rejected";
+  if (filter === "pending_verification") return status === "pending_verification";
   return status === "moderating";
 }
 
@@ -45,38 +98,73 @@ function normalizeExtension(value: string): string | null {
   return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
 }
 
-const COVER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+const COVER_EXTENSIONS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "jpng",
+  "PNG",
+  "JPG",
+  "JPEG",
+  "WEBP",
+  "JPNG"
+] as const;
+
+function getExtensionHint(rawPreview: string): string | null {
+  if (!rawPreview) return null;
+  if (looksLikeOnlyExtension(rawPreview)) {
+    return normalizeExtension(rawPreview);
+  }
+  const withoutQuery = rawPreview.split("?")[0]?.split("#")[0] ?? rawPreview;
+  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0 || dotIndex >= fileName.length - 1) return null;
+  return normalizeExtension(fileName.slice(dotIndex + 1));
+}
+
+function getCoverExtensionsByPriority(rawPreview: string): string[] {
+  const hint = getExtensionHint(rawPreview);
+  const ordered = [...COVER_EXTENSIONS];
+  if (!hint) return ordered;
+  const exacts = ordered.filter((ext) => ext === hint || ext.toLowerCase() === hint);
+  const rest = ordered.filter((ext) => !exacts.includes(ext));
+  return [...exacts, ...rest];
+}
 
 function resolveReleaseCoverUrls(
   releaseId: string,
   preview: string
 ): { url: string; candidates: string[] } {
   const rawPreview = preview.trim();
-  const extraStorageKeys: string[] = COVER_EXTENSIONS.flatMap((extension) => [
-    `${releaseId}.${extension}`,
+  const previewIsExtensionOnly = rawPreview ? looksLikeOnlyExtension(rawPreview) : false;
+  const previewSeed = previewIsExtensionOnly ? "" : rawPreview;
+  const prioritizedExtensions = getCoverExtensionsByPriority(rawPreview);
+  const extraStorageKeys: string[] = prioritizedExtensions.flatMap((extension) => [
     `previews/${releaseId}.${extension}`,
     `covers/${releaseId}.${extension}`,
     `uploads/${releaseId}/release-cover.${extension}`,
     `uploads/${releaseId}.${extension}`,
-    `release-cover.${extension}`,
+    `${releaseId}.${extension}`,
     `previews/release-cover.${extension}`,
     `covers/release-cover.${extension}`,
-    `uploads/release-cover.${extension}`
+    `uploads/release-cover.${extension}`,
+    `release-cover.${extension}`
   ]);
 
   if (rawPreview && looksLikeOnlyExtension(rawPreview)) {
     const extension = normalizeExtension(rawPreview);
     if (extension) {
       extraStorageKeys.push(
-        `${releaseId}.${extension}`,
         `previews/${releaseId}.${extension}`,
-        `covers/${releaseId}.${extension}`,
-        `uploads/${releaseId}/release-cover.${extension}`,
-        `uploads/${releaseId}.${extension}`,
-        `release-cover.${extension}`,
-        `previews/release-cover.${extension}`,
-        `covers/release-cover.${extension}`,
-        `uploads/release-cover.${extension}`
+    `covers/${releaseId}.${extension}`,
+    `uploads/${releaseId}/release-cover.${extension}`,
+    `uploads/${releaseId}.${extension}`,
+    `${releaseId}.${extension}`,
+    `previews/release-cover.${extension}`,
+    `covers/release-cover.${extension}`,
+    `uploads/release-cover.${extension}`,
+    `release-cover.${extension}`
       );
     }
   }
@@ -84,10 +172,10 @@ function resolveReleaseCoverUrls(
   const candidates = Array.from(
     new Set(
       buildLegacyImageCandidateUrls({
-        url: rawPreview,
+        url: previewSeed,
         storageKey:
-          rawPreview && !rawPreview.startsWith("http") && !rawPreview.startsWith("/")
-            ? rawPreview
+          previewSeed && !previewSeed.startsWith("http") && !previewSeed.startsWith("/")
+            ? previewSeed
             : null,
         extraStorageKeys
       })
@@ -95,7 +183,7 @@ function resolveReleaseCoverUrls(
   );
 
   return {
-    url: candidates[0] ?? resolveStoredFileUrl({ url: rawPreview, storageKey: null }) ?? rawPreview,
+    url: candidates[0] ?? resolveStoredFileUrl({ url: previewSeed, storageKey: null }) ?? "",
     candidates
   };
 }
@@ -124,6 +212,9 @@ function emptyTrack(id: string): AdminReleaseDetails["tracks"][number] {
     focusTrack: false
   };
 }
+
+const adminCoverResolveCache = new Map<string, { url: string | null; failedReason: string | null }>();
+const MAX_ADMIN_COVER_RESOLVE_CACHE_SIZE = 1000;
 
 export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promise<AdminReleaseDetails[]> {
   const releases = await prisma.release.findMany({
@@ -156,10 +247,34 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
     orderBy: { date: "desc" }
   });
 
-  return releases
-    .filter((release) => matchStatus(release.status, filter))
-    .filter((release) => (filter === "approved" ? true : release.confirmed))
+  const mapped = releases
+    .filter((release) => {
+      const resolvedUpc = resolveReleaseUpc({
+        upc: release.upc,
+        roles: release.roles
+      });
+      return matchStatus(
+        {
+          status: release.status,
+          confirmed: release.confirmed,
+          upc: resolvedUpc,
+          roles: release.roles
+        },
+        filter
+      );
+    })
+    .filter((release) => (filter === "approved" || filter === "all" ? true : release.confirmed))
     .map((source) => {
+      const resolvedUpc = resolveReleaseUpc({
+        upc: source.upc,
+        roles: source.roles
+      });
+      const accepted = isAcceptedForAdminView({
+        status: source.status,
+        confirmed: source.confirmed,
+        upc: resolvedUpc,
+        roles: source.roles
+      });
       const tracks = source.track.length
         ? source.track.map((item) => ({
             id: item.id,
@@ -167,7 +282,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
             subtitle: item.subtitle ?? "",
             isrc: item.isrc ?? "",
             partnerCode: item.partner_code ?? "",
-            artists: source.performer ?? source.user.name,
+            artists: source.performer ?? "",
             feat: source.feat ?? "",
             musicAuthor: "",
             lyricsAuthor: "",
@@ -198,7 +313,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         coverUrl: cover.url,
         coverUrlCandidates: cover.candidates,
         label: source.labelName ?? "ICECREAMMUSIC",
-        upc: source.upc ?? "",
+        upc: resolvedUpc ?? "",
         preorderDate: formatDate(source.preorderDate),
         releaseDate: formatDate(source.date),
         startDate: formatDate(source.startDate),
@@ -206,7 +321,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         territoriesCount: 244,
         platformsCount: 0,
         genre: source.genre,
-        status: toAdminStatus(source.status),
+        status: accepted ? "approved" : toAdminStatus(source.status),
         submittedAt: formatDateTime(source.date),
         approvedAt: source.status === "approved" ? formatDateTime(source.date) : undefined,
         rejectedAt: source.status === "rejected" ? formatDateTime(source.date) : undefined,
@@ -224,7 +339,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         paymentPlan: paymentDisplay?.usage?.plan ?? null,
         metadataLanguage: source.language,
         releaseType: source.type,
-        artists: source.performer ?? source.user.name,
+        artists: source.performer ?? "",
         feat: source.feat ?? "",
         countryStartEarly: Boolean(source.earlyStartInRussia),
         realTimeDelivery: Boolean(source.realTimeDelivery),
@@ -233,4 +348,33 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         tracks
       } satisfies AdminReleaseDetails;
     });
+
+  return Promise.all(
+    mapped.map(async (item) => {
+      const candidates = Array.from(new Set([item.coverUrl, ...(item.coverUrlCandidates ?? [])].filter(Boolean)));
+      const cacheKey = `${item.id}\n${candidates.join("\n")}`;
+      const cached = adminCoverResolveCache.get(cacheKey);
+      const resolved =
+        cached ?? (await resolveFirstReachableImageCandidateFromCandidates(candidates));
+      if (!cached) {
+        if (adminCoverResolveCache.size >= MAX_ADMIN_COVER_RESOLVE_CACHE_SIZE) {
+          const firstKey = adminCoverResolveCache.keys().next().value;
+          if (firstKey) adminCoverResolveCache.delete(firstKey);
+        }
+        adminCoverResolveCache.set(cacheKey, resolved);
+      }
+      if (!resolved.url) {
+        return {
+          ...item,
+          coverUrl: "",
+          coverUrlCandidates: []
+        };
+      }
+      return {
+        ...item,
+        coverUrl: resolved.url,
+        coverUrlCandidates: [resolved.url]
+      };
+    })
+  );
 }

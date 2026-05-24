@@ -1198,7 +1198,7 @@ async function getVerificationRowByIdRaw(params: {
   const rows = (await params.prisma.$queryRawUnsafe(
     `SELECT id, "userId", status::text AS status, contract, "rejectReason"
        FROM icecream.verification
-      WHERE id = $1
+      WHERE id = $1::uuid
       LIMIT 1`,
     params.verificationId
   )) as VerificationAdminRow[];
@@ -1240,7 +1240,7 @@ async function approveContractSignatureWithVerificationTableFallback(params: {
           SET status = $1::icecream.verification_status,
               "rejectReason" = NULL,
               contract = $2
-        WHERE id = $3`,
+        WHERE id = $3::uuid`,
       toDbStatus("approved"),
       nextContract,
       params.verificationId
@@ -1466,7 +1466,7 @@ async function rejectContractSignatureWithVerificationTableFallback(params: {
           SET status = $1::icecream.verification_status,
               "rejectReason" = $2,
               contract = $3
-        WHERE id = $4`,
+        WHERE id = $4::uuid`,
       toDbStatus("rejected"),
       params.reason,
       nextContract,

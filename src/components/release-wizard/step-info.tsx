@@ -4,7 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import { ExternalLink, Plus, Search, Trash2, Upload } from "lucide-react";
 
-import { normalizeNextImageSrc } from "@/lib/image-src";
+import { buildCoverImageSrcCandidates } from "@/lib/image-src";
 import { cn } from "@/lib/utils";
 import { CIS_CODES, COUNTRIES, GENRES, LANGUAGES, flagEmoji } from "@/lib/countries";
 import { releasePersonRoleOptions } from "@/lib/person-roles";
@@ -72,7 +72,16 @@ async function readAsDataUrl(file: File): Promise<string> {
 export function StepInfo() {
   const { data, set, patch } = useWizard();
   const [coverError, setCoverError] = React.useState<string | null>(null);
-  const safeCoverSrc = normalizeNextImageSrc(data.cover);
+  const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
+  const coverCandidates = React.useMemo(
+    () => buildCoverImageSrcCandidates(data.cover),
+    [data.cover]
+  );
+  const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
+
+  React.useEffect(() => {
+    setCoverCandidateIndex(0);
+  }, [data.cover, coverCandidates.length]);
 
   const onCoverPick = React.useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -155,15 +164,22 @@ export function StepInfo() {
             {safeCoverSrc ? (
               <Image
                 src={safeCoverSrc}
-                alt="cover"
+                alt="Обложка релиза"
                 fill
                 sizes="280px"
                 className="object-cover"
+                onError={() =>
+                  setCoverCandidateIndex((prev) =>
+                    prev + 1 < coverCandidates.length ? prev + 1 : coverCandidates.length
+                  )
+                }
               />
             ) : (
-              <span className="flex flex-col items-center gap-2 text-white/40">
+              <span className="flex flex-col items-center gap-2 text-center text-white/40">
                 <Upload className="h-5 w-5" />
-                <span className="text-[12px]">Загрузить файл</span>
+                <span className="text-[12px]">
+                  {data.cover ? "Обложка недоступна" : "Загрузить файл"}
+                </span>
               </span>
             )}
             <input

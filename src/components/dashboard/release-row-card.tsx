@@ -546,8 +546,8 @@ function ReleaseRowCardBase({
                 }
               />
             ) : (
-              <div className="grid h-full w-full place-items-center bg-white/[0.02] text-[12px] font-medium text-white/45">
-                Без обложки
+              <div className="grid h-full w-full place-items-center bg-white/[0.02] px-2 text-center text-[12px] font-medium text-white/45">
+                Обложка недоступна
               </div>
             )}
           </div>

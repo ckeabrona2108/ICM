@@ -1,6 +1,7 @@
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
 import { prisma } from "@/lib/prisma";
+import { resolveFirstReachableImageUrlFromCandidates } from "@/lib/s3";
 
 const cabinetReleaseSelect = {
   id: true,
@@ -34,7 +35,22 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
     select: cabinetReleaseSelect
   });
 
-  return releases.map((release, index) => mapReleaseToCabinetRelease(release, index + 1));
+  const mapped = releases.map((release, index) => mapReleaseToCabinetRelease(release, index + 1));
+  return Promise.all(
+    mapped.map(async (release) => {
+      const candidateUrls = Array.from(
+        new Set([release.coverUrl, ...(release.coverUrlCandidates ?? [])].filter(Boolean))
+      );
+      if (candidateUrls.length <= 1) return release;
+      const reachableUrl = await resolveFirstReachableImageUrlFromCandidates(candidateUrls);
+      return reachableUrl
+        ? {
+            ...release,
+            coverUrl: reachableUrl
+          }
+        : release;
+    })
+  );
 }
 
 export async function getCabinetDraftReleasesByUser(userId: string): Promise<CabinetRelease[]> {
@@ -51,5 +67,15 @@ export async function getCabinetReleaseByIdForUser(userId: string, releaseId: st
     select: cabinetReleaseSelect
   });
   if (!release) return null;
-  return mapReleaseToCabinetRelease(release, 1);
+  const mapped = mapReleaseToCabinetRelease(release, 1);
+  const candidateUrls = Array.from(
+    new Set([mapped.coverUrl, ...(mapped.coverUrlCandidates ?? [])].filter(Boolean))
+  );
+  if (candidateUrls.length <= 1) return mapped;
+  const reachableUrl = await resolveFirstReachableImageUrlFromCandidates(candidateUrls);
+  if (!reachableUrl) return mapped;
+  return {
+    ...mapped,
+    coverUrl: reachableUrl
+  };
 }

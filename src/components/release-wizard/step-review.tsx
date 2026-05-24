@@ -4,7 +4,7 @@ import * as React from "react";
 import Image from "next/image";
 import { ExternalLink, ImageIcon } from "lucide-react";
 
-import { normalizeNextImageSrc } from "@/lib/image-src";
+import { buildCoverImageSrcCandidates } from "@/lib/image-src";
 import { getReleasePlatformLabel } from "@/lib/release-platforms";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,16 @@ export function StepReview({
   submitPhase?: "idle" | "saving" | "uploading" | "submitting";
 }) {
   const { data } = useWizard();
-  const safeCoverSrc = normalizeNextImageSrc(data.cover);
+  const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
+  const coverCandidates = React.useMemo(
+    () => buildCoverImageSrcCandidates(data.cover),
+    [data.cover]
+  );
+  const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
+
+  React.useEffect(() => {
+    setCoverCandidateIndex(0);
+  }, [data.cover, coverCandidates.length]);
   const hasBlockingErrors = blockingErrors.length > 0;
   const reviewErrors = hasBlockingErrors
     ? [...new Set([...blockingErrors, ...errors])]
@@ -152,10 +161,24 @@ export function StepReview({
         <div className="grid gap-5 p-5 sm:grid-cols-[140px_1fr] sm:p-6">
           <div className="relative aspect-square w-full max-w-[140px] overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02]">
             {safeCoverSrc ? (
-              <Image src={safeCoverSrc} alt="cover" fill sizes="140px" className="object-cover" />
+              <Image
+                src={safeCoverSrc}
+                alt="Обложка релиза"
+                fill
+                sizes="140px"
+                className="object-cover"
+                onError={() =>
+                  setCoverCandidateIndex((prev) =>
+                    prev + 1 < coverCandidates.length ? prev + 1 : coverCandidates.length
+                  )
+                }
+              />
             ) : (
-              <div className="grid h-full w-full place-items-center text-white/30">
-                <ImageIcon className="h-6 w-6" />
+              <div className="grid h-full w-full place-items-center text-center text-white/30">
+                <div className="flex flex-col items-center gap-2">
+                  <ImageIcon className="h-6 w-6" />
+                  <span className="text-[12px] text-white/45">Обложка недоступна</span>
+                </div>
               </div>
             )}
           </div>

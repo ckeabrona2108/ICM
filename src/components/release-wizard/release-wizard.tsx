@@ -143,6 +143,8 @@ type SubmitPhase = "idle" | "saving" | "uploading" | "submitting";
 interface PresignedUploadResponse {
   key: string;
   url: string;
+  publicUrl?: string;
+  bucket?: string;
   method?: string;
   fields?: Record<string, string>;
   mock?: boolean;
@@ -196,6 +198,15 @@ function toAbsoluteStorageUrl(rawUrl: string): string {
   return normalized;
 }
 
+function buildObjectReadUrlFromKey(key: string): string {
+  const encoded = key
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `/api/uploads/object/${encoded}`;
+}
+
 async function uploadBlobToStorage(params: {
   fileName: string;
   contentType: string;
@@ -239,7 +250,16 @@ async function uploadBlobToStorage(params: {
     throw new Error("Ошибка загрузки файла в хранилище.");
   }
 
-  const cleanUrl = toAbsoluteStorageUrl(target.url.split("?")[0] ?? target.url);
+  const readUrl =
+    (typeof target.publicUrl === "string" && target.publicUrl.trim()
+      ? target.publicUrl.trim()
+      : buildObjectReadUrlFromKey(target.key));
+  const cleanUrl = toAbsoluteStorageUrl(readUrl);
+  console.log("[cover-upload-success]", {
+    bucket: target.bucket ?? null,
+    key: target.key,
+    publicUrl: cleanUrl
+  });
   return {
     storageKey: target.key,
     url: cleanUrl,

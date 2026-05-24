@@ -65,6 +65,13 @@ function mergeSubmissionData(roles: unknown, submissionData: Record<string, unkn
   };
 }
 
+function readSubmissionDataCover(data: Record<string, unknown>): string | null {
+  const cover = data.cover;
+  if (typeof cover !== "string") return null;
+  const normalized = cover.trim();
+  return normalized || null;
+}
+
 async function draftsCount(userId: string) {
   const releases = await prisma.release.findMany({
     where: { userId },
@@ -107,11 +114,20 @@ export async function POST(request: Request) {
   const startDate = parseDate(data.startDate, releaseDate);
   const preorderDate = parseDate(data.preorderDate, releaseDate);
 
+  const newReleaseId = randomUUID();
+  const preview = readCover(data);
+  const submissionDataCover = readSubmissionDataCover(data);
+  console.log("[release-cover-save]", {
+    releaseId: newReleaseId,
+    preview,
+    submissionDataCover
+  });
+
   const created = await prisma.release.create({
     data: {
-      id: randomUUID(),
+      id: newReleaseId,
       userId: session.user.id,
-      preview: readCover(data),
+      preview,
       title: readTitle(data),
       date: releaseDate,
       language: readLanguage(data),
@@ -181,10 +197,18 @@ export async function PATCH(request: Request) {
   const startDate = parseDate(data.startDate, existing.startDate);
   const preorderDate = parseDate(data.preorderDate, existing.preorderDate);
 
+  const preview = readCover(data);
+  const submissionDataCover = readSubmissionDataCover(data);
+  console.log("[release-cover-save]", {
+    releaseId: payload.releaseId,
+    preview,
+    submissionDataCover
+  });
+
   await prisma.release.update({
     where: { id: payload.releaseId },
     data: {
-      preview: readCover(data),
+      preview,
       title: readTitle(data),
       date: releaseDate,
       language: readLanguage(data),

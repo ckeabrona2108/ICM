@@ -49,6 +49,8 @@ type TrackAssetKind = keyof typeof TRACK_ASSET_LIMITS;
 interface PresignedUploadResponse {
   key: string;
   url: string;
+  publicUrl?: string;
+  bucket?: string;
   method?: string;
   fields?: Record<string, string>;
   mock?: boolean;
@@ -109,6 +111,19 @@ function resolveLocalObjectUrl(storageKey: string | undefined): string | undefin
     .join("/");
   if (!encoded) return undefined;
   return `/api/uploads/object/${encoded}`;
+}
+
+function toAbsoluteStorageUrl(rawUrl: string): string {
+  const normalized = rawUrl.trim();
+  if (/^https?:\/\//iu.test(normalized)) {
+    return normalized;
+  }
+
+  if (typeof window !== "undefined") {
+    return new URL(normalized, window.location.origin).toString();
+  }
+
+  return normalized;
 }
 
 function resolveTrackAudioUrl(track: TrackFile): string | undefined {
@@ -380,9 +395,13 @@ export function StepTracks() {
           throw new Error("Ошибка загрузки файла в хранилище.");
         }
 
+        const readUrl =
+          (typeof target.publicUrl === "string" && target.publicUrl.trim()
+            ? target.publicUrl.trim()
+            : resolveLocalObjectUrl(target.key) ?? target.url.split("?")[0] ?? target.url);
         const uploadedFile: UploadedFileRef = {
           storageKey: target.key,
-          url: target.url.split("?")[0] ?? target.url,
+          url: toAbsoluteStorageUrl(readUrl),
           fileName: file.name,
           contentType,
           sizeBytes: file.size

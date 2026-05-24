@@ -204,10 +204,20 @@ function resolveReleaseCoverUrls(
         .filter((value): value is string => Boolean(value))
     )
   );
-  return {
+  const resolved = {
     url: uniqueCandidates[0] ?? "",
     candidates: uniqueCandidates
   };
+  console.log("[cover-resolver-debug]", {
+    releaseId,
+    rawCover: {
+      preview: rawPreview || null,
+      rolesCover: rolesCover || null
+    },
+    candidates: resolved.candidates,
+    foundUrl: resolved.url || null
+  });
+  return resolved;
 }
 
 export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number: number): CabinetRelease {

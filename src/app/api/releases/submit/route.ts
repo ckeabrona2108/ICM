@@ -54,6 +54,13 @@ function markSubmittedToModeration(roles: Prisma.InputJsonValue): Prisma.InputJs
   } as Prisma.InputJsonValue;
 }
 
+function readSubmissionDataCover(data: Record<string, unknown>): string | null {
+  const cover = data.cover;
+  if (typeof cover !== "string") return null;
+  const normalized = cover.trim();
+  return normalized || null;
+}
+
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -116,6 +123,11 @@ export async function POST(request: Request) {
     preorderDate,
     type: normalizeReleaseType(data.releaseType)
   };
+  console.log("[release-cover-save]", {
+    releaseId: existing.id,
+    preview: baseReleaseData.preview,
+    submissionDataCover: readSubmissionDataCover(data)
+  });
 
   if (payload.mode === "edit") {
     await prisma.release.update({

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
-import { createPresignedUpload } from "@/lib/s3";
+import { createPresignedUpload, getStorageBucketHint, resolveStoredFileUrl } from "@/lib/s3";
 
 const bodySchema = z.object({
   fileName: z.string().min(1),
@@ -29,9 +29,16 @@ export async function POST(request: Request) {
     key,
     contentType: parsed.data.contentType
   });
+  const publicUrl =
+    resolveStoredFileUrl({
+      storageKey: key
+    }) ?? `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
+  const bucket = getStorageBucketHint();
 
   return NextResponse.json({
     key,
+    bucket,
+    publicUrl,
     ...signed
   });
 }

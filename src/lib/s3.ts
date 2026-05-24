@@ -394,7 +394,7 @@ export async function resolveLegacyImageUrl(input: {
       if (exists === true) {
         return { url: entry.url, candidateUrls: entries.map((item) => item.url) };
       }
-      if (exists === false) continue;
+      if (exists === false && !/^https?:\/\//u.test(entry.url)) continue;
     }
 
     if (/^https?:\/\//u.test(entry.url)) {
@@ -422,7 +422,7 @@ export async function resolveFirstReachableImageUrlFromCandidates(
     if (key) {
       const exists = await checkStorageKeyExists(key);
       if (exists === true) return url;
-      if (exists === false) continue;
+      if (exists === false && !/^https?:\/\//u.test(url)) continue;
     }
     if (/^https?:\/\//u.test(url)) {
       const exists = await checkAbsoluteUrlExists(url);

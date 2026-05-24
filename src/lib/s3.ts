@@ -366,7 +366,7 @@ async function checkStorageKeyExists(key: string): Promise<boolean | null> {
       return false;
     }
     if (/accessdenied|forbidden|403/i.test(`${code} ${message}`)) {
-      return false;
+      return null;
     }
     return null;
   }
@@ -414,23 +414,47 @@ export async function resolveLegacyImageUrl(input: {
 export async function resolveFirstReachableImageUrlFromCandidates(
   candidateUrls: string[]
 ): Promise<string | null> {
-  const urls = Array.from(new Set(candidateUrls.map((item) => item.trim()).filter(Boolean)));
-  if (urls.length === 0) return null;
+  const resolved = await resolveFirstReachableImageCandidateFromCandidates(candidateUrls);
+  return resolved.url;
+}
 
-  for (const url of urls) {
-    const key = normalizeStorageKey(url);
-    if (key) {
-      const exists = await checkStorageKeyExists(key);
-      if (exists === true) return url;
-      if (exists === false && !/^https?:\/\//u.test(url)) continue;
-    }
-    if (/^https?:\/\//u.test(url)) {
-      const exists = await checkAbsoluteUrlExists(url);
-      if (exists) return url;
-    }
+export async function resolveFirstReachableImageCandidateFromCandidates(
+  candidateUrls: string[]
+): Promise<{ url: string | null; failedReason: string | null }> {
+  const urls = Array.from(new Set(candidateUrls.map((item) => item.trim()).filter(Boolean)));
+  if (urls.length === 0) {
+    return { url: null, failedReason: "no-candidates" };
   }
 
-  return urls[0] ?? null;
+  const errors: string[] = [];
+
+  for (const url of urls) {
+    if (/^https?:\/\//u.test(url)) {
+      // Absolute URLs are treated as authoritative read targets.
+      return { url, failedReason: null };
+    }
+
+    const key = normalizeStorageKey(url);
+    if (!key) {
+      errors.push(`invalid-key:${url}`);
+      continue;
+    }
+
+    const exists = await checkStorageKeyExists(key);
+    if (exists === true) return { url, failedReason: null };
+    if (exists === false) {
+      errors.push(`not-found:${key}`);
+      continue;
+    }
+
+    // HeadObject unavailable/forbidden: keep URL usable for frontend fallback.
+    return { url, failedReason: null };
+  }
+
+  return {
+    url: urls[0] ?? null,
+    failedReason: errors.length > 0 ? errors.join("; ") : "fallback-first-candidate"
+  };
 }
 
 export function resolvePublicStorageUrlFromKey(key: string): string | null {

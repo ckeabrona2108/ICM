@@ -1,7 +1,7 @@
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
 import { prisma } from "@/lib/prisma";
-import { resolveFirstReachableImageUrlFromCandidates } from "@/lib/s3";
+import { resolveFirstReachableImageCandidateFromCandidates } from "@/lib/s3";
 
 const cabinetReleaseSelect = {
   id: true,
@@ -28,6 +28,31 @@ const cabinetReleaseSelect = {
   }
 } as const;
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function extractRawCover(source: {
+  preview: string;
+  roles: unknown;
+}): { preview: string | null; submissionCover: string | null; submissionCoverUploadUrl: string | null } {
+  const root = asRecord(source.roles);
+  const submission = asRecord(root?.submissionData);
+  const submissionCoverUpload = asRecord(submission?.coverUpload);
+  return {
+    preview: asString(source.preview),
+    submissionCover: asString(submission?.cover),
+    submissionCoverUploadUrl: asString(submissionCoverUpload?.url)
+  };
+}
+
 export async function getCabinetReleasesByUser(userId: string): Promise<CabinetRelease[]> {
   const releases = await prisma.release.findMany({
     where: { userId },
@@ -37,16 +62,34 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
 
   const mapped = releases.map((release, index) => mapReleaseToCabinetRelease(release, index + 1));
   return Promise.all(
-    mapped.map(async (release) => {
+    mapped.map(async (release, index) => {
+      const source = releases[index];
       const candidateUrls = Array.from(
         new Set([release.coverUrl, ...(release.coverUrlCandidates ?? [])].filter(Boolean))
       );
-      if (candidateUrls.length <= 1) return release;
-      const reachableUrl = await resolveFirstReachableImageUrlFromCandidates(candidateUrls);
-      return reachableUrl
+      const resolved = await resolveFirstReachableImageCandidateFromCandidates(candidateUrls);
+      const rawCover = source
+        ? extractRawCover({
+            preview: source.preview,
+            roles: source.roles
+          })
+        : {
+            preview: null,
+            submissionCover: null,
+            submissionCoverUploadUrl: null
+          };
+      console.log("[cover-resolver-debug]", {
+        releaseId: release.id,
+        title: release.title ?? "Без названия",
+        rawCover,
+        candidates: candidateUrls,
+        foundUrl: resolved.url,
+        failedReason: resolved.failedReason
+      });
+      return resolved.url
         ? {
             ...release,
-            coverUrl: reachableUrl
+            coverUrl: resolved.url
           }
         : release;
     })
@@ -71,11 +114,22 @@ export async function getCabinetReleaseByIdForUser(userId: string, releaseId: st
   const candidateUrls = Array.from(
     new Set([mapped.coverUrl, ...(mapped.coverUrlCandidates ?? [])].filter(Boolean))
   );
-  if (candidateUrls.length <= 1) return mapped;
-  const reachableUrl = await resolveFirstReachableImageUrlFromCandidates(candidateUrls);
-  if (!reachableUrl) return mapped;
+  const resolved = await resolveFirstReachableImageCandidateFromCandidates(candidateUrls);
+  const rawCover = extractRawCover({
+    preview: release.preview,
+    roles: release.roles
+  });
+  console.log("[cover-resolver-debug]", {
+    releaseId: mapped.id,
+    title: mapped.title ?? "Без названия",
+    rawCover,
+    candidates: candidateUrls,
+    foundUrl: resolved.url,
+    failedReason: resolved.failedReason
+  });
+  if (!resolved.url) return mapped;
   return {
     ...mapped,
-    coverUrl: reachableUrl
+    coverUrl: resolved.url
   };
 }

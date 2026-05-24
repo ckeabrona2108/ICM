@@ -158,6 +158,41 @@ interface ReleaseMutationLike {
   };
 }
 
+async function createAdminVerificationLogSafe(params: {
+  tx: unknown;
+  adminId: string;
+  action: string;
+  verificationId: string;
+  payload: Record<string, unknown>;
+}): Promise<void> {
+  const txObj = params.tx as {
+    adminLog?: {
+      create?: (args: unknown) => Promise<unknown>;
+    };
+  };
+  const createFn = txObj.adminLog?.create;
+
+  if (typeof createFn !== "function") {
+    console.warn("[verification-admin-log-skip]", {
+      verificationId: params.verificationId,
+      action: params.action,
+      reason: "adminLog delegate is unavailable"
+    });
+    return;
+  }
+
+  await createFn({
+    data: {
+      id: randomUUID(),
+      adminId: params.adminId,
+      action: params.action,
+      targetType: "UserContractSignature",
+      targetId: params.verificationId,
+      payload: params.payload
+    }
+  });
+}
+
 function deriveArtistNameFromSubmissionData(value: unknown): string {
   if (!value || typeof value !== "object") return "Неизвестный исполнитель";
   const maybePersons = (value as { persons?: unknown }).persons;
@@ -1252,17 +1287,14 @@ async function approveContractSignatureWithVerificationTableFallback(params: {
       now: params.now
     });
 
-    await tx.adminLog.create({
-      data: {
-        id: randomUUID(),
-        adminId: params.adminId,
-        action: "CONTRACT_VERIFICATION_APPROVED",
-        targetType: "UserContractSignature",
-        targetId: params.verificationId,
-        payload: {
-          userId: current.userId,
-          movedReleaseIds
-        }
+    await createAdminVerificationLogSafe({
+      tx,
+      adminId: params.adminId,
+      action: "CONTRACT_VERIFICATION_APPROVED",
+      verificationId: params.verificationId,
+      payload: {
+        userId: current.userId,
+        movedReleaseIds
       }
     });
 
@@ -1279,6 +1311,10 @@ export async function approveContractSignatureByAdmin(params: {
   verificationId: string;
   adminId: string;
 }): Promise<VerificationReviewResult> {
+  console.log("[verification-admin-action]", {
+    action: "approve",
+    verificationId: params.verificationId
+  });
   const now = new Date();
   const model = getModel(params.prisma);
 
@@ -1334,17 +1370,14 @@ export async function approveContractSignatureByAdmin(params: {
         now
       });
 
-      await tx.adminLog.create({
-        data: {
-          id: randomUUID(),
-          adminId: params.adminId,
-          action: "CONTRACT_VERIFICATION_APPROVED",
-          targetType: "UserContractSignature",
-          targetId: params.verificationId,
-          payload: {
-            userId: current.userId,
-            movedReleaseIds
-          }
+      await createAdminVerificationLogSafe({
+        tx,
+        adminId: params.adminId,
+        action: "CONTRACT_VERIFICATION_APPROVED",
+        verificationId: params.verificationId,
+        payload: {
+          userId: current.userId,
+          movedReleaseIds
         }
       });
 
@@ -1368,6 +1401,11 @@ export async function approveContractSignatureByAdmin(params: {
 
     return result;
   } catch (error) {
+    console.error("[verification-admin-action-failed]", {
+      action: "approve",
+      verificationId: params.verificationId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     if (isSchemaUnavailableError(error)) {
       return approveContractSignatureWithVerificationTableFallback({
         ...params,
@@ -1481,21 +1519,18 @@ async function rejectContractSignatureWithVerificationTableFallback(params: {
       now: params.now
     });
 
-    await tx.adminLog.create({
-      data: {
-        id: randomUUID(),
-        adminId: params.adminId,
-        action:
-          currentStatus === "approved"
-            ? "CONTRACT_VERIFICATION_CANCELLED"
-            : "CONTRACT_VERIFICATION_REJECTED",
-        targetType: "UserContractSignature",
-        targetId: params.verificationId,
-        payload: {
-          userId: current.userId,
-          reason: params.reason,
-          movedReleaseIds
-        }
+    await createAdminVerificationLogSafe({
+      tx,
+      adminId: params.adminId,
+      action:
+        currentStatus === "approved"
+          ? "CONTRACT_VERIFICATION_CANCELLED"
+          : "CONTRACT_VERIFICATION_REJECTED",
+      verificationId: params.verificationId,
+      payload: {
+        userId: current.userId,
+        reason: params.reason,
+        movedReleaseIds
       }
     });
 
@@ -1513,6 +1548,10 @@ export async function rejectContractSignatureByAdmin(params: {
   adminId: string;
   reason: string;
 }): Promise<VerificationReviewResult> {
+  console.log("[verification-admin-action]", {
+    action: "reject",
+    verificationId: params.verificationId
+  });
   const reason = params.reason.trim();
   if (reason.length < 3) {
     return { ok: false, error: "Причина отклонения обязательна." };
@@ -1583,21 +1622,18 @@ export async function rejectContractSignatureByAdmin(params: {
         now
       });
 
-      await tx.adminLog.create({
-        data: {
-          id: randomUUID(),
-          adminId: params.adminId,
-          action:
-            currentStatus === "approved"
-              ? "CONTRACT_VERIFICATION_CANCELLED"
-              : "CONTRACT_VERIFICATION_REJECTED",
-          targetType: "UserContractSignature",
-          targetId: params.verificationId,
-          payload: {
-            userId: current.userId,
-            reason,
-            movedReleaseIds
-          }
+      await createAdminVerificationLogSafe({
+        tx,
+        adminId: params.adminId,
+        action:
+          currentStatus === "approved"
+            ? "CONTRACT_VERIFICATION_CANCELLED"
+            : "CONTRACT_VERIFICATION_REJECTED",
+        verificationId: params.verificationId,
+        payload: {
+          userId: current.userId,
+          reason,
+          movedReleaseIds
         }
       });
 
@@ -1608,6 +1644,11 @@ export async function rejectContractSignatureByAdmin(params: {
       } satisfies VerificationReviewResult;
     });
   } catch (error) {
+    console.error("[verification-admin-action-failed]", {
+      action: "reject",
+      verificationId: params.verificationId,
+      error: error instanceof Error ? error.message : String(error)
+    });
     if (isSchemaUnavailableError(error)) {
       return rejectContractSignatureWithVerificationTableFallback({
         ...params,

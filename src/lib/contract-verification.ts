@@ -1183,6 +1183,97 @@ async function approveContractSignatureWithStoreFallback(params: {
   };
 }
 
+interface VerificationAdminRow {
+  id: string;
+  userId: string;
+  status: string;
+  contract: string;
+  rejectReason: string | null;
+}
+
+async function getVerificationRowByIdRaw(params: {
+  prisma: PrismaClient;
+  verificationId: string;
+}): Promise<VerificationAdminRow | null> {
+  const rows = (await params.prisma.$queryRawUnsafe(
+    `SELECT id, "userId", status::text AS status, contract, "rejectReason"
+       FROM icecream.verification
+      WHERE id = $1
+      LIMIT 1`,
+    params.verificationId
+  )) as VerificationAdminRow[];
+  return rows[0] ?? null;
+}
+
+async function approveContractSignatureWithVerificationTableFallback(params: {
+  prisma: PrismaClient;
+  verificationId: string;
+  adminId: string;
+  now: Date;
+}): Promise<VerificationReviewResult> {
+  return params.prisma.$transaction(async (tx) => {
+    const current = await getVerificationRowByIdRaw({
+      prisma: tx as unknown as PrismaClient,
+      verificationId: params.verificationId
+    });
+    if (!current) {
+      return { ok: false, error: "Verification not found" } as VerificationReviewResult;
+    }
+
+    if (normalizeContractStatusValue(current.status) !== "pending") {
+      return { ok: false, error: "STATUS_TRANSITION_NOT_ALLOWED" } as VerificationReviewResult;
+    }
+
+    const currentMeta = safeParseContractMeta(current.contract);
+    const nextContract = toVerificationContractMetaString({
+      ...currentMeta,
+      updatedAt: params.now.toISOString(),
+      approvedAt: params.now.toISOString(),
+      approvedByAdminId: params.adminId,
+      rejectedAt: null,
+      rejectedByAdminId: null,
+      rejectionReason: null
+    });
+
+    await (tx as unknown as PrismaClient).$executeRawUnsafe(
+      `UPDATE icecream.verification
+          SET status = $1::icecream.verification_status,
+              "rejectReason" = NULL,
+              contract = $2
+        WHERE id = $3`,
+      toDbStatus("approved"),
+      nextContract,
+      params.verificationId
+    );
+
+    const movedReleaseIds = await movePendingVerificationReleasesToModeration({
+      prismaLike: tx as unknown as PrismaClient,
+      userId: current.userId,
+      now: params.now
+    });
+
+    await tx.adminLog.create({
+      data: {
+        id: randomUUID(),
+        adminId: params.adminId,
+        action: "CONTRACT_VERIFICATION_APPROVED",
+        targetType: "UserContractSignature",
+        targetId: params.verificationId,
+        payload: {
+          userId: current.userId,
+          movedReleaseIds
+        }
+      }
+    });
+
+    return {
+      ok: true,
+      verificationId: params.verificationId,
+      movedReleaseIds
+    } satisfies VerificationReviewResult;
+  });
+}
+
 export async function approveContractSignatureByAdmin(params: {
   prisma: PrismaClient;
   verificationId: string;
@@ -1192,7 +1283,7 @@ export async function approveContractSignatureByAdmin(params: {
   const model = getModel(params.prisma);
 
   if (!model) {
-    return approveContractSignatureWithStoreFallback({
+    return approveContractSignatureWithVerificationTableFallback({
       ...params,
       now
     });
@@ -1278,7 +1369,7 @@ export async function approveContractSignatureByAdmin(params: {
     return result;
   } catch (error) {
     if (isSchemaUnavailableError(error)) {
-      return approveContractSignatureWithStoreFallback({
+      return approveContractSignatureWithVerificationTableFallback({
         ...params,
         now
       });
@@ -1332,6 +1423,90 @@ async function rejectContractSignatureWithStoreFallback(params: {
   };
 }
 
+async function rejectContractSignatureWithVerificationTableFallback(params: {
+  prisma: PrismaClient;
+  verificationId: string;
+  adminId: string;
+  reason: string;
+  now: Date;
+}): Promise<VerificationReviewResult> {
+  return params.prisma.$transaction(async (tx) => {
+    const current = await getVerificationRowByIdRaw({
+      prisma: tx as unknown as PrismaClient,
+      verificationId: params.verificationId
+    });
+    if (!current) {
+      return { ok: false, error: "Verification not found" } as VerificationReviewResult;
+    }
+
+    const currentStatus = normalizeContractStatusValue(current.status);
+    if (currentStatus !== "pending" && currentStatus !== "approved") {
+      return { ok: false, error: "STATUS_TRANSITION_NOT_ALLOWED" } as VerificationReviewResult;
+    }
+
+    const currentMeta = safeParseContractMeta(current.contract);
+    const nextContract = toVerificationContractMetaString({
+      ...currentMeta,
+      updatedAt: params.now.toISOString(),
+      rejectionReason: params.reason,
+      approvedAt:
+        currentStatus === "approved"
+          ? currentMeta.approvedAt ?? params.now.toISOString()
+          : null,
+      approvedByAdminId:
+        currentStatus === "approved"
+          ? currentMeta.approvedByAdminId ?? params.adminId
+          : null,
+      rejectedAt: params.now.toISOString(),
+      rejectedByAdminId: params.adminId
+    });
+
+    await (tx as unknown as PrismaClient).$executeRawUnsafe(
+      `UPDATE icecream.verification
+          SET status = $1::icecream.verification_status,
+              "rejectReason" = $2,
+              contract = $3
+        WHERE id = $4`,
+      toDbStatus("rejected"),
+      params.reason,
+      nextContract,
+      params.verificationId
+    );
+
+    const movedReleaseIds = await movePendingVerificationReleasesToChangesRequired({
+      prismaLike: tx as unknown as PrismaClient,
+      userId: current.userId,
+      adminId: params.adminId,
+      reason: params.reason,
+      now: params.now
+    });
+
+    await tx.adminLog.create({
+      data: {
+        id: randomUUID(),
+        adminId: params.adminId,
+        action:
+          currentStatus === "approved"
+            ? "CONTRACT_VERIFICATION_CANCELLED"
+            : "CONTRACT_VERIFICATION_REJECTED",
+        targetType: "UserContractSignature",
+        targetId: params.verificationId,
+        payload: {
+          userId: current.userId,
+          reason: params.reason,
+          movedReleaseIds
+        }
+      }
+    });
+
+    return {
+      ok: true,
+      verificationId: params.verificationId,
+      movedReleaseIds
+    } satisfies VerificationReviewResult;
+  });
+}
+
 export async function rejectContractSignatureByAdmin(params: {
   prisma: PrismaClient;
   verificationId: string;
@@ -1347,7 +1522,7 @@ export async function rejectContractSignatureByAdmin(params: {
   const model = getModel(params.prisma);
 
   if (!model) {
-    return rejectContractSignatureWithStoreFallback({
+    return rejectContractSignatureWithVerificationTableFallback({
       ...params,
       reason,
       now
@@ -1434,7 +1609,7 @@ export async function rejectContractSignatureByAdmin(params: {
     });
   } catch (error) {
     if (isSchemaUnavailableError(error)) {
-      return rejectContractSignatureWithStoreFallback({
+      return rejectContractSignatureWithVerificationTableFallback({
         ...params,
         reason,
         now

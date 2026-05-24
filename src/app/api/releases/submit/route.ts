@@ -15,6 +15,7 @@ import {
   getUserReleaseQuota,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
+import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,24 @@ function readSubmissionDataCover(data: Record<string, unknown>): string | null {
   if (typeof cover !== "string") return null;
   const normalized = cover.trim();
   return normalized || null;
+}
+
+async function notifyReleaseSubmittedSafe(params: {
+  releaseTitle: string;
+  artistName: string;
+  releaseId: string;
+}): Promise<void> {
+  try {
+    await notifyAdminReleaseSubmitted({
+      releaseTitle: params.releaseTitle,
+      artistName: params.artistName
+    });
+  } catch (error) {
+    console.error("[telegram] release notification failed", {
+      releaseId: params.releaseId,
+      error
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -163,6 +182,11 @@ export async function POST(request: Request) {
         }
       }
     });
+    await notifyReleaseSubmittedSafe({
+      releaseId: existing.id,
+      releaseTitle: baseReleaseData.title,
+      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+    });
 
     const response: ReleaseSubmitSuccessResponse & {
       payment_required: true;
@@ -195,6 +219,11 @@ export async function POST(request: Request) {
         )
       )
     }
+  });
+  await notifyReleaseSubmittedSafe({
+    releaseId: existing.id,
+    releaseTitle: baseReleaseData.title,
+    artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
   });
 
   const response: ReleaseSubmitSuccessResponse = {

@@ -79,6 +79,7 @@ const reachableImageCandidateCache = new Map<string, { url: string | null; faile
 const MAX_REACHABLE_CANDIDATE_CACHE_SIZE = 500;
 const MAX_STORAGE_HEAD_CACHE_SIZE = 2000;
 const MAX_REACHABLE_PROBE_CANDIDATES = 40;
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "jpng", "gif", "avif"]);
 
 function getUrlHost(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -559,6 +560,28 @@ export async function resolveFirstReachableImageCandidateFromCandidates(
 
     // HeadObject unavailable/forbidden: keep URL usable for frontend fallback.
     const result = { url, failedReason: null };
+    if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+      const firstKey = reachableImageCandidateCache.keys().next().value;
+      if (firstKey) reachableImageCandidateCache.delete(firstKey);
+    }
+    reachableImageCandidateCache.set(cacheKey, result);
+    return result;
+  }
+
+  const fallbackImageLikeUrl =
+    urls.find((candidate) => {
+      const fileLike = extractFileNameLikeValue(candidate);
+      if (!fileLike) return false;
+      const { baseName, extension } = splitFileNameParts(fileLike);
+      if (!baseName || !extension) return false;
+      return IMAGE_EXTENSIONS.has(extension.toLowerCase());
+    }) ?? null;
+
+  if (fallbackImageLikeUrl) {
+    const result = {
+      url: fallbackImageLikeUrl,
+      failedReason: errors.length > 0 ? `probe-fallback:${errors.join("; ")}` : "probe-fallback"
+    };
     if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
       const firstKey = reachableImageCandidateCache.keys().next().value;
       if (firstKey) reachableImageCandidateCache.delete(firstKey);

@@ -4,6 +4,7 @@ import type { CabinetRelease, CabinetReleaseStatus, CabinetTrack } from "@/lib/c
 import { normalizeNextImageSrc } from "@/lib/image-src";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
+import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
 import { buildLegacyImageCandidateUrls, resolveStoredFileUrl } from "@/lib/s3";
 
 export interface CabinetReleaseSource {
@@ -37,6 +38,8 @@ interface SubmissionTrackLike {
   isrc?: string;
 }
 
+const COVER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+
 function isSubmittedToModeration(roles: unknown): boolean {
   const root = asRecord(roles);
   return root?.submittedToModeration === true;
@@ -45,8 +48,20 @@ function isSubmittedToModeration(roles: unknown): boolean {
 function toCabinetStatus(
   status: verification_status,
   confirmed: boolean,
-  roles: unknown
+  roles: unknown,
+  upc: string | null
 ): CabinetReleaseStatus {
+  if (
+    shouldTreatReleaseAsApproved({
+      status,
+      confirmed,
+      upc,
+      roles
+    })
+  ) {
+    return "approved";
+  }
+
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
   if (status === "moderating") {
@@ -168,19 +183,31 @@ function resolveReleaseCoverUrls(
   roles: unknown
 ): { url: string; candidates: string[] } {
   const rawPreview = preview.trim();
-  const legacyStorageKeys: string[] = [];
-  if (rawPreview) {
-    if (looksLikeOnlyExtension(rawPreview)) {
-      const ext = normalizeExtension(rawPreview);
-      if (ext) {
-        legacyStorageKeys.push(
-          `${releaseId}.${ext}`,
-          `previews/${releaseId}.${ext}`,
-          `covers/${releaseId}.${ext}`,
-          `uploads/${releaseId}/release-cover.${ext}`,
-          `uploads/${releaseId}.${ext}`
-        );
-      }
+  const legacyStorageKeys: string[] = COVER_EXTENSIONS.flatMap((extension) => [
+    `${releaseId}.${extension}`,
+    `previews/${releaseId}.${extension}`,
+    `covers/${releaseId}.${extension}`,
+    `uploads/${releaseId}/release-cover.${extension}`,
+    `uploads/${releaseId}.${extension}`,
+    `release-cover.${extension}`,
+    `previews/release-cover.${extension}`,
+    `covers/release-cover.${extension}`,
+    `uploads/release-cover.${extension}`
+  ]);
+  if (rawPreview && looksLikeOnlyExtension(rawPreview)) {
+    const ext = normalizeExtension(rawPreview);
+    if (ext) {
+      legacyStorageKeys.push(
+        `${releaseId}.${ext}`,
+        `previews/${releaseId}.${ext}`,
+        `covers/${releaseId}.${ext}`,
+        `uploads/${releaseId}/release-cover.${ext}`,
+        `uploads/${releaseId}.${ext}`,
+        `release-cover.${ext}`,
+        `previews/release-cover.${ext}`,
+        `covers/release-cover.${ext}`,
+        `uploads/release-cover.${ext}`
+      );
     }
   }
 
@@ -246,7 +273,7 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
     platforms: "Все площадки",
     platformsCount: 0,
     genre: release.genre || "Не указан",
-    status: toCabinetStatus(release.status, release.confirmed, release.roles),
+    status: toCabinetStatus(release.status, release.confirmed, release.roles, release.upc),
     paid: Boolean(release.confirmed),
     paymentKind: release.confirmed ? paymentDisplay?.kind ?? "paid" : "unpaid",
     paymentLabel: release.confirmed ? paymentDisplay?.label ?? "Оплачен" : "Не оплачен",

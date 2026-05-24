@@ -56,8 +56,10 @@ export async function approveReleaseByAdmin(params: {
     where: { id: params.releaseId },
     data: {
       status: "approved",
+      confirmed: true,
       upc: normalizedUpc,
-      rejectReason: null
+      rejectReason: null,
+      moderatorComment: null
     }
   });
 

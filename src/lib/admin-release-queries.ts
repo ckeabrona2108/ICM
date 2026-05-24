@@ -45,16 +45,26 @@ function normalizeExtension(value: string): string | null {
   return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
 }
 
+const COVER_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] as const;
+
 function resolveReleaseCoverUrls(
   releaseId: string,
   preview: string
 ): { url: string; candidates: string[] } {
   const rawPreview = preview.trim();
-  if (!rawPreview) return { url: "", candidates: [] };
+  const extraStorageKeys: string[] = COVER_EXTENSIONS.flatMap((extension) => [
+    `${releaseId}.${extension}`,
+    `previews/${releaseId}.${extension}`,
+    `covers/${releaseId}.${extension}`,
+    `uploads/${releaseId}/release-cover.${extension}`,
+    `uploads/${releaseId}.${extension}`,
+    `release-cover.${extension}`,
+    `previews/release-cover.${extension}`,
+    `covers/release-cover.${extension}`,
+    `uploads/release-cover.${extension}`
+  ]);
 
-  const extraStorageKeys: string[] = [];
-
-  if (looksLikeOnlyExtension(rawPreview)) {
+  if (rawPreview && looksLikeOnlyExtension(rawPreview)) {
     const extension = normalizeExtension(rawPreview);
     if (extension) {
       extraStorageKeys.push(
@@ -62,7 +72,11 @@ function resolveReleaseCoverUrls(
         `previews/${releaseId}.${extension}`,
         `covers/${releaseId}.${extension}`,
         `uploads/${releaseId}/release-cover.${extension}`,
-        `uploads/${releaseId}.${extension}`
+        `uploads/${releaseId}.${extension}`,
+        `release-cover.${extension}`,
+        `previews/release-cover.${extension}`,
+        `covers/release-cover.${extension}`,
+        `uploads/release-cover.${extension}`
       );
     }
   }
@@ -71,7 +85,10 @@ function resolveReleaseCoverUrls(
     new Set(
       buildLegacyImageCandidateUrls({
         url: rawPreview,
-        storageKey: rawPreview.startsWith("http") || rawPreview.startsWith("/") ? null : rawPreview,
+        storageKey:
+          rawPreview && !rawPreview.startsWith("http") && !rawPreview.startsWith("/")
+            ? rawPreview
+            : null,
         extraStorageKeys
       })
     )

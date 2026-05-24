@@ -9,7 +9,7 @@ const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
 const nextAuthSecret = process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(4)
 });
 
@@ -44,9 +44,14 @@ export const authOptions: NextAuthOptions = {
         const parsed = loginSchema.safeParse(credentials);
         if (!parsed.success) return null;
 
-        const email = parsed.data.email.toLowerCase();
-        const user = await prisma.user.findUnique({
-          where: { email },
+        const email = parsed.data.email;
+        const user = await prisma.user.findFirst({
+          where: {
+            email: {
+              equals: email,
+              mode: "insensitive"
+            }
+          },
           select: {
             id: true,
             email: true,

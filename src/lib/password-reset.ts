@@ -113,8 +113,13 @@ export async function requestPasswordReset(params: {
   const email = params.email.trim().toLowerCase();
   const now = params.now ?? new Date();
 
-  const user = await params.prisma.user.findUnique({
-    where: { email },
+  const user = await params.prisma.user.findFirst({
+    where: {
+      email: {
+        equals: email,
+        mode: "insensitive"
+      }
+    },
     select: { id: true, email: true, name: true }
   });
 

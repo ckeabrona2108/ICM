@@ -33,8 +33,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email: parsed.data.email },
+    const user = await prisma.user.findFirst({
+      where: {
+        email: {
+          equals: parsed.data.email,
+          mode: "insensitive"
+        }
+      },
       select: { id: true, email: true, name: true }
     });
 

@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 async function draftsCount(userId: string): Promise<number> {
   const releases = await prisma.release.findMany({
     where: { userId },
-    select: { status: true, confirmed: true, roles: true }
+    select: { status: true, confirmed: true, upc: true, roles: true }
   });
 
   return releases.reduce((count, release) => {
@@ -23,7 +23,11 @@ async function draftsCount(userId: string): Promise<number> {
     const section = mapReleaseStatusToSection(
       release.status,
       release.confirmed,
-      submittedToModeration
+      submittedToModeration,
+      {
+        upc: release.upc,
+        roles: release.roles
+      }
     );
     return section === "draft" ? count + 1 : count;
   }, 0);
@@ -43,7 +47,7 @@ export async function DELETE(_request: Request, context: { params: { id: string 
       id: releaseId,
       userId: session.user.id
     },
-    select: { id: true, status: true, confirmed: true, roles: true }
+    select: { id: true, status: true, confirmed: true, upc: true, roles: true }
   });
 
   const submittedToModeration =
@@ -52,7 +56,10 @@ export async function DELETE(_request: Request, context: { params: { id: string 
     !Array.isArray(draft?.roles) &&
     (draft?.roles as Record<string, unknown>).submittedToModeration === true;
   const section = draft
-    ? mapReleaseStatusToSection(draft.status, draft.confirmed, submittedToModeration)
+    ? mapReleaseStatusToSection(draft.status, draft.confirmed, submittedToModeration, {
+        upc: draft.upc,
+        roles: draft.roles
+      })
     : null;
 
   if (!draft || section !== "draft") {

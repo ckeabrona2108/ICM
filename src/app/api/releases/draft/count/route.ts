@@ -13,7 +13,7 @@ export async function GET() {
 
   const releases = await prisma.release.findMany({
     where: { userId: session.user.id },
-    select: { status: true, confirmed: true, roles: true }
+    select: { status: true, confirmed: true, upc: true, roles: true }
   });
 
   const draftsCount = releases.reduce((count, release) => {
@@ -25,7 +25,11 @@ export async function GET() {
     const section = mapReleaseStatusToSection(
       release.status,
       release.confirmed,
-      submittedToModeration
+      submittedToModeration,
+      {
+        upc: release.upc,
+        roles: release.roles
+      }
     );
     return section === "draft" ? count + 1 : count;
   }, 0);

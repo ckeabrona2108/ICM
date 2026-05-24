@@ -75,7 +75,7 @@ function readSubmissionDataCover(data: Record<string, unknown>): string | null {
 async function draftsCount(userId: string) {
   const releases = await prisma.release.findMany({
     where: { userId },
-    select: { status: true, confirmed: true, roles: true }
+    select: { status: true, confirmed: true, upc: true, roles: true }
   });
 
   return releases.reduce((count, release) => {
@@ -87,7 +87,11 @@ async function draftsCount(userId: string) {
     const section = mapReleaseStatusToSection(
       release.status,
       release.confirmed,
-      submittedToModeration
+      submittedToModeration,
+      {
+        upc: release.upc,
+        roles: release.roles
+      }
     );
     return section === "draft" ? count + 1 : count;
   }, 0);

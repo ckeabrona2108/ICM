@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 
 import type { AdminReleaseDecisionResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
@@ -15,6 +16,36 @@ const decisionSchema = z.object({
   upc: z.string().trim().optional(),
   comment: z.string().trim().optional()
 });
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function resetNeedsChangesFlags(roles: unknown): Record<string, unknown> | null {
+  const root = asRecord(roles);
+  if (!root) return null;
+  const next: Record<string, unknown> = { ...root };
+  next.needsChanges = false;
+  next.moderationStatus = "approved";
+  next.rejectReason = null;
+  next.rejectionReason = null;
+  next.moderationComment = null;
+  next.moderatorComment = null;
+  const submission = asRecord(next.submissionData);
+  if (submission) {
+    next.submissionData = {
+      ...submission,
+      needsChanges: false,
+      moderationStatus: "approved",
+      rejectReason: null,
+      rejectionReason: null,
+      moderationComment: null,
+      moderatorComment: null
+    };
+  }
+  return next;
+}
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
@@ -37,7 +68,7 @@ export async function POST(request: Request) {
 
   const release = await prisma.release.findUnique({
     where: { id: parsed.data.releaseId },
-    select: { id: true, status: true }
+    select: { id: true, status: true, roles: true }
   });
   if (!release) {
     return NextResponse.json({ error: "Release not found" }, { status: 404 });
@@ -63,7 +94,10 @@ export async function POST(request: Request) {
       data: {
         status: "approved",
         confirmed: true,
-        upc
+        upc,
+        rejectReason: null,
+        moderatorComment: null,
+        roles: (resetNeedsChangesFlags(release.roles) ?? undefined) as Prisma.InputJsonValue | undefined
       }
     });
 

@@ -38,11 +38,123 @@ export function normalizeLifecycleStatus(status: string | null | undefined): Lif
   return lifecycleAliases[normalized] ?? null;
 }
 
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function normalizeOptionalBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  return null;
+}
+
+function collectRoleRecords(roles: unknown): Array<Record<string, unknown>> {
+  const root = asRecord(roles);
+  if (!root) return [];
+  const records: Array<Record<string, unknown>> = [root];
+  const submission = asRecord(root.submissionData);
+  if (submission) records.push(submission);
+  return records;
+}
+
+function readLegacyReleaseSignals(roles: unknown): {
+  statusValues: string[];
+  hasApprovedAt: boolean;
+  hasDistributedAt: boolean;
+  isPublished: boolean;
+  needsChanges: boolean | null;
+} {
+  const records = collectRoleRecords(roles);
+  const statusValues: string[] = [];
+  let hasApprovedAt = false;
+  let hasDistributedAt = false;
+  let isPublished = false;
+  let needsChanges: boolean | null = null;
+
+  for (const record of records) {
+    for (const key of ["status", "moderationStatus", "releaseStatus", "distributionStatus"]) {
+      const value = normalizeOptionalString(record[key]);
+      if (value) statusValues.push(value);
+    }
+    if (normalizeOptionalString(record.approvedAt)) hasApprovedAt = true;
+    if (normalizeOptionalString(record.distributedAt)) hasDistributedAt = true;
+    if (normalizeOptionalBoolean(record.isPublished) === true) isPublished = true;
+    if (normalizeOptionalBoolean(record.published) === true) isPublished = true;
+    if (normalizeOptionalBoolean(record.distributed) === true) isPublished = true;
+
+    const localNeedsChanges = normalizeOptionalBoolean(record.needsChanges);
+    if (localNeedsChanges !== null) {
+      needsChanges = localNeedsChanges;
+    }
+  }
+
+  return {
+    statusValues,
+    hasApprovedAt,
+    hasDistributedAt,
+    isPublished,
+    needsChanges
+  };
+}
+
+export function shouldTreatReleaseAsApproved(params: {
+  status: string | null | undefined;
+  confirmed?: boolean | null;
+  upc?: string | null;
+  roles?: unknown;
+}): boolean {
+  const lifecycle = normalizeLifecycleStatus(params.status);
+  if (lifecycle === "approved") return true;
+
+  const upc = normalizeOptionalString(params.upc);
+  const signals = readLegacyReleaseSignals(params.roles);
+  const hasApprovedStatusSignal = signals.statusValues.some((value) => {
+    const normalized = normalizeLifecycleStatus(value);
+    return normalized === "approved";
+  });
+  const hasPublishedEvidence =
+    hasApprovedStatusSignal ||
+    signals.hasApprovedAt ||
+    signals.hasDistributedAt ||
+    signals.isPublished;
+
+  if (hasPublishedEvidence && (Boolean(upc) || params.confirmed === true)) {
+    return true;
+  }
+
+  if (
+    lifecycle === "changes_required" &&
+    Boolean(upc) &&
+    params.confirmed === true &&
+    signals.needsChanges !== true
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export function mapReleaseStatusToSection(
   status: string | null | undefined,
   confirmed?: boolean | null,
-  submittedToModeration?: boolean | null
+  submittedToModeration?: boolean | null,
+  options?: {
+    upc?: string | null;
+    roles?: unknown;
+  }
 ): keyof ReleaseSidebarCounts | null {
+  if (
+    shouldTreatReleaseAsApproved({
+      status,
+      confirmed,
+      upc: options?.upc,
+      roles: options?.roles
+    })
+  ) {
+    return "all";
+  }
+
   const lifecycle = normalizeLifecycleStatus(status);
   switch (lifecycle) {
     case "approved":
@@ -74,6 +186,7 @@ interface ReleaseGroupedItem {
 interface ReleaseCountItem {
   status: string;
   confirmed?: boolean | null;
+  upc?: string | null;
   roles?: unknown;
 }
 
@@ -118,7 +231,7 @@ export async function getReleaseSidebarCountsForUser(
       release: {
         findMany(args: {
           where: { userId: string };
-          select: { status: true; confirmed: true; roles: true };
+          select: { status: true; confirmed: true; upc: true; roles: true };
         }): Promise<ReleaseCountItem[]>;
       };
     };
@@ -126,7 +239,7 @@ export async function getReleaseSidebarCountsForUser(
 ): Promise<ReleaseSidebarCounts> {
   const releases = await params.prisma.release.findMany({
     where: { userId: params.userId },
-    select: { status: true, confirmed: true, roles: true }
+    select: { status: true, confirmed: true, upc: true, roles: true }
   });
 
   const counts: ReleaseSidebarCounts = {
@@ -140,7 +253,11 @@ export async function getReleaseSidebarCountsForUser(
     const section = mapReleaseStatusToSection(
       release.status,
       release.confirmed,
-      isSubmittedToModeration(release.roles)
+      isSubmittedToModeration(release.roles),
+      {
+        upc: release.upc,
+        roles: release.roles
+      }
     );
     if (section) counts[section] += 1;
   }

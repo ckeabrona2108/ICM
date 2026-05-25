@@ -1,4 +1,4 @@
-import type { PrismaClient, verification_status } from "@prisma/client";
+import type { Prisma, PrismaClient, verification_status } from "@prisma/client";
 import { z } from "zod";
 
 export const upcSchema = z
@@ -15,11 +15,44 @@ export function canManageReleases(role: string | null | undefined): boolean {
 }
 
 function canApproveReleaseStatus(status: verification_status): boolean {
-  return status === "moderating";
+  return status === "moderating" || status === "rejected" || status === "approved";
 }
 
 function canRejectReleaseStatus(status: verification_status): boolean {
   return status === "moderating";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefined {
+  const root = asRecord(roles);
+  if (!root) return undefined;
+
+  const next: Record<string, unknown> = { ...root };
+  next.needsChanges = false;
+  next.moderationStatus = "approved";
+  next.rejectReason = null;
+  next.rejectionReason = null;
+  next.moderationComment = null;
+  next.moderatorComment = null;
+
+  const submission = asRecord(next.submissionData);
+  if (submission) {
+    next.submissionData = {
+      ...submission,
+      needsChanges: false,
+      moderationStatus: "approved",
+      rejectReason: null,
+      rejectionReason: null,
+      moderationComment: null,
+      moderatorComment: null
+    };
+  }
+
+  return next as Prisma.InputJsonValue;
 }
 
 export async function approveReleaseByAdmin(params: {
@@ -35,7 +68,7 @@ export async function approveReleaseByAdmin(params: {
 
   const release = await params.prisma.release.findUnique({
     where: { id: params.releaseId },
-    select: { id: true, status: true }
+    select: { id: true, status: true, roles: true }
   });
 
   if (!release) return null;
@@ -59,7 +92,8 @@ export async function approveReleaseByAdmin(params: {
       confirmed: true,
       upc: normalizedUpc,
       rejectReason: null,
-      moderatorComment: null
+      moderatorComment: null,
+      roles: resetNeedsChangesFlags(release.roles)
     }
   });
 

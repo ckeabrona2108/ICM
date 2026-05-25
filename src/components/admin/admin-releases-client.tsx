@@ -249,7 +249,9 @@ export function AdminReleasesClient({
       ) : (
         <div className="mt-6 space-y-4">
           {releases.map((release) => {
-            const canApprove = release.status === "moderation";
+            const canApprove = ["moderation", "rejected", "approved", "changes_required"].includes(
+              release.status
+            );
             const canReject = release.status === "moderation";
             const isBusy = busyId === release.id;
             const safeCoverUrl = normalizeNextImageSrc(

@@ -68,7 +68,7 @@ export async function POST(request: Request) {
 
   const release = await prisma.release.findUnique({
     where: { id: parsed.data.releaseId },
-    select: { id: true, status: true, roles: true }
+    select: { id: true, status: true, roles: true, upc: true }
   });
   if (!release) {
     return NextResponse.json({ error: "Release not found" }, { status: 404 });
@@ -76,6 +76,9 @@ export async function POST(request: Request) {
 
   if (parsed.data.action === "approve") {
     const upc = parsed.data.upc?.trim() || null;
+    if (upc && !/^\d{12,14}$/u.test(upc)) {
+      return NextResponse.json({ error: "UPC должен содержать 12-14 цифр." }, { status: 400 });
+    }
     if (upc) {
       const duplicate = await prisma.release.findFirst({
         where: {
@@ -94,7 +97,7 @@ export async function POST(request: Request) {
       data: {
         status: "approved",
         confirmed: true,
-        upc,
+        upc: upc ?? release.upc,
         rejectReason: null,
         moderatorComment: null,
         roles: (resetNeedsChangesFlags(release.roles) ?? undefined) as Prisma.InputJsonValue | undefined

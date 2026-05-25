@@ -180,7 +180,10 @@ function formatDuration(value: number | null | undefined): string {
 
 export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDetailsResponse }) {
   const router = useRouter();
-  const canModerate = details.status === "moderation";
+  const canApprove = ["moderation", "changes_required", "approved", "rejected"].includes(
+    details.status
+  );
+  const canReject = details.status === "moderation";
   const [busy, setBusy] = React.useState<ActionKind | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [approveOpen, setApproveOpen] = React.useState(false);
@@ -427,7 +430,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          disabled={busy !== null || !canModerate}
+          disabled={busy !== null || !canApprove}
           onClick={() => {
             setApproveOpen(true);
             setError(null);
@@ -439,7 +442,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         </button>
         <button
           type="button"
-          disabled={busy !== null || !canModerate}
+          disabled={busy !== null || !canReject}
           onClick={() => {
             setRejectOpen(true);
             setError(null);

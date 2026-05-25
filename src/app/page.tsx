@@ -9,25 +9,35 @@ import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
 import {
   AppleMusicLogo,
-  ShazamLogo,
   SpotifyLogo,
   TikTokLogo,
-  VkMusicLogo,
-  YandexMusicLogo,
   YouTubeMusicLogo
 } from "@/components/landing/platform-logos";
 import { Reveal, Stagger, StaggerItem } from "@/components/landing/reveal";
 import { IcmTariffCard } from "@/components/tariffs/icm-tariff-card";
 import { ICM_TARIFFS } from "@/lib/icm-tariffs";
 
-const PLATFORMS = [
+const PLATFORMS: Array<{
+  name: string;
+  Logo?: (props: { size?: number }) => JSX.Element;
+  logoSrc?: string;
+  roundedImage?: boolean;
+}> = [
   { name: "Spotify", Logo: SpotifyLogo },
   { name: "Apple Music", Logo: AppleMusicLogo },
-  { name: "VK Музыка", Logo: VkMusicLogo },
-  { name: "Яндекс Музыка", Logo: YandexMusicLogo },
+  { name: "VK Музыка", logoSrc: "/landing/platforms/vk-music.webp" },
+  {
+    name: "Яндекс Музыка",
+    logoSrc: "/landing/platforms/yandex-music.png",
+    roundedImage: true
+  },
   { name: "YouTube Music", Logo: YouTubeMusicLogo },
   { name: "TikTok", Logo: TikTokLogo },
-  { name: "Shazam", Logo: ShazamLogo }
+  {
+    name: "Shazam",
+    logoSrc: "/landing/platforms/shazam.png",
+    roundedImage: true
+  }
 ];
 
 export default function HomePage() {
@@ -128,11 +138,21 @@ export default function HomePage() {
         </Reveal>
 
         <Stagger className="mt-12 grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4" stagger={0.05}>
-          {PLATFORMS.map(({ name, Logo }) => (
+          {PLATFORMS.map(({ name, Logo, logoSrc, roundedImage }) => (
             <StaggerItem key={name}>
               <div className="icm-card group flex h-[110px] items-center justify-center gap-3 px-4 sm:h-[130px] sm:px-6">
                 <span className="inline-flex shrink-0 transition-transform duration-300 group-hover:scale-110">
-                  <Logo size={32} />
+                  {logoSrc ? (
+                    <Image
+                      src={logoSrc}
+                      alt={name}
+                      width={32}
+                      height={32}
+                      className={`h-8 w-8 object-cover ${roundedImage ? "rounded-[9px]" : ""}`}
+                    />
+                  ) : Logo ? (
+                    <Logo size={32} />
+                  ) : null}
                 </span>
                 <span className="text-[15px] font-semibold text-white sm:text-[16px]">{name}</span>
               </div>

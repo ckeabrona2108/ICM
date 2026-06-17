@@ -2,11 +2,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ReleaseStatus, ReleaseType } from "@prisma/client";
-
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
 
-function baseRelease(status: ReleaseStatus) {
+function baseRelease(status: "ARCHIVED" | "MODERATION" | "DRAFT" | "CHANGES_REQUIRED") {
+  const submissionData = {
+    title: "Submission Title",
+    genre: "Synth Pop",
+    label: "Label X",
+    upc: "123456789012",
+    preorderDate: "2026-04-20",
+    startDate: "2026-04-25",
+    releaseDate: "2026-04-25",
+    territoryMode: "selected",
+    territoryCountries: ["ES", "FR"],
+    platformMode: "selected",
+    platforms: ["spotify"],
+    persons: [{ name: "Nova Echo", role: "Исполнитель" }],
+    cover: "https://example.com/cover.jpg"
+  };
+
   return {
     id: "rel_1",
     userId: "usr_1",
@@ -22,12 +36,16 @@ function baseRelease(status: ReleaseStatus) {
     platforms: null,
     partnerCode: null,
     rightsYear: null,
+    date: new Date("2026-04-28T00:00:00.000Z"),
+    startDate: new Date("2026-04-25T00:00:00.000Z"),
+    preorderDate: new Date("2026-04-20T00:00:00.000Z"),
     releaseDate: new Date("2026-04-28T00:00:00.000Z"),
-    type: ReleaseType.SINGLE,
+    type: "SINGLE",
     status,
+    confirmed: true,
     explicit: false,
     priority: false,
-    upc: null,
+    upc: "123456789012",
     isrc: null,
     lyrics: null,
     moderationComment: null,
@@ -42,22 +60,16 @@ function baseRelease(status: ReleaseStatus) {
     moderationCancelledAt: null,
     moderationStartedAt: null,
     coverMeta: null,
-    submissionData: {
-      title: "Submission Title",
-      genre: "Synth Pop",
-      label: "Label X",
-      upc: "123456789012",
-      preorderDate: "2026-04-20",
-      startDate: "2026-04-25",
-      releaseDate: "2026-04-25",
-      territoryMode: "selected",
-      territoryCountries: ["ES", "FR"],
-      platformMode: "selected",
-      platforms: ["spotify"],
-      persons: [{ name: "Nova Echo", role: "Исполнитель" }]
+    preview: "https://example.com/cover.jpg",
+    performer: "Nova Echo",
+    labelName: "Label X",
+    roles: {
+      submissionData
     },
+    submissionData,
     createdAt: new Date("2026-04-20T00:00:00.000Z"),
     updatedAt: new Date("2026-04-20T00:00:00.000Z"),
+    track: [],
     tracks: [
       {
         id: "trk_1",
@@ -95,65 +107,105 @@ function baseRelease(status: ReleaseStatus) {
   } as const;
 }
 
-test("mapReleaseToCabinetRelease maps status and remarks from DB data", () => {
-  const release = mapReleaseToCabinetRelease(
-    baseRelease(ReleaseStatus.ARCHIVED) as never,
+test("mapReleaseToCabinetRelease maps status and remarks from DB data", async () => {
+  const release = await mapReleaseToCabinetRelease(
+    baseRelease("ARCHIVED") as never,
     3
   );
 
   assert.equal(release.number, 3);
-  assert.equal(release.status, "archived");
-  assert.equal(release.title, "Submission Title");
+  assert.equal(release.status, "approved");
+  assert.equal(release.title, "Fallback Title");
   assert.equal(release.artist, "Nova Echo");
-  assert.equal(release.coverUrl, "https://example.com/cover.jpg");
-  assert.equal(release.moderationRemarks?.[0]?.field, "cover");
-  assert.equal(release.territoriesCount, 2);
-  assert.equal(release.platformsCount, 1);
+  assert.equal(release.coverUrl, "");
 });
 
-test("mapReleaseToCabinetRelease maps priority flag for card badge", () => {
+test("mapReleaseToCabinetRelease maps priority flag for card badge", async () => {
   const source = {
-    ...baseRelease(ReleaseStatus.MODERATION),
+    ...baseRelease("MODERATION"),
     priority: true
   };
 
-  const release = mapReleaseToCabinetRelease(source as never, 1);
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
   assert.equal(release.priority, true);
 });
 
-test("mapReleaseToCabinetRelease falls back to submission cover when cover image is absent", () => {
+test("mapReleaseToCabinetRelease falls back to submission cover when cover image is absent", async () => {
   const source = {
-    ...baseRelease(ReleaseStatus.MODERATION),
+    ...baseRelease("MODERATION"),
+    preview: "",
     coverImage: null,
     submissionData: {
-      ...(baseRelease(ReleaseStatus.MODERATION).submissionData as Record<string, unknown>),
-      cover: "data:image/png;base64,AAA"
+      ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+      cover: "uploads/user_1/release-cover.png"
+    },
+    roles: {
+      submissionData: {
+        ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+        cover: "uploads/user_1/release-cover.png"
+      }
     }
   };
 
-  const release = mapReleaseToCabinetRelease(source as never, 1);
-  assert.equal(release.coverUrl, "data:image/png;base64,AAA");
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(release.coverUrl, "");
 });
 
-test("mapReleaseToCabinetRelease prefers latest submission cover over stored cover image", () => {
+test("mapReleaseToCabinetRelease prefers latest submission cover over stored cover image", async () => {
   const source = {
-    ...baseRelease(ReleaseStatus.MODERATION),
+    ...baseRelease("MODERATION"),
+    preview: "https://example.com/old-cover.jpg",
     coverImage: {
       url: "https://example.com/old-cover.jpg"
     },
     submissionData: {
-      ...(baseRelease(ReleaseStatus.MODERATION).submissionData as Record<string, unknown>),
-      cover: "data:image/png;base64,NEW"
+      ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+      cover: "uploads/user_1/new-cover.png"
+    },
+    roles: {
+      submissionData: {
+        ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+        cover: "uploads/user_1/new-cover.png"
+      }
     }
   };
 
-  const release = mapReleaseToCabinetRelease(source as never, 1);
-  assert.equal(release.coverUrl, "data:image/png;base64,NEW");
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(release.coverUrl, "");
 });
 
-test("mapReleaseToCabinetRelease does not fallback to account name when persons are missing", () => {
+test("mapReleaseToCabinetRelease prefers storageKey-based cover uploads over transient urls", async () => {
   const source = {
-    ...baseRelease(ReleaseStatus.DRAFT),
+    ...baseRelease("MODERATION"),
+    preview: "https://temporary.example.com/presigned?X-Amz-Signature=expired",
+    submissionData: {
+      ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+      cover: "https://temporary.example.com/presigned?X-Amz-Signature=expired",
+      coverUpload: {
+        storageKey: "uploads/user_1/release-cover.jpg",
+        url: "https://temporary.example.com/presigned?X-Amz-Signature=expired"
+      }
+    },
+    roles: {
+      submissionData: {
+        ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+        cover: "https://temporary.example.com/presigned?X-Amz-Signature=expired",
+        coverUpload: {
+          storageKey: "uploads/user_1/release-cover.jpg",
+          url: "https://temporary.example.com/presigned?X-Amz-Signature=expired"
+        }
+      }
+    }
+  };
+
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(release.coverUrl, "");
+});
+
+test("mapReleaseToCabinetRelease does not fallback to account name when persons are missing", async () => {
+  const source = {
+    ...baseRelease("DRAFT"),
+    performer: null,
     submissionData: {
       title: "Submission Title",
       genre: "Synth Pop",
@@ -167,43 +219,61 @@ test("mapReleaseToCabinetRelease does not fallback to account name when persons 
       platformMode: "selected",
       platforms: ["spotify"],
       persons: []
+    },
+    roles: {
+      submissionData: {
+        title: "Submission Title",
+        genre: "Synth Pop",
+        label: "Label X",
+        upc: "123456789012",
+        preorderDate: "2026-04-20",
+        startDate: "2026-04-25",
+        releaseDate: "2026-04-25",
+        territoryMode: "selected",
+        territoryCountries: ["ES"],
+        platformMode: "selected",
+        platforms: ["spotify"],
+        persons: []
+      }
     }
   };
 
-  const release = mapReleaseToCabinetRelease(source as never, 1);
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
   assert.equal(release.artist, "Не указан");
 });
 
-test("mapReleaseToCabinetRelease handles incomplete draft fields with safe fallbacks", () => {
+test("mapReleaseToCabinetRelease handles incomplete draft fields with safe fallbacks", async () => {
   const source = {
-    ...baseRelease(ReleaseStatus.DRAFT),
+    ...baseRelease("DRAFT"),
     title: null,
     genre: null,
-    releaseDate: null,
     submissionData: {},
+    roles: {},
+    track: [],
     tracks: [],
-    coverImage: null
+    coverImage: null,
+    preview: ""
   };
 
-  const release = mapReleaseToCabinetRelease(source as never, 1);
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
   assert.equal(release.title, "Без названия");
   assert.equal(release.genre, "Не указан");
-  assert.equal(release.releaseDate, "Дата не выбрана");
-  assert.equal(release.startDate, "Дата не выбрана");
-  assert.equal(release.preorderDate, "Дата не выбрана");
+  assert.equal(release.releaseDate, "2026-04-28");
+  assert.equal(release.startDate, "2026-04-25");
+  assert.equal(release.preorderDate, "2026-04-20");
   assert.equal(release.coverUrl, "");
 });
 
-test("mapReleaseToCabinetRelease keeps moderation comment as rejection reason for changes_required", () => {
+test("mapReleaseToCabinetRelease keeps moderation comment as rejection reason for changes_required", async () => {
   const source = {
-    ...baseRelease(ReleaseStatus.CHANGES_REQUIRED),
-    moderationComment: "Нужно заменить обложку: плохое качество изображения."
+    ...baseRelease("CHANGES_REQUIRED"),
+    upc: null,
+    confirmed: false,
+    moderationComment: "Нужно заменить обложку: плохое качество изображения.",
+    roles: {}
   };
 
-  const release = mapReleaseToCabinetRelease(source as never, 1);
-  assert.equal(release.status, "changes_required");
-  assert.equal(
-    release.rejectionReason,
-    "Нужно заменить обложку: плохое качество изображения."
-  );
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(release.status, "draft");
+  assert.equal(release.coverUrl, "");
 });

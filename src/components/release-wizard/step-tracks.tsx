@@ -37,7 +37,7 @@ const TRACK_ASSET_LIMITS = {
   },
   ringtone: {
     maxBytes: 200 * 1024 * 1024,
-    allowedExtensions: [".wav", ".flac", ".mp3"]
+    allowedExtensions: [".wav", ".flac"]
   },
   video: {
     maxBytes: 6 * 1024 * 1024 * 1024,
@@ -366,7 +366,8 @@ export function StepTracks() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fileName: sanitizeFileName(file.name),
-            contentType
+            contentType,
+            kind: "audio"
           })
         });
 
@@ -395,10 +396,7 @@ export function StepTracks() {
           throw new Error("Ошибка загрузки файла в хранилище.");
         }
 
-        const readUrl =
-          (typeof target.publicUrl === "string" && target.publicUrl.trim()
-            ? target.publicUrl.trim()
-            : resolveLocalObjectUrl(target.key) ?? target.url.split("?")[0] ?? target.url);
+        const readUrl = resolveLocalObjectUrl(target.key) ?? target.url.split("?")[0] ?? target.url;
         const uploadedFile: UploadedFileRef = {
           storageKey: target.key,
           url: toAbsoluteStorageUrl(readUrl),

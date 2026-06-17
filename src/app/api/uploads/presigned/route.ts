@@ -7,7 +7,8 @@ import { createPresignedUpload, getStorageBucketHint, resolveStoredFileUrl } fro
 
 const bodySchema = z.object({
   fileName: z.string().min(1),
-  contentType: z.string().min(1)
+  contentType: z.string().min(1),
+  kind: z.enum(["audio", "cover"]).optional()
 });
 
 export async function POST(request: Request) {
@@ -24,7 +25,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const key = `uploads/${session.user.id}/${Date.now()}-${parsed.data.fileName}`;
+  const storageRoot = parsed.data.kind === "cover" ? "previews" : "uploads";
+  const key = `${storageRoot}/${session.user.id}/${Date.now()}-${parsed.data.fileName}`;
   const signed = await createPresignedUpload({
     key,
     contentType: parsed.data.contentType
@@ -34,6 +36,15 @@ export async function POST(request: Request) {
       storageKey: key
     }) ?? `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
   const bucket = getStorageBucketHint();
+
+  if (process.env.STORAGE_DEBUG === "1") {
+    console.log("[storage-debug:presigned-upload]", {
+      key,
+      bucket,
+      publicUrl,
+      signedUrl: signed.url
+    });
+  }
 
   return NextResponse.json({
     key,

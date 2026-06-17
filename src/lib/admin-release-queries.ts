@@ -3,11 +3,7 @@ import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
 import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
-import {
-  buildLegacyImageCandidateUrls,
-  resolveFirstReachableImageCandidateFromCandidates,
-  resolveStoredFileUrl
-} from "@/lib/s3";
+import { getReleaseCoverAsset } from "@/lib/release-cover";
 
 export type AdminReleaseStatusFilter =
   | "moderation"
@@ -88,104 +84,14 @@ function matchStatus(source: {
   return status === "moderating";
 }
 
-function looksLikeOnlyExtension(value: string): boolean {
-  return /^[a-z0-9]{2,8}$/iu.test(value.trim().replace(/^\./u, ""));
-}
-
-function normalizeExtension(value: string): string | null {
-  const normalized = value.trim().replace(/^\./u, "").toLowerCase();
-  if (!normalized) return null;
-  return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
-}
-
-const COVER_EXTENSIONS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "jpng",
-  "PNG",
-  "JPG",
-  "JPEG",
-  "WEBP",
-  "JPNG"
-] as const;
-
-function getExtensionHint(rawPreview: string): string | null {
-  if (!rawPreview) return null;
-  if (looksLikeOnlyExtension(rawPreview)) {
-    return normalizeExtension(rawPreview);
-  }
-  const withoutQuery = rawPreview.split("?")[0]?.split("#")[0] ?? rawPreview;
-  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex <= 0 || dotIndex >= fileName.length - 1) return null;
-  return normalizeExtension(fileName.slice(dotIndex + 1));
-}
-
-function getCoverExtensionsByPriority(rawPreview: string): string[] {
-  const hint = getExtensionHint(rawPreview);
-  const ordered = [...COVER_EXTENSIONS];
-  if (!hint) return ordered;
-  const exacts = ordered.filter((ext) => ext === hint || ext.toLowerCase() === hint);
-  const rest = ordered.filter((ext) => !exacts.includes(ext));
-  return [...exacts, ...rest];
-}
-
-function resolveReleaseCoverUrls(
-  releaseId: string,
-  preview: string
-): { url: string; candidates: string[] } {
-  const rawPreview = preview.trim();
-  const previewIsExtensionOnly = rawPreview ? looksLikeOnlyExtension(rawPreview) : false;
-  const previewSeed = previewIsExtensionOnly ? "" : rawPreview;
-  const prioritizedExtensions = getCoverExtensionsByPriority(rawPreview);
-  const extraStorageKeys: string[] = prioritizedExtensions.flatMap((extension) => [
-    `previews/${releaseId}.${extension}`,
-    `covers/${releaseId}.${extension}`,
-    `uploads/${releaseId}/release-cover.${extension}`,
-    `uploads/${releaseId}.${extension}`,
-    `${releaseId}.${extension}`,
-    `previews/release-cover.${extension}`,
-    `covers/release-cover.${extension}`,
-    `uploads/release-cover.${extension}`,
-    `release-cover.${extension}`
-  ]);
-
-  if (rawPreview && looksLikeOnlyExtension(rawPreview)) {
-    const extension = normalizeExtension(rawPreview);
-    if (extension) {
-      extraStorageKeys.push(
-        `previews/${releaseId}.${extension}`,
-    `covers/${releaseId}.${extension}`,
-    `uploads/${releaseId}/release-cover.${extension}`,
-    `uploads/${releaseId}.${extension}`,
-    `${releaseId}.${extension}`,
-    `previews/release-cover.${extension}`,
-    `covers/release-cover.${extension}`,
-    `uploads/release-cover.${extension}`,
-    `release-cover.${extension}`
-      );
-    }
-  }
-
-  const candidates = Array.from(
-    new Set(
-      buildLegacyImageCandidateUrls({
-        url: previewSeed,
-        storageKey:
-          previewSeed && !previewSeed.startsWith("http") && !previewSeed.startsWith("/")
-            ? previewSeed
-            : null,
-        extraStorageKeys
-      })
-    )
-  );
-
-  return {
-    url: candidates[0] ?? resolveStoredFileUrl({ url: previewSeed, storageKey: null }) ?? "",
-    candidates
-  };
+export function resolveAdminReleaseCoverUrl(input: {
+  sourceCoverUrl: string;
+  submissionCover: string;
+}): string {
+  const submissionCover = input.submissionCover.trim();
+  if (submissionCover) return submissionCover;
+  const sourceCoverUrl = input.sourceCoverUrl.trim();
+  return sourceCoverUrl || "/hero/drop.png";
 }
 
 function emptyTrack(id: string): AdminReleaseDetails["tracks"][number] {
@@ -213,12 +119,33 @@ function emptyTrack(id: string): AdminReleaseDetails["tracks"][number] {
   };
 }
 
-const adminCoverResolveCache = new Map<string, { url: string | null; failedReason: string | null }>();
-const MAX_ADMIN_COVER_RESOLVE_CACHE_SIZE = 1000;
 
 export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promise<AdminReleaseDetails[]> {
   const releases = await prisma.release.findMany({
-    include: {
+    select: {
+      id: true,
+      title: true,
+      subtitle: true,
+      genre: true,
+      date: true,
+      startDate: true,
+      preorderDate: true,
+      status: true,
+      confirmed: true,
+      labelName: true,
+      preview: true,
+      performer: true,
+      roles: true,
+      upc: true,
+      language: true,
+      type: true,
+      feat: true,
+      earlyStartInRussia: true,
+      realTimeDelivery: true,
+      yandexSoonNewRelease: true,
+      rejectReason: true,
+      moderatorComment: true,
+      userId: true,
       user: {
         select: {
           name: true,
@@ -247,8 +174,9 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
     orderBy: { date: "desc" }
   });
 
-  const mapped = releases
-    .filter((release) => {
+  const mapped = await Promise.all(
+    releases
+      .filter((release) => {
       const resolvedUpc = resolveReleaseUpc({
         upc: release.upc,
         roles: release.roles
@@ -264,7 +192,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
       );
     })
     .filter((release) => (filter === "approved" || filter === "all" ? true : release.confirmed))
-    .map((source) => {
+    .map(async (source) => {
       const resolvedUpc = resolveReleaseUpc({
         upc: source.upc,
         roles: source.roles
@@ -300,7 +228,33 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
           }))
         : [emptyTrack(`${source.id}-track`)];
 
-      const cover = resolveReleaseCoverUrls(source.id, source.preview);
+      const cover = await getReleaseCoverAsset({
+        id: source.id,
+        preview: source.preview,
+        roles: source.roles,
+        userId: source.userId,
+        title: source.title
+      });
+      const previewFallbackCover =
+        !cover.url && source.preview
+          ? await getReleaseCoverAsset({
+              id: source.id,
+              preview: source.preview,
+              roles: {},
+              userId: source.userId,
+              title: source.title
+            })
+          : null;
+      const resolvedCover = previewFallbackCover?.url ? previewFallbackCover : cover;
+      if (process.env.NODE_ENV !== "production") {
+        console.log("[admin-releases-api:cover]", {
+          releaseId: source.id,
+          title: source.title,
+          preview: source.preview,
+          coverUrl: resolvedCover.url ?? "",
+          coverStorageKey: resolvedCover.storageKey
+        });
+      }
       const paymentDisplay = source.confirmed
         ? getReleasePaymentDisplayFromRoles(source.roles)
         : null;
@@ -310,8 +264,9 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         role: source.user.isAdmin ? "label" : "artist",
         title: source.title,
         subtitle: source.subtitle ?? "",
-        coverUrl: cover.url,
-        coverUrlCandidates: cover.candidates,
+        coverUrl: resolvedCover.url ?? "",
+        coverStorageKey: resolvedCover.storageKey,
+        coverUrlCandidates: resolvedCover.candidateUrls,
         label: source.labelName ?? "ICECREAMMUSIC",
         upc: resolvedUpc ?? "",
         preorderDate: formatDate(source.preorderDate),
@@ -344,37 +299,11 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         countryStartEarly: Boolean(source.earlyStartInRussia),
         realTimeDelivery: Boolean(source.realTimeDelivery),
         yandexDate: source.yandexSoonNewRelease ? formatDate(source.yandexSoonNewRelease) : "",
-        previewUrl: cover.url,
+        previewUrl: resolvedCover.url ?? "",
         tracks
       } satisfies AdminReleaseDetails;
-    });
-
-  return Promise.all(
-    mapped.map(async (item) => {
-      const candidates = Array.from(new Set([item.coverUrl, ...(item.coverUrlCandidates ?? [])].filter(Boolean)));
-      const cacheKey = `${item.id}\n${candidates.join("\n")}`;
-      const cached = adminCoverResolveCache.get(cacheKey);
-      const resolved =
-        cached ?? (await resolveFirstReachableImageCandidateFromCandidates(candidates));
-      if (!cached) {
-        if (adminCoverResolveCache.size >= MAX_ADMIN_COVER_RESOLVE_CACHE_SIZE) {
-          const firstKey = adminCoverResolveCache.keys().next().value;
-          if (firstKey) adminCoverResolveCache.delete(firstKey);
-        }
-        adminCoverResolveCache.set(cacheKey, resolved);
-      }
-      if (!resolved.url) {
-        return {
-          ...item,
-          coverUrl: "",
-          coverUrlCandidates: []
-        };
-      }
-      return {
-        ...item,
-        coverUrl: resolved.url,
-        coverUrlCandidates: [resolved.url]
-      };
     })
   );
+
+  return mapped;
 }

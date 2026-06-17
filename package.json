@@ -17,7 +17,24 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:push": "prisma db push",
     "prisma:seed": "tsx prisma/seed.ts",
-    "backfill:release-payment-snapshot": "tsx scripts/backfill-release-payment-snapshot.ts"
+    "gallery:all-images": "tsx scripts/build-all-image-gallery.ts",
+    "gallery:previews": "tsx scripts/build-previews-gallery.ts",
+    "audit:s3-buckets": "tsx scripts/audit-s3-buckets.ts",
+    "report:release-cover-status": "tsx scripts/report-release-cover-status.ts",
+    "report:broken-previews-with-role-backups": "tsx scripts/report-broken-previews-with-role-backups.ts",
+    "report:restore-media-backup": "tsx scripts/report-release-media-backup.ts",
+    "apply:restore-media-backup": "tsx scripts/apply-release-media-backup.ts",
+    "report:backup-storage-keys": "tsx scripts/report-backup-storage-keys.ts",
+    "report:backup-all-storage-keys": "tsx scripts/report-backup-storage-keys.ts",
+    "backfill:release-payment-snapshot": "tsx scripts/backfill-release-payment-snapshot.ts",
+    "repair:release-covers:s3": "tsx scripts/repair-release-covers-s3-to-s3.ts",
+    "report:release-media:repair-dry-run": "tsx scripts/report-release-media-repair-dry-run.ts",
+    "report:release-cover-mapping": "tsx scripts/report-release-cover-mapping.ts",
+    "report:release-media-diagnosis": "tsx scripts/report-release-media-diagnosis.ts",
+    "apply:release-cover-mapping": "tsx scripts/apply-release-cover-mapping.ts",
+    "report:s3-object-index": "tsx scripts/report-s3-object-index.ts",
+    "report:s3-media-index-dry-run": "tsx scripts/report-s3-media-index-dry-run.ts",
+    "repair:release-covers": "tsx scripts/repair-release-covers.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

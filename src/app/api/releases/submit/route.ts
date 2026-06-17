@@ -8,6 +8,7 @@ import type {
   ReleaseSubmitSuccessResponse
 } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
+import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import { prisma } from "@/lib/prisma";
 import { sanitizePriorityReleaseFlag } from "@/lib/release-priority";
 import {
@@ -55,11 +56,18 @@ function markSubmittedToModeration(roles: Prisma.InputJsonValue): Prisma.InputJs
   } as Prisma.InputJsonValue;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readCoverUploadUrl(data: Record<string, unknown>): string | null {
+  const coverUpload = asRecord(data.coverUpload);
+  return normalizeReleaseCoverUrl(coverUpload, null);
+}
+
 function readSubmissionDataCover(data: Record<string, unknown>): string | null {
-  const cover = data.cover;
-  if (typeof cover !== "string") return null;
-  const normalized = cover.trim();
-  return normalized || null;
+  return readCoverUploadUrl(data) ?? normalizeReleaseCoverUrl(data.cover, null);
 }
 
 async function notifyReleaseSubmittedSafe(params: {
@@ -130,12 +138,22 @@ export async function POST(request: Request) {
       isActive: quota.isActive
     })
   };
+  const preview = await resolveReleasePreviewForPersistence({
+    id: existing.id,
+    preview: normalizeReleaseCoverUrl(data.cover, null),
+    submissionData,
+    coverUpload: data.coverUpload,
+    cover: data.cover,
+    roles: mergeSubmissionData(existing.roles, submissionData),
+    userId: session.user.id,
+    title: typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Новый релиз"
+  });
   const baseReleaseData = {
     title: typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Новый релиз",
     subtitle: typeof data.subtitle === "string" ? data.subtitle : null,
     performer: typeof data.artist === "string" && data.artist.trim() ? data.artist.trim() : null,
     genre: typeof data.genre === "string" && data.genre.trim() ? data.genre.trim() : "Не указан",
-    preview: typeof data.cover === "string" && data.cover.trim() ? data.cover.trim() : "/hero/drop.png",
+    preview,
     language: typeof data.language === "string" && data.language.trim() ? data.language.trim() : "Russian",
     date: releaseDate,
     startDate,

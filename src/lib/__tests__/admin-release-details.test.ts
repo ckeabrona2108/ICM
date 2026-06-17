@@ -56,6 +56,10 @@ test("mapAdminReleaseDetails includes tracks, stores, territories and moderation
       tracks: [
         {
           fileName: "track-01.wav",
+          audioFile: {
+            storageKey: "uploads/user_1/track-01.wav",
+            url: "/api/uploads/object/uploads/user_1/track-01.wav"
+          },
           title: "Track 01",
           isrc: "USAAA2600001",
           metadataLanguage: "ru",
@@ -142,11 +146,16 @@ test("mapAdminReleaseDetails includes tracks, stores, territories and moderation
   } as never);
 
   assert.equal(details.release.title, "Submission Title");
-  assert.equal(details.cover.url, "https://cdn.example/cover.jpg");
+  assert.equal(details.cover.url, "/api/uploads/object/covers/cover_1.jpg");
+  assert.equal(details.cover.download_url, "/api/admin/releases/rel_1/files/cover/download");
   assert.equal(details.release.platforms.selected_codes[0], "spotify");
   assert.equal(details.release.territories.countries[0], "RU");
   assert.equal(details.comment, "db-comment");
   assert.equal(details.tracks[0]?.files.audio.file_name, "track-01.wav");
+  assert.equal(
+    details.tracks[0]?.files.audio.download_url,
+    "/api/uploads/object/uploads/user_1/track-01.wav"
+  );
   assert.equal(details.tracks[0]?.rights.copyright_pct, "80");
 });
 
@@ -190,4 +199,135 @@ test("resolveAdminReleaseFileTargetFromRelease resolves known file ids only", ()
     release
   });
   assert.equal(unknown, null);
+});
+
+test("stored file refs prefer storageKey over transient url", () => {
+  const details = mapAdminReleaseDetails({
+    id: "rel_signed",
+    userId: "user_1",
+    title: "Signed URL Title",
+    status: "MODERATION",
+    priority: false,
+    coverImage: {
+      storageKey: "uploads/user_1/release-cover.jpg",
+      url: "https://temporary.example.com/presigned?X-Amz-Signature=expired"
+    },
+    releaseFile: null,
+    submissionData: {
+      title: "Signed URL Title",
+      coverUpload: {
+        storageKey: "uploads/user_1/release-cover.jpg",
+        url: "https://temporary.example.com/presigned?X-Amz-Signature=expired"
+      },
+      tracks: [
+        {
+          id: "trk_signed_1",
+          fileName: "signed-track.wav",
+          audioFile: {
+            storageKey: "uploads/user_1/signed-track.wav",
+            url: "https://temporary.example.com/presigned?X-Amz-Signature=expired"
+          },
+          title: "Signed Track"
+        }
+      ]
+    },
+    tracks: []
+  } as never);
+
+  assert.equal(details.cover.url, "/api/uploads/object/uploads/user_1/release-cover.jpg");
+  assert.equal(
+    details.tracks[0]?.files.audio.download_url,
+    "/api/uploads/object/uploads/user_1/signed-track.wav"
+  );
+});
+test("legacy string file refs remain downloadable", () => {
+  const details = mapAdminReleaseDetails({
+    id: "rel_legacy",
+    userId: "user_1",
+    title: "Legacy Title",
+    status: "MODERATION",
+    priority: false,
+    coverImage: "/api/storage/preview?key=uploads%2Flegacy-cover.png&contentType=image%2Fpng",
+    releaseFile: null,
+    submissionData: {
+      title: "Legacy Title",
+      coverUpload: "/api/storage/preview?key=uploads%2Flegacy-cover.png&contentType=image%2Fpng",
+      tracks: [
+        {
+          fileName: "legacy-track.wav",
+          audioFile: "/api/uploads/object/uploads/user_1/legacy-track.wav",
+          title: "Legacy Track",
+          durationSec: 0
+        }
+      ]
+    },
+    tracks: [
+      {
+        id: "trk_legacy",
+        trackNumber: 1,
+        title: "Legacy Track",
+        durationSec: 0
+      }
+    ]
+  } as never);
+
+  assert.equal(details.cover.url, "/api/uploads/object/uploads/legacy-cover.png");
+  assert.equal(details.cover.download_url, "/api/admin/releases/rel_legacy/files/cover/download");
+  assert.equal(details.tracks[0]?.files.audio.available, true);
+  assert.equal(
+    details.tracks[0]?.files.audio.download_url,
+    "/api/uploads/object/uploads/user_1/legacy-track.wav"
+  );
+});
+
+test("track downloads fall back to submissionData when db tracks are missing", () => {
+  const release = {
+    tracks: [],
+    submissionData: {
+      tracks: [
+        {
+          id: "trk_submission_1",
+          fileName: "new-release.wav",
+          audioFile: {
+            storageKey: "uploads/user_1/new-release.wav",
+            url: "/api/uploads/object/uploads/user_1/new-release.wav"
+          },
+          title: "Submission Track"
+        }
+      ]
+    }
+  };
+
+  const target = resolveAdminReleaseFileTargetFromRelease({
+    fileId: "track-trk_submission_1-audio",
+    release
+  });
+
+  assert.equal(target?.kind, "track-audio");
+  assert.equal(target?.url, "/api/uploads/object/uploads/user_1/new-release.wav");
+});
+
+test("track downloads fall back to submissionData track positions when ids are missing", () => {
+  const release = {
+    tracks: [],
+    submissionData: {
+      tracks: [
+        {
+          title: "Submission Track",
+          audioFile: {
+            storageKey: "uploads/user_1/new-release.wav",
+            url: "/api/uploads/object/uploads/user_1/new-release.wav"
+          }
+        }
+      ]
+    }
+  };
+
+  const target = resolveAdminReleaseFileTargetFromRelease({
+    fileId: "track-1-audio",
+    release
+  });
+
+  assert.equal(target?.kind, "track-audio");
+  assert.equal(target?.url, "/api/uploads/object/uploads/user_1/new-release.wav");
 });

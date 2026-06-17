@@ -23,13 +23,14 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import type { ReleaseDraftDeleteResponse } from "@/lib/api/contracts";
+import { buildStoredFileRouteUrl, normalizeStoredFileKey } from "@/lib/file-resolver";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
 import { getPriorityBadgeDescriptor } from "@/lib/release-status-ui";
 import {
   buildTrackQuickPreviewData,
   type TrackQuickPreviewData
 } from "@/lib/track-quick-preview";
-import { normalizeNextImageSrc } from "@/lib/image-src";
+import { resolveRenderableStoredFileUrl } from "@/lib/s3";
 
 import { PaymentStatusBadge } from "@/components/releases/payment-status-badge";
 import { StatusBadge } from "@/components/releases/status-badge";
@@ -104,15 +105,11 @@ function readFileRef(input: unknown): { url?: string; storageKey?: string } | nu
 function resolveFileRefUrl(input: unknown): string | null {
   const ref = readFileRef(input);
   if (!ref) return null;
-  if (ref.url) return ref.url;
-  if (!ref.storageKey) return null;
-  const encoded = ref.storageKey
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  if (!encoded) return null;
-  return `/api/uploads/object/${encoded}`;
+  const storageKey = normalizeStoredFileKey(ref.storageKey ?? ref.url ?? null);
+  if (storageKey) {
+    return buildStoredFileRouteUrl(storageKey);
+  }
+  return null;
 }
 
 function parsePercentValue(value: string | undefined): number | null {
@@ -215,14 +212,9 @@ function ReleaseRowCardBase({
   const editLocked = release.status === "moderation";
   const showHistoryIcon = release.status !== "draft";
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
-  const safeCoverSrc = React.useMemo(
-    () =>
-      normalizeNextImageSrc(
-        release.coverUrl || release.coverUrlCandidates?.[0] || release.cover || ""
-      ),
-    [release.cover, release.coverUrl, release.coverUrlCandidates]
-  );
-  const activeCoverSrc = !coverBroken && safeCoverSrc ? safeCoverSrc : null;
+  const activeCoverSrc = !coverBroken
+    ? resolveRenderableStoredFileUrl({ url: release.coverUrl || release.cover || "", storageKey: null })
+    : null;
   const title = release.title?.trim() || "Без названия";
   const artist = release.artist?.trim() || "Исполнитель не указан";
   const releaseDate = release.releaseDate?.trim() || "Дата не выбрана";
@@ -309,7 +301,7 @@ function ReleaseRowCardBase({
 
   React.useEffect(() => {
     setCoverBroken(false);
-  }, [release.id, safeCoverSrc]);
+  }, [release.id]);
 
   const handleDeleteDraft = React.useCallback(async () => {
     if (release.status !== "draft") return;
@@ -535,7 +527,9 @@ function ReleaseRowCardBase({
                 alt=""
                 className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 loading="lazy"
-                onError={() => setCoverBroken(true)}
+                onError={() => {
+                  setCoverBroken(true);
+                }}
               />
             ) : (
               <div className="grid h-full w-full place-items-center bg-white/[0.02] px-2 text-center text-[12px] font-medium text-white/45">

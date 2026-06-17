@@ -1,14 +1,14 @@
 import type { verification_status } from "@prisma/client";
 
 import type { CabinetRelease, CabinetReleaseStatus, CabinetTrack } from "@/lib/cabinet-types";
-import { normalizeNextImageSrc } from "@/lib/image-src";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
 import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
-import { buildLegacyImageCandidateUrls, resolveStoredFileUrl } from "@/lib/s3";
+import { getReleaseCoverAsset } from "@/lib/release-cover";
 
 export interface CabinetReleaseSource {
   id: string;
+  userId: string;
   title: string;
   upc: string | null;
   date: Date;
@@ -36,40 +36,6 @@ interface SubmissionTrackLike {
   title?: string;
   durationSec?: number | null;
   isrc?: string;
-}
-
-const COVER_EXTENSIONS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "jpng",
-  "PNG",
-  "JPG",
-  "JPEG",
-  "WEBP",
-  "JPNG"
-] as const;
-
-function getExtensionHint(rawPreview: string): string | null {
-  if (!rawPreview) return null;
-  if (looksLikeOnlyExtension(rawPreview)) {
-    return normalizeExtension(rawPreview);
-  }
-  const withoutQuery = rawPreview.split("?")[0]?.split("#")[0] ?? rawPreview;
-  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex <= 0 || dotIndex >= fileName.length - 1) return null;
-  return normalizeExtension(fileName.slice(dotIndex + 1));
-}
-
-function getCoverExtensionsByPriority(rawPreview: string): string[] {
-  const hint = getExtensionHint(rawPreview);
-  const ordered = [...COVER_EXTENSIONS];
-  if (!hint) return ordered;
-  const exacts = ordered.filter((ext) => ext === hint || ext.toLowerCase() === hint);
-  const rest = ordered.filter((ext) => !exacts.includes(ext));
-  return [...exacts, ...rest];
 }
 
 function isSubmittedToModeration(roles: unknown): boolean {
@@ -181,115 +147,7 @@ function asString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-function resolveCoverFromRoles(roles: unknown): string | null {
-  const root = asRecord(roles);
-  if (!root) return null;
-
-  const submission = asRecord(root.submissionData);
-  const topCoverUpload = asRecord(root.coverUpload);
-  const submissionCoverUpload = submission ? asRecord(submission.coverUpload) : null;
-
-  const candidates: Array<unknown> = [
-    root.cover,
-    topCoverUpload?.url,
-    topCoverUpload?.storageKey,
-    submission?.cover,
-    submissionCoverUpload?.url,
-    submissionCoverUpload?.storageKey
-  ];
-
-  for (const value of candidates) {
-    const candidate = asString(value);
-    if (!candidate) continue;
-    const normalizedFromStorage = normalizeNextImageSrc(
-      resolveStoredFileUrl({ url: candidate, storageKey: null })
-    );
-    const normalizedDirect = normalizeNextImageSrc(candidate);
-    const normalized = normalizedFromStorage ?? normalizedDirect;
-    if (normalized) return normalized;
-  }
-
-  return null;
-}
-
-function looksLikeOnlyExtension(value: string): boolean {
-  return /^[a-z0-9]{2,8}$/iu.test(value.trim().replace(/^\./u, ""));
-}
-
-function normalizeExtension(value: string): string | null {
-  const normalized = value.trim().replace(/^\./u, "").toLowerCase();
-  if (!normalized) return null;
-  return /^[a-z0-9]{2,8}$/u.test(normalized) ? normalized : null;
-}
-
-function resolveReleaseCoverUrls(
-  releaseId: string,
-  preview: string,
-  roles: unknown
-): { url: string; candidates: string[] } {
-  const rawPreview = preview.trim();
-  const previewIsExtensionOnly = rawPreview ? looksLikeOnlyExtension(rawPreview) : false;
-  const previewSeed = previewIsExtensionOnly ? "" : rawPreview;
-  const prioritizedExtensions = getCoverExtensionsByPriority(rawPreview);
-  const legacyStorageKeys: string[] = prioritizedExtensions.flatMap((extension) => [
-    `previews/${releaseId}.${extension}`,
-    `covers/${releaseId}.${extension}`,
-    `uploads/${releaseId}/release-cover.${extension}`,
-    `uploads/${releaseId}.${extension}`,
-    `${releaseId}.${extension}`,
-    `previews/release-cover.${extension}`,
-    `covers/release-cover.${extension}`,
-    `uploads/release-cover.${extension}`,
-    `release-cover.${extension}`
-  ]);
-  if (rawPreview && looksLikeOnlyExtension(rawPreview)) {
-    const ext = normalizeExtension(rawPreview);
-    if (ext) {
-      legacyStorageKeys.push(
-        `previews/${releaseId}.${ext}`,
-        `covers/${releaseId}.${ext}`,
-        `uploads/${releaseId}/release-cover.${ext}`,
-        `uploads/${releaseId}.${ext}`,
-        `${releaseId}.${ext}`,
-        `previews/release-cover.${ext}`,
-        `covers/release-cover.${ext}`,
-        `uploads/release-cover.${ext}`,
-        `release-cover.${ext}`
-      );
-    }
-  }
-
-  const rolesCover = resolveCoverFromRoles(roles);
-  const previewCandidates = buildLegacyImageCandidateUrls({
-    url: previewSeed,
-    storageKey:
-      previewSeed && !previewSeed.startsWith("http") && !previewSeed.startsWith("/")
-        ? previewSeed
-        : null,
-    extraStorageKeys: [...legacyStorageKeys]
-  });
-  const rolesCandidates = rolesCover
-    ? buildLegacyImageCandidateUrls({
-        url: rolesCover,
-        storageKey: rolesCover.startsWith("http") || rolesCover.startsWith("/") ? null : rolesCover
-      })
-    : [];
-
-  const uniqueCandidates = Array.from(
-    new Set(
-      [...previewCandidates, ...rolesCandidates]
-        .map((value) => normalizeNextImageSrc(value))
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-  const resolved = {
-    url: uniqueCandidates[0] ?? "",
-    candidates: uniqueCandidates
-  };
-  return resolved;
-}
-
-export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number: number): CabinetRelease {
+export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number: number): Promise<CabinetRelease> {
   const submissionTracks = parseSubmissionTracks(release.roles);
   const mappedTracks = mapTracks(release.track, submissionTracks);
   const firstDbTrack = release.track.slice().sort((a, b) => a.index - b.index)[0];
@@ -308,12 +166,18 @@ export function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number
     upc: release.upc,
     roles: release.roles
   });
-  const cover = resolveReleaseCoverUrls(release.id, release.preview, release.roles);
+  const cover = await getReleaseCoverAsset({
+    id: release.id,
+    preview: release.preview,
+    roles: release.roles,
+    userId: release.userId,
+    title: release.title
+  });
   return {
     id: release.id,
     number,
-    coverUrl: cover.url,
-    coverUrlCandidates: cover.candidates,
+    coverUrl: cover.url ?? "",
+    coverUrlCandidates: cover.candidateUrls,
     title: release.title || "Без названия",
     artist: release.performer?.trim() || "Не указан",
     upc: resolvedUpc || "",

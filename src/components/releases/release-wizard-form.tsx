@@ -37,11 +37,11 @@ export function ReleaseWizardForm() {
     if (step === 2) {
       if (!state.audioFile) nextErrors.push("Audio file is required.");
       if (!state.coverFile) nextErrors.push("Cover image is required.");
-      if (state.audioFile && !["audio/wav", "audio/x-wav", "audio/flac"].includes(state.audioFile.type)) {
-        nextErrors.push("Audio must be WAV or FLAC.");
+      if (state.audioFile && !["audio/wav", "audio/x-wav", "audio/flac", "audio/mpeg", "audio/mp3", "audio/aac", "audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aiff", "audio/x-aiff"].includes(state.audioFile.type)) {
+        nextErrors.push("Audio must be WAV, FLAC, MP3, AAC, M4A or AIFF.");
       }
-      if (state.coverFile && !state.coverFile.type.startsWith("image/")) {
-        nextErrors.push("Cover must be an image file.");
+      if (state.coverFile && !["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"].includes(state.coverFile.type)) {
+        nextErrors.push("Cover must be JPG, PNG, WEBP or GIF.");
       }
     }
 
@@ -188,6 +188,9 @@ function StepBasicInfo() {
             { label: "Album", value: "album" }
           ]}
         />
+        <p className="text-xs text-muted-foreground">
+          Release type is chosen manually and is not limited by track count.
+        </p>
       </Field>
     </div>
   );
@@ -203,7 +206,7 @@ function StepFiles({ coverPreview }: { coverPreview: string | null }) {
         <Input
           id="audio-file"
           type="file"
-          accept=".wav,.flac,audio/wav,audio/flac"
+          accept=".wav,.flac,.mp3,.aac,.m4a,.aif,.aiff,audio/wav,audio/x-wav,audio/flac,audio/mpeg,audio/mp3,audio/aac,audio/mp4,audio/x-m4a,audio/m4a,audio/aiff,audio/x-aiff"
           onChange={(event) => state.setField("audioFile", event.target.files?.[0])}
         />
         {state.audioFile ? (
@@ -223,7 +226,7 @@ function StepFiles({ coverPreview }: { coverPreview: string | null }) {
         <Input
           id="cover-file"
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
           onChange={(event) => state.setField("coverFile", event.target.files?.[0])}
         />
         {coverPreview ? (

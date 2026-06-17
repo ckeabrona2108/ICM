@@ -1,10 +1,6 @@
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
 import { prisma } from "@/lib/prisma";
-import { resolveFirstReachableImageCandidateFromCandidates } from "@/lib/s3";
-const ENABLE_COVER_RESOLVER_DEBUG = process.env.COVER_RESOLVER_DEBUG === "1";
-const coverResolveCache = new Map<string, { url: string | null; failedReason: string | null }>();
-const MAX_COVER_RESOLVE_CACHE_SIZE = 1000;
 
 const cabinetReleaseSelect = {
   id: true,
@@ -28,7 +24,8 @@ const cabinetReleaseSelect = {
       track: true,
       isrc: true
     }
-  }
+  },
+  userId: true
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -63,52 +60,7 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
     select: cabinetReleaseSelect
   });
 
-  const mapped = releases.map((release, index) => mapReleaseToCabinetRelease(release, index + 1));
-  return Promise.all(
-    mapped.map(async (release, index) => {
-      const source = releases[index];
-      const candidateUrls = Array.from(
-        new Set([release.coverUrl, ...(release.coverUrlCandidates ?? [])].filter(Boolean))
-      );
-      const cacheKey = `${release.id}\n${candidateUrls.join("\n")}`;
-      const cached = coverResolveCache.get(cacheKey);
-      const resolved =
-        cached ?? (await resolveFirstReachableImageCandidateFromCandidates(candidateUrls));
-      if (!cached) {
-        if (coverResolveCache.size >= MAX_COVER_RESOLVE_CACHE_SIZE) {
-          const firstKey = coverResolveCache.keys().next().value;
-          if (firstKey) coverResolveCache.delete(firstKey);
-        }
-        coverResolveCache.set(cacheKey, resolved);
-      }
-      const rawCover = source
-        ? extractRawCover({
-            preview: source.preview,
-            roles: source.roles
-          })
-        : {
-            preview: null,
-            submissionCover: null,
-            submissionCoverUploadUrl: null
-          };
-      if (ENABLE_COVER_RESOLVER_DEBUG) {
-        console.log("[cover-resolver-debug]", {
-          releaseId: release.id,
-          title: release.title ?? "Без названия",
-          rawCover,
-          candidates: candidateUrls,
-          foundUrl: resolved.url,
-          failedReason: resolved.failedReason
-        });
-      }
-      return resolved.url
-        ? {
-            ...release,
-            coverUrl: resolved.url
-          }
-        : release;
-    })
-  );
+  return Promise.all(releases.map((release, index) => mapReleaseToCabinetRelease(release, index + 1)));
 }
 
 export async function getCabinetDraftReleasesByUser(userId: string): Promise<CabinetRelease[]> {
@@ -125,37 +77,5 @@ export async function getCabinetReleaseByIdForUser(userId: string, releaseId: st
     select: cabinetReleaseSelect
   });
   if (!release) return null;
-  const mapped = mapReleaseToCabinetRelease(release, 1);
-  const candidateUrls = Array.from(
-    new Set([mapped.coverUrl, ...(mapped.coverUrlCandidates ?? [])].filter(Boolean))
-  );
-  const cacheKey = `${mapped.id}\n${candidateUrls.join("\n")}`;
-  const cached = coverResolveCache.get(cacheKey);
-  const resolved = cached ?? (await resolveFirstReachableImageCandidateFromCandidates(candidateUrls));
-  if (!cached) {
-    if (coverResolveCache.size >= MAX_COVER_RESOLVE_CACHE_SIZE) {
-      const firstKey = coverResolveCache.keys().next().value;
-      if (firstKey) coverResolveCache.delete(firstKey);
-    }
-    coverResolveCache.set(cacheKey, resolved);
-  }
-  const rawCover = extractRawCover({
-    preview: release.preview,
-    roles: release.roles
-  });
-  if (ENABLE_COVER_RESOLVER_DEBUG) {
-    console.log("[cover-resolver-debug]", {
-      releaseId: mapped.id,
-      title: mapped.title ?? "Без названия",
-      rawCover,
-      candidates: candidateUrls,
-      foundUrl: resolved.url,
-      failedReason: resolved.failedReason
-    });
-  }
-  if (!resolved.url) return mapped;
-  return {
-    ...mapped,
-    coverUrl: resolved.url
-  };
+  return mapReleaseToCabinetRelease(release, 1);
 }

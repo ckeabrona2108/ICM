@@ -1,6 +1,7 @@
+import { ALLOWED_S3_MEDIA_PREFIXES, resolveRenderableStoredFileUrl } from "@/lib/s3";
+
 const IMAGE_PLACEHOLDER_RE = /^(?:image\/)?(?:jpe?g|png|webp|gif)$/iu;
 const IMAGE_FILE_RE = /\.(?:jpe?g|png|jpng|webp|gif|avif)(?:[?#].*)?$/iu;
-const LEGACY_IMAGE_PREFIXES = ["", "previews/", "covers/", "uploads/"] as const;
 const LEGACY_IMAGE_EXTENSIONS = [
   "jpg",
   "jpeg",
@@ -13,6 +14,7 @@ const LEGACY_IMAGE_EXTENSIONS = [
   "WEBP",
   "JPNG"
 ] as const;
+const STORAGE_MEDIA_URL_RE = /^https?:\/\/s3\.icecreammusic\.net\//iu;
 
 function toLocalObjectPath(value: string): string | null {
   const raw = value.trim();
@@ -115,7 +117,7 @@ function buildLegacyPathCandidatesFromValue(value: string): string[] {
   const fileNames = Array.from(extCandidates).map((ext) => `${baseName}.${ext}`);
   const candidateKeys: string[] = [];
   for (const fileName of fileNames) {
-    for (const prefix of LEGACY_IMAGE_PREFIXES) {
+    for (const prefix of ALLOWED_S3_MEDIA_PREFIXES) {
       candidateKeys.push(`${prefix}${fileName}`);
     }
   }
@@ -142,7 +144,18 @@ export function buildCoverImageSrcCandidates(
     src.startsWith("blob:") ||
     src.startsWith("/")
   ) {
+    const normalized = resolveRenderableStoredFileUrl({ url: src, storageKey: null });
+    if (normalized) {
+      pushUnique(candidates, seen, normalized);
+      return candidates;
+    }
+
+    if (STORAGE_MEDIA_URL_RE.test(src)) {
+      return candidates;
+    }
+
     pushUnique(candidates, seen, src);
+    return candidates;
   }
 
   if (

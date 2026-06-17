@@ -18,7 +18,10 @@ import {
   XCircle
 } from "lucide-react";
 
+import { ReleaseCoverUploadButton } from "@/components/admin/release-cover-upload-button";
+import { ReleaseAudioUploadButton } from "@/components/admin/release-audio-upload-button";
 import { StatusBadge } from "@/components/releases/status-badge";
+import { resolveRenderableStoredFileUrl } from "@/lib/s3";
 
 interface AdminReleaseDetailsResponse {
   id: string;
@@ -193,18 +196,18 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [reason, setReason] = React.useState("");
   const [platformsOpen, setPlatformsOpen] = React.useState(false);
   const [lyricsModal, setLyricsModal] = React.useState<{ title: string; lyrics: string } | null>(null);
-  const primaryCoverUrl = React.useMemo(() => {
-    const candidates = [details.cover.download_url, details.cover.url, ...(details.cover.candidate_urls ?? [])]
-      .map((item) => (typeof item === "string" ? item.trim() : ""))
-      .filter(Boolean);
-    return candidates[0] ?? null;
-  }, [details.cover.candidate_urls, details.cover.download_url, details.cover.url]);
+  const [coverOverrideUrl, setCoverOverrideUrl] = React.useState<string | null>(null);
+  const coverSourceUrl = coverOverrideUrl ?? details.cover.url;
+  const coverDownloadUrl = details.cover.download_url;
   const [coverBroken, setCoverBroken] = React.useState(false);
-  const activeCoverUrl = coverBroken ? null : primaryCoverUrl;
+  const activeCoverUrl = coverBroken
+    ? null
+    : resolveRenderableStoredFileUrl({ url: coverSourceUrl, storageKey: null });
 
   React.useEffect(() => {
     setCoverBroken(false);
-  }, [details.id, primaryCoverUrl]);
+    setCoverOverrideUrl(null);
+  }, [details.id]);
 
   const approve = async () => {
     const normalized = upc.trim();
@@ -288,7 +291,9 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                   src={activeCoverUrl}
                   alt={details.release.title}
                   className="h-full w-full object-cover"
-                  onError={() => setCoverBroken(true)}
+                  onError={() => {
+                    setCoverBroken(true);
+                  }}
                 />
               ) : (
                 <div className="grid h-full w-full place-items-center text-[12px] text-white/50">
@@ -296,10 +301,19 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 </div>
               )}
             </div>
+            <ReleaseCoverUploadButton
+              releaseId={details.id}
+              label={coverSourceUrl ? "Заменить обложку" : "Загрузить обложку"}
+              className="mt-4"
+              onUploaded={({ previewUrl }) => {
+                setCoverOverrideUrl(previewUrl);
+                setCoverBroken(false);
+              }}
+            />
             {activeCoverUrl ? (
               <a
-                href={activeCoverUrl}
-                download={guessDownloadName("cover.jpg", activeCoverUrl.split("/").pop())}
+                href={coverDownloadUrl ?? ""}
+                download={guessDownloadName("cover.jpg", (coverDownloadUrl ?? activeCoverUrl ?? "").split("/").pop())}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-4 inline-flex h-10 w-full items-center justify-center gap-1 rounded-xl bg-[#7b3df5] px-3 text-[13px] font-semibold text-white transition hover:bg-[#8f5bf7]"
@@ -307,7 +321,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 <Download className="h-4 w-4" />
                 Скачать обложку
               </a>
-            ) : primaryCoverUrl ? (
+            ) : coverSourceUrl ? (
               <button
                 type="button"
                 disabled
@@ -482,6 +496,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         <h2 className="text-[20px] font-semibold text-white">Список треков</h2>
         {details.tracks.map((track, index) => {
           const hasAudioDownload = Boolean(track.files.audio.download_url);
+          const audioUploadLabel = track.files.audio.available ? "Заменить аудио" : "Загрузить аудио";
           const lyricsText = track.raw_commentary.lyrics.trim();
           const hasLyricsText = lyricsText.length > 0;
           const downloadableFiles = fileActions([
@@ -563,6 +578,15 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                       </div>
                     </details>
                   ) : null}
+                  <ReleaseAudioUploadButton
+                    releaseId={details.id}
+                    trackId={track.id}
+                    label={audioUploadLabel}
+                    className="mt-1"
+                    onUploaded={() => {
+                      router.refresh();
+                    }}
+                  />
                 </div>
               </div>
               {!hasAudioDownload ? (

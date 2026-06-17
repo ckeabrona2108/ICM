@@ -98,7 +98,10 @@ function resolveUserAvatarUrl(userId: string, avatar: string | null): string | n
     return resolveStoredFileUrl({ storageKey: `avatars/${userId}.${extension}` });
   }
 
-  return resolveStoredFileUrl({ url: rawAvatar, storageKey: null }) ?? rawAvatar;
+  const resolved = resolveStoredFileUrl({ url: rawAvatar, storageKey: null });
+  if (resolved) return resolved;
+  if (/^https?:\/\/s3\.icecreammusic\.net\//iu.test(rawAvatar)) return null;
+  return rawAvatar;
 }
 
 export async function listAdminUsers(

@@ -226,7 +226,18 @@ export function groupReleaseValidationIssuesByStep(
   return grouped;
 }
 
-const coverMimeTypes = new Set(["image/jpeg", "image/jpg", "image/png"]);
+const coverMimeTypes = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif"
+]);
+const trackAudioMimeTypes = new Set([
+  "audio/wav",
+  "audio/x-wav",
+  "audio/flac"
+]);
 const coverMinSidePx = 1400;
 const coverMaxSidePx = 6000;
 const coverMaxBytes = 20 * 1024 * 1024;
@@ -394,7 +405,7 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
           issues,
           "invalid",
           "cover",
-          "Обложка должна быть в формате JPG или PNG."
+          "Обложка должна быть в формате JPG, PNG, WEBP или GIF."
         );
       }
 
@@ -864,6 +875,27 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
       }
     }
 
+    if (track.audioFile?.contentType && !trackAudioMimeTypes.has(track.audioFile.contentType.toLowerCase())) {
+      pushIssue(
+        issues,
+        "invalid",
+        `${prefix}.audioFile`,
+        `Аудиофайл трека №${index + 1} должен быть WAV, FLAC, MP3, AAC, M4A или AIFF.`
+      );
+    }
+
+    if (track.audioFile?.fileName) {
+      const normalizedFileName = track.audioFile.fileName.trim().toLowerCase();
+      if (normalizedFileName && !/\.(wav|flac)$/u.test(normalizedFileName)) {
+        pushIssue(
+          issues,
+          "invalid",
+          `${prefix}.audioFile`,
+          `Аудиофайл трека №${index + 1} должен быть WAV, FLAC, MP3, AAC, M4A или AIFF.`
+        );
+      }
+    }
+
     if (track.hasAudio !== false && (!track.durationSec || track.durationSec <= 0)) {
       pushIssue(
         issues,
@@ -879,14 +911,6 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
   const totalDuration = audioTracks.reduce((sum, track) => sum + (track.durationSec ?? 0), 0);
 
   if (releaseType === "single" && audioTrackCount > 0) {
-    if (audioTrackCount < 1 || audioTrackCount > 3) {
-      pushIssue(
-        issues,
-        "invalid",
-        "type",
-        "Single должен содержать от 1 до 3 треков."
-      );
-    }
     if (audioTracks.some((track) => (track.durationSec ?? 0) > 600)) {
       pushIssue(
         issues,
@@ -897,38 +921,9 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
     }
   }
 
-  if (releaseType === "ep" && audioTrackCount > 0) {
-    const hasLongTrack = audioTracks.some((track) => (track.durationSec ?? 0) >= 600);
-    const variantA =
-      audioTrackCount >= 1 &&
-      audioTrackCount <= 3 &&
-      hasLongTrack &&
-      totalDuration <= 1800;
-    const variantB =
-      audioTrackCount >= 4 &&
-      audioTrackCount <= 6 &&
-      totalDuration <= 1800;
-
-    if (!variantA && !variantB) {
-      pushIssue(
-        issues,
-        "invalid",
-        "type",
-        "EP должен соответствовать правилам: 1–3 трека (хотя бы один ≥10 мин) или 4–6 треков, общая длительность до 30 минут."
-      );
-    }
-  }
-
-  if (releaseType === "album" && audioTrackCount > 0) {
-    if (audioTrackCount < 7 || totalDuration <= 1800) {
-      pushIssue(
-        issues,
-        "invalid",
-        "type",
-        "Album должен содержать 7+ треков и быть длиннее 30 минут."
-      );
-    }
-  }
+  void releaseType;
+  void audioTrackCount;
+  void totalDuration;
 
   if (data.releaseKind === "single_maxi") {
     if (data.tracks.length < 2 || data.tracks.length > 3) {
@@ -991,6 +986,16 @@ export function canEditRelease(params: {
     return {
       allowed: false,
       message: "Архивный релиз нельзя редактировать."
+    };
+  }
+
+  if (status === "moderation") {
+    return {
+      allowed: false,
+      requiresCancellation: !params.moderationStarted,
+      message: params.moderationStarted
+        ? "Редактирование недоступно: релиз уже на проверке у модератора."
+        : "Сначала отмените модерацию, чтобы редактировать релиз."
     };
   }
 

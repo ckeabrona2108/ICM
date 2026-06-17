@@ -155,8 +155,13 @@ function inferContentTypeFromName(name: string): string {
   if (normalized.endsWith(".wav")) return "audio/wav";
   if (normalized.endsWith(".flac")) return "audio/flac";
   if (normalized.endsWith(".mp3")) return "audio/mpeg";
+  if (normalized.endsWith(".aac")) return "audio/aac";
+  if (normalized.endsWith(".m4a")) return "audio/mp4";
+  if (normalized.endsWith(".aif") || normalized.endsWith(".aiff")) return "audio/aiff";
   if (normalized.endsWith(".png")) return "image/png";
   if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+  if (normalized.endsWith(".webp")) return "image/webp";
+  if (normalized.endsWith(".gif")) return "image/gif";
   return "application/octet-stream";
 }
 
@@ -215,11 +220,12 @@ async function uploadBlobToStorage(params: {
   const targetResponse = await fetch("/api/uploads/presigned", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      fileName: sanitizeFileName(params.fileName),
-      contentType: params.contentType
-    })
-  });
+      body: JSON.stringify({
+        fileName: sanitizeFileName(params.fileName),
+        contentType: params.contentType,
+        kind: "cover"
+      })
+    });
 
   const target = (await targetResponse.json().catch(() => null)) as
     | PresignedUploadResponse
@@ -250,10 +256,7 @@ async function uploadBlobToStorage(params: {
     throw new Error("Ошибка загрузки файла в хранилище.");
   }
 
-  const readUrl =
-    (typeof target.publicUrl === "string" && target.publicUrl.trim()
-      ? target.publicUrl.trim()
-      : buildObjectReadUrlFromKey(target.key));
+  const readUrl = buildObjectReadUrlFromKey(target.key);
   const cleanUrl = toAbsoluteStorageUrl(readUrl);
   console.log("[cover-upload-success]", {
     bucket: target.bucket ?? null,

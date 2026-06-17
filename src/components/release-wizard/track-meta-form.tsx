@@ -372,7 +372,7 @@ export function TrackMetaForm({
                   />
                   <TrackAssetUploadCard
                     title="Добавление рингтона"
-                    hint="Форматы: .wav, .flac, .mp3"
+                    hint="Форматы: .wav, .flac"
                     kind="ringtone"
                     fileName={meta.ringtoneFile?.fileName ?? null}
                     uploading={uploadingAssetKind === "ringtone"}
@@ -418,7 +418,7 @@ function TrackAssetUploadCard({
     kind === "syncedLyrics"
       ? ".ttml"
       : kind === "ringtone"
-        ? ".wav,.flac,.mp3,audio/wav,audio/flac,audio/mpeg"
+        ? ".wav,.flac,audio/wav,audio/x-wav,audio/flac"
         : ".mov,.mp4,.avi,video/quicktime,video/mp4,video/x-msvideo";
 
   return (

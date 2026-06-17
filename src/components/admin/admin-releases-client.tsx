@@ -7,7 +7,8 @@ import { Check, Loader2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/releases/status-badge";
 import type { AdminReleaseDetails } from "@/lib/admin-data";
-import { normalizeNextImageSrc } from "@/lib/image-src";
+import { resolveRenderableStoredFileUrl } from "@/lib/s3";
+import { ReleaseCoverUploadButton } from "@/components/admin/release-cover-upload-button";
 
 type AdminReleaseTab =
   | "moderation"
@@ -37,7 +38,11 @@ export function AdminReleasesClient({
   const [error, setError] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
-  const [coverBrokenById, setCoverBrokenById] = React.useState<Record<string, boolean>>({});
+  const [coverBrokenById, setCoverBrokenById] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    setCoverBrokenById({});
+  }, [releases]);
 
   const [rejectModal, setRejectModal] = React.useState<{
     open: boolean;
@@ -206,6 +211,23 @@ export function AdminReleasesClient({
     }
   }
 
+  const handleCoverUploaded = React.useCallback(
+    (releaseId: string, payload: { previewUrl: string }) => {
+      setReleases((prev) =>
+        prev.map((release) =>
+          release.id === releaseId
+            ? {
+                ...release,
+                coverUrl: payload.previewUrl
+              }
+            : release
+        )
+      );
+      setToast("Обложка обновлена.");
+    },
+    []
+  );
+
   return (
     <div className="pb-10">
       <h1 className="text-[24px] font-semibold tracking-tight text-white sm:text-[26px]">Релизы</h1>
@@ -254,11 +276,19 @@ export function AdminReleasesClient({
             );
             const canReject = release.status === "moderation";
             const isBusy = busyId === release.id;
-            const safeCoverUrl = normalizeNextImageSrc(
-              release.coverUrl || release.coverUrlCandidates?.[0] || ""
-            );
-            const isCoverBroken = Boolean(coverBrokenById[release.id]);
-            const activeCoverUrl = !isCoverBroken && safeCoverUrl ? safeCoverUrl : null;
+            const safeCoverUrl = resolveRenderableStoredFileUrl({ url: release.coverUrl || "", storageKey: null });
+            const failedCoverUrl = coverBrokenById[release.id] ?? null;
+            const activeCoverUrl = safeCoverUrl && failedCoverUrl !== safeCoverUrl ? safeCoverUrl : null;
+
+            if (process.env.NODE_ENV !== "production") {
+              console.log("[admin-release-card:image]", {
+                releaseId: release.id,
+                imageSrc: activeCoverUrl,
+                rawCoverUrl: release.coverUrl,
+                safeCoverUrl,
+                failedCoverUrl
+              });
+            }
 
             return (
               <article
@@ -273,12 +303,12 @@ export function AdminReleasesClient({
                         alt={release.title}
                         className="h-full w-full object-cover"
                         loading="lazy"
-                        onError={() =>
+                        onError={() => {
                           setCoverBrokenById((prev) => ({
                             ...prev,
-                            [release.id]: true
-                          }))
-                        }
+                            [release.id]: safeCoverUrl ?? release.coverUrl ?? ""
+                          }));
+                        }}
                       />
                     ) : (
                       <div className="grid h-full w-full place-items-center bg-white/[0.03] text-[11px] text-white/45">
@@ -385,6 +415,12 @@ export function AdminReleasesClient({
                       <Trash2 className="h-4 w-4" />
                       Удалить
                     </button>
+                    <ReleaseCoverUploadButton
+                      releaseId={release.id}
+                      label={release.coverUrl ? "Заменить обложку" : "Загрузить обложку"}
+                      onUploaded={(payload) => handleCoverUploaded(release.id, payload)}
+                      className="mt-1"
+                    />
                   </div>
                 </div>
               </article>

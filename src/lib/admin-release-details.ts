@@ -1,10 +1,14 @@
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import {
-  buildLegacyImageCandidateUrls,
-  resolveFirstReachableImageUrlFromCandidates,
-  resolveStoredFileUrl
+  ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES,
+  resolveRenderableStoredFileUrl
 } from "@/lib/s3";
+import {
+  buildReleaseCoverCandidateUrls,
+  getReleaseCoverAsset
+} from "@/lib/release-cover";
+import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
 
 interface AdminReleaseDetailsResponse {
   id: string;
@@ -16,6 +20,7 @@ interface AdminReleaseDetailsResponse {
   priority: boolean;
   cover: {
     url: string;
+    storage_key?: string | null;
     download_url: string | null;
     candidate_urls: string[];
   };
@@ -129,6 +134,10 @@ interface FileTarget {
   fileName: string | null;
 }
 
+function buildAdminReleaseFileDownloadUrl(releaseId: string, fileId: string): string {
+  return `/api/admin/releases/${releaseId}/files/${encodeURIComponent(fileId)}/download`;
+}
+
 interface PersonGroups {
   performers: string[];
   feats: string[];
@@ -144,11 +153,13 @@ const COVER_EXTENSIONS = [
   "jpg",
   "jpeg",
   "webp",
+  "gif",
   "jpng",
   "PNG",
   "JPG",
   "JPEG",
   "WEBP",
+  "GIF",
   "JPNG"
 ] as const;
 
@@ -235,6 +246,40 @@ function fileNameFromUrl(value: string | null): string | null {
   }
 }
 
+async function resolveAdminDetailCoverAsset(input: {
+  id: string;
+  preview: string | null;
+  submissionData: unknown;
+  roles: unknown;
+  coverImage: unknown;
+  userId: string | null;
+  title: string | null;
+}) {
+  const primary = await getReleaseCoverAsset({
+    id: input.id,
+    preview: input.preview,
+    submissionData: input.submissionData,
+    roles: input.roles,
+    coverImage: input.coverImage,
+    userId: input.userId,
+    title: input.title
+  });
+
+  if (primary.url || primary.storageKey || !input.preview) {
+    return primary;
+  }
+
+  return getReleaseCoverAsset({
+    id: input.id,
+    preview: input.preview,
+    submissionData: input.submissionData,
+    roles: {},
+    coverImage: input.coverImage,
+    userId: input.userId,
+    title: input.title
+  });
+}
+
 function normalizeStorageKeyCandidate(value: string | null): string | null {
   if (!value) return null;
   const normalized = value.trim();
@@ -260,6 +305,9 @@ function normalizeStorageKeyCandidate(value: string | null): string | null {
 }
 
 function pickStoredFileRef(input: unknown): { storageKey: string | null; url: string | null; fileName: string | null } {
+  if (typeof input === "string") {
+    return pickLegacyFileRef(input);
+  }
   const source = asRecord(input);
   if (!source) return { storageKey: null, url: null, fileName: null };
 
@@ -272,7 +320,9 @@ function pickStoredFileRef(input: unknown): { storageKey: string | null; url: st
   const rawFileName = asString(source.fileName) ?? asString(source.filename);
 
   const storageKey = normalizeStorageKeyCandidate(rawStorageKey) ?? normalizeStorageKeyCandidate(rawUrl);
-  const resolvedUrl = resolveStoredFileUrl({ url: rawUrl, storageKey });
+  const resolvedUrl = storageKey
+    ? resolveRenderableStoredFileUrl({ storageKey })
+    : resolveRenderableStoredFileUrl({ url: rawUrl, storageKey: null });
   const fileName = rawFileName ?? fileNameFromUrl(rawUrl) ?? fileNameFromUrl(resolvedUrl);
 
   return { storageKey, url: resolvedUrl, fileName };
@@ -284,7 +334,7 @@ function pickLegacyFileRef(value: unknown): { storageKey: string | null; url: st
     return { storageKey: null, url: null, fileName: null };
   }
   if (asValue.startsWith("http://") || asValue.startsWith("https://") || asValue.startsWith("/")) {
-    const resolved = resolveStoredFileUrl({ url: asValue, storageKey: null });
+    const resolved = resolveRenderableStoredFileUrl({ url: asValue, storageKey: null });
     return {
       storageKey: null,
       url: resolved,
@@ -299,7 +349,7 @@ function pickLegacyFileRef(value: unknown): { storageKey: string | null; url: st
 
   return {
     storageKey,
-    url: resolveStoredFileUrl({ storageKey }),
+    url: resolveRenderableStoredFileUrl({ storageKey }),
     fileName: fileNameFromUrl(storageKey)
   };
 }
@@ -309,11 +359,14 @@ function toFileItem(input: {
   url?: string | null;
   fileName?: string | null;
   fallbackName?: string | null;
+  downloadUrl?: string | null;
 }): FileItem {
-  const downloadUrl = resolveStoredFileUrl({
-    url: input.url ?? null,
-    storageKey: input.storageKey ?? null
-  });
+  const downloadUrl =
+    input.downloadUrl ??
+    resolveRenderableStoredFileUrl({
+      url: input.url ?? null,
+      storageKey: input.storageKey ?? null
+    });
   const fileName =
     input.fileName ??
     input.fallbackName ??
@@ -405,7 +458,6 @@ function mapRoleToBucket(roleRaw: string): keyof PersonGroups | null {
     compact === "textauthor" ||
     compact === "textauthors" ||
     compact === "authorwords" ||
-    compact === "lyrics" ||
     compact === "lyricsauthor" ||
     compact === "lyricsauthors" ||
     compact === "songwriter" ||
@@ -414,6 +466,33 @@ function mapRoleToBucket(roleRaw: string): keyof PersonGroups | null {
   if (isLyricsAuthor) return "lyricsAuthors";
 
   return null;
+}
+
+function looksLikeLyricsText(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > 200) return true;
+  if (/[\r\n]/u.test(trimmed)) return true;
+  if (/[.!?…]{2,}/u.test(trimmed)) return true;
+  const words = trimmed.split(/\s+/u).filter(Boolean);
+  if (words.length >= 12) return true;
+  if (/[а-яёa-z]{4,}\s+[а-яёa-z]{4,}\s+[а-яёa-z]{4,}\s+[а-яёa-z]{4,}/iu.test(trimmed)) return true;
+  return false;
+}
+
+function looksLikePersonName(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (looksLikeLyricsText(trimmed)) return false;
+  if (trimmed.length > 120) return false;
+  if (/[0-9@#$%^&*_=+<>[\]{}\\/]/u.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/u).filter(Boolean);
+  if (words.length === 0 || words.length > 6) return false;
+  return words.every((word) => /^[\p{L}'’-]{2,}$/u.test(word));
+}
+
+function onlyPersonNames(values: string[]): string[] {
+  return unique(values.filter((value) => looksLikePersonName(value)));
 }
 
 function mergeRoleNamesFromValue(
@@ -573,7 +652,7 @@ function mergePersonGroups(
     coPerformers: unique([...first.coPerformers, ...second.coPerformers]),
     producers: unique([...first.producers, ...second.producers]),
     musicAuthors: unique([...first.musicAuthors, ...second.musicAuthors]),
-    lyricsAuthors: unique([...first.lyricsAuthors, ...second.lyricsAuthors])
+    lyricsAuthors: onlyPersonNames([...first.lyricsAuthors, ...second.lyricsAuthors])
   };
 }
 
@@ -610,86 +689,6 @@ function parseSubmissionData(release: Record<string, unknown>): Record<string, u
   return asRecord(roles?.submissionData);
 }
 
-function resolveCoverItem(release: Record<string, unknown>, submissionData: Record<string, unknown> | null) {
-  const coverImageRef = pickStoredFileRef(release.coverImage);
-  const coverUploadRef = pickStoredFileRef(submissionData?.coverUpload);
-  const legacyCoverUrl = asString(submissionData?.cover);
-  const preview = asString(release.preview);
-  const previewSeed = preview && !looksLikeOnlyExtension(preview) ? preview : null;
-  const releaseId = asString(release.id);
-  const previewFileName =
-    preview && !preview.includes("/") && !looksLikeOnlyExtension(preview) ? preview.trim() : null;
-  const previewRef = previewFileName
-    ? { storageKey: null, url: null, fileName: null }
-    : pickLegacyFileRef(preview);
-  const previewExt = normalizeExtension(preview);
-  const legacyPreviewBucketRef =
-    releaseId && previewExt
-      ? {
-          storageKey: `previews/${releaseId}.${previewExt}`,
-          url: resolveStoredFileUrl({ storageKey: `previews/${releaseId}.${previewExt}` }),
-          fileName: `${releaseId}.${previewExt}`
-        }
-      : { storageKey: null, url: null, fileName: null };
-  const legacyPreviewFileRef = previewFileName
-    ? {
-        storageKey: `previews/${previewFileName}`,
-        url: resolveStoredFileUrl({ storageKey: `previews/${previewFileName}` }),
-        fileName: previewFileName
-      }
-    : { storageKey: null, url: null, fileName: null };
-  const fallbackUrl = resolveStoredFileUrl({ url: legacyCoverUrl, storageKey: null });
-  const prioritizedExtensions = getCoverExtensionsByPriority(preview);
-  const legacyStorageKeys =
-    releaseId == null
-      ? []
-      : prioritizedExtensions.flatMap((extension) => [
-          `previews/${releaseId}.${extension}`,
-    `covers/${releaseId}.${extension}`,
-    `uploads/${releaseId}/release-cover.${extension}`,
-    `uploads/${releaseId}.${extension}`,
-    `${releaseId}.${extension}`,
-    `previews/release-cover.${extension}`,
-    `covers/release-cover.${extension}`,
-    `uploads/release-cover.${extension}`,
-    `release-cover.${extension}`
-        ]);
-
-  const candidateUrls = Array.from(
-    new Set(
-      [
-        ...buildLegacyImageCandidateUrls({
-          url: coverUploadRef.url,
-          storageKey: coverUploadRef.storageKey
-        }),
-        ...buildLegacyImageCandidateUrls({
-          url: fallbackUrl,
-          storageKey: null
-        }),
-        ...buildLegacyImageCandidateUrls({
-          url: coverImageRef.url,
-          storageKey: coverImageRef.storageKey
-        }),
-        ...buildLegacyImageCandidateUrls({
-          url: previewRef.url ?? previewSeed ?? null,
-          storageKey: previewSeed ?? null,
-          extraStorageKeys: [
-            legacyPreviewBucketRef.storageKey ?? "",
-            legacyPreviewFileRef.storageKey ?? "",
-            ...legacyStorageKeys
-          ].filter(Boolean)
-        })
-      ].filter(Boolean)
-    )
-  );
-  const coverUrl = candidateUrls[0] ?? "";
-  return {
-    url: coverUrl,
-    download_url: coverUrl || null,
-    candidate_urls: candidateUrls
-  };
-}
-
 function resolveReleaseStatus(raw: unknown): string {
   const normalized = (asString(raw) ?? "").toLowerCase();
   if (normalized === "moderating" || normalized === "moderation") return "moderation";
@@ -700,9 +699,11 @@ function resolveReleaseStatus(raw: unknown): string {
   return normalized || "moderation";
 }
 
-function getTrackFileRefByType(trackData: Record<string, unknown>, type: "audio" | "text" | "karaoke" | "video_shot" | "video_clip") {
+function getTrackFileByType(trackData: Record<string, unknown>, type: "audio" | "text" | "karaoke" | "video_shot" | "video_clip") {
   if (type === "audio") {
-    const fromUploaded = pickStoredFileRef(trackData.audioFile);
+    const fromUploaded = pickStoredFileRef(
+      trackData.audioFile ?? trackData.audioUpload ?? trackData.audioUrl ?? trackData.audio
+    );
     if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
 
     const legacyDb = pickLegacyFileRef(asString(trackData.track));
@@ -714,7 +715,7 @@ function getTrackFileRefByType(trackData: Record<string, unknown>, type: "audio"
       const legacyKey = `tracks/${trackId}.${ext}`;
       return {
         storageKey: null,
-        url: resolveStoredFileUrl({ storageKey: legacyKey }),
+        url: resolveRenderableStoredFileUrl({ storageKey: legacyKey }),
         fileName: `${trackId}.${ext}`
       };
     }
@@ -748,12 +749,47 @@ function getTrackFileRefByType(trackData: Record<string, unknown>, type: "audio"
   if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
   return pickLegacyFileRef(asString(trackData.video));
 }
+function buildTrackAudioCandidateUrls(trackData: Record<string, unknown>): string[] {
+  const candidates = new Set<string>();
+  const addCandidate = (value: unknown) => {
+    if (typeof value === "string") {
+      const resolved = resolveRenderableStoredFileUrl({ url: value, storageKey: null });
+      if (resolved) candidates.add(resolved);
+      return;
+    }
+    const ref = pickStoredFileRef(value);
+    if (ref.url) candidates.add(ref.url);
+    if (ref.storageKey) candidates.add(resolveRenderableStoredFileUrl({ storageKey: ref.storageKey }) ?? ref.storageKey);
+  };
+
+  addCandidate(trackData.audioFile);
+  addCandidate(trackData.audioUpload);
+  addCandidate(trackData.audioUrl);
+  addCandidate(trackData.audio);
+
+  const trackId = asString(trackData.id);
+  const extHint = normalizeExtension(asString(trackData.track));
+  const fileName = asString(trackData.fileName);
+  const fileNames = new Set<string>();
+  if (fileName) fileNames.add(fileName);
+  if (trackId && extHint) fileNames.add(`${trackId}.${extHint}`);
+
+  const prefixes = [...ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES];
+  for (const name of fileNames) {
+    candidates.add(name);
+    for (const prefix of prefixes) {
+      candidates.add(`${prefix}${name}`);
+    }
+  }
+
+  return Array.from(candidates).filter(Boolean);
+}
 
 export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsResponse {
   const release = (releaseInput ?? {}) as Record<string, unknown>;
   const submissionData = parseSubmissionData(release);
   const submissionTracks = asArray(submissionData?.tracks);
-  const dbTracks = asArray(release.tracks ?? release.track);
+  const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
   const trackCount = Math.max(dbTracks.length, submissionTracks.length);
 
   const releasePersons = mergePersonGroups(
@@ -763,6 +799,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
       parsePersons(submissionData?.roles)
     )
   );
+  const releaseId = asString(release.id) ?? "";
   const releasePerformer = asString(release.performer) ?? "";
   const releaseFeat = asString(release.feat) ?? "";
   const releaseRemixer = asString(release.remixer) ?? "";
@@ -774,6 +811,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
     releaseOwnerName,
     explicitPerformers
   );
+  const sanitizedReleaseLyricsAuthors = onlyPersonNames(releasePersons.lyricsAuthors);
 
   const tracks = Array.from({ length: trackCount }).map((_, index) => {
     const dbTrack = asRecord(dbTracks[index]) ?? {};
@@ -782,18 +820,36 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
       parseTrackPersons(submissionTrack),
       parseTrackPersons(dbTrack)
     );
+    const trackId =
+      asString(dbTrack.id) ??
+      asString(submissionTrack.id) ??
+      `track-${index + 1}`;
 
-    const audioRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "audio");
-    const textRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "text");
-    const karaokeRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "karaoke");
-    const videoShotRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "video_shot");
-    const videoClipRef = getTrackFileRefByType({ ...dbTrack, ...submissionTrack }, "video_clip");
+    const audioRef = getTrackFileByType({ ...dbTrack, ...submissionTrack }, "audio");
+    const textRef = getTrackFileByType({ ...dbTrack, ...submissionTrack }, "text");
+    const karaokeRef = getTrackFileByType({ ...dbTrack, ...submissionTrack }, "karaoke");
+    const videoShotRef = getTrackFileByType({ ...dbTrack, ...submissionTrack }, "video_shot");
+    const videoClipRef = getTrackFileByType({ ...dbTrack, ...submissionTrack }, "video_clip");
+    const audioDownloadUrl = null;
+    const textDownloadUrl =
+      textRef.url || textRef.storageKey
+        ? buildAdminReleaseFileDownloadUrl(releaseId, `track-${trackId}-text`)
+        : null;
+    const karaokeDownloadUrl =
+      karaokeRef.url || karaokeRef.storageKey
+        ? buildAdminReleaseFileDownloadUrl(releaseId, `track-${trackId}-karaoke`)
+        : null;
+    const videoShotDownloadUrl =
+      videoShotRef.url || videoShotRef.storageKey
+        ? buildAdminReleaseFileDownloadUrl(releaseId, `track-${trackId}-video_shot`)
+        : null;
+    const videoClipDownloadUrl =
+      videoClipRef.url || videoClipRef.storageKey
+        ? buildAdminReleaseFileDownloadUrl(releaseId, `track-${trackId}-video_clip`)
+        : null;
 
     return {
-      id:
-        asString(dbTrack.id) ??
-        asString(submissionTrack.id) ??
-        `track-${index + 1}`,
+      id: trackId,
       title: asString(submissionTrack.title) ?? asString(dbTrack.title) ?? "",
       subtitle: asString(submissionTrack.subtitle) ?? asString(dbTrack.subtitle) ?? "",
       identification: {
@@ -811,7 +867,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
         coPerformers: unique(persons.coPerformers),
         producers: unique(persons.producers),
         musicAuthors: unique(persons.musicAuthors),
-        lyricsAuthors: unique(persons.lyricsAuthors)
+        lyricsAuthors: onlyPersonNames(persons.lyricsAuthors)
       },
       rights: {
         copyright_pct: asString(submissionTrack.copyrightPct) ?? asString(dbTrack.author_rights) ?? null,
@@ -837,19 +893,52 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
           ? submissionTrack.durationSec
           : toSeconds(asString(dbTrack.track)),
       files: {
-        audio: toFileItem({ ...audioRef, fallbackName: asString(submissionTrack.fileName) }),
-        text: toFileItem(textRef),
-        karaoke: toFileItem(karaokeRef),
-        video_shot: toFileItem(videoShotRef),
-        video_clip: toFileItem(videoClipRef)
+        audio: toFileItem({
+          ...audioRef,
+          fallbackName: asString(submissionTrack.fileName),
+          downloadUrl: audioDownloadUrl
+        }),
+        text: toFileItem({
+          ...textRef,
+          downloadUrl: textDownloadUrl
+        }),
+        karaoke: toFileItem({
+          ...karaokeRef,
+          downloadUrl: karaokeDownloadUrl
+        }),
+        video_shot: toFileItem({
+          ...videoShotRef,
+          downloadUrl: videoShotDownloadUrl
+        }),
+        video_clip: toFileItem({
+          ...videoClipRef,
+          downloadUrl: videoClipDownloadUrl
+        })
       },
       raw_commentary: {
         lyrics: asString(submissionTrack.lyrics) ?? asString(dbTrack.text) ?? ""
       }
     };
   });
+  const releaseLyricsField = tracks
+    .map((track) => track.raw_commentary.lyrics.trim())
+    .find((value) => value.length > 0) ?? "";
+  if (process.env.NODE_ENV !== "production" && sanitizedReleaseLyricsAuthors.join(" | ") !== unique(releasePersons.lyricsAuthors).join(" | ")) {
+    console.log("[release-lyricist-sanitizer]", {
+      releaseId,
+      rawLyricist: unique(releasePersons.lyricsAuthors),
+      sanitizedLyricist: sanitizedReleaseLyricsAuthors,
+      lyricsField: releaseLyricsField
+    });
+  }
 
-  const cover = resolveCoverItem(release, submissionData);
+  const coverCandidateUrls = buildReleaseCoverCandidateUrls({
+    id: asString(release.id) ?? "",
+    preview: asString(release.preview),
+    submissionData,
+    roles: release.roles,
+    coverImage: release.coverImage
+  });
   const platforms = asArray(submissionData?.platforms).map((item) => asString(item)).filter(Boolean) as string[];
   const countries = asArray(submissionData?.territoryCountries).map((item) => asString(item)).filter(Boolean) as string[];
 
@@ -861,7 +950,14 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
     payment_usage: null,
     payment_plan: null,
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),
-    cover,
+    cover: {
+      url: coverCandidateUrls[0] ?? "",
+      download_url:
+        asString(release.id) && coverCandidateUrls[0]
+          ? buildAdminReleaseFileDownloadUrl(asString(release.id) ?? "", "cover")
+          : null,
+      candidate_urls: coverCandidateUrls
+    },
     release: {
       metadata_language: asString(submissionData?.language) ?? asString(release.language) ?? "",
       title: asString(submissionData?.title) ?? asString(release.title) ?? "",
@@ -893,7 +989,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
         coPerformers: unique(releasePersons.coPerformers),
         producers: unique(releasePersons.producers),
         musicAuthors: unique(releasePersons.musicAuthors),
-        lyricsAuthors: unique(releasePersons.lyricsAuthors)
+        lyricsAuthors: sanitizedReleaseLyricsAuthors
       },
       settings: {
         early_russia_start: Boolean(submissionData?.priorityRelease ?? release.earlyStartInRussia),
@@ -927,17 +1023,33 @@ function parseTrackFileId(fileId: string): { trackId: string; kind: "audio" | "t
   };
 }
 
-function resolveTrackIndex(release: Record<string, unknown>, trackId: string): number {
-  const tracks = asArray(release.tracks ?? release.track);
-  const index = tracks.findIndex((item) => {
+function resolveTrackIndexFromTracks(tracks: unknown[], trackId: string): number {
+  return tracks.findIndex((item) => {
     const row = asRecord(item);
     if (!row) return false;
     const id = asString(row.id);
     if (id === trackId) return true;
-    const num = row.trackNumber;
-    return typeof num === "number" && String(num) === trackId;
+    const num = row.trackNumber ?? row.index;
+    return typeof num === "number" && (String(num) === trackId || `track-${num}` === trackId);
   });
-  return index;
+}
+
+function resolveTrackIndexByPosition(trackId: string, trackCount: number): number {
+  const directMatch = /^track-(\d+)$/u.exec(trackId) ?? /^(\d+)$/u.exec(trackId);
+  if (!directMatch?.[1]) return -1;
+  const position = Number(directMatch[1]);
+  if (!Number.isInteger(position) || position < 1 || position > trackCount) return -1;
+  return position - 1;
+}
+
+function resolveTrackIndex(release: Record<string, unknown>, submissionData: Record<string, unknown> | null, trackId: string): number {
+  const tracks = asArray(release.tracks ?? release.track);
+  const dbIndex = resolveTrackIndexFromTracks(tracks, trackId);
+  if (dbIndex >= 0) return dbIndex;
+  const submissionTracks = asArray(submissionData?.tracks);
+  const submissionIndex = resolveTrackIndexFromTracks(submissionTracks, trackId);
+  if (submissionIndex >= 0) return submissionIndex;
+  return resolveTrackIndexByPosition(trackId, submissionTracks.length);
 }
 
 export function resolveAdminReleaseFileTargetFromRelease(
@@ -952,15 +1064,20 @@ export function resolveAdminReleaseFileTargetFromRelease(
   if (!release || !fileId) return null;
 
   if (fileId === "cover") {
-    const submissionData = parseSubmissionData(release);
-    const cover = resolveCoverItem(release, submissionData);
-    const firstCoverCandidate = cover.candidate_urls[0] ?? cover.url ?? null;
+    const coverCandidateUrls = buildReleaseCoverCandidateUrls({
+      id: asString(release.id) ?? "",
+      preview: asString(release.preview),
+      submissionData: parseSubmissionData(release),
+      roles: release.roles,
+      coverImage: release.coverImage
+    });
+    const firstCoverCandidate = coverCandidateUrls[0] ?? null;
     if (!firstCoverCandidate) return null;
     return {
       kind: "cover",
-      storageKey: normalizeStorageKeyCandidate(firstCoverCandidate),
       url: firstCoverCandidate,
-      fileName: fileNameFromUrl(firstCoverCandidate)
+      fileName: fileNameFromUrl(firstCoverCandidate),
+      storageKey: normalizeStorageKeyCandidate(firstCoverCandidate)
     };
   }
 
@@ -981,16 +1098,16 @@ export function resolveAdminReleaseFileTargetFromRelease(
   if (!parsedTrackFile) return null;
 
   const submissionData = parseSubmissionData(release);
-  const trackIndex = resolveTrackIndex(release, parsedTrackFile.trackId);
+  const trackIndex = resolveTrackIndex(release, submissionData, parsedTrackFile.trackId);
   if (trackIndex < 0) return null;
   const submissionTracks = asArray(submissionData?.tracks);
-  const dbTracks = asArray(release.tracks ?? release.track);
+  const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
   const trackData = {
     ...(asRecord(dbTracks[trackIndex]) ?? {}),
     ...(asRecord(submissionTracks[trackIndex]) ?? {})
   };
 
-  const resolved = getTrackFileRefByType(trackData, parsedTrackFile.kind);
+  const resolved = getTrackFileByType(trackData, parsedTrackFile.kind);
   if (!resolved.url && !resolved.storageKey) return null;
 
   return {
@@ -1018,12 +1135,65 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
 
   if (!release) return null;
   const details = mapAdminReleaseDetails(release);
-  const reachableCoverUrl = await resolveFirstReachableImageUrlFromCandidates(
-    details.cover.candidate_urls
-  );
-  details.cover.url = reachableCoverUrl ?? "";
-  details.cover.download_url = reachableCoverUrl;
-  details.cover.candidate_urls = reachableCoverUrl ? [reachableCoverUrl] : [];
+  const submissionData = parseSubmissionData(release);
+  const submissionTracks = asArray(submissionData?.tracks);
+  const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
+  const coverImage = (release as Record<string, unknown>).coverImage;
+  const cover = await resolveAdminDetailCoverAsset({
+    id: release.id,
+    preview: asString(release.preview),
+    submissionData,
+    roles: release.roles,
+    coverImage,
+    userId: asString((release as Record<string, unknown>).userId),
+    title: asString(release.title)
+  });
+  details.cover = {
+    ...details.cover,
+    url: cover.url ?? "",
+    storage_key: cover.storageKey ?? null,
+    candidate_urls: cover.candidateUrls,
+    download_url:
+      releaseId && cover.url ? buildAdminReleaseFileDownloadUrl(releaseId, "cover") : null
+  };
+
+  for (let index = 0; index < details.tracks.length; index += 1) {
+    const currentTrack = details.tracks[index];
+    if (!currentTrack) continue;
+    const dbTrack = asRecord(dbTracks[index]) ?? {};
+    const submissionTrack = asRecord(submissionTracks[index]) ?? {};
+    const trackId = currentTrack.id || asString(dbTrack.id) || asString(submissionTrack.id) || `track-${index + 1}`;
+    const resolvedAudio = await resolveTrackAudioAsset({
+      releaseId: release.id,
+      userId: asString((release as Record<string, unknown>).userId),
+      releaseTitle: asString(submissionData?.title) ?? asString(release.title),
+      trackId,
+      trackTitle: asString(submissionTrack.title) ?? asString(dbTrack.title),
+      audioFile: submissionTrack.audioFile ?? dbTrack.audioFile,
+      audioUpload: submissionTrack.audioUpload ?? dbTrack.audioUpload,
+      audioUrl: submissionTrack.audioUrl ?? dbTrack.audioUrl,
+      audio: submissionTrack.audio ?? dbTrack.audio,
+      track: submissionTrack.track ?? dbTrack.track
+    });
+
+    if (resolvedAudio.url) {
+      details.tracks[index] = {
+        ...currentTrack,
+        files: {
+          ...currentTrack.files,
+          audio: toFileItem({
+            storageKey: resolvedAudio.storageKey,
+            url: resolvedAudio.url,
+            fallbackName:
+              asString(submissionTrack.fileName) ??
+              asString(dbTrack.fileName) ??
+              currentTrack.files.audio.file_name,
+            downloadUrl: resolvedAudio.downloadUrl ?? resolvedAudio.url
+          })
+        }
+      };
+    }
+  }
 
   if (process.env.ADMIN_RELEASE_ROLES_DEBUG === "1") {
     console.log("[admin-release-roles-debug]", {
@@ -1060,15 +1230,53 @@ export async function getAdminReleaseDownloadTarget(params: { releaseId: string;
   if (!release) return null;
 
   if (params.fileId === "cover") {
-    const details = mapAdminReleaseDetails(release);
-    const resolvedCoverUrl = await resolveFirstReachableImageUrlFromCandidates(
-      details.cover.candidate_urls
-    );
-    if (!resolvedCoverUrl) return null;
-    return {
-      storageKey: null,
-      url: resolvedCoverUrl
-    };
+    const cover = await resolveAdminDetailCoverAsset({
+      id: release.id,
+      preview: asString(release.preview),
+      submissionData: parseSubmissionData(release),
+      roles: release.roles,
+      coverImage: (release as Record<string, unknown>).coverImage,
+      userId: asString((release as Record<string, unknown>).userId),
+      title: asString(release.title)
+    });
+    if (cover.url) {
+      return {
+        storageKey: cover.storageKey,
+        url: cover.url
+      };
+    }
+  }
+
+  const parsedTrackFile = parseTrackFileId(params.fileId);
+  if (parsedTrackFile?.kind === "audio") {
+    const submissionData = parseSubmissionData(release);
+    const trackIndex = resolveTrackIndex(release, submissionData, parsedTrackFile.trackId);
+    if (trackIndex >= 0) {
+      const submissionTracks = asArray(submissionData?.tracks);
+      const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
+      const trackData = {
+        ...(asRecord(dbTracks[trackIndex]) ?? {}),
+        ...(asRecord(submissionTracks[trackIndex]) ?? {})
+      };
+      const resolvedAudio = await resolveTrackAudioAsset({
+        releaseId: release.id,
+        userId: asString((release as Record<string, unknown>).userId),
+        releaseTitle: asString(submissionData?.title) ?? asString(release.title),
+        trackId: parsedTrackFile.trackId,
+        trackTitle: asString(trackData.title),
+        audioFile: trackData.audioFile,
+        audioUpload: trackData.audioUpload,
+        audioUrl: trackData.audioUrl,
+        audio: trackData.audio,
+        track: trackData.track
+      });
+      if (resolvedAudio.url) {
+        return {
+          storageKey: resolvedAudio.storageKey,
+          url: resolvedAudio.url
+        };
+      }
+    }
   }
 
   const target = resolveAdminReleaseFileTargetFromRelease({

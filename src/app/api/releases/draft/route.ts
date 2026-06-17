@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import type { ReleaseDraftSaveRequest, ReleaseDraftSaveResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import { mapReleaseStatusToSection } from "@/lib/release-counts";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +30,14 @@ function readTitle(data: Record<string, unknown>): string {
   return value || "Новый релиз";
 }
 
-function readCover(data: Record<string, unknown>): string {
-  const value = typeof data.cover === "string" ? data.cover.trim() : "";
-  return value || "/hero/drop.png";
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readCoverUploadUrl(data: Record<string, unknown>): string | null {
+  const coverUpload = asRecord(data.coverUpload);
+  return normalizeReleaseCoverUrl(coverUpload, null);
 }
 
 function readGenre(data: Record<string, unknown>): string {
@@ -66,10 +72,7 @@ function mergeSubmissionData(roles: unknown, submissionData: Record<string, unkn
 }
 
 function readSubmissionDataCover(data: Record<string, unknown>): string | null {
-  const cover = data.cover;
-  if (typeof cover !== "string") return null;
-  const normalized = cover.trim();
-  return normalized || null;
+  return readCoverUploadUrl(data) ?? normalizeReleaseCoverUrl(data.cover, null);
 }
 
 async function draftsCount(userId: string) {
@@ -119,7 +122,16 @@ export async function POST(request: Request) {
   const preorderDate = parseDate(data.preorderDate, releaseDate);
 
   const newReleaseId = randomUUID();
-  const preview = readCover(data);
+  const preview = await resolveReleasePreviewForPersistence({
+    id: newReleaseId,
+    preview: normalizeReleaseCoverUrl(data.cover, null),
+    submissionData: payload.data,
+    coverUpload: data.coverUpload,
+    cover: data.cover,
+    roles: { submissionData: payload.data },
+    userId: session.user.id,
+    title: readTitle(data)
+  });
   const submissionDataCover = readSubmissionDataCover(data);
   console.log("[release-cover-save]", {
     releaseId: newReleaseId,
@@ -201,7 +213,16 @@ export async function PATCH(request: Request) {
   const startDate = parseDate(data.startDate, existing.startDate);
   const preorderDate = parseDate(data.preorderDate, existing.preorderDate);
 
-  const preview = readCover(data);
+  const preview = await resolveReleasePreviewForPersistence({
+    id: payload.releaseId,
+    preview: normalizeReleaseCoverUrl(data.cover, null),
+    submissionData: payload.data,
+    coverUpload: data.coverUpload,
+    cover: data.cover,
+    roles: mergeSubmissionData(existing.roles, payload.data as Record<string, unknown>),
+    userId: session.user.id,
+    title: readTitle(data)
+  });
   const submissionDataCover = readSubmissionDataCover(data);
   console.log("[release-cover-save]", {
     releaseId: payload.releaseId,

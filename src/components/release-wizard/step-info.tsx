@@ -39,7 +39,7 @@ const KIND_OPTIONS: Array<{ value: ReleaseKind; label: string }> = [
 const COVER_MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const COVER_MIN_SIZE_PX = 1400;
 const COVER_MAX_SIZE_PX = 6000;
-const COVER_ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);
+const COVER_ALLOWED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
 const PLATFORM_PREVIEW_LIMIT = 12;
 const COUNTRY_PREVIEW_LIMIT = 24;
 
@@ -91,7 +91,7 @@ export function StepInfo() {
       setCoverError(null);
 
       if (!COVER_ALLOWED_TYPES.has(file.type.toLowerCase())) {
-        setCoverError("Обложка должна быть в формате JPG или PNG.");
+        setCoverError("Обложка должна быть в формате JPG, PNG, WEBP или GIF.");
         return;
       }
 
@@ -185,7 +185,7 @@ export function StepInfo() {
             <input
               id="cover-upload"
               type="file"
-              accept="image/jpeg,image/png"
+              accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
               className="sr-only"
               onChange={(event) => {
                 void onCoverPick(event);
@@ -258,7 +258,12 @@ export function StepInfo() {
             </div>
 
             <div>
-              <FieldLabel required>Тип релиза</FieldLabel>
+              <FieldLabel
+                required
+                hint="Вы выбираете тип релиза вручную. Количество треков не блокирует выбор Single, EP или Album."
+              >
+                Тип релиза
+              </FieldLabel>
               <div className="flex flex-wrap gap-2">
                 {TYPE_OPTIONS.map((opt) => (
                   <RadioPill
@@ -270,6 +275,9 @@ export function StepInfo() {
                   </RadioPill>
                 ))}
               </div>
+              <p className="mt-2 text-[11px] text-white/45">
+                Тип релиза сохраняется таким, как вы выбрали. Система не меняет его автоматически по числу треков.
+              </p>
             </div>
 
             <div>

@@ -176,7 +176,7 @@ test("validateReleaseSubmission blocks rights share above 100%", () => {
   );
 });
 
-test("validateReleaseSubmission enforces release type and focus track rules", () => {
+test("validateReleaseSubmission keeps focus track limits for single_maxi", () => {
   const payload = validSubmission();
   payload.type = "single";
   payload.releaseKind = "single_maxi";
@@ -204,6 +204,77 @@ test("validateReleaseSubmission enforces release type and focus track rules", ()
   const issues = validateReleaseSubmission(payload);
 
   assert.ok(issues.some((issue) => issue.field === "tracks"));
+  assert.equal(issues.some((issue) => issue.field === "type"), false);
+});
+
+test("validateReleaseSubmission allows album with one track", () => {
+  const payload = validSubmission();
+  payload.type = "album";
+
+  const issues = validateReleaseSubmission(payload);
+
+  assert.equal(issues.some((issue) => issue.field === "type"), false);
+});
+
+test("validateReleaseSubmission allows album with three tracks", () => {
+  const payload = validSubmission();
+  payload.type = "album";
+  payload.tracks = [
+    payload.tracks[0],
+    {
+      ...payload.tracks[0],
+      fileName: "track-02.wav",
+      title: "Track 02",
+      isrc: "USRC17607840",
+      partnerCode: "trk-002"
+    },
+    {
+      ...payload.tracks[0],
+      fileName: "track-03.wav",
+      title: "Track 03",
+      isrc: "USRC17607841",
+      partnerCode: "trk-003"
+    }
+  ];
+
+  const issues = validateReleaseSubmission(payload);
+
+  assert.equal(issues.some((issue) => issue.field === "type"), false);
+});
+
+test("validateReleaseSubmission allows ep with seven tracks", () => {
+  const payload = validSubmission();
+  payload.type = "ep";
+  payload.tracks = Array.from({ length: 7 }, (_, index) => ({
+    ...payload.tracks[0],
+    fileName: `track-0${index + 1}.wav`,
+    title: `Track ${index + 1}`,
+    isrc: `USRC1760784${index}`,
+    partnerCode: `trk-00${index + 1}`
+  }));
+
+  const issues = validateReleaseSubmission(payload);
+
+  assert.equal(issues.some((issue) => issue.field === "type"), false);
+});
+
+test("validateReleaseSubmission allows single with multiple tracks", () => {
+  const payload = validSubmission();
+  payload.type = "single";
+  payload.tracks = [
+    payload.tracks[0],
+    {
+      ...payload.tracks[0],
+      fileName: "track-02.wav",
+      title: "Track 02",
+      isrc: "USRC17607840",
+      partnerCode: "trk-002"
+    }
+  ];
+
+  const issues = validateReleaseSubmission(payload);
+
+  assert.equal(issues.some((issue) => issue.field === "type"), false);
 });
 
 test("validateReleaseSubmission blocks no-audio release with streaming platforms", () => {
@@ -226,6 +297,50 @@ test("validateReleaseSubmission blocks no-audio release with streaming platforms
       (issue) =>
         issue.message ===
         "Добавьте аудиофайл хотя бы к одному треку или уберите стриминговые площадки."
+    )
+  );
+});
+
+test("validateReleaseSubmission accepts wav and flac mime types", () => {
+  const wavPayload = validSubmission();
+  wavPayload.tracks[0].audioFile = {
+    storageKey: "uploads/user_1/track-01.wav",
+    url: "/api/uploads/object/uploads/user_1/track-01.wav",
+    fileName: "track-01.wav",
+    contentType: "audio/wav",
+    sizeBytes: 1024
+  };
+
+  const flacPayload = validSubmission();
+  flacPayload.tracks[0].audioFile = {
+    storageKey: "uploads/user_1/track-01.flac",
+    url: "/api/uploads/object/uploads/user_1/track-01.flac",
+    fileName: "track-01.flac",
+    contentType: "audio/flac",
+    sizeBytes: 1024
+  };
+
+  assert.equal(validateReleaseSubmission(wavPayload).some((issue) => issue.field === "tracks.0.audioFile"), false);
+  assert.equal(validateReleaseSubmission(flacPayload).some((issue) => issue.field === "tracks.0.audioFile"), false);
+});
+
+test("validateReleaseSubmission rejects unsupported audio mime types", () => {
+  const payload = validSubmission();
+  payload.tracks[0].audioFile = {
+    storageKey: "uploads/user_1/track-01.ogg",
+    url: "/api/uploads/object/uploads/user_1/track-01.ogg",
+    fileName: "track-01.ogg",
+    contentType: "audio/ogg",
+    sizeBytes: 1024
+  };
+
+  const issues = validateReleaseSubmission(payload);
+
+  assert.ok(issues.some((issue) => issue.field === "tracks.0.audioFile"));
+  assert.ok(
+    issues.some(
+      (issue) =>
+        issue.message === "Аудиофайл трека №1 должен быть WAV, FLAC, MP3, AAC, M4A или AIFF."
     )
   );
 });

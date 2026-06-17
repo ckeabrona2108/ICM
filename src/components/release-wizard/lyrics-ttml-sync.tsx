@@ -441,7 +441,7 @@ export function LyricsTtmlSyncPanel({
         <div className="flex flex-wrap items-center gap-2 rounded border border-dashed border-white/[0.1] bg-black/25 px-2 py-1.5">
           <span className="text-[10px] text-white/45">Нет файла с шага треков:</span>
           <label className="cursor-pointer rounded bg-white/[0.08] px-2 py-1 text-[10px] text-white/85 hover:bg-white/[0.12]">
-            <input type="file" accept=".wav,.flac,.mp3,audio/*" className="sr-only" onChange={onLocalFile} />
+            <input type="file" accept=".wav,.flac,audio/wav,audio/x-wav,audio/flac" className="sr-only" onChange={onLocalFile} />
             MP3 / WAV
           </label>
         </div>

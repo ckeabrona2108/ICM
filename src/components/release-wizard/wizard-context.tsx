@@ -56,6 +56,12 @@ export interface TrackMeta {
   versionCover: boolean;
   versionRemix: boolean;
   versionInstrumental: boolean;
+  versionDrugReference: boolean;
+  aiAssistanceUsed: boolean;
+  aiGeneratedFullTrack: boolean;
+  aiGeneratedMusicOnly: boolean;
+  aiGeneratedLyricsOnly: boolean;
+  aiProcessedTrackOnly: boolean;
   metadataLanguage: string;
   lyrics: string;
   ringtoneDurationSec: string;
@@ -83,6 +89,12 @@ export function emptyTrackMeta(): TrackMeta {
     versionCover: false,
     versionRemix: false,
     versionInstrumental: false,
+    versionDrugReference: false,
+    aiAssistanceUsed: false,
+    aiGeneratedFullTrack: false,
+    aiGeneratedMusicOnly: false,
+    aiGeneratedLyricsOnly: false,
+    aiProcessedTrackOnly: false,
     metadataLanguage: "",
     lyrics: "",
     ringtoneDurationSec: "",

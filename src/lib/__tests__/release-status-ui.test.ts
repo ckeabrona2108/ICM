@@ -16,3 +16,10 @@ test("pending verification release has dedicated badge", () => {
   assert.equal(badge?.label, "Ожидает верификацию");
   assert.equal(badge?.variant, "warning");
 });
+
+test("draft release has dedicated badge", () => {
+  const badge = getReleaseStatusDescriptor("draft");
+  assert.ok(badge);
+  assert.equal(badge?.label, "Черновик");
+  assert.equal(badge?.variant, "warning");
+});

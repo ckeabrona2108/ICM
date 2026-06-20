@@ -95,6 +95,14 @@ interface AdminReleaseDetailsResponse {
       cover: boolean;
       remix: boolean;
       instrumental: boolean;
+      drug_reference: boolean;
+    };
+    ai_usage: {
+      used: boolean;
+      generated_full_track: boolean;
+      generated_music_only: boolean;
+      generated_lyrics_only: boolean;
+      processed_track_only: boolean;
     };
     usage: {
       metadata_language: string;
@@ -889,7 +897,23 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
         live: Boolean(submissionTrack.versionLive ?? dbTrack.live),
         cover: Boolean(submissionTrack.versionCover ?? dbTrack.cover),
         remix: Boolean(submissionTrack.versionRemix ?? dbTrack.remix),
-        instrumental: Boolean(submissionTrack.versionInstrumental ?? dbTrack.instrumental)
+        instrumental: Boolean(submissionTrack.versionInstrumental ?? dbTrack.instrumental),
+        drug_reference: Boolean(submissionTrack.versionDrugReference ?? dbTrack.versionDrugReference)
+      },
+      ai_usage: {
+        used: Boolean(submissionTrack.aiAssistanceUsed ?? dbTrack.aiAssistanceUsed),
+        generated_full_track: Boolean(
+          submissionTrack.aiGeneratedFullTrack ?? dbTrack.aiGeneratedFullTrack
+        ),
+        generated_music_only: Boolean(
+          submissionTrack.aiGeneratedMusicOnly ?? dbTrack.aiGeneratedMusicOnly
+        ),
+        generated_lyrics_only: Boolean(
+          submissionTrack.aiGeneratedLyricsOnly ?? dbTrack.aiGeneratedLyricsOnly
+        ),
+        processed_track_only: Boolean(
+          submissionTrack.aiProcessedTrackOnly ?? dbTrack.aiProcessedTrackOnly
+        )
       },
       usage: {
         metadata_language: asString(submissionTrack.metadataLanguage) ?? asString(dbTrack.language) ?? ""

@@ -51,7 +51,13 @@ function buildTrackRoles(
     textFile: track.textFile ?? track.syncedLyricsFile ?? null,
     karaokeFile: track.karaokeFile ?? track.ringtoneFile ?? null,
     videoShotFile: track.videoShotFile ?? null,
-    videoClipFile: track.videoClipFile ?? track.videoFile ?? null
+    videoClipFile: track.videoClipFile ?? track.videoFile ?? null,
+    versionDrugReference: Boolean(track.versionDrugReference),
+    aiAssistanceUsed: Boolean(track.aiAssistanceUsed),
+    aiGeneratedFullTrack: Boolean(track.aiGeneratedFullTrack),
+    aiGeneratedMusicOnly: Boolean(track.aiGeneratedMusicOnly),
+    aiGeneratedLyricsOnly: Boolean(track.aiGeneratedLyricsOnly),
+    aiProcessedTrackOnly: Boolean(track.aiProcessedTrackOnly)
   } satisfies Record<string, unknown>;
 }
 

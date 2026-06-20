@@ -23,9 +23,10 @@ function formatDateTime(value: Date): string {
   return value.toISOString().slice(0, 16).replace("T", " ");
 }
 
-function toAdminStatus(status: string): AdminReleaseStatus {
+export function toAdminStatus(status: string): AdminReleaseStatus {
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
+  if (status === "draft") return "draft";
   return "moderation";
 }
 

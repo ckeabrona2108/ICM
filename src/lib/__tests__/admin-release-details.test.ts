@@ -64,6 +64,12 @@ test("mapAdminReleaseDetails includes tracks, stores, territories and moderation
           isrc: "USAAA2600001",
           metadataLanguage: "ru",
           versionExplicit: true,
+          versionDrugReference: true,
+          aiAssistanceUsed: true,
+          aiGeneratedFullTrack: false,
+          aiGeneratedMusicOnly: true,
+          aiGeneratedLyricsOnly: false,
+          aiProcessedTrackOnly: true,
           durationSec: 125,
           copyrightPct: "80",
           relatedRightsPct: "20",
@@ -157,6 +163,9 @@ test("mapAdminReleaseDetails includes tracks, stores, territories and moderation
     "/api/uploads/object/uploads/user_1/track-01.wav"
   );
   assert.equal(details.tracks[0]?.rights.copyright_pct, "80");
+  assert.equal(details.tracks[0]?.version.drug_reference, true);
+  assert.equal(details.tracks[0]?.ai_usage.used, true);
+  assert.equal(details.tracks[0]?.ai_usage.generated_music_only, true);
 });
 
 test("resolveAdminReleaseFileTargetFromRelease resolves known file ids only", () => {

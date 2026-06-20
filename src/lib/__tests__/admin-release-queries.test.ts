@@ -2,7 +2,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveAdminReleaseCoverUrl } from "@/lib/admin-release-queries";
+import {
+  resolveAdminReleaseCoverUrl,
+  toAdminStatus
+} from "@/lib/admin-release-queries";
 
 test("resolveAdminReleaseCoverUrl prefers latest submission cover", () => {
   const coverUrl = resolveAdminReleaseCoverUrl({
@@ -24,4 +27,9 @@ test("resolveAdminReleaseCoverUrl falls back to stored cover and default", () =>
 
   assert.equal(stored, "https://example.com/cover.jpg");
   assert.equal(fallback, "/hero/drop.png");
+});
+
+test("toAdminStatus keeps draft releases as draft", () => {
+  assert.equal(toAdminStatus("draft"), "draft");
+  assert.equal(toAdminStatus("moderating"), "moderation");
 });

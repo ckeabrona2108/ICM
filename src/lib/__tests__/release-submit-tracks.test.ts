@@ -78,6 +78,12 @@ function validSubmission(): ReleaseSubmissionData {
         versionCover: false,
         versionRemix: false,
         versionInstrumental: false,
+        versionDrugReference: true,
+        aiAssistanceUsed: true,
+        aiGeneratedFullTrack: false,
+        aiGeneratedMusicOnly: true,
+        aiGeneratedLyricsOnly: false,
+        aiProcessedTrackOnly: true,
         lyrics: "Lyrics",
         ringtoneDurationSec: "",
         syncedLyricsFile: {
@@ -120,6 +126,14 @@ test("buildTrackCreateManyInput persists audio refs and single track metadata", 
   assert.equal(
     (rows[0]?.roles as { audioFile?: { storageKey?: string } } | undefined)?.audioFile?.storageKey,
     "uploads/user_1/track-01.wav"
+  );
+  assert.equal(
+    (rows[0]?.roles as { versionDrugReference?: boolean } | undefined)?.versionDrugReference,
+    true
+  );
+  assert.equal(
+    (rows[0]?.roles as { aiGeneratedMusicOnly?: boolean } | undefined)?.aiGeneratedMusicOnly,
+    true
   );
 });
 

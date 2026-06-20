@@ -70,6 +70,12 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
           versionCover: false,
           versionRemix: false,
           versionInstrumental: false,
+          versionDrugReference: true,
+          aiAssistanceUsed: true,
+          aiGeneratedFullTrack: false,
+          aiGeneratedMusicOnly: true,
+          aiGeneratedLyricsOnly: false,
+          aiProcessedTrackOnly: true,
           lyrics: "",
           ringtoneDurationSec: ""
         }
@@ -85,4 +91,8 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
   assert.equal(seed.tracks?.length, 1);
   assert.equal(seed.tracks?.[0]?.meta.title, "Track 1");
   assert.equal(seed.tracks?.[0]?.meta.trackPersons.length, 1);
+  assert.equal(seed.tracks?.[0]?.meta.versionDrugReference, true);
+  assert.equal(seed.tracks?.[0]?.meta.aiAssistanceUsed, true);
+  assert.equal(seed.tracks?.[0]?.meta.aiGeneratedMusicOnly, true);
+  assert.equal(seed.tracks?.[0]?.meta.aiProcessedTrackOnly, true);
 });

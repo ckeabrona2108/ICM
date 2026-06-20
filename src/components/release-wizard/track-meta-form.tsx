@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Info, Plus, Trash2 } from "lucide-react";
 
 import { LANGUAGES } from "@/lib/countries";
 import { trackPersonRoleOptions } from "@/lib/person-roles";
@@ -15,6 +15,11 @@ import { Checkbox, FieldLabel, Select, TextArea, TextInput } from "./wizard-ui";
 
 const TRACK_LANGUAGE_OPTIONS = [...LANGUAGES, "Без слов"];
 type TrackAssetKind = "syncedLyrics" | "ringtone" | "video";
+type AiTrackField =
+  | "aiGeneratedFullTrack"
+  | "aiGeneratedMusicOnly"
+  | "aiGeneratedLyricsOnly"
+  | "aiProcessedTrackOnly";
 
 function normalizePercentInput(raw: string): string {
   const cleaned = raw.replace(",", ".").replace(/[^\d.]/gu, "");
@@ -46,6 +51,27 @@ export function TrackMetaForm({
   onRemoveAsset: (kind: TrackAssetKind) => void;
 }) {
   const [rightsError, setRightsError] = React.useState<string | null>(null);
+
+  const setAiAssistanceUsed = (checked: boolean) => {
+    onPatch({
+      aiAssistanceUsed: checked,
+      ...(checked
+        ? {}
+        : {
+            aiGeneratedFullTrack: false,
+            aiGeneratedMusicOnly: false,
+            aiGeneratedLyricsOnly: false,
+            aiProcessedTrackOnly: false
+          })
+    });
+  };
+
+  const setAiField = (field: AiTrackField, checked: boolean) => {
+    onPatch({
+      aiAssistanceUsed: checked ? true : meta.aiAssistanceUsed,
+      [field]: checked
+    } as Partial<TrackMeta>);
+  };
 
   const setCopyrightPct = (value: string) => {
     const normalized = normalizePercentInput(value);
@@ -117,7 +143,6 @@ export function TrackMetaForm({
 
       <div className="space-y-5">
               <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-4">
-                <h4 className="text-[13px] font-semibold text-white">Название трека</h4>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <FieldLabel required hint="Как трек будет отображаться на площадках">
@@ -301,6 +326,43 @@ export function TrackMetaForm({
               </div>
 
               <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+                <h4 className="text-[13px] font-semibold text-white">Использование ИИ</h4>
+                <Checkbox
+                  checked={meta.aiAssistanceUsed}
+                  onChange={setAiAssistanceUsed}
+                  label="Использование ИИ"
+                  description="Отметьте, если при создании трека использовался искусственный интеллект"
+                  size="sm"
+                />
+                <div className="grid gap-2 border-l border-white/[0.08] pl-6 sm:grid-cols-2">
+                  <Checkbox
+                    checked={meta.aiGeneratedFullTrack}
+                    onChange={(v) => setAiField("aiGeneratedFullTrack", v)}
+                    label="Трек полностью сгенерирован ИИ (Текст + Музыка)"
+                    size="sm"
+                  />
+                  <Checkbox
+                    checked={meta.aiGeneratedMusicOnly}
+                    onChange={(v) => setAiField("aiGeneratedMusicOnly", v)}
+                    label="ИИ использован частично, только для генерации музыки"
+                    size="sm"
+                  />
+                  <Checkbox
+                    checked={meta.aiGeneratedLyricsOnly}
+                    onChange={(v) => setAiField("aiGeneratedLyricsOnly", v)}
+                    label="ИИ использован частично, только для генерации текста"
+                    size="sm"
+                  />
+                  <Checkbox
+                    checked={meta.aiProcessedTrackOnly}
+                    onChange={(v) => setAiField("aiProcessedTrackOnly", v)}
+                    label="ИИ использован частично, только для обработки трека"
+                    size="sm"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Версия трека</h4>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   <Checkbox
@@ -331,6 +393,17 @@ export function TrackMetaForm({
                     checked={meta.versionInstrumental}
                     onChange={(v) => onPatch({ versionInstrumental: v })}
                     label="Instrumental"
+                    size="sm"
+                  />
+                  <Checkbox
+                    checked={meta.versionDrugReference}
+                    onChange={(v) => onPatch({ versionDrugReference: v })}
+                    label={
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>Упоминание наркотических/психотропных веществ</span>
+                        <InlineTooltip text="Отметка поставлена в целях информирования и соблюдения норм закона. В соответствии с требованиями Федерального закона от 08.08.2024 № 224-ФЗ, если трек содержит упоминания, которые могут быть интерпретированы как связанные с наркотическими средствами или психотропными веществами, отметьте этот пункт." />
+                      </span>
+                    }
                     size="sm"
                   />
                 </div>
@@ -392,6 +465,19 @@ export function TrackMetaForm({
               </div>
       </div>
     </div>
+  );
+}
+
+function InlineTooltip({ text }: { text: string }) {
+  return (
+    <span className="group/tooltip relative inline-flex items-center">
+      <span className="cursor-help text-white/35 transition-colors group-hover/tooltip:text-[#7b3df5]">
+        <Info className="h-3.5 w-3.5" />
+      </span>
+      <span className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden w-[min(280px,calc(100vw-3rem))] rounded-xl border border-white/[0.08] bg-[#384154] px-3 py-2 text-[11px] font-medium leading-5 text-white shadow-[0_18px_48px_-24px_rgba(0,0,0,0.85)] group-hover/tooltip:block">
+        {text}
+      </span>
+    </span>
   );
 }
 

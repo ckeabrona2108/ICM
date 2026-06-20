@@ -73,8 +73,8 @@ export function getReleaseTimelineState(
     const steps = withPaymentLabel(BASE_STEPS, paid);
     return {
       steps,
-      currentStep: "moderation",
-      activeIndex: indexOfStep(steps, "moderation"),
+      currentStep: "unpaid",
+      activeIndex: indexOfStep(steps, "unpaid"),
       showPayButton: true
     };
   }

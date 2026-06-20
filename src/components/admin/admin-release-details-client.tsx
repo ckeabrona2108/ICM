@@ -107,6 +107,14 @@ interface AdminReleaseDetailsResponse {
       cover: boolean;
       remix: boolean;
       instrumental: boolean;
+      drug_reference: boolean;
+    };
+    ai_usage: {
+      used: boolean;
+      generated_full_track: boolean;
+      generated_music_only: boolean;
+      generated_lyrics_only: boolean;
+      processed_track_only: boolean;
     };
     usage: {
       metadata_language: string;
@@ -643,10 +651,36 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                   title="Версия трека"
                   rows={[
                     ["Explicit content", boolView(track.version.explicit)],
+                    [
+                      "Упоминание наркотических/психотропных веществ",
+                      boolView(track.version.drug_reference)
+                    ],
                     ["Live", boolView(track.version.live)],
                     ["Cover", boolView(track.version.cover)],
                     ["Remix", boolView(track.version.remix)],
                     ["Instrumental", boolView(track.version.instrumental)]
+                  ]}
+                />
+                <InfoSection
+                  title="Использование ИИ"
+                  rows={[
+                    ["Использование ИИ", boolView(track.ai_usage.used)],
+                    [
+                      "Трек полностью сгенерирован ИИ (текст + музыка)",
+                      boolView(track.ai_usage.generated_full_track)
+                    ],
+                    [
+                      "ИИ использован только для генерации музыки",
+                      boolView(track.ai_usage.generated_music_only)
+                    ],
+                    [
+                      "ИИ использован только для генерации текста",
+                      boolView(track.ai_usage.generated_lyrics_only)
+                    ],
+                    [
+                      "ИИ использован только для обработки трека",
+                      boolView(track.ai_usage.processed_track_only)
+                    ]
                   ]}
                 />
                 <InfoSection

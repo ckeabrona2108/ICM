@@ -65,6 +65,12 @@ function validSubmission(): ReleaseSubmissionData {
         versionCover: false,
         versionRemix: false,
         versionInstrumental: false,
+        versionDrugReference: false,
+        aiAssistanceUsed: false,
+        aiGeneratedFullTrack: false,
+        aiGeneratedMusicOnly: false,
+        aiGeneratedLyricsOnly: false,
+        aiProcessedTrackOnly: false,
         lyrics: "",
         ringtoneDurationSec: ""
       }

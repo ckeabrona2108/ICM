@@ -49,7 +49,7 @@ const ADVANTAGES: Advantage[] = [
   {
     icon: Headset,
     title: "Поддержка",
-    description: "Вопросы клиента — один из главных приоритетов, мы почти всегда на связи."
+    description: "Вопросы клиента — один из главных приоритетов, мы всегда на связи."
   },
   {
     icon: LayoutGrid,

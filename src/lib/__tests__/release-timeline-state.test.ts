@@ -10,12 +10,13 @@ test("timeline: draft shows draft as current step", () => {
   assert.equal(state.showPayButton, false);
 });
 
-test("timeline: moderation + unpaid shows moderation as current step and keeps pay button", () => {
+test("timeline: moderation + unpaid keeps release in moderation flow but current step is unpaid", () => {
   const state = getReleaseTimelineState("moderation", false);
-  assert.equal(state.currentStep, "moderation");
-  assert.equal(state.activeIndex, 2);
+  assert.equal(state.currentStep, "unpaid");
+  assert.equal(state.activeIndex, 1);
   assert.equal(state.showPayButton, true);
   assert.equal(state.steps[1]?.label, "Не оплачен");
+  assert.equal(state.steps[2]?.label, "На модерации");
 });
 
 test("timeline: moderation + paid shows moderation as current step", () => {

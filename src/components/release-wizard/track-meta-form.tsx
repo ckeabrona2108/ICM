@@ -179,14 +179,6 @@ export function TrackMetaForm({
                       placeholder="CCXXXYYNNNNN"
                     />
                   </div>
-                  <div>
-                    <FieldLabel>Код партнёра</FieldLabel>
-                    <TextInput
-                      value={meta.partnerCode}
-                      onChange={(e) => onPatch({ partnerCode: e.target.value })}
-                      placeholder="Внутренний код"
-                    />
-                  </div>
                 </div>
               </div>
 

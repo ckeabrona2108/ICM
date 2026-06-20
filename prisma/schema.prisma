@@ -60,6 +60,28 @@ model news {
   @@schema("icecream")
 }
 
+model partner_codes {
+  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                 String               @unique
+  label                String?
+  active               Boolean              @default(true)
+  coversReleasePayment Boolean              @default(true)
+  maxUses              Int?
+  usedCount            Int                  @default(0)
+  expiresAt            DateTime?            @db.Timestamp(6)
+  allowedUserId        String?              @db.Uuid
+  allowedEmailDomain   String?
+  notes                String?
+  createdAt            DateTime             @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime             @updatedAt @db.Timestamp(6)
+  createdByAdminId     String?              @db.Uuid
+  allowedUser          user?                @relation("partner_codes_allowed_user", fields: [allowedUserId], references: [id], onDelete: SetNull)
+  createdByAdmin       user?                @relation("partner_codes_created_by_admin", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  usages               partner_code_usages[]
+
+  @@schema("icecream")
+}
+
 model orders {
   id        String     @id @db.Uuid
   createdAt DateTime?  @default(now()) @db.Timestamp(6)
@@ -144,6 +166,7 @@ model release {
   analytics_daily_summaries analytics_daily_summaries[]
   analytics_platform_summaries analytics_platform_summaries[]
   analytics_report_snapshots analytics_report_snapshots[]
+  partner_code_usages  partner_code_usages[]
   promo_links          promo_links[]
   unmatched_analytics_imports unmatched_analytics_imports[] @relation("unmatched_analytics_imports_resolved_release")
   user                 user                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "release_userId_user_id_fk")
@@ -242,6 +265,21 @@ model track {
   @@schema("icecream")
 }
 
+model partner_code_usages {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partnerCodeId String        @db.Uuid
+  userId        String        @db.Uuid
+  releaseId     String        @db.Uuid
+  codeSnapshot  String
+  createdAt     DateTime      @default(now()) @db.Timestamp(6)
+  partnerCode   partner_codes @relation(fields: [partnerCodeId], references: [id], onDelete: Cascade, map: "partner_code_usages_partnerCodeId_partner_codes_id_fk")
+  release       release       @relation(fields: [releaseId], references: [id], onDelete: Cascade, map: "partner_code_usages_releaseId_release_id_fk")
+  user          user          @relation(fields: [userId], references: [id], onDelete: Cascade, map: "partner_code_usages_userId_user_id_fk")
+
+  @@unique([partnerCodeId, releaseId])
+  @@schema("icecream")
+}
+
 model user {
   id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name                String
@@ -273,6 +311,9 @@ model user {
   analytics_platform_summaries analytics_platform_summaries[]
   analytics_report_snapshots analytics_report_snapshots[]
   orders              orders[]
+  partnerCodeUsages   partner_code_usages[]
+  partnerCodesAllowed partner_codes[]         @relation("partner_codes_allowed_user")
+  partnerCodesCreated partner_codes[]         @relation("partner_codes_created_by_admin")
   payment_methods     payment_methods[]
   payouts             payouts[]
   release             release[]

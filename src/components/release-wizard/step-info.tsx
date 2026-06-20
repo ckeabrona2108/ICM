@@ -2,7 +2,16 @@
 
 import * as React from "react";
 import Image from "next/image";
-import { ExternalLink, Plus, Search, Trash2, Upload } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  Plus,
+  Search,
+  Trash2,
+  Upload
+} from "lucide-react";
 
 import { buildCoverImageSrcCandidates } from "@/lib/image-src";
 import { cn } from "@/lib/utils";
@@ -22,6 +31,29 @@ import {
   TextInput,
   WizardCard
 } from "./wizard-ui";
+
+function resolvePartnerCodeErrorMessage(params: {
+  status: number;
+  payload: { error?: string; message?: string } | null;
+}): string {
+  if (params.payload?.message?.trim()) {
+    return params.payload.message.trim();
+  }
+
+  if (params.status === 401) {
+    return "Войдите в аккаунт, чтобы проверить партнёрский код.";
+  }
+
+  if (params.status === 403) {
+    return "У вас нет доступа к проверке партнёрского кода.";
+  }
+
+  if (params.payload?.error?.trim()) {
+    return params.payload.error.trim();
+  }
+
+  return "Партнёрский код недействителен.";
+}
 
 const TYPE_OPTIONS: Array<{ value: ReleaseType; label: string }> = [
   { value: "single", label: "Single" },
@@ -73,15 +105,34 @@ export function StepInfo() {
   const { data, set, patch } = useWizard();
   const [coverError, setCoverError] = React.useState<string | null>(null);
   const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
+  const [partnerCodeState, setPartnerCodeState] = React.useState<{
+    status: "idle" | "loading" | "valid" | "invalid";
+    message: string | null;
+    validatedCode: string;
+  }>({
+    status: "idle",
+    message: null,
+    validatedCode: ""
+  });
   const coverCandidates = React.useMemo(
     () => buildCoverImageSrcCandidates(data.cover),
     [data.cover]
   );
   const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
+  const normalizedPartnerCode = data.partnerCode.trim().toUpperCase();
 
   React.useEffect(() => {
     setCoverCandidateIndex(0);
   }, [data.cover, coverCandidates.length]);
+
+  React.useEffect(() => {
+    if (normalizedPartnerCode === partnerCodeState.validatedCode) return;
+    setPartnerCodeState({
+      status: "idle",
+      message: null,
+      validatedCode: ""
+    });
+  }, [normalizedPartnerCode, partnerCodeState.validatedCode]);
 
   const onCoverPick = React.useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,6 +203,65 @@ export function StepInfo() {
   const canAddPerson = data.persons.every(
     (person) => person.name.trim().length > 0 && person.role.trim().length > 0
   );
+
+  const applyPartnerCode = React.useCallback(async () => {
+    const rawCode = data.partnerCode.trim();
+    if (!rawCode) {
+      setPartnerCodeState({
+        status: "invalid",
+        message: "Введите партнёрский код.",
+        validatedCode: ""
+      });
+      return;
+    }
+
+    setPartnerCodeState({
+      status: "loading",
+      message: null,
+      validatedCode: ""
+    });
+
+    try {
+      const response = await fetch("/api/partner-codes/validate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          code: rawCode
+        })
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; code?: string; message?: string; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.ok) {
+        setPartnerCodeState({
+          status: "invalid",
+          message: resolvePartnerCodeErrorMessage({
+            status: response.status,
+            payload
+          }),
+          validatedCode: ""
+        });
+        return;
+      }
+
+      const validatedCode = payload.code?.trim() || rawCode.toUpperCase();
+      set("partnerCode", validatedCode);
+      setPartnerCodeState({
+        status: "valid",
+        message: "Код применён. Оплата всего релиза будет покрыта.",
+        validatedCode
+      });
+    } catch {
+      setPartnerCodeState({
+        status: "invalid",
+        message: "Не удалось проверить код. Попробуйте ещё раз.",
+        validatedCode: ""
+      });
+    }
+  }, [data.partnerCode, set]);
 
   return (
     <div className="space-y-4">
@@ -389,12 +499,54 @@ export function StepInfo() {
               />
             </div>
             <div>
-              <FieldLabel hint="Внутренний идентификатор партнёра">Код партнёра</FieldLabel>
-              <TextInput
-                value={data.partnerCode}
-                onChange={(e) => set("partnerCode", e.target.value)}
-                placeholder="Внутренний код"
-              />
+              <FieldLabel hint="Код применяется ко всему релизу, а не к отдельным трекам">
+                Код партнёра
+              </FieldLabel>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <TextInput
+                  value={data.partnerCode}
+                  onChange={(e) => set("partnerCode", e.target.value)}
+                  placeholder="PARTNER-001"
+                  className="flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void applyPartnerCode();
+                  }}
+                  disabled={!data.partnerCode.trim() || partnerCodeState.status === "loading"}
+                  className={cn(
+                    "inline-flex h-10 items-center justify-center gap-2 rounded-lg border px-4 text-[12.5px] font-medium transition-colors",
+                    !data.partnerCode.trim() || partnerCodeState.status === "loading"
+                      ? "cursor-not-allowed border-white/[0.06] bg-white/[0.03] text-white/35"
+                      : "border-[#7b3df5]/35 bg-[#7b3df5]/12 text-[#e6d7ff] hover:border-[#7b3df5]/50 hover:bg-[#7b3df5]/18"
+                  )}
+                >
+                  {partnerCodeState.status === "loading" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : null}
+                  Применить
+                </button>
+              </div>
+              {partnerCodeState.message ? (
+                <p
+                  className={cn(
+                    "mt-2 flex items-start gap-2 text-[12px]",
+                    partnerCodeState.status === "valid" ? "text-emerald-300" : "text-rose-300"
+                  )}
+                >
+                  {partnerCodeState.status === "valid" ? (
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  ) : (
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  )}
+                  <span>{partnerCodeState.message}</span>
+                </p>
+              ) : (
+                <p className="mt-2 text-[11px] text-white/40">
+                  Один валидный код покрывает оплату всего релиза: single, EP или album целиком.
+                </p>
+              )}
             </div>
           </div>
         </WizardCard>

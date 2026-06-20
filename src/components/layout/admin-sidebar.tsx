@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
   CircleHelp,
+  Ticket,
   CreditCard,
   FileText,
   Headset,
@@ -22,6 +23,7 @@ const items = [
   { href: "/admin/news", label: "Новости сервиса", icon: FileText },
   { href: "/admin/users", label: "Пользователи", icon: UserRound },
   { href: "/admin/releases", label: "Релизы", icon: Music2 },
+  { href: "/admin/partner-codes", label: "Партнёрские коды", icon: Ticket },
   { href: "/admin/support/tickets", label: "Поддержка", icon: Headset },
   { href: "/admin/analytics", label: "Аналитика CSV", icon: BarChart3 },
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },

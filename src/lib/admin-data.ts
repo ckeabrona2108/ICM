@@ -59,7 +59,7 @@ export interface AdminReleaseDetails {
   moderationReturnedAt?: string;
   priority?: boolean;
   paid: boolean;
-  paymentKind?: "paid" | "subscription" | "unpaid";
+  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code";
   paymentLabel?: string;
   paymentUsage?: string | null;
   paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;

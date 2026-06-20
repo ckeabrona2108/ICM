@@ -61,7 +61,6 @@ function validSubmission(): ReleaseSubmissionData {
         title: "Track 01",
         subtitle: "",
         isrc: "USRC17607839",
-        partnerCode: "TRK-001",
         metadataLanguage: "Русский",
         trackPersons: [
           { name: "Nova Echo", role: "Исполнитель" },
@@ -118,6 +117,7 @@ test("buildTrackCreateManyInput persists audio refs and single track metadata", 
   assert.equal(rows[0]?.releaseId, "6687ff3c-d2c9-4aaa-bbad-193e4c989934");
   assert.equal(rows[0]?.track, "03:05");
   assert.equal(rows[0]?.language, "Русский");
+  assert.equal(rows[0]?.partner_code, null);
   assert.equal(
     new Date(rows[0]?.instant_gratification_date ?? "").toISOString(),
     "2026-05-01T00:00:00.000Z"

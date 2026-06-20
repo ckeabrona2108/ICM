@@ -58,7 +58,6 @@ export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionD
       title: track.meta.title,
       subtitle: track.meta.subtitle,
       isrc: track.meta.isrc,
-      partnerCode: track.meta.partnerCode,
       metadataLanguage: track.meta.metadataLanguage,
       trackPersons: track.meta.trackPersons.map((person) => ({
         name: person.name,

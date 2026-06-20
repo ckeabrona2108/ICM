@@ -135,3 +135,19 @@ test("standalone paid release does not consume subscription quota", async () => 
   assert.equal(quota.remaining, 1);
   assert.equal(quota.requiresPaymentForNextRelease, false);
 });
+
+test("partner-code paid release does not consume subscription quota", async () => {
+  const client = createClient({
+    user: {
+      isSubscribed: true,
+      subscribeLevel: "standard",
+      expiresAt: daysFromNow(20)
+    },
+    releases: [{ id: "rel_partner", date: new Date(), roles: usage("partner_code") }]
+  });
+
+  const quota = await getUserReleaseQuota("user_1", client);
+  assert.equal(quota.used, 0);
+  assert.equal(quota.remaining, 1);
+  assert.equal(quota.requiresPaymentForNextRelease, false);
+});

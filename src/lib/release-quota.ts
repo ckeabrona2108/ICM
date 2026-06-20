@@ -4,7 +4,7 @@ import { addMonths } from "date-fns";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 
 export type ReleaseQuotaPlan = "STANDARD" | "PRO" | "ENTERPRISE";
-export type ReleaseUsageType = "subscription" | "standalone_payment";
+export type ReleaseUsageType = "subscription" | "standalone_payment" | "partner_code";
 
 export interface UserReleaseQuota {
   plan: ReleaseQuotaPlan;
@@ -24,6 +24,8 @@ export interface ReleasePaymentUsage {
   releasesUsedAfterSubmit?: number;
   releasesLimit?: number | null;
   orderId?: string;
+  partnerCode?: string;
+  partnerCodeId?: string;
 }
 
 type QuotaPrismaClient = Pick<PrismaClient, "user" | "release" | "orders">;
@@ -90,7 +92,11 @@ export function getReleasePaymentUsageFromRoles(roles: unknown): ReleasePaymentU
 
   const usage = asRecord(root.paymentUsage);
   const usageType = asString(usage?.type);
-  if (usageType === "subscription" || usageType === "standalone_payment") {
+  if (
+    usageType === "subscription" ||
+    usageType === "standalone_payment" ||
+    usageType === "partner_code"
+  ) {
     return {
       type: usageType,
       usedAt: asString(usage?.usedAt) ?? new Date(0).toISOString(),
@@ -103,7 +109,9 @@ export function getReleasePaymentUsageFromRoles(roles: unknown): ReleasePaymentU
         typeof usage?.releasesLimit === "number" || usage?.releasesLimit === null
           ? usage.releasesLimit
           : undefined,
-      orderId: asString(usage?.orderId) ?? undefined
+      orderId: asString(usage?.orderId) ?? undefined,
+      partnerCode: asString(usage?.partnerCode) ?? undefined,
+      partnerCodeId: asString(usage?.partnerCodeId) ?? undefined
     };
   }
 
@@ -112,6 +120,13 @@ export function getReleasePaymentUsageFromRoles(roles: unknown): ReleasePaymentU
     return {
       type: "standalone_payment",
       usedAt: asString(root.releaseUsageUsedAt) ?? new Date(0).toISOString()
+    };
+  }
+  if (releaseUsageType === "partner_code") {
+    return {
+      type: "partner_code",
+      usedAt: asString(root.releaseUsageUsedAt) ?? new Date(0).toISOString(),
+      partnerCode: asString(root.releasePartnerCode) ?? undefined
     };
   }
   if (releaseUsageType === "subscription" || root.releasedViaSubscription === true) {
@@ -173,6 +188,7 @@ export function mergeReleaseRolesPaymentUsage(
     releasedViaSubscription: paymentUsage.type === "subscription",
     releaseUsageType: paymentUsage.type,
     releaseUsageUsedAt: paymentUsage.usedAt,
+    releasePartnerCode: paymentUsage.partnerCode ?? null,
     submissionData: paymentSnapshot
       ? {
           ...nextSubmission,
@@ -207,8 +223,21 @@ export function buildStandalonePaymentUsage(params?: {
   };
 }
 
+export function buildPartnerCodePaymentUsage(params: {
+  partnerCode: string;
+  partnerCodeId?: string;
+  usedAt?: Date;
+}): ReleasePaymentUsage {
+  return {
+    type: "partner_code",
+    usedAt: (params.usedAt ?? new Date()).toISOString(),
+    partnerCode: params.partnerCode,
+    partnerCodeId: params.partnerCodeId
+  };
+}
+
 export function getReleasePaymentDisplayFromRoles(roles: unknown): {
-  kind: "paid" | "subscription" | "unpaid";
+  kind: "paid" | "subscription" | "unpaid" | "partner_code";
   label: string;
   usage: ReleasePaymentUsage | null;
 } {
@@ -224,6 +253,13 @@ export function getReleasePaymentDisplayFromRoles(roles: unknown): {
     return {
       kind: "paid",
       label: "Оплачено отдельно",
+      usage
+    };
+  }
+  if (usage?.type === "partner_code") {
+    return {
+      kind: "partner_code",
+      label: usage.partnerCode ? `Партнёрский код ${usage.partnerCode}` : "Оплачено партнёром",
       usage
     };
   }
@@ -303,6 +339,7 @@ export async function getUserReleaseQuota(
   for (const release of releases) {
     const usage = getReleasePaymentUsageFromRoles(release.roles);
     if (usage?.type === "standalone_payment") continue;
+    if (usage?.type === "partner_code") continue;
     if (standalonePaidReleaseIds.has(release.id)) continue;
 
     if (usage?.type === "subscription") {

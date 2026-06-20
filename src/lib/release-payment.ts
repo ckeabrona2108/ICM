@@ -1,6 +1,6 @@
 import type { LimitDecision, EffectivePlan } from "@/lib/subscription-limits";
 
-export type ReleasePaymentKind = "paid" | "subscription" | "unpaid";
+export type ReleasePaymentKind = "paid" | "subscription" | "unpaid" | "partner_code";
 
 export interface ReleasePaymentSnapshot {
   version: 1;
@@ -111,6 +111,18 @@ export function buildReleasePaymentDisplay(params: {
   return {
     kind: "unpaid",
     label: "Не оплачен",
+    plan: null,
+    usageLabel: null
+  };
+}
+
+export function buildPartnerCodePaymentDisplay(params: {
+  code?: string | null;
+}): ReleasePaymentDisplay {
+  const normalized = typeof params.code === "string" ? params.code.trim() : "";
+  return {
+    kind: "partner_code",
+    label: normalized ? `Партнёрский код ${normalized}` : "Оплачено партнёром",
     plan: null,
     usageLabel: null
   };

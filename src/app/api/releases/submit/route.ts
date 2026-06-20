@@ -11,6 +11,10 @@ import { authOptions } from "@/lib/auth";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import { prisma } from "@/lib/prisma";
 import {
+  checkPartnerCodeForRelease,
+  consumePartnerCodeForRelease
+} from "@/lib/partner-codes";
+import {
   groupReleaseValidationIssuesByStep,
   releaseSubmissionDataSchema,
   type ReleaseSubmissionData,
@@ -18,6 +22,7 @@ import {
 } from "@/lib/release-policy";
 import { sanitizePriorityReleaseFlag } from "@/lib/release-priority";
 import {
+  buildPartnerCodePaymentUsage,
   buildSubscriptionPaymentUsage,
   getUserReleaseQuota,
   mergeReleaseRolesPaymentUsage
@@ -212,6 +217,7 @@ export async function POST(request: Request) {
     confirmed: boolean;
     status: (typeof existing)["status"];
     roles: Prisma.InputJsonValue;
+    afterSync?: (tx: Prisma.TransactionClient) => Promise<void>;
   }) => {
     try {
       const createdTracksCount = await prisma.$transaction(async (tx) => {
@@ -237,6 +243,9 @@ export async function POST(request: Request) {
         });
         if (persistedCount !== trackRows.length) {
           throw new Error("release_track_sync_mismatch");
+        }
+        if (params.afterSync) {
+          await params.afterSync(tx);
         }
         return persistedCount;
       });
@@ -286,6 +295,102 @@ export async function POST(request: Request) {
       releaseId: existing.id,
       nextStatus: "moderation",
       message: "Изменения релиза сохранены."
+    };
+
+    return NextResponse.json(response, { status: 200 });
+  }
+
+  const submittedPartnerCode = submissionData.partnerCode?.trim() || "";
+  const partnerCodeCheck = submittedPartnerCode
+    ? await checkPartnerCodeForRelease({
+        prisma,
+        code: submittedPartnerCode,
+        userId: session.user.id,
+        userEmail: session.user.email ?? "",
+        releaseId: existing.id
+      })
+    : null;
+
+  if (submittedPartnerCode && partnerCodeCheck && !partnerCodeCheck.ok) {
+    const issue = {
+      code: `partner_code_${partnerCodeCheck.reason}`,
+      field: "partnerCode",
+      message: partnerCodeCheck.message
+    };
+
+    const response: ReleaseSubmitFailureResponse = {
+      ok: false,
+      errors: [issue],
+      errors_by_step: {
+        release_info: [issue],
+        tracks: [],
+        stores: [],
+        pricing: []
+      }
+    };
+
+    return NextResponse.json(response, { status: 400 });
+  }
+
+  if (partnerCodeCheck?.ok) {
+    let partnerCodeResult:
+      | Awaited<ReturnType<typeof consumePartnerCodeForRelease>>
+      | null = null;
+
+    await updateReleaseAndSyncTracks({
+      confirmed: true,
+      status: "moderating",
+      roles: markSubmittedToModeration(
+        mergeReleaseRolesPaymentUsage(
+          existing.roles,
+          buildPartnerCodePaymentUsage({
+            partnerCode: submittedPartnerCode
+          }),
+          submissionData
+        )
+      ),
+      afterSync: async (tx) => {
+        partnerCodeResult = await consumePartnerCodeForRelease({
+          prisma: tx,
+          code: submittedPartnerCode,
+          userId: session.user.id,
+          userEmail: session.user.email ?? "",
+          releaseId: existing.id
+        });
+
+        if (!partnerCodeResult.ok) {
+          throw new Error(`partner_code:${partnerCodeResult.reason}:${partnerCodeResult.message}`);
+        }
+
+        await tx.release.update({
+          where: { id: existing.id },
+          data: {
+            roles: markSubmittedToModeration(
+              mergeReleaseRolesPaymentUsage(
+                existing.roles,
+                buildPartnerCodePaymentUsage({
+                  partnerCode: partnerCodeResult.code,
+                  partnerCodeId: partnerCodeResult.partnerCodeId
+                }),
+                submissionData
+              )
+            )
+          }
+        });
+      }
+    });
+
+    await notifyReleaseSubmittedSafe({
+      releaseId: existing.id,
+      releaseTitle: baseReleaseData.title,
+      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+    });
+
+    const response: ReleaseSubmitSuccessResponse = {
+      ok: true,
+      releaseId: existing.id,
+      nextStatus: "moderation",
+      message: "Релиз отправлен на модерацию по партнёрскому коду."
     };
 
     return NextResponse.json(response, { status: 200 });

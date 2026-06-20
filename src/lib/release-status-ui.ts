@@ -60,7 +60,7 @@ export function getReleaseStatusDescriptor(status: string): ReleaseStatusDescrip
 export function getPaymentStatusDescriptor(params: {
   paid: boolean;
   label?: string;
-  kind?: "paid" | "subscription" | "unpaid";
+  kind?: "paid" | "subscription" | "unpaid" | "partner_code";
 }): {
   label: string;
   variant: BadgeVariant;
@@ -79,6 +79,14 @@ export function getPaymentStatusDescriptor(params: {
       return {
         label: params.label.trim(),
         variant: "success"
+      };
+    }
+
+    if (params.kind === "partner_code") {
+      return {
+        label: params.label.trim(),
+        variant: "success",
+        className: "border-violet-400/25 bg-violet-500/10 text-violet-200"
       };
     }
 

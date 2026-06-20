@@ -188,10 +188,10 @@ function buildNav(counts: {
         badgeTone: "soon"
       },
       {
-        href: "/dashboard/ai-music-tools",
-        label: "AI Music Tools",
+        href: "/dashboard/video-snippets",
+        label: "Видео-сниппеты",
         icon: RobotStickerIcon,
-        badge: "Скоро",
+        badge: "NEW",
         badgeTone: "soon"
       },
       {

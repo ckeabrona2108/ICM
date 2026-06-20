@@ -8,6 +8,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import { mapReleaseStatusToSection } from "@/lib/release-counts";
+import { readReleaseTypeFromSubmissionData } from "@/lib/release-submit-tracks";
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +17,6 @@ function parseDate(value: unknown, fallback: Date): Date {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
   return date;
-}
-
-function normalizeReleaseType(value: unknown): "single" | "album" | "ep" {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "single";
-  if (normalized === "album") return "album";
-  if (normalized === "ep") return "ep";
-  return "single";
 }
 
 function readTitle(data: Record<string, unknown>): string {
@@ -155,7 +149,7 @@ export async function POST(request: Request) {
       labelName: readLabel(data),
       startDate,
       preorderDate,
-      type: normalizeReleaseType(data.releaseType),
+      type: readReleaseTypeFromSubmissionData(data),
       confirmed: false,
       status: "moderating",
       roles: {
@@ -245,7 +239,7 @@ export async function PATCH(request: Request) {
       labelName: readLabel(data),
       startDate,
       preorderDate,
-      type: normalizeReleaseType(data.releaseType),
+      type: readReleaseTypeFromSubmissionData(data),
       confirmed: existing.confirmed,
       status: existing.status,
       roles: mergeSubmissionData(

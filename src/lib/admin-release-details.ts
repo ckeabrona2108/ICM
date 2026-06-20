@@ -689,6 +689,12 @@ function parseSubmissionData(release: Record<string, unknown>): Record<string, u
   return asRecord(roles?.submissionData);
 }
 
+function inflateTrackRow(value: unknown): Record<string, unknown> {
+  const track = asRecord(value) ?? {};
+  const roles = asRecord(track.roles);
+  return roles ? { ...roles, ...track } : track;
+}
+
 function resolveReleaseStatus(raw: unknown): string {
   const normalized = (asString(raw) ?? "").toLowerCase();
   if (normalized === "moderating" || normalized === "moderation") return "moderation";
@@ -814,7 +820,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
   const sanitizedReleaseLyricsAuthors = onlyPersonNames(releasePersons.lyricsAuthors);
 
   const tracks = Array.from({ length: trackCount }).map((_, index) => {
-    const dbTrack = asRecord(dbTracks[index]) ?? {};
+    const dbTrack = inflateTrackRow(dbTracks[index]);
     const submissionTrack = asRecord(submissionTracks[index]) ?? {};
     const persons = mergePersonGroups(
       parseTrackPersons(submissionTrack),
@@ -1160,7 +1166,7 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
   for (let index = 0; index < details.tracks.length; index += 1) {
     const currentTrack = details.tracks[index];
     if (!currentTrack) continue;
-    const dbTrack = asRecord(dbTracks[index]) ?? {};
+    const dbTrack = inflateTrackRow(dbTracks[index]);
     const submissionTrack = asRecord(submissionTracks[index]) ?? {};
     const trackId = currentTrack.id || asString(dbTrack.id) || asString(submissionTrack.id) || `track-${index + 1}`;
     const resolvedAudio = await resolveTrackAudioAsset({
@@ -1255,7 +1261,7 @@ export async function getAdminReleaseDownloadTarget(params: { releaseId: string;
       const submissionTracks = asArray(submissionData?.tracks);
       const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
       const trackData = {
-        ...(asRecord(dbTracks[trackIndex]) ?? {}),
+        ...inflateTrackRow(dbTracks[trackIndex]),
         ...(asRecord(submissionTracks[trackIndex]) ?? {})
       };
       const resolvedAudio = await resolveTrackAudioAsset({

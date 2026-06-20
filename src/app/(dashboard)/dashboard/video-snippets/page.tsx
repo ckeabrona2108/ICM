@@ -1,6 +1,6 @@
 import { VideoSnippetsPage } from "@/components/video-snippets/video-snippets-page";
 
-export default function AiMusicToolsPage({
+export default function VideoSnippetsRoute({
   searchParams
 }: {
   searchParams?: Record<string, string | string[] | undefined>;

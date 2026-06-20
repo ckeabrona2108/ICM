@@ -10,12 +10,23 @@ import type {
 import { authOptions } from "@/lib/auth";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import { prisma } from "@/lib/prisma";
+import {
+  groupReleaseValidationIssuesByStep,
+  releaseSubmissionDataSchema,
+  type ReleaseSubmissionData,
+  validateReleaseSubmission
+} from "@/lib/release-policy";
 import { sanitizePriorityReleaseFlag } from "@/lib/release-priority";
 import {
   buildSubscriptionPaymentUsage,
   getUserReleaseQuota,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
+import {
+  buildSubmitTrackDiagnostics,
+  buildTrackCreateManyInput,
+  readReleaseTypeFromSubmissionData
+} from "@/lib/release-submit-tracks";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 
 export const dynamic = "force-dynamic";
@@ -25,13 +36,6 @@ function parseDate(value: unknown, fallback: Date): Date {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
   return date;
-}
-
-function normalizeReleaseType(value: unknown): "single" | "album" | "ep" {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "single";
-  if (normalized === "album") return "album";
-  if (normalized === "ep") return "ep";
-  return "single";
 }
 
 function mergeSubmissionData(roles: unknown, submissionData: Record<string, unknown>): Record<string, unknown> {
@@ -103,7 +107,44 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Submission payload is required" }, { status: 400 });
   }
 
+  const parsedSubmission = releaseSubmissionDataSchema.safeParse(payload.data);
+  if (!parsedSubmission.success) {
+    const response: ReleaseSubmitFailureResponse = {
+      ok: false,
+      errors: [
+        {
+          code: "invalid_payload",
+          field: "data",
+          message: "Некорректные данные релиза. Обновите страницу и повторите отправку."
+        }
+      ],
+      errors_by_step: {
+        release_info: [
+          {
+            code: "invalid_payload",
+            field: "data",
+            message: "Некорректные данные релиза. Обновите страницу и повторите отправку."
+          }
+        ],
+        tracks: [],
+        stores: [],
+        pricing: []
+      }
+    };
+    return NextResponse.json(response, { status: 400 });
+  }
+
   const data = payload.data as Record<string, unknown>;
+  const rawSubmissionData = parsedSubmission.data;
+  const validationIssues = validateReleaseSubmission(rawSubmissionData);
+  if (validationIssues.length > 0) {
+    const response: ReleaseSubmitFailureResponse = {
+      ok: false,
+      errors: validationIssues,
+      errors_by_step: groupReleaseValidationIssuesByStep(validationIssues)
+    };
+    return NextResponse.json(response, { status: 400 });
+  }
 
   const releaseId = payload.releaseId?.trim();
   if (!releaseId) {
@@ -130,8 +171,8 @@ export async function POST(request: Request) {
   const preorderDate = parseDate(data.preorderDate, releaseDate);
 
   const quota = await getUserReleaseQuota(session.user.id, prisma);
-  const submissionData = {
-    ...(payload.data as Record<string, unknown>),
+  const submissionData: ReleaseSubmissionData = {
+    ...rawSubmissionData,
     priorityRelease: sanitizePriorityReleaseFlag({
       requested: data.priorityRelease,
       plan: quota.plan,
@@ -158,7 +199,74 @@ export async function POST(request: Request) {
     date: releaseDate,
     startDate,
     preorderDate,
-    type: normalizeReleaseType(data.releaseType)
+    type: readReleaseTypeFromSubmissionData(data)
+  };
+  const trackRows = buildTrackCreateManyInput({
+    releaseId: existing.id,
+    releaseLanguage: baseReleaseData.language,
+    startDate,
+    tracks: submissionData.tracks
+  });
+
+  const updateReleaseAndSyncTracks = async (params: {
+    confirmed: boolean;
+    status: (typeof existing)["status"];
+    roles: Prisma.InputJsonValue;
+  }) => {
+    try {
+      const createdTracksCount = await prisma.$transaction(async (tx) => {
+        await tx.release.update({
+          where: { id: existing.id },
+          data: {
+            ...baseReleaseData,
+            confirmed: params.confirmed,
+            status: params.status,
+            roles: params.roles
+          }
+        });
+        await tx.track.deleteMany({
+          where: { releaseId: existing.id }
+        });
+        if (trackRows.length > 0) {
+          await tx.track.createMany({
+            data: trackRows
+          });
+        }
+        const persistedCount = await tx.track.count({
+          where: { releaseId: existing.id }
+        });
+        if (persistedCount !== trackRows.length) {
+          throw new Error("release_track_sync_mismatch");
+        }
+        return persistedCount;
+      });
+
+      console.info(
+        "[release-submit-track-sync]",
+        buildSubmitTrackDiagnostics({
+          releaseId: existing.id,
+          payloadData: data,
+          submissionData,
+          createdTracksCount
+        })
+      );
+
+      return createdTracksCount;
+    } catch (error) {
+      console.error(
+        "[release-submit-track-sync-failed]",
+        {
+          ...buildSubmitTrackDiagnostics({
+            releaseId: existing.id,
+            payloadData: data,
+            submissionData,
+            createdTracksCount: 0
+          }),
+          error
+        }
+      );
+      throw error;
+    }
   };
   console.log("[release-cover-save]", {
     releaseId: existing.id,
@@ -167,14 +275,10 @@ export async function POST(request: Request) {
   });
 
   if (payload.mode === "edit") {
-    await prisma.release.update({
-      where: { id: existing.id },
-      data: {
-        ...baseReleaseData,
-        confirmed: existing.confirmed,
-        status: existing.status,
-        roles: mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
-      }
+    await updateReleaseAndSyncTracks({
+      confirmed: existing.confirmed,
+      status: existing.status,
+      roles: mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
     });
 
     const response: ReleaseSubmitSuccessResponse = {
@@ -188,17 +292,10 @@ export async function POST(request: Request) {
   }
 
   if (quota.requiresPaymentForNextRelease) {
-    await prisma.release.update({
-      where: { id: existing.id },
-      data: {
-        ...baseReleaseData,
-        confirmed: false,
-        status: "moderating",
-        roles: {
-          submittedToModeration: true,
-          submissionData
-        }
-      }
+    await updateReleaseAndSyncTracks({
+      confirmed: false,
+      status: "moderating",
+      roles: mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
     });
     await notifyReleaseSubmittedSafe({
       releaseId: existing.id,
@@ -223,20 +320,16 @@ export async function POST(request: Request) {
     return NextResponse.json(response, { status: 200 });
   }
 
-  await prisma.release.update({
-    where: { id: existing.id },
-    data: {
-      ...baseReleaseData,
-      confirmed: true,
-      status: "moderating",
-      roles: markSubmittedToModeration(
-        mergeReleaseRolesPaymentUsage(
-          existing.roles,
-          buildSubscriptionPaymentUsage({ quota }),
-          submissionData
-        )
+  await updateReleaseAndSyncTracks({
+    confirmed: true,
+    status: "moderating",
+    roles: markSubmittedToModeration(
+      mergeReleaseRolesPaymentUsage(
+        existing.roles,
+        buildSubscriptionPaymentUsage({ quota }),
+        submissionData
       )
-    }
+    )
   });
   await notifyReleaseSubmittedSafe({
     releaseId: existing.id,

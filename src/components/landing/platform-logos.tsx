@@ -19,6 +19,18 @@ export function SpotifyLogo({ size = 28, ...props }: LogoProps) {
   );
 }
 
+export function SoundCloudLogo({ size = 28, ...props }: LogoProps) {
+  return (
+    <svg {...base(size)} {...props}>
+      <rect width="24" height="24" rx="6" fill="#FF6A00" />
+      <path
+        d="M8.2 9.9a2.8 2.8 0 0 1 2.6-1.7c1.2 0 2.2.7 2.7 1.7h.3a2.2 2.2 0 1 1 0 4.4H8.2a.6.6 0 0 1-.6-.6v-3.2c0-.33.27-.6.6-.6zm-1.1 1.1c.2 0 .4.17.4.38v2.46a.4.4 0 0 1-.8 0v-2.46c0-.21.18-.38.4-.38zm-1.2.5c.2 0 .4.16.4.36v1.5a.4.4 0 0 1-.8 0v-1.5c0-.2.18-.36.4-.36zm-1 .7c.19 0 .35.16.35.35v.8a.35.35 0 0 1-.7 0v-.8c0-.2.16-.35.35-.35z"
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
 export function AppleMusicLogo({ size = 28, ...props }: LogoProps) {
   return (
     <svg {...base(size)} {...props}>
@@ -91,6 +103,36 @@ export function TikTokLogo({ size = 28, ...props }: LogoProps) {
       />
       <path
         d="M16.3 8.15c-1 0-1.9-.4-2.6-1V13.75a3.5 3.5 0 1 1-3.5-3.5h.4v1.9a1.6 1.6 0 1 0 1.2 1.6V5.25h1.9a3.6 3.6 0 0 0 2.6 2.5v.4z"
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
+export function TidalLogo({ size = 28, ...props }: LogoProps) {
+  return (
+    <svg {...base(size)} {...props}>
+      <rect width="24" height="24" rx="6" fill="#101010" />
+      <path
+        d="M7.35 7.1 9.9 9.65 12.45 7.1 15 9.65 17.55 7.1 20.1 9.65 17.55 12.2 15 9.65 12.45 12.2 9.9 9.65 7.35 12.2 4.8 9.65 7.35 7.1Zm2.55 5.1 2.55 2.55L15 12.2l2.55 2.55-2.55 2.55L12.45 14.75 9.9 17.3l-2.55-2.55L9.9 12.2Z"
+        fill="#fff"
+      />
+    </svg>
+  );
+}
+
+export function MtsMusicLogo({ size = 28, ...props }: LogoProps) {
+  return (
+    <svg {...base(size)} {...props}>
+      <defs>
+        <linearGradient id="mtsg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#FF2442" />
+          <stop offset="1" stopColor="#D70022" />
+        </linearGradient>
+      </defs>
+      <rect width="24" height="24" rx="6" fill="url(#mtsg)" />
+      <path
+        d="M7.1 15.7V8.3h1.5l2 2.8 2-2.8h1.5v7.4h-1.6v-4.5l-1.7 2.4h-.4l-1.7-2.4v4.5H7.1Zm8.3-6.1a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm-.8 6.1v-5h1.6v5h-1.6Z"
         fill="#fff"
       />
     </svg>

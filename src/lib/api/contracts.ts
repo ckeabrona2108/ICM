@@ -489,6 +489,15 @@ export interface AnalyticsOverviewChartPointResponse {
   pay_streams: number;
 }
 
+export interface AnalyticsPlatformsChartPointResponse {
+  date: string;
+  values: Array<{
+    platform: string;
+    streams: number;
+    pay_streams: number;
+  }>;
+}
+
 export interface AnalyticsOverviewResponse {
   total_streams: number;
   total_pay_streams: number;
@@ -505,6 +514,7 @@ export interface AnalyticsOverviewResponse {
     change_percent: number | null;
   }>;
   chart: AnalyticsOverviewChartPointResponse[];
+  platforms_chart: AnalyticsPlatformsChartPointResponse[];
 }
 
 export interface AnalyticsReleaseListItemResponse {

@@ -52,7 +52,8 @@ export async function GET(request: Request) {
         top_platform: null,
         platforms_count: 0,
         platforms_breakdown: [],
-        chart: []
+        chart: [],
+        platforms_chart: []
       },
       { status: 200 }
     );
@@ -88,6 +89,14 @@ export async function GET(request: Request) {
           date: point.date,
           streams: point.streams,
           pay_streams: point.pay_streams
+        })),
+        platforms_chart: data.platformsChart.map((point) => ({
+          date: point.date,
+          values: point.values.map((item) => ({
+            platform: item.platform,
+            streams: item.streams,
+            pay_streams: item.pay_streams
+          }))
         }))
       },
       { status: 200 }
@@ -136,7 +145,8 @@ export async function GET(request: Request) {
             top_platform: null,
             platforms_count: 0,
             platforms_breakdown: [],
-            chart: []
+            chart: [],
+            platforms_chart: []
           },
           { status: 200 }
         );
@@ -234,7 +244,8 @@ export async function GET(request: Request) {
             date: toDateKey(row.report_date),
             streams: Number(row.streams ?? 0),
             pay_streams: Number(row.pay_streams ?? 0)
-          }))
+          })),
+          platforms_chart: []
         },
         { status: 200 }
       );
@@ -252,7 +263,8 @@ export async function GET(request: Request) {
         top_platform: null,
         platforms_count: 0,
         platforms_breakdown: [],
-        chart: []
+        chart: [],
+        platforms_chart: []
       },
       { status: 200 }
     );

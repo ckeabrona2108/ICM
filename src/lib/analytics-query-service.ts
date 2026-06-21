@@ -186,12 +186,132 @@ async function buildAllTimePlatformsBreakdown(
   return breakdown;
 }
 
+async function groupSnapshotPlatformsChartCompat(
+  prisma: PrismaClient,
+  where: {
+    user_id: string;
+    release_id?: string;
+    release_ids?: string[];
+    country?: string;
+    upc?: string;
+    platform?: string;
+    rangeStart: Date;
+  }
+): Promise<AnalyticsPlatformsChartPoint[]> {
+  const snapshotWhere = {
+    user_id: where.user_id,
+    report_date: {
+      gte: where.rangeStart
+    },
+    ...(where.release_id ? { release_id: where.release_id } : {}),
+    ...(where.release_ids?.length ? { release_id: { in: where.release_ids } } : {}),
+    ...(where.country ? { country: where.country } : {}),
+    ...(where.upc ? { upc: where.upc } : {}),
+    ...(where.platform ? { platform: where.platform } : {})
+  };
+
+  try {
+    const rows = await prisma.analytics_report_snapshots.groupBy({
+      by: ["report_date", "platform"],
+      where: snapshotWhere,
+      _sum: {
+        streams: true,
+        pay_streams: true
+      },
+      orderBy: [{ report_date: "asc" }, { platform: "asc" }]
+    });
+
+    const byDate = new Map<string, AnalyticsPlatformsChartPoint["values"]>();
+    for (const row of rows) {
+      const date = toDateKey(row.report_date);
+      const bucket = byDate.get(date) ?? [];
+      bucket.push({
+        platform: row.platform ?? "Unknown",
+        streams: row._sum.streams ?? 0,
+        pay_streams: row._sum.pay_streams ?? 0
+      });
+      byDate.set(date, bucket);
+    }
+
+    return Array.from(byDate.entries()).map(([date, values]) => ({
+      date,
+      values: values.sort((left, right) => right.streams - left.streams)
+    }));
+  } catch (error) {
+    if (!isUnknownSnapshotPlatformFieldError(error)) throw error;
+  }
+
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`"user_id" = ${where.user_id}`,
+    Prisma.sql`"report_date" >= ${where.rangeStart}`
+  ];
+  if (where.release_id) conditions.push(Prisma.sql`"release_id" = ${where.release_id}`);
+  if (where.release_ids?.length) {
+    conditions.push(Prisma.sql`"release_id" IN (${Prisma.join(where.release_ids)})`);
+  }
+  if (where.country) conditions.push(Prisma.sql`"country" = ${where.country}`);
+  if (where.upc) conditions.push(Prisma.sql`"upc" = ${where.upc}`);
+  if (where.platform) conditions.push(Prisma.sql`"platform" = ${where.platform}`);
+
+  try {
+    const rows = await prisma.$queryRaw<
+      Array<{
+        report_date: Date;
+        platform: string | null;
+        streams: bigint | number | null;
+        pay_streams: bigint | number | null;
+      }>
+    >(Prisma.sql`
+      SELECT
+        "report_date" AS "report_date",
+        "platform" AS "platform",
+        SUM("streams")::bigint AS "streams",
+        SUM("pay_streams")::bigint AS "pay_streams"
+      FROM "analytics_report_snapshots"
+      WHERE ${Prisma.join(conditions, " AND ")}
+      GROUP BY "report_date", "platform"
+      ORDER BY "report_date" ASC, "platform" ASC
+    `);
+
+    const byDate = new Map<string, AnalyticsPlatformsChartPoint["values"]>();
+    for (const row of rows) {
+      const date = toDateKey(row.report_date);
+      const bucket = byDate.get(date) ?? [];
+      bucket.push({
+        platform: row.platform ?? "Unknown",
+        streams: toNumber(row.streams),
+        pay_streams: toNumber(row.pay_streams)
+      });
+      byDate.set(date, bucket);
+    }
+
+    return Array.from(byDate.entries()).map(([date, values]) => ({
+      date,
+      values: values.sort((left, right) => right.streams - left.streams)
+    }));
+  } catch (error) {
+    if (isRawPlatformQueryUnavailableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 export type AnalyticsTrend = "up" | "down" | "flat" | "new";
 
 export interface AnalyticsChartPoint {
   date: string;
   streams: number;
   pay_streams: number;
+}
+
+export interface AnalyticsPlatformsChartPoint {
+  date: string;
+  values: Array<{
+    platform: string;
+    streams: number;
+    pay_streams: number;
+  }>;
 }
 
 export interface AnalyticsOverviewResponse {
@@ -210,6 +330,7 @@ export interface AnalyticsOverviewResponse {
     changePercent: number | null;
   }>;
   chart: AnalyticsChartPoint[];
+  platformsChart: AnalyticsPlatformsChartPoint[];
 }
 
 export interface AnalyticsReleaseListItem {
@@ -265,7 +386,8 @@ function emptyAnalyticsOverview(): AnalyticsOverviewResponse {
     topPlatform: null,
     platforms_count: 0,
     platformsBreakdown: [],
-    chart: []
+    chart: [],
+    platformsChart: []
   };
 }
 
@@ -393,7 +515,56 @@ async function buildOverviewFromSnapshots(
       date: toDateKey(row.report_date),
       streams: row._sum.streams ?? 0,
       pay_streams: row._sum.pay_streams ?? 0
-    }))
+    })),
+    platformsChart: []
+  };
+}
+
+async function enrichOverviewWithPlatformCharts(
+  prisma: PrismaClient,
+  params: {
+    base: AnalyticsOverviewResponse;
+    user_id: string;
+    release_id?: string;
+    release_ids?: string[];
+    country?: string;
+    upc?: string;
+    platform?: string;
+    days: number;
+  }
+): Promise<AnalyticsOverviewResponse> {
+  const platformsBreakdown = await buildAllTimePlatformsBreakdown(prisma, {
+    user_id: params.user_id,
+    ...(params.release_id ? { release_id: params.release_id } : {}),
+    ...(params.release_ids?.length ? { release_ids: params.release_ids } : {}),
+    ...(params.country ? { country: params.country } : {}),
+    ...(params.upc ? { upc: params.upc } : {}),
+    ...(params.platform ? { platform: params.platform } : {}),
+    fallbackStreams: params.base.totalStreams,
+    fallbackPayStreams: params.base.totalPayStreams
+  });
+
+  const latestChartPoint = params.base.chart[params.base.chart.length - 1];
+  const latestDate = latestChartPoint ? new Date(`${latestChartPoint.date}T00:00:00.000Z`) : null;
+  const rangeStart = latestDate ? buildReportRangeFromLatest(latestDate, params.days) : null;
+  const platformsChart = rangeStart
+    ? await groupSnapshotPlatformsChartCompat(prisma, {
+        user_id: params.user_id,
+        ...(params.release_id ? { release_id: params.release_id } : {}),
+        ...(params.release_ids?.length ? { release_ids: params.release_ids } : {}),
+        ...(params.country ? { country: params.country } : {}),
+        ...(params.upc ? { upc: params.upc } : {}),
+        ...(params.platform ? { platform: params.platform } : {}),
+        rangeStart
+      })
+    : [];
+
+  return {
+    ...params.base,
+    topPlatform: platformsBreakdown[0]?.platform ?? null,
+    platforms_count: platformsBreakdown.length,
+    platformsBreakdown,
+    platformsChart
   };
 }
 
@@ -429,7 +600,15 @@ export async function getAnalyticsOverview(
         },
         days
       });
-      if (fallback) return fallback;
+      if (fallback) {
+        return enrichOverviewWithPlatformCharts(prisma, {
+          base: fallback,
+          user_id: params.user_id,
+          ...(params.release_id ? { release_id: params.release_id } : {}),
+          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+          days
+        });
+      }
       return {
         ...emptyAnalyticsOverview()
       };
@@ -464,7 +643,15 @@ export async function getAnalyticsOverview(
         },
         days
       });
-      if (fallback) return fallback;
+      if (fallback) {
+        return enrichOverviewWithPlatformCharts(prisma, {
+          base: fallback,
+          user_id: params.user_id,
+          ...(params.release_id ? { release_id: params.release_id } : {}),
+          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+          days
+        });
+      }
       return {
         ...emptyAnalyticsOverview()
       };
@@ -478,7 +665,15 @@ export async function getAnalyticsOverview(
         },
         days
       });
-      if (fallback) return fallback;
+      if (fallback) {
+        return enrichOverviewWithPlatformCharts(prisma, {
+          base: fallback,
+          user_id: params.user_id,
+          ...(params.release_id ? { release_id: params.release_id } : {}),
+          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+          days
+        });
+      }
       return {
         ...emptyAnalyticsOverview()
       };
@@ -516,22 +711,23 @@ export async function getAnalyticsOverview(
         },
         days
       });
-      if (fallback) return fallback;
+      if (fallback) {
+        return enrichOverviewWithPlatformCharts(prisma, {
+          base: fallback,
+          user_id: params.user_id,
+          ...(params.release_id ? { release_id: params.release_id } : {}),
+          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+          days
+        });
+      }
       return emptyAnalyticsOverview();
     }
-
-    const platformsBreakdown = await buildAllTimePlatformsBreakdown(prisma, {
-      user_id: params.user_id,
-      ...(params.release_id ? { release_id: params.release_id } : {}),
-      ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
-      fallbackStreams: current.total_streams,
-      fallbackPayStreams: current.total_pay_streams
-    });
 
     const periodStreams = chartRows.reduce((sum, row) => sum + row.total_streams, 0);
     const periodPayStreams = chartRows.reduce((sum, row) => sum + row.total_pay_streams, 0);
 
-    return {
+    return enrichOverviewWithPlatformCharts(prisma, {
+      base: {
       totalStreams: periodStreams,
       totalPayStreams: periodPayStreams,
       streamsChangePercent: calculateChangePercent(
@@ -543,15 +739,21 @@ export async function getAnalyticsOverview(
         previous?.total_pay_streams ?? 0
       ),
       latestReportDate: toDateKey(current.report_date),
-      topPlatform: platformsBreakdown[0]?.platform ?? null,
-      platforms_count: platformsBreakdown.length,
-      platformsBreakdown,
+      topPlatform: null,
+      platforms_count: 0,
+      platformsBreakdown: [],
       chart: chartRows.map((row) => ({
         date: toDateKey(row.report_date),
         streams: row.total_streams,
         pay_streams: row.total_pay_streams
-      }))
-    };
+      })),
+      platformsChart: []
+      },
+      user_id: params.user_id,
+      ...(params.release_id ? { release_id: params.release_id } : {}),
+      ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+      days
+    });
   }
 
   const snapshotWhere: Prisma.analytics_report_snapshotsWhereInput = {
@@ -576,27 +778,21 @@ export async function getAnalyticsOverview(
       topPlatform: null,
       platforms_count: 0,
       platformsBreakdown: [],
-      chart: []
+      chart: [],
+      platformsChart: []
     };
   }
 
-  const platformsBreakdown = await buildAllTimePlatformsBreakdown(prisma, {
+  return enrichOverviewWithPlatformCharts(prisma, {
+    base: snapshotOverview,
     user_id: params.user_id,
     ...(params.release_id ? { release_id: params.release_id } : {}),
     ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
     ...(country ? { country } : {}),
     ...(upc ? { upc } : {}),
     ...(platform ? { platform } : {}),
-    fallbackStreams: snapshotOverview.totalStreams,
-    fallbackPayStreams: snapshotOverview.totalPayStreams
+    days
   });
-
-  return {
-    ...snapshotOverview,
-    topPlatform: platformsBreakdown[0]?.platform ?? null,
-    platforms_count: platformsBreakdown.length,
-    platformsBreakdown
-  };
 }
 
 export async function listAnalyticsReleases(

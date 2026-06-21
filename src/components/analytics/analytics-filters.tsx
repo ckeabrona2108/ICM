@@ -13,13 +13,34 @@ export interface AnalyticsFilterState {
 interface AnalyticsFiltersProps {
   value: AnalyticsFilterState;
   releases: AnalyticsReleaseListItemResponse[];
+  platforms?: string[];
   onChange: (next: AnalyticsFilterState) => void;
 }
+
+const defaultPlatforms = [
+  "Spotify",
+  "Apple Music",
+  "YouTube Music",
+  "Яндекс Музыка",
+  "VK Музыка",
+  "TikTok",
+  "Deezer",
+  "Unknown"
+];
 
 const fieldClass =
   "h-10 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] font-medium text-white outline-none transition-colors placeholder:text-white/45 focus:border-[#7b3df5]/60";
 
-export function AnalyticsFilters({ value, releases, onChange }: AnalyticsFiltersProps) {
+export function AnalyticsFilters({
+  value,
+  releases,
+  platforms = [],
+  onChange
+}: AnalyticsFiltersProps) {
+  const availablePlatforms = Array.from(new Set([...platforms, ...defaultPlatforms])).sort((left, right) =>
+    left.localeCompare(right, "ru")
+  );
+
   return (
     <section className="rounded-2xl border border-white/[0.08] bg-[#13151d]/85 p-4 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)] backdrop-blur-xl">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -67,14 +88,11 @@ export function AnalyticsFilters({ value, releases, onChange }: AnalyticsFilters
             onChange={(event) => onChange({ ...value, platform: event.target.value })}
           >
             <option value="">Все площадки</option>
-            <option value="Spotify">Spotify</option>
-            <option value="Apple Music">Apple Music</option>
-            <option value="YouTube Music">YouTube Music</option>
-            <option value="Яндекс Музыка">Яндекс Музыка</option>
-            <option value="VK Музыка">VK Музыка</option>
-            <option value="TikTok">TikTok</option>
-            <option value="Deezer">Deezer</option>
-            <option value="Unknown">Unknown</option>
+            {availablePlatforms.map((platform) => (
+              <option key={platform} value={platform}>
+                {platform}
+              </option>
+            ))}
           </select>
         </label>
 

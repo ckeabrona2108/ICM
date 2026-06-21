@@ -29,6 +29,17 @@ const AnalyticsLineChart = dynamic(
   }
 );
 
+const AnalyticsPlatformsChart = dynamic(
+  () =>
+    import("@/components/analytics/analytics-platforms-chart").then(
+      (module) => module.AnalyticsPlatformsChart
+    ),
+  {
+    ssr: false,
+    loading: () => <p className="text-[14px] font-medium text-white/70">Готовим график площадок…</p>
+  }
+);
+
 function buildOverviewUrl(filters: AnalyticsFilterState): string {
   const params = new URLSearchParams();
   params.set("days", String(filters.days));
@@ -61,6 +72,7 @@ export function AnalyticsPage() {
     platform: "",
     days: 30
   });
+  const [focusedPlatform, setFocusedPlatform] = React.useState("");
 
   const [overview, setOverview] = React.useState<AnalyticsOverviewResponse | null>(null);
   const [releases, setReleases] = React.useState<AnalyticsReleaseListItemResponse[]>([]);
@@ -100,6 +112,19 @@ export function AnalyticsPage() {
       };
     });
   }, []);
+  const handleSelectPlatform = React.useCallback((platform: string) => {
+    setFocusedPlatform((prev) => (prev === platform ? "" : platform));
+  }, []);
+  const platformOptions = React.useMemo(
+    () => overview?.platforms_breakdown.map((item) => item.platform) ?? [],
+    [overview]
+  );
+
+  React.useEffect(() => {
+    if (!focusedPlatform) return;
+    if (platformOptions.includes(focusedPlatform)) return;
+    setFocusedPlatform("");
+  }, [focusedPlatform, platformOptions]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -258,7 +283,12 @@ export function AnalyticsPage() {
         description="История ежедневных snapshot-отчётов агрегатора по прослушиваниям."
       />
 
-      <AnalyticsFilters value={filters} releases={releases} onChange={setFilters} />
+      <AnalyticsFilters
+        value={filters}
+        releases={releases}
+        platforms={platformOptions}
+        onChange={setFilters}
+      />
 
       <div className="mt-4 space-y-4">
         <AnalyticsOverviewCard data={overview} />
@@ -300,26 +330,50 @@ export function AnalyticsPage() {
           {!overview || overview.platforms_breakdown.length === 0 ? (
             <p className="mt-2 text-[14px] text-white/65">По площадкам пока нет данных.</p>
           ) : (
-            <div className="mt-3 space-y-2">
-              {overview.platforms_breakdown.map((item) => {
-                return (
-                  <div key={item.platform} className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[14px] font-semibold text-white">{item.platform}</p>
-                    </div>
-                    <p className="mt-1 text-[12px] text-white/70">
-                      {item.streams.toLocaleString("ru-RU")} streams · {item.pay_streams.toLocaleString("ru-RU")} pay streams
-                    </p>
-                    <p className="mt-1 text-[12px] text-white/60">{item.share_percent.toFixed(1)}%</p>
-                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                      <div
-                        className="h-full rounded-full bg-[#7b3df5]"
-                        style={{ width: `${Math.max(0, Math.min(100, item.share_percent))}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="mt-3 space-y-4">
+              {overview.platforms_chart.length > 0 ? (
+                <AnalyticsPlatformsChart
+                  data={overview.platforms_chart}
+                  platforms={overview.platforms_breakdown.map((item) => item.platform)}
+                  selectedPlatform={focusedPlatform}
+                  onSelectPlatform={handleSelectPlatform}
+                />
+              ) : null}
+              <div className="grid gap-2 lg:grid-cols-2">
+                {overview.platforms_breakdown.map((item) => {
+                  const active = focusedPlatform === item.platform;
+                  return (
+                    <button
+                      key={item.platform}
+                      type="button"
+                      onClick={() => handleSelectPlatform(active ? "" : item.platform)}
+                      className={`rounded-xl border p-3 text-left transition ${
+                        active
+                          ? "border-[#7b3df5]/40 bg-[#7b3df5]/12"
+                          : "border-white/10 bg-black/20 hover:bg-black/28"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[14px] font-semibold text-white">{item.platform}</p>
+                        <span className="text-[11px] font-medium text-white/55">
+                          {active ? "Выбрано" : "Открыть"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[12px] text-white/70">
+                        {item.streams.toLocaleString("ru-RU")} streams ·{" "}
+                        {item.pay_streams.toLocaleString("ru-RU")} pay streams
+                      </p>
+                      <p className="mt-1 text-[12px] text-white/60">{item.share_percent.toFixed(1)}%</p>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-[#7b3df5]"
+                          style={{ width: `${Math.max(0, Math.min(100, item.share_percent))}%` }}
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </PageSection>

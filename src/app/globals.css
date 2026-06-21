@@ -239,6 +239,40 @@ html {
 .blob-b { animation: blob-drift-b 26s ease-in-out infinite; }
 .blob-c { animation: blob-drift-c 30s ease-in-out infinite; }
 
+@keyframes ambient-orbit-left {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  50% { transform: translate3d(30px, -28px, 0) scale(1.08) rotate(10deg); }
+}
+@keyframes ambient-orbit-right {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  50% { transform: translate3d(-26px, 22px, 0) scale(0.94) rotate(-8deg); }
+}
+.ambient-orbit-left {
+  animation: ambient-orbit-left 32s ease-in-out infinite;
+  will-change: transform;
+}
+.ambient-orbit-right {
+  animation: ambient-orbit-right 36s ease-in-out infinite;
+  will-change: transform;
+}
+
+@keyframes beam-sweep-y {
+  0%, 100% { transform: translate3d(0, -8%, 0); opacity: 0.22; }
+  50% { transform: translate3d(0, 12%, 0); opacity: 0.45; }
+}
+@keyframes beam-sweep-x {
+  0%, 100% { transform: translate3d(-8%, 0, 0); opacity: 0.18; }
+  50% { transform: translate3d(10%, 0, 0); opacity: 0.4; }
+}
+.beam-sweep-y {
+  animation: beam-sweep-y 18s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+.beam-sweep-x {
+  animation: beam-sweep-x 20s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 @keyframes gradient-shift {
   0%, 100% { background-position: 0% 50%; }
   50%      { background-position: 100% 50%; }
@@ -261,6 +295,7 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .blob-a, .blob-b, .blob-c, .float-soft, .gradient-shift, .spin-slow,
+  .ambient-orbit-left, .ambient-orbit-right, .beam-sweep-x, .beam-sweep-y,
   .auth-bg-video {
     animation: none !important;
   }

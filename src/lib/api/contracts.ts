@@ -151,7 +151,132 @@ export interface CurrentUserProfileResponse {
   name: string;
   email: string;
   avatarUrl: string | null;
+  royaltyBalance: number;
+  aiTokenBalance: number;
+  currentPlan: "FREE" | "PRO" | "ENTERPRISE";
+  hasAiStudioAccess: boolean;
   verification: import("@/lib/contract-verification-shared").ContractStatusPayload;
+}
+
+export interface AiStudioModelOptionResponse {
+  id: string;
+  label: string;
+  provider: string;
+  task: string;
+  supportsReference: boolean;
+  supportsAudio: boolean;
+  supportsVideo: boolean;
+  supportsImage: boolean;
+  recommended: boolean;
+  priceTokens?: number;
+  inputType?: string | null;
+}
+
+export interface AiStudioModelCatalogResponse {
+  source: "backend" | "database";
+  provider: string;
+  configured: boolean;
+  sections: {
+    chat: AiStudioModelOptionResponse[];
+    image: AiStudioModelOptionResponse[];
+    video: AiStudioModelOptionResponse[];
+    audio: AiStudioModelOptionResponse[];
+  };
+}
+
+export interface AiTokenPackageResponse {
+  id: string;
+  code: "starter" | "creator" | "pro_creator" | "studio" | "mega_studio" | "ultra_studio";
+  name: string;
+  tokenAmount: number;
+  bonusTokens: number;
+  priceRub: number;
+  active: boolean;
+}
+
+export interface AiTokenTransactionResponse {
+  id: string;
+  userId: string;
+  packageCode: string | null;
+  type: string;
+  amountTokens: number;
+  amountRub: number | null;
+  balanceAfter: number;
+  description: string | null;
+  createdAt: string;
+}
+
+export interface AiStudioGenerateReferenceFile {
+  name: string;
+  kind: "image" | "audio";
+  size: number;
+  uploadId?: string;
+  storageKey?: string;
+  url?: string;
+}
+
+export interface AiStudioGenerateRequest {
+  section: "chat" | "image" | "video" | "audio";
+  prompt: string;
+  modelId: string;
+  parameters: Record<string, string>;
+  referenceFiles: AiStudioGenerateReferenceFile[];
+  mode?: string;
+  priority?: string;
+  earlyAccess?: boolean;
+}
+
+export interface AiStudioGenerateResponse {
+  success: true;
+  newBalance: number;
+  transactionId: string;
+  assistantText?: string | null;
+  previewUrl?: string | null;
+  generation: {
+    id: string;
+    section: string;
+    modelCode: string;
+    prompt: string;
+    status: string;
+    costTokens: number;
+    resultUrl: string | null;
+    createdAt: string;
+  } | null;
+}
+
+export interface AiStudioChatThreadResponse {
+  id: string;
+  title: string;
+  modelCode: string;
+  createdAt: string;
+  updatedAt: string;
+  lastMessageAt: string | null;
+  messageCount: number;
+  lastMessagePreview: string | null;
+}
+
+export interface AiStudioChatMessageResponse {
+  id: string;
+  threadId: string;
+  role: "user" | "assistant";
+  content: string;
+  modelCode: string | null;
+  createdAt: string;
+}
+
+export interface AiStudioChatSendRequest {
+  threadId?: string | null;
+  modelId: string;
+  prompt: string;
+}
+
+export interface AiStudioChatSendResponse {
+  success: true;
+  newBalance: number;
+  transactionId: string;
+  thread: AiStudioChatThreadResponse;
+  userMessage: AiStudioChatMessageResponse;
+  assistantMessage: AiStudioChatMessageResponse;
 }
 
 export interface UpdateCurrentUserProfileRequest {

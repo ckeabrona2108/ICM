@@ -71,7 +71,7 @@ export async function PUT(request: Request) {
   }
 
   try {
-    await prisma.user.update({
+    await prisma.user.updateMany({
       where: { id: userId },
       data: {
         avatar: parsed.data.imageDataUrl
@@ -98,7 +98,7 @@ export async function DELETE() {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    await prisma.user.update({
+    await prisma.user.updateMany({
       where: { id: userId },
       data: {
         avatar: null

@@ -58,15 +58,31 @@ function IcmTariffCardBase({
         className
       )}
     >
-      {showTierBadge ? (
-        <div className="absolute right-5 top-5 flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
-          <span className="text-[11px] font-medium text-white/70">{tier.badge}</span>
-        </div>
-      ) : null}
-      {showCurrentPlanBadge ? (
-        <div className="absolute right-5 top-5 rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
-          Текущий план
+      {(showTierBadge || showCurrentPlanBadge || tier.promoBadge) ? (
+        <div className="absolute right-5 top-5 flex flex-col items-end gap-2">
+          {showTierBadge ? (
+            <div className="flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+              <span className="text-[11px] font-medium text-white/70">{tier.badge}</span>
+            </div>
+          ) : null}
+          {showCurrentPlanBadge ? (
+            <div className="rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+              Текущий план
+            </div>
+          ) : null}
+          {tier.promoBadge ? (
+            <div
+              className={cn(
+                "inline-flex items-center rounded-full border px-3 py-1.5 text-[12px] font-semibold",
+                tier.promoBadge.tone === "emerald"
+                  ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"
+                  : "border-violet-400/30 bg-violet-500/12 text-violet-200"
+              )}
+            >
+              {tier.promoBadge.label}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -84,6 +100,9 @@ function IcmTariffCardBase({
         <span className="text-[36px] font-bold text-white">{tier.price}</span>
         <span className="text-[13px] text-white/45">{tier.period}</span>
       </div>
+      {tier.aiGiftDescription ? (
+        <p className="mt-4 text-[13px] leading-relaxed text-white/68">{tier.aiGiftDescription}</p>
+      ) : null}
 
       <ul className="mt-6 space-y-3">
         {tier.features.map((f) => (

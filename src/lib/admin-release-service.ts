@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient, verification_status } from "@prisma/client";
 import { z } from "zod";
+import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 
 export const upcSchema = z
   .string()
@@ -68,7 +69,18 @@ export async function approveReleaseByAdmin(params: {
 
   const release = await params.prisma.release.findUnique({
     where: { id: params.releaseId },
-    select: { id: true, status: true, roles: true }
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      roles: true,
+      user: {
+        select: {
+          email: true,
+          name: true
+        }
+      }
+    }
   });
 
   if (!release) return null;
@@ -97,6 +109,20 @@ export async function approveReleaseByAdmin(params: {
     }
   });
 
+  try {
+    await sendReleaseDecisionEmail({
+      to: release.user?.email,
+      userName: release.user?.name,
+      releaseTitle: release.title ?? "Без названия",
+      approved: true
+    });
+  } catch (error) {
+    console.error("[release-email] approve notification failed", {
+      releaseId: params.releaseId,
+      error
+    });
+  }
+
   return { releaseId: params.releaseId } as const;
 }
 
@@ -113,7 +139,17 @@ export async function rejectReleaseByAdmin(params: {
 
   const release = await params.prisma.release.findUnique({
     where: { id: params.releaseId },
-    select: { id: true, status: true }
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      user: {
+        select: {
+          email: true,
+          name: true
+        }
+      }
+    }
   });
 
   if (!release) return { ok: false as const, error: "Release not found" };
@@ -129,6 +165,21 @@ export async function rejectReleaseByAdmin(params: {
       rejectReason: reason
     }
   });
+
+  try {
+    await sendReleaseDecisionEmail({
+      to: release.user?.email,
+      userName: release.user?.name,
+      releaseTitle: release.title ?? "Без названия",
+      approved: false,
+      reason
+    });
+  } catch (error) {
+    console.error("[release-email] reject notification failed", {
+      releaseId: params.releaseId,
+      error
+    });
+  }
 
   return { ok: true as const, reason };
 }

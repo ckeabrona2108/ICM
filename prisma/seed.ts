@@ -289,6 +289,123 @@ async function main() {
     }
   });
 
+  await Promise.all([
+    prisma.ai_token_packages.upsert({
+      where: { code: "starter" },
+      update: {
+        name: "Starter",
+        token_amount: 1000,
+        bonus_tokens: 0,
+        price_rub: 500,
+        active: true
+      },
+      create: {
+        id: randomUUID(),
+        code: "starter",
+        name: "Starter",
+        token_amount: 1000,
+        bonus_tokens: 0,
+        price_rub: 500,
+        active: true
+      }
+    }),
+    prisma.ai_token_packages.upsert({
+      where: { code: "creator" },
+      update: {
+        name: "Creator",
+        token_amount: 2500,
+        bonus_tokens: 100,
+        price_rub: 1250,
+        active: true
+      },
+      create: {
+        id: randomUUID(),
+        code: "creator",
+        name: "Creator",
+        token_amount: 2500,
+        bonus_tokens: 100,
+        price_rub: 1250,
+        active: true
+      }
+    }),
+    prisma.ai_token_packages.upsert({
+      where: { code: "pro_creator" },
+      update: {
+        name: "Pro Creator",
+        token_amount: 5000,
+        bonus_tokens: 300,
+        price_rub: 2500,
+        active: true
+      },
+      create: {
+        id: randomUUID(),
+        code: "pro_creator",
+        name: "Pro Creator",
+        token_amount: 5000,
+        bonus_tokens: 300,
+        price_rub: 2500,
+        active: true
+      }
+    }),
+    prisma.ai_token_packages.upsert({
+      where: { code: "studio" },
+      update: {
+        name: "Studio",
+        token_amount: 10000,
+        bonus_tokens: 1000,
+        price_rub: 5000,
+        active: true
+      },
+      create: {
+        id: randomUUID(),
+        code: "studio",
+        name: "Studio",
+        token_amount: 10000,
+        bonus_tokens: 1000,
+        price_rub: 5000,
+        active: true
+      }
+    }),
+    prisma.ai_token_packages.upsert({
+      where: { code: "mega_studio" },
+      update: {
+        name: "Mega Studio",
+        token_amount: 15000,
+        bonus_tokens: 2000,
+        price_rub: 7500,
+        active: true
+      },
+      create: {
+        id: randomUUID(),
+        code: "mega_studio",
+        name: "Mega Studio",
+        token_amount: 15000,
+        bonus_tokens: 2000,
+        price_rub: 7500,
+        active: true
+      }
+    }),
+    prisma.ai_token_packages.upsert({
+      where: { code: "ultra_studio" },
+      update: {
+        name: "Ultra Studio",
+        token_amount: 20000,
+        bonus_tokens: 3000,
+        price_rub: 10000,
+        active: true
+      },
+      create: {
+        id: randomUUID(),
+        code: "ultra_studio",
+        name: "Ultra Studio",
+        token_amount: 20000,
+        bonus_tokens: 3000,
+        price_rub: 10000,
+        active: true
+      }
+    })
+  ]);
+
   await prisma.adminLog.create({
     data: {
       id: randomUUID(),

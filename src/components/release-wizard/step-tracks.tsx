@@ -16,6 +16,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
+import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
 
 import {
   emptyTrackMeta,
@@ -45,16 +46,6 @@ const TRACK_ASSET_LIMITS = {
   }
 } as const;
 type TrackAssetKind = keyof typeof TRACK_ASSET_LIMITS;
-
-interface PresignedUploadResponse {
-  key: string;
-  url: string;
-  publicUrl?: string;
-  bucket?: string;
-  method?: string;
-  fields?: Record<string, string>;
-  mock?: boolean;
-}
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} Б`;
@@ -361,44 +352,17 @@ export function StepTracks() {
       setUploadingAsset({ trackId, kind });
       try {
         const contentType = file.type || inferContentTypeFromName(file.name);
-        const targetResponse = await fetch("/api/uploads/presigned", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fileName: sanitizeFileName(file.name),
-            contentType,
-            kind: "audio"
-          })
+        const uploaded = await uploadBrowserBlobToStorage({
+          fileName: sanitizeFileName(file.name),
+          contentType,
+          kind: "audio",
+          blob: file
         });
 
-        const target = (await targetResponse.json().catch(() => null)) as
-          | PresignedUploadResponse
-          | { error?: string }
-          | null;
-
-        if (!targetResponse.ok || !target || !("url" in target) || !target.url || !target.key) {
-          const fallback =
-            target && "error" in target && typeof target.error === "string"
-              ? target.error
-              : "Не удалось получить ссылку для загрузки файла.";
-          throw new Error(fallback);
-        }
-
-        const uploadResponse = await fetch(target.url, {
-          method: target.method ?? "PUT",
-          headers: {
-            "Content-Type": contentType
-          },
-          body: file
-        });
-
-        if (!uploadResponse.ok) {
-          throw new Error("Ошибка загрузки файла в хранилище.");
-        }
-
-        const readUrl = resolveLocalObjectUrl(target.key) ?? target.url.split("?")[0] ?? target.url;
+        const readUrl =
+          resolveLocalObjectUrl(uploaded.key) ?? uploaded.publicUrl ?? uploaded.uploadUrl.split("?")[0] ?? uploaded.uploadUrl;
         const uploadedFile: UploadedFileRef = {
-          storageKey: target.key,
+          storageKey: uploaded.key,
           url: toAbsoluteStorageUrl(readUrl),
           fileName: file.name,
           contentType,

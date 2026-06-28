@@ -1,5 +1,6 @@
 import {
   CreateBucketCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -1765,4 +1766,28 @@ export async function createPresignedDownload(input: {
     url,
     mock: false
   };
+}
+
+export async function deleteStoredObject(input: {
+  key: string;
+  bucket?: string;
+}): Promise<void> {
+  const client = getClient();
+  const requestedBucket = (input.bucket ?? "").trim();
+  const normalizedKey = normalizeStorageKey(input.key);
+  if (!normalizedKey || !client) {
+    return;
+  }
+
+  const bucketName = requestedBucket || (await resolveBucketName(client)) || getDefaultBucketName();
+  if (!bucketName) {
+    return;
+  }
+
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucketName,
+      Key: normalizedKey
+    })
+  );
 }

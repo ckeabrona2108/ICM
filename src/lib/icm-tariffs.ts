@@ -9,6 +9,11 @@ export interface IcmTariffTier {
   icon: IcmTariffIconId;
   iconColor: string;
   description: string;
+  aiGiftDescription?: string;
+  promoBadge?: {
+    label: string;
+    tone: "emerald" | "violet";
+  };
   price: string;
   period: string;
   features: string[];
@@ -46,6 +51,12 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
     icon: "camera",
     iconColor: "#fb923c",
     description: "🔥 Больше релизов — больше шансов залететь. Для тех, кто настроен на результат.",
+    aiGiftDescription:
+      "🎁 1 000 AI-токенов в подарок. Генерируйте изображения, видео, аудио и общайтесь с AI без дополнительных расходов в первый месяц.",
+    promoBadge: {
+      label: "🎁 +1 000 AI-токенов",
+      tone: "emerald"
+    },
     price: "₽990",
     period: "/ Мес",
     features: [
@@ -68,6 +79,12 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
     icon: "dollar",
     iconColor: "#7b61ff",
     description: "👑 Максимум возможностей для серьёзных артистов. Уровень, где начинается настоящий рост.",
+    aiGiftDescription:
+      "🎁 2 500 AI-токенов в подарок. Максимальный бонус для профессиональной работы с AI Студией: больше генераций, больше возможностей, больше результата.",
+    promoBadge: {
+      label: "🔥 +2 500 AI-токенов",
+      tone: "violet"
+    },
     price: "₽1990",
     period: "/ Мес",
     features: [

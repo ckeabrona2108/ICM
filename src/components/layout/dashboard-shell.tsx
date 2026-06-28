@@ -10,7 +10,7 @@ export function DashboardShell({
   className?: string;
   children: React.ReactNode;
 }) {
-  return <div className={cn("pb-12", className)}>{children}</div>;
+  return <div className={cn("perf-content-auto pb-12", className)}>{children}</div>;
 }
 
 export function PageSection({
@@ -23,7 +23,7 @@ export function PageSection({
   return (
     <section
       className={cn(
-        "rounded-2xl border border-white/[0.08] bg-[#13151d]/92 p-4 shadow-[0_10px_30px_-24px_rgba(11,14,24,0.9)] backdrop-blur-[4px] sm:p-5",
+        "perf-content-auto perf-paint-contain rounded-2xl border border-white/[0.08] bg-[#13151d]/92 p-4 shadow-[0_8px_24px_-20px_rgba(11,14,24,0.76)] backdrop-blur-[2px] sm:p-5",
         className
       )}
     >

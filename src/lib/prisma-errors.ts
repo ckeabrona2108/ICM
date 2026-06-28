@@ -42,6 +42,41 @@ export function isAnyPrismaTableMissingError(
   return tableNames.some((tableName) => isPrismaTableMissingError(error, tableName));
 }
 
+export function isPrismaColumnMissingError(
+  error: unknown,
+  columnName?: string
+): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code !== "P2022") {
+      return false;
+    }
+
+    if (!columnName) {
+      return true;
+    }
+
+    const metaColumn = String(error.meta?.column ?? "");
+    if (metaColumn.includes(columnName)) {
+      return true;
+    }
+  }
+
+  const message = extractErrorMessage(error);
+  const columnHint = columnName ? message.includes(columnName) : true;
+
+  return (
+    columnHint &&
+    /column .* does not exist|unknown column|has no column|missing column/i.test(message)
+  );
+}
+
+export function isAnyPrismaColumnMissingError(
+  error: unknown,
+  columnNames: string[]
+): boolean {
+  return columnNames.some((columnName) => isPrismaColumnMissingError(error, columnName));
+}
+
 export function isPrismaConnectionError(error: unknown): boolean {
   if (error instanceof Prisma.PrismaClientInitializationError) {
     return true;

@@ -59,6 +59,30 @@
   - потом расширение ценности за пределы дистрибуции
   - потом платформы, FAQ и запуск первого релиза
 
+## AI Studio UX
+- Source of truth:
+  - AI Studio is a native dashboard surface inside ICECREAMMUSIC.
+  - Active tab state is URL-driven and should survive refreshes and direct links.
+- Primary UX rule:
+  - сначала действие, потом настройки.
+  - The prompt/composer must be the first thing the user sees on every active AI tab.
+- Workspace structure:
+  - Chats should feel like a compact ChatGPT-style conversation shell.
+  - Image, video, and audio tabs should feel like a focused creation workspace with a thin toolbar and a fixed composer.
+  - Do not show big statistics, bonus blocks, or model galleries above the main action area.
+- Controls:
+  - Model selection should be a compact dropdown or popover.
+  - Model parameters should appear only after a model is chosen.
+  - References should attach inline near the prompt with small previews.
+  - Native, Priority, and Early access are global generation modes, not decorative labels.
+- Placement:
+  - Limits, bonuses, file counts, and other account stats belong in Profile AI or Settings AI.
+  - Token balance and generation cost stay visible near the prompt and in the top dashboard bar.
+- Avoid:
+  - Repeating the same data in multiple large cards.
+  - Showing every control at once if a lighter progressive-disclosure pattern works.
+  - SFEROOM-style stacked panels or gold-forward accenting.
+
 ## Design principles
 - Principle 1: hero остаётся визуальным центром бренда; остальные блоки подчиняются ему, а не спорят с ним
 - Principle 2: каждая следующая секция должна усиливать доверие, а не просто добавлять “контент”

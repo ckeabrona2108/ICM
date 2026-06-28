@@ -19,7 +19,7 @@ function TabsBase({ tabs, active, onChange }: TabsProps) {
           type="button"
           onClick={() => onChange(tab)}
           className={cn(
-            "rounded-lg px-3 py-1.5 text-sm transition",
+            "rounded-lg px-3 py-1.5 text-sm transition-colors duration-150 ease-out motion-reduce:transition-none",
             active === tab ? "bg-white/10 text-white" : "text-muted-foreground hover:text-foreground"
           )}
         >

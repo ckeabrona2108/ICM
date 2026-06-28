@@ -25,6 +25,7 @@ import {
   type ContractSignatureStatus,
   type ContractStatusPayload
 } from "@/lib/contract-verification-shared";
+import { sendVerificationDecisionEmail } from "@/lib/user-event-email";
 
 const RELEASE_STATUS_PENDING_VERIFICATION = "moderating";
 const RELEASE_STATUS_MODERATION = "moderating";
@@ -1397,6 +1398,20 @@ export async function approveContractSignatureByAdmin(params: {
       } catch (error) {
         console.error("[verification] telegram notification failed", error);
       }
+
+      const verification = await getContractSignatureById({
+        prisma: params.prisma,
+        id: params.verificationId
+      });
+      try {
+        await sendVerificationDecisionEmail({
+          to: verification?.userEmail,
+          userName: verification?.userName,
+          approved: true
+        });
+      } catch (error) {
+        console.error("[verification-email] approve notification failed", error);
+      }
     }
 
     return result;
@@ -1569,7 +1584,7 @@ export async function rejectContractSignatureByAdmin(params: {
   }
 
   try {
-    return await params.prisma.$transaction(async (tx) => {
+    const result = await params.prisma.$transaction(async (tx) => {
       const current = (await tx.verification.findUnique({
         where: { id: params.verificationId },
         include: {
@@ -1643,6 +1658,25 @@ export async function rejectContractSignatureByAdmin(params: {
         movedReleaseIds
       } satisfies VerificationReviewResult;
     });
+
+    if (result.ok) {
+      const verification = await getContractSignatureById({
+        prisma: params.prisma,
+        id: params.verificationId
+      });
+      try {
+        await sendVerificationDecisionEmail({
+          to: verification?.userEmail,
+          userName: verification?.userName,
+          approved: false,
+          reason
+        });
+      } catch (error) {
+        console.error("[verification-email] reject notification failed", error);
+      }
+    }
+
+    return result;
   } catch (error) {
     console.error("[verification-admin-action-failed]", {
       action: "reject",

@@ -196,10 +196,8 @@ function buildNav(counts: {
       },
       {
         href: "/dashboard/ai-studio",
-        label: "AI Studio",
-        icon: RobotStickerIcon,
-        badge: "Скоро",
-        badgeTone: "soon"
+        label: "AI Студия",
+        icon: RobotStickerIcon
       },
       {
         href: "/dashboard/ai-artists",
@@ -491,9 +489,9 @@ export function DashboardSidebar({
     <>
       <aside
         data-dashboard-sidebar="true"
-        className="fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[4px] lg:flex"
+        className="perf-fixed-layer fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[2px] lg:flex"
       >
-        <div className="flex h-full flex-col overflow-y-auto px-3.5 py-5">
+        <div className="perf-scroll-shell flex h-full flex-col overflow-y-auto px-3.5 py-5">
           <Link href="/dashboard" className="mb-6 flex items-center justify-start gap-2.5 px-3">
             <span className="grid h-10 w-10 place-items-center overflow-hidden">
               <Image
@@ -599,7 +597,7 @@ export function DashboardSidebar({
         </div>
       </aside>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.1] bg-[#0d0f16]/96 px-1.5 pb-[calc(env(safe-area-inset-bottom)+6px)] pt-1.5 backdrop-blur-md lg:hidden">
+      <nav className="perf-fixed-layer fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.1] bg-[#0d0f16]/96 px-1.5 pb-[calc(env(safe-area-inset-bottom)+6px)] pt-1.5 backdrop-blur-[6px] lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-5 gap-1">
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
@@ -631,7 +629,7 @@ export function DashboardSidebar({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
-            className="pointer-events-none fixed right-5 top-5 z-[90] rounded-xl border border-amber-300/30 bg-[#251d05]/95 px-4 py-3 text-[14px] font-medium text-amber-100 shadow-[0_18px_50px_-22px_rgba(0,0,0,0.9)] backdrop-blur-md"
+            className="pointer-events-none fixed right-5 top-5 z-[90] rounded-xl border border-amber-300/30 bg-[#251d05]/95 px-4 py-3 text-[14px] font-medium text-amber-100 shadow-[0_14px_30px_-18px_rgba(0,0,0,0.8)] backdrop-blur-[4px]"
             role="status"
             aria-live="polite"
           >

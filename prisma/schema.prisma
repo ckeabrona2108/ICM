@@ -61,35 +61,37 @@ model news {
 }
 
 model partner_codes {
-  id                   String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code                 String               @unique
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                 String                @unique
   label                String?
-  active               Boolean              @default(true)
-  coversReleasePayment Boolean              @default(true)
+  active               Boolean               @default(true)
+  coversReleasePayment Boolean               @default(true)
   maxUses              Int?
-  usedCount            Int                  @default(0)
-  expiresAt            DateTime?            @db.Timestamp(6)
-  allowedUserId        String?              @db.Uuid
+  usedCount            Int                   @default(0)
+  expiresAt            DateTime?             @db.Timestamp(6)
+  allowedUserId        String?               @db.Uuid
   allowedEmailDomain   String?
   notes                String?
-  createdAt            DateTime             @default(now()) @db.Timestamp(6)
-  updatedAt            DateTime             @updatedAt @db.Timestamp(6)
-  createdByAdminId     String?              @db.Uuid
-  allowedUser          user?                @relation("partner_codes_allowed_user", fields: [allowedUserId], references: [id], onDelete: SetNull)
-  createdByAdmin       user?                @relation("partner_codes_created_by_admin", fields: [createdByAdminId], references: [id], onDelete: SetNull)
+  createdAt            DateTime              @default(now()) @db.Timestamp(6)
+  updatedAt            DateTime              @updatedAt @db.Timestamp(6)
+  createdByAdminId     String?               @db.Uuid
+  allowedUser          user?                 @relation("partner_codes_allowed_user", fields: [allowedUserId], references: [id], onDelete: SetNull)
+  createdByAdmin       user?                 @relation("partner_codes_created_by_admin", fields: [createdByAdminId], references: [id], onDelete: SetNull)
   usages               partner_code_usages[]
 
   @@schema("icecream")
 }
 
 model orders {
-  id        String     @id @db.Uuid
-  createdAt DateTime?  @default(now()) @db.Timestamp(6)
-  userId    String     @db.Uuid
-  type      order_type
-  metadata  Json
-  confirmed Boolean    @default(false)
-  user      user       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "orders_userId_user_id_fk")
+  id             String     @id @db.Uuid
+  createdAt      DateTime?  @default(now()) @db.Timestamp(6)
+  userId         String     @db.Uuid
+  type           order_type
+  metadata       Json
+  confirmed      Boolean    @default(false)
+  payment_status String     @default("pending_payment")
+  completed_at   DateTime?  @db.Timestamp(6)
+  user           user       @relation(fields: [userId], references: [id], onDelete: Cascade, map: "orders_userId_user_id_fk")
 
   @@schema("icecream")
 }
@@ -137,40 +139,40 @@ model promo_urls {
 }
 
 model release {
-  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  preview              String
-  title                String
-  date                 DateTime            @db.Timestamp(6)
-  upc                  String?
-  userId               String              @db.Uuid
-  language             String
-  subtitle             String?
-  performer            String?
-  feat                 String?
-  remixer              String?
-  genre                String
-  labelName            String?
-  startDate            DateTime            @db.Timestamp(6)
-  preorderDate         DateTime            @db.Timestamp(6)
-  platforms            Json?
-  area                 Json?
-  type                 release_type
-  confirmed            Boolean             @default(false)
-  rejectReason         String?
-  status               verification_status @default(moderating)
-  roles                Json?
-  moderatorComment     String?
-  earlyStartInRussia   Boolean?
-  realTimeDelivery     Boolean?
-  yandexSoonNewRelease DateTime?           @db.Timestamp(6)
-  analytics_daily_summaries analytics_daily_summaries[]
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  preview                      String
+  title                        String
+  date                         DateTime                       @db.Timestamp(6)
+  upc                          String?
+  userId                       String                         @db.Uuid
+  language                     String
+  subtitle                     String?
+  performer                    String?
+  feat                         String?
+  remixer                      String?
+  genre                        String
+  labelName                    String?
+  startDate                    DateTime                       @db.Timestamp(6)
+  preorderDate                 DateTime                       @db.Timestamp(6)
+  platforms                    Json?
+  area                         Json?
+  type                         release_type
+  confirmed                    Boolean                        @default(false)
+  rejectReason                 String?
+  status                       verification_status            @default(moderating)
+  roles                        Json?
+  moderatorComment             String?
+  earlyStartInRussia           Boolean?
+  realTimeDelivery             Boolean?
+  yandexSoonNewRelease         DateTime?                      @db.Timestamp(6)
+  analytics_daily_summaries    analytics_daily_summaries[]
   analytics_platform_summaries analytics_platform_summaries[]
-  analytics_report_snapshots analytics_report_snapshots[]
-  partner_code_usages  partner_code_usages[]
-  promo_links          promo_links[]
-  unmatched_analytics_imports unmatched_analytics_imports[] @relation("unmatched_analytics_imports_resolved_release")
-  user                 user                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "release_userId_user_id_fk")
-  track                track[]
+  analytics_report_snapshots   analytics_report_snapshots[]
+  partner_code_usages          partner_code_usages[]
+  promo_links                  promo_links[]
+  unmatched_analytics_imports  unmatched_analytics_imports[]  @relation("unmatched_analytics_imports_resolved_release")
+  user                         user                           @relation(fields: [userId], references: [id], onDelete: Cascade, map: "release_userId_user_id_fk")
+  track                        track[]
 
   @@schema("icecream")
 }
@@ -281,47 +283,208 @@ model partner_code_usages {
 }
 
 model user {
-  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name                String
-  email               String                @unique(map: "user_email_unique")
-  emailVerified       DateTime?             @db.Timestamp(6)
-  avatar              String?
-  password            String?
-  verificationToken   String?
-  resetPasswordToken  String?
-  isVerifiedAuthor    Boolean               @default(false)
-  isAdmin             Boolean               @default(false)
-  isSubscribed        Boolean               @default(false)
-  subscribeLevel      subscribe_level?
-  expiresAt           DateTime?             @db.Timestamp(6)
-  freeReleases        Float                 @default(0)
-  balance             Float                 @default(0)
-  birthDate           DateTime?             @db.Timestamp(6)
-  country             String?
-  label               String?
-  personalSiteUrl     String?
-  telegram            String?
-  vk                  String?
-  whatsup             String?
-  viber               String?
-  accounts            accounts[]            @ignore
-  analytics           analytics[]
-  analytics_daily_summaries analytics_daily_summaries[]
-  analytics_import_jobs analytics_import_jobs[] @relation("analytics_import_jobs_created_by_admin")
+  id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                         String
+  email                        String                         @unique(map: "user_email_unique")
+  emailVerified                DateTime?                      @db.Timestamp(6)
+  avatar                       String?
+  password                     String?
+  verificationToken            String?
+  resetPasswordToken           String?
+  isVerifiedAuthor             Boolean                        @default(false)
+  isAdmin                      Boolean                        @default(false)
+  isSubscribed                 Boolean                        @default(false)
+  subscribeLevel               subscribe_level?
+  expiresAt                    DateTime?                      @db.Timestamp(6)
+  freeReleases                 Float                          @default(0)
+  balance                      Float                          @default(0)
+  aiTokenBalance               Int                            @default(0)
+  aiPendingTokenBalance        Int                            @default(0)
+  aiMonthlyBonusLastGrantedAt  DateTime?                      @db.Timestamp(6)
+  birthDate                    DateTime?                      @db.Timestamp(6)
+  country                      String?
+  label                        String?
+  personalSiteUrl              String?
+  telegram                     String?
+  vk                           String?
+  whatsup                      String?
+  viber                        String?
+  accounts                     accounts[]                     @ignore
+  analytics                    analytics[]
+  analytics_daily_summaries    analytics_daily_summaries[]
+  analytics_import_jobs        analytics_import_jobs[]        @relation("analytics_import_jobs_created_by_admin")
   analytics_platform_summaries analytics_platform_summaries[]
-  analytics_report_snapshots analytics_report_snapshots[]
-  orders              orders[]
-  partnerCodeUsages   partner_code_usages[]
-  partnerCodesAllowed partner_codes[]         @relation("partner_codes_allowed_user")
-  partnerCodesCreated partner_codes[]         @relation("partner_codes_created_by_admin")
-  payment_methods     payment_methods[]
-  payouts             payouts[]
-  release             release[]
-  sessions            sessions[]
-  unmatched_analytics_imports unmatched_analytics_imports[] @relation("unmatched_analytics_imports_resolved_by_admin")
-  verification        verification[]
-  verification_tokens verification_tokens[]
+  analytics_report_snapshots   analytics_report_snapshots[]
+  ai_generations               ai_generations[]
+  ai_chat_threads              ai_chat_threads[]
+  ai_chat_messages             ai_chat_messages[]
+  ai_token_transactions        ai_token_transactions[]
+  ai_user_notifications        ai_user_notifications[]
+  ai_uploads                   ai_uploads[]
+  orders                       orders[]
+  partnerCodeUsages            partner_code_usages[]
+  partnerCodesAllowed          partner_codes[]                @relation("partner_codes_allowed_user")
+  partnerCodesCreated          partner_codes[]                @relation("partner_codes_created_by_admin")
+  payment_methods              payment_methods[]
+  payouts                      payouts[]
+  release                      release[]
+  sessions                     sessions[]
+  unmatched_analytics_imports  unmatched_analytics_imports[]  @relation("unmatched_analytics_imports_resolved_by_admin")
+  verification                 verification[]
+  verification_tokens          verification_tokens[]
 
+  @@schema("icecream")
+}
+
+model ai_studio_system_state {
+  id           Int       @id @default(1)
+  status       String    @default("preparing")
+  activated_at DateTime? @db.Timestamp(6)
+  created_at   DateTime  @default(now()) @db.Timestamp(6)
+  updated_at   DateTime  @default(now()) @db.Timestamp(6)
+
+  @@schema("icecream")
+}
+
+model ai_models {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code              String           @unique
+  name              String
+  provider          String
+  section           String
+  input_type        String?
+  supports_image    Boolean          @default(false)
+  supports_audio    Boolean          @default(false)
+  supports_video    Boolean          @default(false)
+  base_cost_usd     Float            @default(0)
+  markup_percent    Float            @default(0)
+  price_tokens      Int              @default(0)
+  billing_type      String           @default("generation")
+  parameters_schema Json?
+  active            Boolean          @default(true)
+  created_at        DateTime         @default(now()) @db.Timestamp(6)
+  updated_at        DateTime         @updatedAt @db.Timestamp(6)
+  generations       ai_generations[]
+
+  @@schema("icecream")
+}
+
+model ai_generations {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String     @db.Uuid
+  ai_model_id   String?    @db.Uuid
+  section       String
+  model_code    String
+  prompt        String
+  input_files   Json?
+  parameters    Json?
+  cost_tokens   Int        @default(0)
+  status        String     @default("queued")
+  result_url    String?
+  error_message String?
+  created_at    DateTime   @default(now()) @db.Timestamp(6)
+  updated_at    DateTime   @updatedAt @db.Timestamp(6)
+  user          user       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  ai_model      ai_models? @relation(fields: [ai_model_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at])
+  @@index([section, status])
+  @@schema("icecream")
+}
+
+model ai_uploads {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String   @db.Uuid
+  section     String
+  file_name   String
+  storage_key String
+  mime_type   String
+  size_bytes  Int
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  updated_at  DateTime @updatedAt @db.Timestamp(6)
+  user        user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at])
+  @@schema("icecream")
+}
+
+model ai_chat_threads {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String             @db.Uuid
+  title           String
+  model_code      String
+  last_message_at DateTime?          @db.Timestamp(6)
+  created_at      DateTime           @default(now()) @db.Timestamp(6)
+  updated_at      DateTime           @updatedAt @db.Timestamp(6)
+  user            user               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  messages        ai_chat_messages[]
+
+  @@index([user_id, updated_at])
+  @@index([user_id, last_message_at])
+  @@schema("icecream")
+}
+
+model ai_chat_messages {
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  thread_id  String          @db.Uuid
+  user_id    String          @db.Uuid
+  role       String
+  content    String
+  model_code String?
+  created_at DateTime        @default(now()) @db.Timestamp(6)
+  thread     ai_chat_threads @relation(fields: [thread_id], references: [id], onDelete: Cascade)
+  user       user            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([thread_id, created_at])
+  @@index([user_id, created_at])
+  @@schema("icecream")
+}
+
+model ai_token_packages {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code         String   @unique
+  name         String
+  token_amount Int
+  bonus_tokens Int      @default(0)
+  price_rub    Float
+  active       Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  updated_at   DateTime @updatedAt @db.Timestamp(6)
+
+  @@schema("icecream")
+}
+
+model ai_token_transactions {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String   @db.Uuid
+  package_code  String?
+  type          String
+  amount_tokens Int
+  amount_rub    Float?
+  balance_after Int
+  generation_id String?  @db.Uuid
+  description   String?
+  metadata      Json?
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  user          user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at])
+  @@schema("icecream")
+}
+
+model ai_user_notifications {
+  id         String    @id
+  user_id    String    @db.Uuid
+  kind       String    @default("info")
+  title      String
+  message    String
+  cta_label  String?
+  cta_href   String?
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+  read_at    DateTime? @db.Timestamp(6)
+  user       user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, created_at])
   @@schema("icecream")
 }
 
@@ -413,19 +576,19 @@ model analytics_daily_summaries {
 }
 
 model analytics_platform_summaries {
-  id           String   @id
-  user_id      String   @db.Uuid
-  release_id   String?  @db.Uuid
-  report_date  DateTime @db.Timestamp(3)
-  platform     String
-  streams      Int
-  pay_streams  Int
-  share_percent Decimal @default(0) @db.Decimal(7, 3)
+  id             String   @id
+  user_id        String   @db.Uuid
+  release_id     String?  @db.Uuid
+  report_date    DateTime @db.Timestamp(3)
+  platform       String
+  streams        Int
+  pay_streams    Int
+  share_percent  Decimal  @default(0) @db.Decimal(7, 3)
   change_percent Decimal? @db.Decimal(7, 3)
-  created_at   DateTime @default(now()) @db.Timestamp(3)
-  updated_at   DateTime @db.Timestamp(3)
-  user         user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_platform_summaries_user_id_fkey")
-  release      release? @relation(fields: [release_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_platform_summaries_release_id_fkey")
+  created_at     DateTime @default(now()) @db.Timestamp(3)
+  updated_at     DateTime @db.Timestamp(3)
+  user           user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_platform_summaries_user_id_fkey")
+  release        release? @relation(fields: [release_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_platform_summaries_release_id_fkey")
 
   @@unique([user_id, release_id, report_date, platform], map: "aps_user_release_date_platform_uniq")
   @@index([user_id, report_date], map: "analytics_platform_summaries_user_id_report_date_idx")
@@ -435,27 +598,27 @@ model analytics_platform_summaries {
 }
 
 model analytics_import_jobs {
-  id                        String                   @id
-  source_file_name          String
-  stored_file_path          String?
-  report_date               DateTime                 @db.Timestamp(3)
-  status                    AnalyticsImportJobStatus @default(PENDING)
-  total_rows                Int                      @default(0)
-  imported_rows             Int                      @default(0)
-  matched_rows              Int                      @default(0)
-  unmatched_rows            Int                      @default(0)
-  affected_users_count      Int                      @default(0)
-  affected_releases_count   Int                      @default(0)
-  platforms_count           Int                      @default(0)
-  rows_with_unknown_platform Int                     @default(0)
-  top_platform              String?
-  error_message             String?
-  started_at                DateTime?                @db.Timestamp(3)
-  finished_at               DateTime?                @db.Timestamp(3)
-  created_by_admin_id       String                   @db.Uuid
-  created_at                DateTime                 @default(now()) @db.Timestamp(3)
-  updated_at                DateTime                 @db.Timestamp(3)
-  user                      user                     @relation("analytics_import_jobs_created_by_admin", fields: [created_by_admin_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_import_jobs_created_by_admin_id_fkey")
+  id                          String                        @id
+  source_file_name            String
+  stored_file_path            String?
+  report_date                 DateTime                      @db.Timestamp(3)
+  status                      AnalyticsImportJobStatus      @default(PENDING)
+  total_rows                  Int                           @default(0)
+  imported_rows               Int                           @default(0)
+  matched_rows                Int                           @default(0)
+  unmatched_rows              Int                           @default(0)
+  affected_users_count        Int                           @default(0)
+  affected_releases_count     Int                           @default(0)
+  platforms_count             Int                           @default(0)
+  rows_with_unknown_platform  Int                           @default(0)
+  top_platform                String?
+  error_message               String?
+  started_at                  DateTime?                     @db.Timestamp(3)
+  finished_at                 DateTime?                     @db.Timestamp(3)
+  created_by_admin_id         String                        @db.Uuid
+  created_at                  DateTime                      @default(now()) @db.Timestamp(3)
+  updated_at                  DateTime                      @db.Timestamp(3)
+  user                        user                          @relation("analytics_import_jobs_created_by_admin", fields: [created_by_admin_id], references: [id], onDelete: Cascade, onUpdate: Cascade, map: "analytics_import_jobs_created_by_admin_id_fkey")
   unmatched_analytics_imports unmatched_analytics_imports[]
 
   @@index([status, created_at], map: "analytics_import_jobs_status_created_at_idx")
@@ -464,7 +627,7 @@ model analytics_import_jobs {
 }
 
 model unmatched_analytics_imports {
-  id                   String               @id
+  id                   String                 @id
   upc                  String
   track_name           String?
   artist_name          String?
@@ -473,17 +636,17 @@ model unmatched_analytics_imports {
   streams              Int
   pay_streams          Int
   source_file_name     String
-  report_date          DateTime             @db.Timestamp(3)
+  report_date          DateTime               @db.Timestamp(3)
   reason               String
   import_job_id        String?
-  resolved             Boolean              @default(false)
-  resolved_at          DateTime?            @db.Timestamp(3)
-  resolved_by_admin_id String?              @db.Uuid
-  resolved_release_id  String?              @db.Uuid
-  created_at           DateTime             @default(now()) @db.Timestamp(3)
+  resolved             Boolean                @default(false)
+  resolved_at          DateTime?              @db.Timestamp(3)
+  resolved_by_admin_id String?                @db.Uuid
+  resolved_release_id  String?                @db.Uuid
+  created_at           DateTime               @default(now()) @db.Timestamp(3)
   import_job           analytics_import_jobs? @relation(fields: [import_job_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_import_job_id_fkey")
-  user                 user?                @relation("unmatched_analytics_imports_resolved_by_admin", fields: [resolved_by_admin_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_resolved_by_admin_id_fkey")
-  release              release?             @relation("unmatched_analytics_imports_resolved_release", fields: [resolved_release_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_resolved_release_id_fkey")
+  user                 user?                  @relation("unmatched_analytics_imports_resolved_by_admin", fields: [resolved_by_admin_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_resolved_by_admin_id_fkey")
+  release              release?               @relation("unmatched_analytics_imports_resolved_release", fields: [resolved_release_id], references: [id], onDelete: SetNull, onUpdate: Cascade, map: "unmatched_analytics_imports_resolved_release_id_fkey")
 
   @@index([report_date], map: "unmatched_analytics_imports_report_date_idx")
   @@index([upc], map: "unmatched_analytics_imports_upc_idx")

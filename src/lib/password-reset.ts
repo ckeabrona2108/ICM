@@ -212,7 +212,7 @@ export async function resetPasswordWithToken(params: {
   const passwordHash = await hashPassword(params.password);
 
   await params.prisma.$transaction(async (tx) => {
-    await tx.user.update({
+    await tx.user.updateMany({
       where: { id: user_id },
       data: {
         passwordHash

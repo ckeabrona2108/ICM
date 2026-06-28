@@ -256,7 +256,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
 
 export default function HomePage() {
   return (
-    <main className="relative h-[100dvh] overflow-x-hidden overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
+    <main className="perf-scroll-shell relative h-[100dvh] overflow-x-hidden overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
       <LandingScrollUnlock />
 
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -434,7 +434,7 @@ export default function HomePage() {
         </Reveal>
       </section>
 
-      <section id="reviews" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
+      <section className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
         <Reveal className={`rounded-[34px] p-8 sm:p-10 lg:p-12 ${SURFACE_PANEL_GLOW}`}>
           <div className="grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
             <div>
@@ -538,7 +538,7 @@ export default function HomePage() {
         </Reveal>
       </section>
 
-      <section className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
+      <section id="reviews" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
         <div className="grid gap-12 lg:grid-cols-[0.32fr_0.68fr] lg:items-start">
           <Reveal className="text-center lg:sticky lg:top-24">
             <SectionEyebrow>Отзывы</SectionEyebrow>
@@ -648,6 +648,47 @@ export default function HomePage() {
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+      </section>
+
+      <section className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
+        <Reveal className={`relative overflow-hidden rounded-[36px] p-8 sm:p-10 lg:p-12 ${SURFACE_PANEL_GLOW}`}>
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_24%,rgba(123,97,255,0.16),transparent_24%),radial-gradient(circle_at_82%_32%,rgba(82,208,255,0.10),transparent_20%)]" />
+          <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center overflow-hidden">
+            <span className="select-none whitespace-nowrap text-center text-[64px] font-semibold uppercase tracking-[0.28em] text-white/[0.05] sm:text-[88px] lg:text-[132px]">
+              ICECREAM AI
+            </span>
+          </div>
+
+          <div className="relative mx-auto max-w-4xl text-center">
+            <SectionEyebrow>AI STUDIO</SectionEyebrow>
+            <h2 className="mt-5 text-[34px] font-bold leading-[1.02] tracking-tight sm:text-[44px] lg:text-[64px]">
+              ВАША AI-СТУДИЯ
+              <br />
+              ДЛЯ СОЗДАНИЯ ЛЮБОГО КОНТЕНТА
+            </h2>
+            <p className="mx-auto mt-6 max-w-3xl text-[15px] leading-relaxed text-white/64 sm:text-[17px]">
+              От идеи до готового результата за несколько минут. Генерируйте изображения, видео,
+              музыку, тексты, озвучку и многое другое на базе лучших мировых AI-моделей.
+            </p>
+
+            <div className="mt-8 flex flex-wrap justify-center gap-3">
+              <Link
+                href="/dashboard/ai-studio"
+                className="group inline-flex items-center gap-2 rounded-xl bg-[#7b61ff] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_36px_-10px_rgba(123,97,255,0.75)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#6a4ff0]"
+              >
+                🚀 Начать создавать
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </div>
+
+            <div className="mx-auto mt-5 max-w-3xl overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]">
+              <div className="icm-marquee flex min-w-max items-center gap-10 whitespace-nowrap text-[12.5px] leading-relaxed text-white/46 sm:text-[13px]">
+                <span>FLUX • GPT Image • Gemini • Imagen • Google Veo 3 • Kling 3.0 / 2.6 • ByteDance Seedance 2.0 • Runway Gen-4 • Luma Dream Machine / Ray • MiniMax Hailuo • PixVerse • Vidu • Wan 2.2 • Nano Banana • Suno • MiniMax Music • ElevenLabs • GPT • Claude • DeepSeek</span>
+                <span aria-hidden="true">FLUX • GPT Image • Gemini • Imagen • Google Veo 3 • Kling 3.0 / 2.6 • ByteDance Seedance 2.0 • Runway Gen-4 • Luma Dream Machine / Ray • MiniMax Hailuo • PixVerse • Vidu • Wan 2.2 • Nano Banana • Suno • MiniMax Music • ElevenLabs • GPT • Claude • DeepSeek</span>
               </div>
             </div>
           </div>

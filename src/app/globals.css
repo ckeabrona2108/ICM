@@ -38,6 +38,8 @@ body {
   overflow-x: hidden;
   overflow-y: scroll;
   overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 html {
@@ -46,7 +48,6 @@ html {
   max-width: 100%;
   overflow-x: hidden;
   overscroll-behavior: none;
-  scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
@@ -79,7 +80,7 @@ html {
 }
 
 .glass-card {
-  @apply rounded-2xl border border-white/10 bg-card/65 shadow-glass backdrop-blur-xl;
+  @apply rounded-2xl border border-white/10 bg-card/65 shadow-glass backdrop-blur-[6px];
 }
 
 .icm-card {
@@ -89,8 +90,30 @@ html {
 .dashboard-card {
   border: 1px solid var(--dashboard-border);
   background: color-mix(in srgb, var(--dashboard-surface) 92%, transparent);
-  box-shadow: 0 16px 44px -28px rgba(11, 14, 24, 0.95);
-  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 30px -24px rgba(11, 14, 24, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.perf-scroll-shell {
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.perf-fixed-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  contain: paint;
+  isolation: isolate;
+  will-change: transform;
+}
+
+.perf-paint-contain {
+  contain: layout paint style;
+}
+
+.perf-content-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 720px;
 }
 
 .dashboard-field {
@@ -234,6 +257,26 @@ html {
 @keyframes blob-drift-c {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
   50%      { transform: translate3d(60px, -40px, 0) scale(0.9); }
+}
+
+@keyframes icm-marquee {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(calc(-50% - 1.25rem), 0, 0);
+  }
+}
+
+.icm-marquee {
+  animation: icm-marquee 28s linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icm-marquee {
+    animation: none;
+  }
 }
 .blob-a { animation: blob-drift-a 22s ease-in-out infinite; }
 .blob-b { animation: blob-drift-b 26s ease-in-out infinite; }

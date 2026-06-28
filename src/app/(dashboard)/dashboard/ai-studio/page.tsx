@@ -1,5 +1,5 @@
-import { DashboardSectionUnavailable } from "@/components/layout/section-unavailable";
+import { redirect } from "next/navigation";
 
 export default function AiStudioPage() {
-  return <DashboardSectionUnavailable title="AI Студии" />;
+  redirect("/dashboard/ai-studio/image");
 }

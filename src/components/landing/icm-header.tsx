@@ -11,6 +11,7 @@ const NAV = [
   { label: "Отзывы", href: "#reviews" },
   { label: "Дистрибуция", href: "#how" },
   { label: "Платформы", href: "#platforms" },
+  { label: "AI Студия", href: "/dashboard/ai-studio" },
   { label: "FAQ", href: "#faq" }
 ];
 
@@ -55,13 +56,23 @@ export function IcmHeader() {
 
           <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 md:flex">
             {NAV.map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                className="rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
-              >
-                {link.label}
-              </a>
+              link.href.startsWith("/") ? (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
+                >
+                  {link.label}
+                </Link>
+              ) : (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  className="rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
+                >
+                  {link.label}
+                </a>
+              )
             ))}
           </nav>
 
@@ -94,14 +105,25 @@ export function IcmHeader() {
         <div className="mx-auto mt-3 max-w-7xl md:hidden">
           <div className="rounded-[28px] border border-white/[0.08] bg-[rgba(8,8,12,0.82)] p-2 shadow-[0_18px_44px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
             {NAV.map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                onClick={() => setOpen(false)}
-                className="block rounded-2xl px-4 py-3 text-sm text-white/[0.72] transition-colors hover:bg-white/[0.05] hover:text-white"
-              >
-                {link.label}
-              </a>
+              link.href.startsWith("/") ? (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setOpen(false)}
+                  className="block rounded-2xl px-4 py-3 text-sm text-white/[0.72] transition-colors hover:bg-white/[0.05] hover:text-white"
+                >
+                  {link.label}
+                </Link>
+              ) : (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setOpen(false)}
+                  className="block rounded-2xl px-4 py-3 text-sm text-white/[0.72] transition-colors hover:bg-white/[0.05] hover:text-white"
+                >
+                  {link.label}
+                </a>
+              )
             ))}
             <Link
               href="https://www.icecreammusic.net/login"

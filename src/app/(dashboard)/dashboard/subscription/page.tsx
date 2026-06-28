@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import { SubscriptionTiersClient } from "@/components/tariffs/subscription-tiers-client";
+import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { authOptions } from "@/lib/auth";
 import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { prisma } from "@/lib/prisma";
@@ -99,6 +100,9 @@ export default async function SubscriptionPage({
         {paymentResult?.applied ? (
           <p className="mb-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
             Оплата подтверждена. Подписка обновлена.
+            {paymentResult.paymentSummary?.totalTokens
+              ? ` Начислено ${formatAiTokenAmount(paymentResult.paymentSummary.totalTokens)} AI-токенов.`
+              : ""}
           </p>
         ) : paymentResult && paymentResult.status !== "already_confirmed" ? (
           <p className="mb-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-amber-100">

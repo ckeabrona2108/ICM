@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   const passwordHash = await hashPassword(parsed.data.password);
 
   await prisma.$transaction([
-    prisma.user.update({
+    prisma.user.updateMany({
       where: { id: tokenRecord.user.id },
       data: { password: passwordHash }
     }),

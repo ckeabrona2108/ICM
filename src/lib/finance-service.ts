@@ -59,6 +59,65 @@ function getRepo<T = unknown>(prisma: PrismaClient, key: string): T | null {
   return repo ? (repo as T) : null;
 }
 
+async function writeBalanceAdminLogIfAvailable(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  params: {
+    userId: string;
+    adminId: string;
+    type: "CREDIT" | "DEBIT";
+    amount: number;
+    oldBalance: number;
+    newBalance: number;
+    comment: string | null;
+  }
+) {
+  const repo = (prisma as unknown as {
+    balance_admin_logs?: {
+      create?: (args: {
+        data: {
+          id: string;
+          user_id: string;
+          admin_id: string;
+          type: "CREDIT" | "DEBIT";
+          amount: Prisma.Decimal;
+          old_balance: Prisma.Decimal;
+          new_balance: Prisma.Decimal;
+          comment: string | null;
+        };
+      }) => Promise<unknown>;
+    };
+  }).balance_admin_logs;
+
+  if (typeof repo?.create !== "function") {
+    return;
+  }
+
+  try {
+    await repo.create({
+      data: {
+        id: randomUUID(),
+        user_id: params.userId,
+        admin_id: params.adminId,
+        type: params.type,
+        amount: new Prisma.Decimal(params.amount),
+        old_balance: new Prisma.Decimal(params.oldBalance),
+        new_balance: new Prisma.Decimal(params.newBalance),
+        comment: params.comment
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (
+      message.includes("balance_admin_logs") ||
+      message.includes("does not exist") ||
+      message.includes("unknown")
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export function computeSettlementDelta(entries: SettlementTransactionEntry[]): number {
   return entries.reduce((sum, entry) => {
     const amount = Math.abs(toNumber(entry.amount));
@@ -226,23 +285,57 @@ export async function topUpUserBalanceByAdmin(params: {
   amount: number;
   comment?: string;
 }) {
-  if (!getRepo(params.prisma, "financeReport") || !getRepo(params.prisma, "transaction")) {
-    return { ok: false as const, error: "Finance module is unavailable in current schema." };
-  }
-
   const user = await params.prisma.user.findUnique({
     where: { id: params.userId },
-    select: { id: true }
+    select: { id: true, balance: true }
   });
   if (!user) return { ok: false as const, error: "User not found" };
+
+  const financeReportRepo = getRepo(params.prisma, "financeReport");
+  const transactionRepo = getRepo(params.prisma, "transaction");
+  const oldValue = Number(user.balance ?? 0);
+  const newValue = oldValue + params.amount;
+
+  if (!financeReportRepo || !transactionRepo) {
+    await params.prisma.$transaction(async (tx) => {
+      await tx.user.updateMany({
+        where: { id: params.userId },
+        data: {
+          balance: newValue
+        }
+      });
+
+      await writeBalanceAdminLogIfAvailable(tx, {
+        userId: params.userId,
+        adminId: params.adminId,
+        type: "CREDIT",
+        amount: params.amount,
+        oldBalance: oldValue,
+        newBalance: newValue,
+        comment: params.comment?.trim() || "Пополнение баланса администратором"
+      });
+
+      await createAdminLog(tx, {
+        adminId: params.adminId,
+        action: "USER_BALANCE_TOPUP",
+        targetType: "User",
+        targetId: params.userId,
+        oldValue: { agreedBalance: oldValue },
+        newValue: { agreedBalance: newValue, amountDelta: params.amount },
+        comment: params.comment
+      });
+    });
+
+    return { ok: true as const };
+  }
 
   const amountDecimal = new Prisma.Decimal(params.amount);
   const now = new Date();
   const { start, end } = monthRange(now);
 
   const oldTotals = await getUserBalanceTotals(params.prisma, params.userId);
-  const oldValue = oldTotals.agreedBalance;
-  const newValue = oldValue + params.amount;
+  const financeOldValue = oldTotals.agreedBalance;
+  const financeNewValue = financeOldValue + params.amount;
 
   await params.prisma.$transaction(async (tx) => {
     const report = await tx.financeReport.create({
@@ -275,8 +368,8 @@ export async function topUpUserBalanceByAdmin(params: {
       action: "USER_BALANCE_TOPUP",
       targetType: "User",
       targetId: params.userId,
-      oldValue: { agreedBalance: oldValue },
-      newValue: { agreedBalance: newValue, amountDelta: params.amount },
+      oldValue: { agreedBalance: financeOldValue },
+      newValue: { agreedBalance: financeNewValue, amountDelta: params.amount },
       comment: params.comment
     });
   });
@@ -292,16 +385,9 @@ export async function adjustUserBalanceByAdmin(params: {
   amount: number;
   comment?: string;
 }) {
-  if (!getRepo(params.prisma, "transaction")) {
-    return { ok: false as const, error: "Finance module is unavailable in current schema." };
-  }
-  if (params.type === "credit" && !getRepo(params.prisma, "financeReport")) {
-    return { ok: false as const, error: "Finance reports are unavailable in current schema." };
-  }
-
   const user = await params.prisma.user.findUnique({
     where: { id: params.userId },
-    select: { id: true }
+    select: { id: true, balance: true }
   });
   if (!user) return { ok: false as const, error: "User not found" };
 
@@ -310,13 +396,47 @@ export async function adjustUserBalanceByAdmin(params: {
     return { ok: false as const, error: "Комментарий администратора обязателен." };
   }
 
-  const oldTotals = await getUserBalanceTotals(params.prisma, params.userId);
-  const oldValue = oldTotals.agreedBalance;
+  const transactionRepo = getRepo(params.prisma, "transaction");
+  const financeReportRepo = getRepo(params.prisma, "financeReport");
+  const oldValue = Number(user.balance ?? 0);
   const delta = params.type === "credit" ? params.amount : -params.amount;
   const newValue = oldValue + delta;
 
   if (params.type === "debit" && newValue < 0) {
     return { ok: false as const, error: "Недостаточно средств для списания" };
+  }
+
+  if (!transactionRepo || (params.type === "credit" && !financeReportRepo)) {
+    await params.prisma.$transaction(async (tx) => {
+      await tx.user.updateMany({
+        where: { id: params.userId },
+        data: {
+          balance: newValue
+        }
+      });
+
+      await writeBalanceAdminLogIfAvailable(tx, {
+        userId: params.userId,
+        adminId: params.adminId,
+        type: params.type === "credit" ? "CREDIT" : "DEBIT",
+        amount: params.amount,
+        oldBalance: oldValue,
+        newBalance: newValue,
+        comment: normalizedComment
+      });
+
+      await createAdminLog(tx, {
+        adminId: params.adminId,
+        action: params.type === "credit" ? "USER_BALANCE_CREDIT" : "USER_BALANCE_DEBIT",
+        targetType: "User",
+        targetId: params.userId,
+        oldValue: { agreedBalance: oldValue },
+        newValue: { agreedBalance: newValue, amountDelta: delta },
+        comment: normalizedComment
+      });
+    });
+
+    return { ok: true as const };
   }
 
   const amountDecimal = new Prisma.Decimal(params.amount);
@@ -366,20 +486,14 @@ export async function adjustUserBalanceByAdmin(params: {
       });
     }
 
-    await tx.balance_admin_logs.create({
-      data: {
-        id: randomUUID(),
-        user_id: params.userId,
-        admin_id: params.adminId,
-        type:
-          params.type === "credit"
-            ? "CREDIT"
-            : "DEBIT",
-        amount: amountDecimal,
-        old_balance: new Prisma.Decimal(oldValue),
-        new_balance: new Prisma.Decimal(newValue),
-        comment: normalizedComment
-      }
+    await writeBalanceAdminLogIfAvailable(tx, {
+      userId: params.userId,
+      adminId: params.adminId,
+      type: params.type === "credit" ? "CREDIT" : "DEBIT",
+      amount: params.amount,
+      oldBalance: oldValue,
+      newBalance: newValue,
+      comment: normalizedComment
     });
 
     await createAdminLog(tx, {

@@ -8,12 +8,14 @@ import { DashboardTopbar } from "@/components/layout/dashboard-topbar";
 import { DashboardPrefetch } from "@/components/layout/dashboard-prefetch";
 import { DashboardVerificationStatusModal } from "@/components/verification/dashboard-verification-status-modal";
 import { getUserContractStatus } from "@/lib/contract-verification";
+import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { prisma } from "@/lib/prisma";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { getReleaseSidebarCountsForUser } from "@/lib/release-counts";
 import { getSubscriptionOverview } from "@/lib/subscription-limits";
+import { getAiTokenBalance } from "@/lib/ai-token-service";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/login");
   }
 
+  const hasAiTokenBalanceColumn = await hasUserAiTokenBalanceColumn(prisma);
+
   const [releaseCounts, userProfile, balanceTotals, subscriptionOverview, contractStatus] = await Promise.all([
     getReleaseSidebarCountsForUser({
       userId: session.user.id,
@@ -31,10 +35,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
     }),
     prisma.user.findUnique({
       where: { id: session.user.id },
-      select: {
-        name: true,
-        email: true
-      }
+      select: hasAiTokenBalanceColumn
+        ? {
+            name: true,
+            email: true,
+            aiTokenBalance: true
+          }
+        : {
+            name: true,
+            email: true
+          }
     }),
     getUserBalanceTotals(prisma, session.user.id)
       .catch((error) => {
@@ -74,17 +84,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const hasSubscription = subscriptionOverview.hasActiveSubscription;
   const userName = userProfile?.name ?? session.user.name ?? "Пользователь";
   const userEmail = userProfile?.email ?? session.user.email ?? undefined;
+  const aiTokenBalance = userProfile
+    ? hasAiTokenBalanceColumn && "aiTokenBalance" in userProfile
+      ? Number((userProfile as { aiTokenBalance?: number }).aiTokenBalance ?? 0)
+      : await getAiTokenBalance(prisma, session.user.id)
+    : 0;
+  const aiTokenBalanceLabel = aiTokenBalance.toLocaleString("ru-RU");
 
   return (
-    <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[#0a0b0f] text-white">
+    <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[#0a0b0f] text-white [--dashboard-mobile-bottom-nav-height:72px] [--dashboard-mobile-header-height:84px]">
       {/* ambient corner glow (top-right) */}
-      <div className="pointer-events-none absolute right-0 top-[-160px] h-[520px] w-[520px] translate-x-1/3 rounded-full bg-[#7b3df5]/[0.18] blur-[140px]" />
-      <div className="pointer-events-none absolute right-0 top-40 h-[360px] w-[360px] translate-x-1/4 rounded-full bg-[#3b1d75]/30 blur-[120px]" />
+      <div className="pointer-events-none absolute right-0 top-[-160px] h-[520px] w-[520px] translate-x-1/3 rounded-full bg-[#7b3df5]/[0.12] blur-[96px]" />
+      <div className="pointer-events-none absolute right-0 top-40 h-[360px] w-[360px] translate-x-1/4 rounded-full bg-[#3b1d75]/22 blur-[84px]" />
 
       <div className="relative h-screen min-w-0 overflow-hidden">
         <DashboardSidebar counts={sidebarCounts} contractStatus={contractStatus} />
         <div className="h-screen min-w-0 lg:pl-[258px]">
-          <div className="h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 pb-24 sm:px-6 lg:px-8 lg:pb-0">
+          <div className="perf-scroll-shell h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 pb-[calc(var(--dashboard-mobile-bottom-nav-height)+env(safe-area-inset-bottom)+24px)] pt-[calc(var(--dashboard-mobile-header-height)+16px)] sm:px-6 lg:px-8 lg:pb-0 lg:pt-0">
             <DashboardPrefetch />
             <DashboardVerificationStatusModal initialStatus={contractStatus} />
             <DashboardTopbar
@@ -92,6 +108,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               userEmail={userEmail}
               planLabel={planLabel}
               balanceLabel={balanceLabel}
+              aiTokenBalanceLabel={aiTokenBalanceLabel}
               hasSubscription={hasSubscription}
               subscriptionEndsAt={subscriptionOverview.endsAt}
               contractStatus={contractStatus}

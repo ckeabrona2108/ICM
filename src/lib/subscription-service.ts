@@ -99,7 +99,7 @@ export async function updateUserSubscriptionByAdmin(params: {
   const nextIsSubscribed = nextStatus === "active";
 
   await params.prisma.$transaction(async (tx) => {
-    await tx.user.update({
+    await tx.user.updateMany({
       where: { id: params.userId },
       data: {
         isSubscribed: nextIsSubscribed,

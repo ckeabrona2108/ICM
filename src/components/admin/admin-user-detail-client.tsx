@@ -12,6 +12,7 @@ import type { UserFinanceView } from "@/lib/finance-service";
 import type { UserReportItem } from "@/lib/report-service";
 import type { UserSubscriptionView } from "@/lib/subscription-service";
 import { formatRubCurrency } from "@/lib/currency-format";
+import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { cn } from "@/lib/utils";
 
 type FinanceReportStatusValue = "READY_TO_CONFIRM" | "AGREED";
@@ -314,6 +315,7 @@ export function AdminUserDetailClient({
               <p>Дата регистрации: {new Date(profile.createdAt).toLocaleString("ru-RU")}</p>
               <p>Подписка: {profile.subscriptionPlan ?? "Нет"} {profile.subscriptionStatus ?? ""}</p>
               <p>Баланс: {formatRubCurrency(profile.balance)}</p>
+              <p>AI-токены: {formatAiTokenAmount(profile.aiTokenBalance)}</p>
             </div>
           </div>
         </div>

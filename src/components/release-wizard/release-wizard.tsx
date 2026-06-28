@@ -43,6 +43,7 @@ import { shouldGuardUnsavedChanges } from "@/lib/wizard-dirty";
 import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
+import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
 
 const STEPS: Array<{ id: StepId; label: string }> = [
   { id: "info", label: "Информация по релизу" },
@@ -140,16 +141,6 @@ function hasDraftContent(data: WizardData): boolean {
 
 type SubmitPhase = "idle" | "saving" | "uploading" | "submitting";
 
-interface PresignedUploadResponse {
-  key: string;
-  url: string;
-  publicUrl?: string;
-  bucket?: string;
-  method?: string;
-  fields?: Record<string, string>;
-  mock?: boolean;
-}
-
 function inferContentTypeFromName(name: string): string {
   const normalized = name.trim().toLowerCase();
   if (normalized.endsWith(".wav")) return "audio/wav";
@@ -216,55 +207,24 @@ async function uploadBlobToStorage(params: {
   fileName: string;
   contentType: string;
   blob: Blob;
+  kind: "audio" | "cover";
 }): Promise<UploadedFileRef> {
-  const targetResponse = await fetch("/api/uploads/presigned", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fileName: sanitizeFileName(params.fileName),
-        contentType: params.contentType,
-        kind: "cover"
-      })
-    });
-
-  const target = (await targetResponse.json().catch(() => null)) as
-    | PresignedUploadResponse
-    | { error?: string }
-    | null;
-
-  if (!targetResponse.ok || !target || !("url" in target) || !target.url || !target.key) {
-    const fallback =
-      target && "error" in target && typeof target.error === "string"
-        ? target.error
-        : "Не удалось получить ссылку для загрузки.";
-    throw new Error(fallback);
-  }
-
-  if (target.mock) {
-    throw new Error("Хранилище файлов не настроено. Проверьте S3 параметры окружения.");
-  }
-
-  const uploadResponse = await fetch(target.url, {
-    method: target.method ?? "PUT",
-    headers: {
-      "Content-Type": params.contentType
-    },
-    body: params.blob
+  const uploaded = await uploadBrowserBlobToStorage({
+    fileName: sanitizeFileName(params.fileName),
+    contentType: params.contentType,
+    kind: params.kind,
+    blob: params.blob
   });
 
-  if (!uploadResponse.ok) {
-    throw new Error("Ошибка загрузки файла в хранилище.");
-  }
-
-  const readUrl = buildObjectReadUrlFromKey(target.key);
+  const readUrl = buildObjectReadUrlFromKey(uploaded.key);
   const cleanUrl = toAbsoluteStorageUrl(readUrl);
   console.log("[cover-upload-success]", {
-    bucket: target.bucket ?? null,
-    key: target.key,
+    bucket: uploaded.bucket ?? null,
+    key: uploaded.key,
     publicUrl: cleanUrl
   });
   return {
-    storageKey: target.key,
+    storageKey: uploaded.key,
     url: cleanUrl,
     fileName: params.fileName,
     contentType: params.contentType,
@@ -600,7 +560,8 @@ function WizardInner({
         const upload = await uploadBlobToStorage({
           fileName: `release-cover.${fileExtension}`,
           contentType,
-          blob: coverBlob
+          blob: coverBlob,
+          kind: "cover"
         });
         const coverUpload: UploadedCoverRef = {
           ...upload,
@@ -658,7 +619,8 @@ function WizardInner({
         upload = await uploadBlobToStorage({
           fileName: trackState.name,
           contentType,
-          blob: audioBlob
+          blob: audioBlob,
+          kind: "audio"
         });
       } catch (error) {
         const reason =

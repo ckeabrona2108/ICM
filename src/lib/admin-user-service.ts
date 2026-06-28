@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { PrismaClient, subscribe_level } from "@prisma/client";
 import { resolveStoredFileUrl } from "@/lib/s3";
+import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
+import { getAiTokenBalance, getUserAiPendingTokenBalance } from "@/lib/ai-token-service";
 
 export type AdminUserAccountStatus = "ACTIVE" | "INACTIVE";
 
@@ -15,6 +17,8 @@ export interface AdminUserTableItem {
   subscriptionStatus: string | null;
   accountStatus: AdminUserAccountStatus;
   balance: number;
+  aiTokenBalance: number;
+  pendingAiTokenBalance: number;
   releaseCount: number;
 }
 
@@ -49,6 +53,8 @@ export interface AdminUserProfileDetails {
   subscriptionPlan: subscribe_level | null;
   subscriptionStatus: string | null;
   balance: number;
+  aiTokenBalance: number;
+  pendingAiTokenBalance: number;
   releaseCount: number;
 }
 
@@ -108,52 +114,84 @@ export async function listAdminUsers(
   prisma: PrismaClient,
   params: z.infer<typeof adminUsersListQuerySchema>
 ): Promise<AdminUsersListResult> {
+  const hasAiTokenBalanceColumn = await hasUserAiTokenBalanceColumn(prisma);
   const baseUsers = await prisma.user.findMany({
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      avatar: true,
-      isAdmin: true,
-      isSubscribed: true,
-      subscribeLevel: true,
-      balance: true,
-      emailVerified: true,
-      _count: {
-        select: {
-          release: true
+    select: hasAiTokenBalanceColumn
+      ? {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          isAdmin: true,
+          isSubscribed: true,
+          subscribeLevel: true,
+          balance: true,
+          aiTokenBalance: true,
+          emailVerified: true,
+          _count: {
+            select: {
+              release: true
+            }
+          }
         }
-      }
-    }
+      : {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          isAdmin: true,
+          isSubscribed: true,
+          subscribeLevel: true,
+          balance: true,
+          emailVerified: true,
+          _count: {
+            select: {
+              release: true
+            }
+          }
+        }
   });
 
-  let items = baseUsers
-    .filter((user) => !user.isAdmin)
-    .map((user) => ({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      avatarUrl: resolveUserAvatarUrl(user.id, user.avatar),
-      role: user.isAdmin ? "ADMIN" : "USER",
-      createdAt: (user.emailVerified ?? new Date(0)).toISOString(),
-      subscriptionPlan: user.subscribeLevel,
-      subscriptionStatus: user.isSubscribed ? "active" : null,
-      accountStatus: mapAccountStatus(user.isSubscribed),
-      balance: Number(user.balance ?? 0),
-      releaseCount: user._count.release
-    } satisfies AdminUserTableItem));
+  const items = await Promise.all(
+    baseUsers
+      .filter((user) => !user.isAdmin)
+      .map(async (user) => {
+        const aiTokenBalance = hasAiTokenBalanceColumn
+          ? Number(("aiTokenBalance" in user ? user.aiTokenBalance : 0) ?? 0)
+          : await getAiTokenBalance(prisma, user.id);
+        const pendingAiTokenBalance = await getUserAiPendingTokenBalance(prisma, user.id);
 
-  if (params.q) items = items.filter((item) => includesQuery(item, params.q ?? ""));
-  if (params.subscription) items = items.filter((item) => item.subscriptionPlan === params.subscription);
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          avatarUrl: resolveUserAvatarUrl(user.id, user.avatar),
+          role: user.isAdmin ? "ADMIN" : "USER",
+          createdAt: (user.emailVerified ?? new Date(0)).toISOString(),
+          subscriptionPlan: user.subscribeLevel,
+          subscriptionStatus: user.isSubscribed ? "active" : null,
+          accountStatus: mapAccountStatus(user.isSubscribed),
+          balance: Number(user.balance ?? 0),
+          aiTokenBalance,
+          pendingAiTokenBalance,
+          releaseCount: user._count.release
+        } satisfies AdminUserTableItem;
+      })
+  );
+
+  let itemsSorted = items;
+
+  if (params.q) itemsSorted = itemsSorted.filter((item) => includesQuery(item, params.q ?? ""));
+  if (params.subscription) itemsSorted = itemsSorted.filter((item) => item.subscriptionPlan === params.subscription);
   if (params.status === "ACTIVE" || params.status === "ACTIVE_ONLY") {
-    items = items.filter((item) => item.accountStatus === "ACTIVE");
+    itemsSorted = itemsSorted.filter((item) => item.accountStatus === "ACTIVE");
   }
   if (params.status === "INACTIVE" || params.status === "INACTIVE_ONLY") {
-    items = items.filter((item) => item.accountStatus === "INACTIVE");
+    itemsSorted = itemsSorted.filter((item) => item.accountStatus === "INACTIVE");
   }
 
   const direction = params.sortOrder === "asc" ? 1 : -1;
-  items.sort((a, b) => {
+  itemsSorted.sort((a, b) => {
     if (params.sortBy === "balance") return (a.balance - b.balance) * direction;
     if (params.sortBy === "releaseCount") return (a.releaseCount - b.releaseCount) * direction;
     const da = new Date(a.createdAt).getTime();
@@ -161,13 +199,13 @@ export async function listAdminUsers(
     return (da - db) * direction;
   });
 
-  const total = items.length;
+  const total = itemsSorted.length;
   const totalPages = Math.max(1, Math.ceil(total / params.perPage));
   const page = Math.min(params.page, totalPages);
   const start = (page - 1) * params.perPage;
 
   return {
-    items: items.slice(start, start + params.perPage),
+    items: itemsSorted.slice(start, start + params.perPage),
     page,
     perPage: params.perPage,
     total,
@@ -179,27 +217,51 @@ export async function getAdminUserProfileDetails(
   prisma: PrismaClient,
   userId: string
 ): Promise<AdminUserProfileDetails | null> {
+  const hasAiTokenBalanceColumn = await hasUserAiTokenBalanceColumn(prisma);
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      avatar: true,
-      isAdmin: true,
-      isSubscribed: true,
-      subscribeLevel: true,
-      balance: true,
-      emailVerified: true,
-      _count: {
-        select: {
-          release: true
+    select: hasAiTokenBalanceColumn
+      ? {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          isAdmin: true,
+          isSubscribed: true,
+          subscribeLevel: true,
+          balance: true,
+          aiTokenBalance: true,
+          emailVerified: true,
+          _count: {
+            select: {
+              release: true
+            }
+          }
         }
-      }
-    }
+      : {
+          id: true,
+          name: true,
+          email: true,
+          avatar: true,
+          isAdmin: true,
+          isSubscribed: true,
+          subscribeLevel: true,
+          balance: true,
+          emailVerified: true,
+          _count: {
+            select: {
+              release: true
+            }
+          }
+        }
   });
 
   if (!user) return null;
+
+  const aiTokenBalance = hasAiTokenBalanceColumn
+    ? Number(("aiTokenBalance" in user ? user.aiTokenBalance : 0) ?? 0)
+    : await getAiTokenBalance(prisma, user.id);
+  const pendingAiTokenBalance = await getUserAiPendingTokenBalance(prisma, user.id);
 
   const createdAt = user.emailVerified ?? new Date(0);
   return {
@@ -214,6 +276,8 @@ export async function getAdminUserProfileDetails(
     subscriptionPlan: user.subscribeLevel,
     subscriptionStatus: user.isSubscribed ? "active" : null,
     balance: Number(user.balance ?? 0),
+    aiTokenBalance,
+    pendingAiTokenBalance,
     releaseCount: user._count.release
   };
 }

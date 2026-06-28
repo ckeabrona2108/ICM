@@ -4,7 +4,5 @@ export function formatRubCurrency(value: number): string {
     currency: "RUB",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  })
-    .format(value)
-    .replace(/\u00A0/g, " ");
+  }).format(value);
 }

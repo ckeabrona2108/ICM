@@ -11,6 +11,7 @@ import { ReleaseModerationStepper } from "@/components/dashboard/release-moderat
 import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { prisma } from "@/lib/prisma";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,16 @@ export default async function ReleaseDetailsPage({
       <PageHeader
         title={release.title?.trim() || "Релиз"}
         description={`${release.artist?.trim() || "Исполнитель не указан"} · ${release.genre || "Жанр не указан"}`}
+        actions={
+          <>
+            <Link
+              href={`/dashboard/releases/${params.id}/smart-link`}
+              className="inline-flex h-10 items-center rounded-xl border border-white/12 bg-white/[0.04] px-4 text-sm font-medium text-white/82 transition hover:bg-white/[0.07]"
+            >
+              Smart Link
+            </Link>
+          </>
+        }
       />
 
       <div className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">

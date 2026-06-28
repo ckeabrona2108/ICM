@@ -11,6 +11,7 @@ import {
   BookOpenText,
   ChevronDown,
   CreditCard,
+  ExternalLink,
   Headset,
   HelpCircle,
   LayoutGrid,
@@ -113,6 +114,11 @@ function buildNav(counts: {
           icon: Package,
           count: counts.totalReleases,
           countTone: "brand"
+        },
+        {
+          href: "/dashboard/smart-links",
+          label: "Smart Links",
+          icon: ExternalLink
         },
         { href: "/dashboard/releases/new", label: "Новый релиз", icon: Sparkles },
         {

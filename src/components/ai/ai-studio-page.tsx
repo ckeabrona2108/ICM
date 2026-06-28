@@ -2125,8 +2125,9 @@ function PurchaseConfirmModal({
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-black/66 p-4 backdrop-blur-[4px]">
-      <div className="w-full max-w-md rounded-[24px] border border-white/[0.10] bg-[#10131a] p-5 shadow-[0_16px_42px_-28px_rgba(0,0,0,0.82)]">
+    <div className="fixed inset-0 z-[90] overflow-y-auto bg-black/72 p-4 pt-[max(env(safe-area-inset-top),1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur-[4px] sm:grid sm:place-items-center">
+      <div className="flex min-h-full items-end sm:min-h-0 sm:items-center sm:justify-center">
+        <div className="relative w-full max-w-md rounded-[24px] border border-white/[0.10] bg-[#10131a] p-5 shadow-[0_16px_42px_-28px_rgba(0,0,0,0.82)]">
         <div className="flex items-center gap-2 text-white">
           <CheckCircle2 className="h-5 w-5 text-emerald-300" />
           <h4 className="text-[18px] font-semibold">Подтвердить покупку?</h4>
@@ -2140,11 +2141,11 @@ function PurchaseConfirmModal({
             Бонус: +{formatAiTokenAmount(packageBonusTokens)} токенов
           </p>
         ) : null}
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl border border-white/[0.12] bg-white/[0.03] px-4 py-2 text-[14px] text-white/80 transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-0.5 hover:bg-white/[0.06] motion-reduce:transition-none"
+            className="w-full rounded-xl border border-white/[0.12] bg-white/[0.03] px-4 py-2 text-[14px] text-white/80 transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-0.5 hover:bg-white/[0.06] motion-reduce:transition-none sm:w-auto"
           >
             Отмена
           </button>
@@ -2152,12 +2153,13 @@ function PurchaseConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#7b3df5] px-4 py-2 text-[14px] font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:-translate-y-0.5 hover:bg-[#8b4ff7] disabled:opacity-50 motion-reduce:transition-none"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#7b3df5] px-4 py-2 text-[14px] font-semibold text-white transition-[background-color,transform] duration-150 ease-out hover:-translate-y-0.5 hover:bg-[#8b4ff7] disabled:opacity-50 motion-reduce:transition-none sm:w-auto"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Подтвердить
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

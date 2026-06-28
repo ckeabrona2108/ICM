@@ -597,21 +597,25 @@ function WizardInner({
         continue;
       }
 
-      if (!trackState.audioUrl) {
+      if (!trackState.localAudioFile && !trackState.audioUrl) {
         throw new Error(`Трек «${trackState.name}» не содержит аудиофайл для загрузки.`);
       }
 
       let audioBlob: Blob;
-      try {
-        const audioResponse = await fetch(trackState.audioUrl);
-        if (!audioResponse.ok) {
-          throw new Error("audio_unavailable");
+      if (trackState.localAudioFile) {
+        audioBlob = trackState.localAudioFile;
+      } else {
+        try {
+          const audioResponse = await fetch(trackState.audioUrl as string);
+          if (!audioResponse.ok) {
+            throw new Error("audio_unavailable");
+          }
+          audioBlob = await audioResponse.blob();
+        } catch {
+          throw new Error(
+            `Не удалось получить локальный аудиофайл трека «${trackState.name}». Заново прикрепите файл на шаге «Список треков» и повторите отправку. На iPhone и во встроенных webview надёжнее повторить загрузку в Safari или Chrome.`
+          );
         }
-        audioBlob = await audioResponse.blob();
-      } catch {
-        throw new Error(
-          `Не удалось загрузить аудиофайл трека «${trackState.name}». Перезагрузите файл на шаге «Список треков».`
-        );
       }
       const contentType = audioBlob.type || inferContentTypeFromName(trackState.name);
       let upload: UploadedFileRef;
@@ -637,6 +641,7 @@ function WizardInner({
         itemIndex === index
           ? {
               ...item,
+              localAudioFile: null,
               audioUpload: upload
             }
           : item

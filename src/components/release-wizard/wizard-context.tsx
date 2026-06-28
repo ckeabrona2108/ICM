@@ -126,6 +126,8 @@ export interface TrackFile {
   meta: TrackMeta;
   /** Blob URL загруженного аудио */
   audioUrl?: string;
+  /** Локальный файл для submit-flow в текущей сессии, не сериализуется в черновик */
+  localAudioFile?: File | null;
   /** Ссылка на загруженный аудиофайл в хранилище */
   audioUpload?: UploadedFileRef | null;
 }
@@ -228,6 +230,7 @@ function normalizeWizardSeed(seed?: Partial<WizardData>): WizardData {
     tracks: merged.tracks.map((t) => ({
       ...t,
       hasAudio: t.hasAudio ?? true,
+      localAudioFile: null,
       audioUpload: t.audioUpload ?? null,
       meta: normalizeTrackMeta(t.meta as Partial<TrackMeta>)
     }))

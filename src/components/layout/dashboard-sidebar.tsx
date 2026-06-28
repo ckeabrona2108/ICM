@@ -17,6 +17,7 @@ import {
   LogOut,
   Music2,
   Package,
+  PanelLeftClose,
   Rocket,
   Sparkles,
   Store,
@@ -257,6 +258,7 @@ export function DashboardSidebar({
     aiEnabled: counts.aiEnabled
   });
   const [verificationModalOpen, setVerificationModalOpen] = React.useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [unavailableToast, setUnavailableToast] = React.useState<string | null>(null);
   const unavailableToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const nav = React.useMemo(() => buildNav(liveCounts), [liveCounts]);
@@ -331,6 +333,10 @@ export function DashboardSidebar({
   }, [optimisticPath, pathname]);
 
   React.useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  React.useEffect(() => {
     const onDraftsCount = (event: Event) => {
       const custom = event as CustomEvent<{ draftsCount?: number }>;
       const next = Number(custom.detail?.draftsCount);
@@ -357,6 +363,10 @@ export function DashboardSidebar({
       });
     };
 
+    const onToggleMobileSidebar = () => {
+      setMobileMenuOpen((prev) => !prev);
+    };
+
     window.addEventListener("dashboard:drafts-count", onDraftsCount as EventListener);
     window.addEventListener(
       "dashboard:release-counts-refresh",
@@ -365,6 +375,10 @@ export function DashboardSidebar({
     window.addEventListener(
       "dashboard:support-unread-count",
       onSupportUnreadCount as EventListener
+    );
+    window.addEventListener(
+      "dashboard:toggle-mobile-sidebar",
+      onToggleMobileSidebar as EventListener
     );
     return () => {
       window.removeEventListener("dashboard:drafts-count", onDraftsCount as EventListener);
@@ -375,6 +389,10 @@ export function DashboardSidebar({
       window.removeEventListener(
         "dashboard:support-unread-count",
         onSupportUnreadCount as EventListener
+      );
+      window.removeEventListener(
+        "dashboard:toggle-mobile-sidebar",
+        onToggleMobileSidebar as EventListener
       );
     };
   }, [loadReleaseCounts]);
@@ -473,6 +491,7 @@ export function DashboardSidebar({
   );
   const startNavigation = React.useCallback((href: string) => {
     setOptimisticPath(href);
+    setMobileMenuOpen(false);
   }, []);
   const mobileNavItems = React.useMemo(
     () => [
@@ -485,117 +504,155 @@ export function DashboardSidebar({
     []
   );
 
+  const sidebarNavigation = (
+    <>
+      <Link href="/dashboard" className="mb-6 flex items-center justify-start gap-2.5 px-3">
+        <span className="grid h-10 w-10 place-items-center overflow-hidden">
+          <Image
+            src="/brand/logo.png"
+            alt="ICM"
+            width={317}
+            height={400}
+            className="h-8 w-auto object-contain"
+          />
+        </span>
+        <span className="leading-tight">
+          <span className="block text-[13px] font-semibold tracking-[0.01em] text-white">
+            ICECREAMMUSIC
+          </span>
+        </span>
+      </Link>
+
+      <nav className="flex-1 space-y-0.5">
+        {nav.map((item) => {
+          if (item.type === "leaf") {
+            return (
+              <NavLink
+                key={item.href}
+                item={item}
+                pathname={activePath}
+                onUnavailableClick={showUnavailableNotice}
+                onVerificationRequired={() => setVerificationModalOpen(true)}
+                requiresVerificationGate={requiresVerificationGate}
+                onNavigate={startNavigation}
+                onPrefetch={prefetchHref}
+              />
+            );
+          }
+
+          const ActiveIcon = item.icon;
+          const isOpen = open[item.id];
+          const groupActive = item.children.some(
+            (child) => activePath === child.href || activePath.startsWith(`${child.href}/`)
+          );
+
+          return (
+            <div key={item.id}>
+              <button
+                type="button"
+                onClick={() => toggle(item.id)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
+                  groupActive ? "text-white" : "text-white/65 hover:bg-white/[0.04] hover:text-white"
+                )}
+              >
+                <ActiveIcon className="h-4 w-4 shrink-0" />
+                <span className="flex-1 text-left">{item.label}</span>
+                <ChevronDown
+                  className={cn("h-3.5 w-3.5 text-white/40 transition-transform", isOpen && "rotate-180")}
+                />
+              </button>
+              <AnimatePresence initial={false}>
+                {isOpen ? (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <div className="my-1 ml-3 space-y-0.5 border-l border-white/[0.05] pl-2">
+                      {item.children.map((child) => (
+                        <SubNavLink
+                          key={child.href}
+                          child={child}
+                          pathname={activePath}
+                          onUnavailableClick={showUnavailableNotice}
+                          onVerificationRequired={() => setVerificationModalOpen(true)}
+                          requiresVerificationGate={requiresVerificationGate}
+                          onNavigate={startNavigation}
+                          onPrefetch={prefetchHref}
+                        />
+                      ))}
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+
+        <button
+          type="button"
+          onClick={() => {
+            import("next-auth/react").then((module) => module.signOut({ callbackUrl: "/login" }));
+          }}
+          className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium text-white/65 transition-colors hover:bg-white/[0.04] hover:text-white"
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          <span>Выход</span>
+        </button>
+      </nav>
+    </>
+  );
+
   return (
     <>
       <aside
         data-dashboard-sidebar="true"
         className="perf-fixed-layer fixed inset-y-0 left-0 z-30 hidden w-[258px] shrink-0 flex-col border-r border-white/[0.08] bg-[#0d0f16]/96 backdrop-blur-[2px] lg:flex"
       >
-        <div className="perf-scroll-shell flex h-full flex-col overflow-y-auto px-3.5 py-5">
-          <Link href="/dashboard" className="mb-6 flex items-center justify-start gap-2.5 px-3">
-            <span className="grid h-10 w-10 place-items-center overflow-hidden">
-              <Image
-                src="/brand/logo.png"
-                alt="ICM"
-                width={317}
-                height={400}
-                className="h-8 w-auto object-contain"
-              />
-            </span>
-            <span className="leading-tight">
-              <span className="block text-[13px] font-semibold tracking-[0.01em] text-white">
-                ICECREAMMUSIC
-              </span>
-            </span>
-          </Link>
-
-          <nav className="flex-1 space-y-0.5">
-            {nav.map((item) => {
-              if (item.type === "leaf") {
-                return (
-                  <NavLink
-                    key={item.href}
-                    item={item}
-                    pathname={activePath}
-                    onUnavailableClick={showUnavailableNotice}
-                    onVerificationRequired={() => setVerificationModalOpen(true)}
-                    requiresVerificationGate={requiresVerificationGate}
-                    onNavigate={startNavigation}
-                    onPrefetch={prefetchHref}
-                  />
-                );
-              }
-
-              const ActiveIcon = item.icon;
-              const isOpen = open[item.id];
-              const groupActive = item.children.some(
-                (child) => activePath === child.href || activePath.startsWith(`${child.href}/`)
-              );
-
-              return (
-                <div key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => toggle(item.id)}
-                    className={cn(
-                      "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
-                      groupActive
-                        ? "text-white"
-                        : "text-white/65 hover:bg-white/[0.04] hover:text-white"
-                    )}
-                  >
-                    <ActiveIcon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 text-left">{item.label}</span>
-                    <ChevronDown
-                      className={cn(
-                        "h-3.5 w-3.5 text-white/40 transition-transform",
-                        isOpen && "rotate-180"
-                      )}
-                    />
-                  </button>
-                  <AnimatePresence initial={false}>
-                    {isOpen ? (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: "auto", opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                        className="overflow-hidden"
-                      >
-                        <div className="my-1 ml-3 space-y-0.5 border-l border-white/[0.05] pl-2">
-                          {item.children.map((child) => (
-                            <SubNavLink
-                              key={child.href}
-                              child={child}
-                              pathname={activePath}
-                              onUnavailableClick={showUnavailableNotice}
-                              onVerificationRequired={() => setVerificationModalOpen(true)}
-                              requiresVerificationGate={requiresVerificationGate}
-                              onNavigate={startNavigation}
-                              onPrefetch={prefetchHref}
-                            />
-                          ))}
-                        </div>
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
-                </div>
-              );
-            })}
-
-            <button
-              type="button"
-              onClick={() => {
-                import("next-auth/react").then((module) => module.signOut({ callbackUrl: "/login" }));
-              }}
-              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium text-white/65 transition-colors hover:bg-white/[0.04] hover:text-white"
-            >
-              <LogOut className="h-4 w-4 shrink-0" />
-              <span>Выход</span>
-            </button>
-          </nav>
-        </div>
+        <div className="perf-scroll-shell flex h-full flex-col overflow-y-auto px-3.5 py-5">{sidebarNavigation}</div>
       </aside>
+
+      <AnimatePresence initial={false}>
+        {mobileMenuOpen ? (
+          <>
+            <motion.button
+              type="button"
+              aria-label="Закрыть меню кабинета"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-[74] bg-[#04050a]/88 backdrop-blur-[8px] lg:hidden"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <motion.aside
+              data-dashboard-sidebar="true"
+              initial={{ x: -28, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -20, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="fixed inset-y-0 left-0 z-[75] flex w-[min(86vw,320px)] max-w-[320px] flex-col border-r border-white/[0.12] bg-[#0a0c12] shadow-[24px_0_70px_-34px_rgba(0,0,0,0.98)] lg:hidden"
+            >
+              <div className="flex items-center justify-end px-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] text-white/78 transition-colors hover:bg-white/[0.08]"
+                  aria-label="Закрыть меню кабинета"
+                >
+                  <PanelLeftClose className="h-4.5 w-4.5" />
+                </button>
+              </div>
+              <div className="perf-scroll-shell flex h-full flex-col overflow-y-auto px-3.5 pb-[calc(env(safe-area-inset-bottom)+96px)] pt-2">
+                {sidebarNavigation}
+              </div>
+            </motion.aside>
+          </>
+        ) : null}
+      </AnimatePresence>
 
       <nav className="perf-fixed-layer fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.1] bg-[#0d0f16]/96 px-1.5 pb-[calc(env(safe-area-inset-bottom)+6px)] pt-1.5 backdrop-blur-[6px] lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-5 gap-1">

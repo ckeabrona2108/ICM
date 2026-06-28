@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Coins, LogOut, Sparkles, UserRound, Wallet } from "lucide-react";
+import { ChevronDown, Coins, LogOut, PanelLeft, Sparkles, UserRound, Wallet } from "lucide-react";
 
 import { useCurrentUser } from "@/components/user/user-provider";
 import { UserAvatar } from "@/components/user/user-avatar";
@@ -169,7 +169,18 @@ export function DashboardTopbar({
   }, [activeMenu, updateMenuPositions]);
 
   return (
-    <div className="perf-fixed-layer fixed inset-x-0 top-0 z-50 mb-5 flex min-h-[var(--dashboard-mobile-header-height)] min-w-0 flex-wrap items-center gap-2 overflow-visible border-b border-white/[0.08] bg-[#0d0f16]/96 px-4 py-2 backdrop-blur-[6px] sm:px-6 lg:sticky lg:top-0 lg:z-[70] lg:isolate lg:-mx-8 lg:mb-6 lg:min-h-[72px] lg:gap-4 lg:bg-[#0d0f16]/92 lg:px-8 lg:py-0 lg:backdrop-blur-[2px]">
+    <div className="perf-fixed-layer fixed inset-x-0 top-0 z-50 mb-4 flex min-h-[var(--dashboard-mobile-header-height)] min-w-0 flex-wrap items-center gap-2 overflow-visible border-b border-white/[0.08] bg-[#0d0f16]/96 px-4 py-1.5 backdrop-blur-[6px] sm:px-6 lg:sticky lg:top-0 lg:z-[70] lg:isolate lg:-mx-8 lg:mb-6 lg:min-h-[72px] lg:gap-4 lg:bg-[#0d0f16]/92 lg:px-8 lg:py-0 lg:backdrop-blur-[2px]">
+      <button
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(new CustomEvent("dashboard:toggle-mobile-sidebar"));
+        }}
+        className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] text-white/82 transition-colors hover:bg-white/[0.08] lg:hidden"
+        aria-label="Открыть меню кабинета"
+      >
+        <PanelLeft className="h-4.5 w-4.5" />
+      </button>
+
       <ServiceWorkStatus className="order-1 flex min-w-0 items-center gap-2.5" />
 
       <div className="order-2 ml-auto flex min-w-0 items-center gap-2 sm:gap-3" ref={menuRef}>

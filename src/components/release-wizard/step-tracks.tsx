@@ -92,6 +92,20 @@ function inferContentTypeFromName(name: string): string {
   return "application/octet-stream";
 }
 
+function detectMobileUploadRisk(): boolean {
+  if (typeof window === "undefined") return false;
+
+  const ua = window.navigator.userAgent || "";
+  const vendor = window.navigator.vendor || "";
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/iu.test(ua);
+  const isIos = /iPhone|iPad|iPod/iu.test(ua);
+  const isWebView =
+    /Instagram|FBAN|FBAV|FB_IAB|Line|MicroMessenger|Telegram|VKClient|VK\/|VKontakte/iu.test(ua) ||
+    ((isIos && !/Safari/iu.test(ua)) || /wv/iu.test(ua));
+
+  return isMobile || isWebView || /Apple/iu.test(vendor);
+}
+
 function resolveLocalObjectUrl(storageKey: string | undefined): string | undefined {
   const key = storageKey?.trim();
   if (!key) return undefined;
@@ -304,6 +318,7 @@ async function readDuration(file: File): Promise<number | undefined> {
 export function StepTracks() {
   const { data, set } = useWizard();
   const [drag, setDrag] = React.useState(false);
+  const [showMobileUploadNotice] = React.useState(() => detectMobileUploadRisk());
   const [error, setError] = React.useState<string | null>(null);
   const [openMetaId, setOpenMetaId] = React.useState<string | null>(null);
   const [previewTrackId, setPreviewTrackId] = React.useState<string | null>(null);
@@ -426,6 +441,7 @@ export function StepTracks() {
           name: file.name,
           size: file.size,
           hasAudio: true,
+          localAudioFile: file,
           audioUpload: null,
           durationSec,
           durationLabel: durationSec ? formatDuration(durationSec) : undefined,
@@ -462,6 +478,7 @@ export function StepTracks() {
       name: `track-${String(number).padStart(2, "0")}-without-audio`,
       size: 0,
       hasAudio: false,
+      localAudioFile: null,
       audioUpload: null,
       meta: emptyTrackMeta()
     };
@@ -503,6 +520,17 @@ export function StepTracks() {
 
   return (
     <div className="space-y-4">
+      {showMobileUploadNotice ? (
+        <div className="rounded-2xl border border-amber-400/20 bg-[linear-gradient(180deg,rgba(255,184,77,0.08),rgba(255,184,77,0.03))] px-4 py-3 text-sm text-amber-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+          <p className="font-medium text-amber-100">Загрузка WAV и FLAC на телефоне может быть нестабильной</p>
+          <p className="mt-1 text-[13px] leading-6 text-amber-50/80">
+            Во встроенных браузерах VK, Telegram и других webview большие аудиофайлы иногда теряют доступ к локальному
+            файлу до момента отправки релиза. Для более надёжной загрузки используйте Safari, Chrome или откройте сайт
+            во внешнем браузере.
+          </p>
+        </div>
+      ) : null}
+
       <WizardCard className="!p-0">
         <div
           onClick={() => inputRef.current?.click()}

@@ -92,7 +92,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const aiTokenBalanceLabel = aiTokenBalance.toLocaleString("ru-RU");
 
   return (
-    <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[#0a0b0f] text-white [--dashboard-mobile-bottom-nav-height:72px] [--dashboard-mobile-header-height:84px]">
+    <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[#0a0b0f] text-white [--dashboard-mobile-bottom-nav-height:72px] [--dashboard-mobile-header-height:72px] [--dashboard-mobile-header-offset:104px]">
       {/* ambient corner glow (top-right) */}
       <div className="pointer-events-none absolute right-0 top-[-160px] h-[520px] w-[520px] translate-x-1/3 rounded-full bg-[#7b3df5]/[0.12] blur-[96px]" />
       <div className="pointer-events-none absolute right-0 top-40 h-[360px] w-[360px] translate-x-1/4 rounded-full bg-[#3b1d75]/22 blur-[84px]" />
@@ -100,7 +100,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="relative h-screen min-w-0 overflow-hidden">
         <DashboardSidebar counts={sidebarCounts} contractStatus={contractStatus} />
         <div className="h-screen min-w-0 lg:pl-[258px]">
-          <div className="perf-scroll-shell h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 pb-[calc(var(--dashboard-mobile-bottom-nav-height)+env(safe-area-inset-bottom)+24px)] pt-[calc(var(--dashboard-mobile-header-height)+16px)] sm:px-6 lg:px-8 lg:pb-0 lg:pt-0">
+          <div className="perf-scroll-shell h-screen min-w-0 overflow-y-auto overflow-x-clip px-4 pb-[calc(var(--dashboard-mobile-bottom-nav-height)+env(safe-area-inset-bottom)+24px)] pt-[var(--dashboard-mobile-header-offset)] sm:px-6 lg:px-8 lg:pb-0 lg:pt-0">
             <DashboardPrefetch />
             <DashboardVerificationStatusModal initialStatus={contractStatus} />
             <DashboardTopbar

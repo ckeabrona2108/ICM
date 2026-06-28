@@ -30,6 +30,33 @@ export function StepUpload({
     return () => clearTimeout(t);
   }, [progress, done]);
 
+  const sentToModeration =
+    submitResult?.nextStatus === "moderation" ||
+    submitResult?.nextStatus === "pending_verification";
+  const title =
+    submitResult?.nextStatus === "pending_verification"
+      ? "Релиз ожидает подтверждения верификации"
+      : sentToModeration
+        ? submissionMode === "edit"
+          ? "Версия отправлена на модерацию"
+          : "Релиз отправлен на модерацию"
+        : "Изменения сохранены";
+  const description = submitResult?.message ? (
+    submitResult.message
+  ) : sentToModeration && submissionMode === "edit" ? (
+    <>
+      Обновлённая копия «{data.title || "Без названия"}» ушла в очередь модерации. Черновик можно
+      отслеживать в разделе «Черновики» до появления карточки в «Мои релизы».
+    </>
+  ) : submissionMode === "edit" ? (
+    <>Изменения для «{data.title || "Без названия"}» сохранены.</>
+  ) : (
+    <>
+      «{data.title || "Без названия"}» поставлен в очередь модерации. Среднее время проверки — до 12
+      часов. Уведомление придёт в раздел Новости.
+    </>
+  );
+
   return (
     <WizardCard className="text-center">
       {done ? (
@@ -41,28 +68,8 @@ export function StepUpload({
           <span className="grid h-14 w-14 place-items-center rounded-full bg-emerald-500/15 text-emerald-400">
             <CheckCircle2 className="h-7 w-7" />
           </span>
-          <h3 className="text-[18px] font-semibold text-white">
-            {submitResult?.nextStatus === "pending_verification"
-              ? "Релиз ожидает подтверждения верификации"
-              : submissionMode === "edit"
-                ? "Версия отправлена на модерацию"
-                : "Релиз отправлен на модерацию"}
-          </h3>
-          <p className="max-w-md text-[13px] text-white/55">
-            {submitResult?.message ? (
-              submitResult.message
-            ) : submissionMode === "edit" ? (
-              <>
-                Обновлённая копия «{data.title || "Без названия"}» ушла в очередь модерации. Черновик
-                можно отслеживать в разделе «Черновики» до появления карточки в «Мои релизы».
-              </>
-            ) : (
-              <>
-                «{data.title || "Без названия"}» поставлен в очередь модерации. Среднее время проверки —
-                до 12 часов. Уведомление придёт в раздел Новости.
-              </>
-            )}
-          </p>
+          <h3 className="text-[18px] font-semibold text-white">{title}</h3>
+          <p className="max-w-md text-[13px] text-white/55">{description}</p>
           <div className="mt-2 flex items-center gap-2">
             <Link
               href={

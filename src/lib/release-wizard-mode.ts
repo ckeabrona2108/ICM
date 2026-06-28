@@ -19,3 +19,7 @@ export function resolveReleaseSubmitMode(
   if (currentStatus === "draft") return "new";
   return "edit";
 }
+
+export function shouldResubmitEditedRelease(currentStatus?: ReleaseLifecycleStatus): boolean {
+  return currentStatus === "changes_required" || currentStatus === "rejected";
+}

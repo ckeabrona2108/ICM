@@ -12,6 +12,7 @@ import { ReleaseWizard } from "@/components/release-wizard/release-wizard";
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapCabinetReleaseToWizardSeed } from "@/lib/map-cabinet-to-wizard-seed";
 import { canEditRelease } from "@/lib/release-policy";
+import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
 
 export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
   const seed = React.useMemo(() => mapCabinetReleaseToWizardSeed(release), [release]);
@@ -24,6 +25,7 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
       ? "changes_required"
       : release.status;
   const isDraftRelease = effectiveStatus === "draft";
+  const willResubmitToModeration = shouldResubmitEditedRelease(effectiveStatus);
 
   const editPermission = React.useMemo(
     () =>
@@ -167,7 +169,7 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
         </div>
       ) : null}
 
-      {!isDraftRelease ? (
+      {!isDraftRelease && willResubmitToModeration ? (
         <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-[12.5px] leading-relaxed text-amber-100/90">
           <p>
             После редактирования релиз будет повторно отправлен на модерацию. Пока проверка не

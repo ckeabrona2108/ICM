@@ -27,6 +27,7 @@ import {
   getUserReleaseQuota,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
+import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
 import {
   buildSubmitTrackDiagnostics,
   buildTrackCreateManyInput,
@@ -284,17 +285,43 @@ export async function POST(request: Request) {
   });
 
   if (payload.mode === "edit") {
+    const shouldResubmit = shouldResubmitEditedRelease(payload.currentStatus);
     await updateReleaseAndSyncTracks({
       confirmed: existing.confirmed,
-      status: existing.status,
-      roles: mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
+      status: shouldResubmit ? "moderating" : existing.status,
+      roles: shouldResubmit
+        ? markSubmittedToModeration(
+            mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
+          )
+        : (mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue),
+      afterSync: shouldResubmit
+        ? async (tx) => {
+            await tx.release.update({
+              where: { id: existing.id },
+              data: {
+                rejectReason: null,
+                moderatorComment: null
+              }
+            });
+          }
+        : undefined
     });
+
+    if (shouldResubmit) {
+      await notifyReleaseSubmittedSafe({
+        releaseId: existing.id,
+        releaseTitle: baseReleaseData.title,
+        artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+      });
+    }
 
     const response: ReleaseSubmitSuccessResponse = {
       ok: true,
       releaseId: existing.id,
-      nextStatus: "moderation",
-      message: "Изменения релиза сохранены."
+      nextStatus: shouldResubmit ? "moderation" : (payload.currentStatus ?? "draft"),
+      message: shouldResubmit
+        ? "Релиз повторно отправлен на модерацию."
+        : "Изменения релиза сохранены."
     };
 
     return NextResponse.json(response, { status: 200 });

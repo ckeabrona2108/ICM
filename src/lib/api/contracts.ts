@@ -154,6 +154,7 @@ export interface CurrentUserProfileResponse {
   royaltyBalance: number;
   aiTokenBalance: number;
   currentPlan: "FREE" | "PRO" | "ENTERPRISE";
+  hasActiveSubscription: boolean;
   hasAiStudioAccess: boolean;
   verification: import("@/lib/contract-verification-shared").ContractStatusPayload;
 }

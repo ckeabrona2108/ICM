@@ -21,13 +21,15 @@ export function isPrismaTableMissingError(
     }
 
     const metaTable = String(error.meta?.table ?? "");
-    if (metaTable.includes(tableName)) {
+    if (metaTable.toLowerCase().includes(tableName.toLowerCase())) {
       return true;
     }
   }
 
   const message = extractErrorMessage(error);
-  const tableHint = tableName ? message.includes(tableName) : true;
+  const tableHint = tableName
+    ? message.toLowerCase().includes(tableName.toLowerCase())
+    : true;
 
   return (
     tableHint &&
@@ -56,13 +58,15 @@ export function isPrismaColumnMissingError(
     }
 
     const metaColumn = String(error.meta?.column ?? "");
-    if (metaColumn.includes(columnName)) {
+    if (metaColumn.toLowerCase().includes(columnName.toLowerCase())) {
       return true;
     }
   }
 
   const message = extractErrorMessage(error);
-  const columnHint = columnName ? message.includes(columnName) : true;
+  const columnHint = columnName
+    ? message.toLowerCase().includes(columnName.toLowerCase())
+    : true;
 
   return (
     columnHint &&

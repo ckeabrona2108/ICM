@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { motion } from "framer-motion";
 
 import { cn } from "@/lib/utils";
 
@@ -19,11 +20,18 @@ function TabsBase({ tabs, active, onChange }: TabsProps) {
           type="button"
           onClick={() => onChange(tab)}
           className={cn(
-            "rounded-lg px-3 py-1.5 text-sm transition-colors duration-150 ease-out motion-reduce:transition-none",
-            active === tab ? "bg-white/10 text-white" : "text-muted-foreground hover:text-foreground"
+            "relative rounded-lg px-3 py-1.5 text-sm transition-colors duration-150 ease-out motion-reduce:transition-none",
+            active === tab ? "text-white" : "text-muted-foreground hover:text-foreground"
           )}
         >
-          {tab}
+          {active === tab ? (
+            <motion.span
+              layoutId="tabs-active-pill"
+              className="absolute inset-0 rounded-lg bg-white/10"
+              transition={{ type: "spring", stiffness: 420, damping: 34 }}
+            />
+          ) : null}
+          <span className="relative z-[1]">{tab}</span>
         </button>
       ))}
     </div>

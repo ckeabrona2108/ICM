@@ -138,6 +138,391 @@ model promo_urls {
   @@schema("icecream")
 }
 
+model promo_submissions {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id               String   @db.Uuid
+  release_id            String   @db.Uuid
+  status                PromoSubmissionStatus @default(SUBMITTED)
+  email                 String
+  partner_name          String
+  artist_name           String
+  artist_country        String
+  release_title         String
+  release_date          DateTime @db.Timestamp(6)
+  genre                 String
+  release_format        String
+  release_language      String
+  upc                   String
+  key_track_title       String
+  has_music_video       Boolean  @default(false)
+  video_preview_url     String?
+  label                 String
+  release_description   String
+  artist_photo_url      String
+  listening_link        String
+  promotion_plan        String
+  artist_social_links   String
+  confirmation_accepted Boolean  @default(false)
+  admin_comment         String?
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  updated_at            DateTime @updatedAt @db.Timestamp(6)
+  reviewed_at           DateTime? @db.Timestamp(6)
+  reviewed_by           String?  @db.Uuid
+  user                  user     @relation("promo_submissions_user", fields: [user_id], references: [id], onDelete: Cascade)
+  release               release  @relation(fields: [release_id], references: [id], onDelete: Cascade)
+  reviewer              user?    @relation("promo_submissions_reviewed_by", fields: [reviewed_by], references: [id], onDelete: SetNull)
+
+  @@unique([user_id, release_id])
+  @@index([status, created_at])
+  @@index([user_id, created_at])
+  @@index([release_id])
+  @@schema("icecream")
+}
+
+model venues {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_user_id  String?  @db.Uuid
+  name           String
+  city           String?
+  address        String?
+  place_id       String?
+  map_provider   String?
+  latitude       Decimal? @db.Decimal(10, 7)
+  longitude      Decimal? @db.Decimal(10, 7)
+  metadata       Json?
+  created_at     DateTime @default(now()) @db.Timestamp(6)
+  updated_at     DateTime @updatedAt @db.Timestamp(6)
+  owner          user?    @relation("venues_owner", fields: [owner_user_id], references: [id], onDelete: SetNull)
+  events         events[]
+
+  @@index([owner_user_id, created_at])
+  @@index([name])
+  @@index([city])
+  @@schema("icecream")
+}
+
+model events {
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizer_user_id      String               @db.Uuid
+  venue_id               String?              @db.Uuid
+  title                  String
+  slug                   String               @unique
+  event_type             EventType            @default(CONCERT)
+  age_restriction        EventAgeRestriction  @default(ALL_AGES)
+  description            String?
+  city                   String?
+  venue_name             String?
+  address                String?
+  hashtags               String[]             @default([])
+  genres                 String[]             @default([])
+  starts_at              DateTime             @db.Timestamp(6)
+  ends_at                DateTime?            @db.Timestamp(6)
+  cover_image_url        String?
+  poster_image_url       String?
+  currency               String               @default("RUB")
+  ticket_sales_enabled   Boolean              @default(true)
+  ticket_terms           String?
+  status                 EventStatus          @default(DRAFT)
+  published_at           DateTime?            @db.Timestamp(6)
+  moderation_note        String?
+  metadata               Json?
+  created_at             DateTime             @default(now()) @db.Timestamp(6)
+  updated_at             DateTime             @updatedAt @db.Timestamp(6)
+  organizer              user                 @relation("events_organizer", fields: [organizer_user_id], references: [id], onDelete: Cascade)
+  venue                  venues?              @relation(fields: [venue_id], references: [id], onDelete: SetNull)
+  tags                   event_tags[]
+  artists                event_artists[]
+  images                 event_images[]
+  ticket_types           event_ticket_types[]
+  tickets                event_tickets[]
+  orders                 ticket_orders[]
+  payments               ticket_payments[]
+  checkins               ticket_checkins[]
+  staff_access_tokens    staff_access_tokens[]
+  ticket_check_logs      ticket_check_logs[]
+  financial_transactions event_financial_transactions[]
+  payouts                event_payouts[]
+
+  @@index([organizer_user_id, status, starts_at])
+  @@index([slug])
+  @@index([venue_id])
+  @@schema("icecream")
+}
+
+model event_tags {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id    String   @db.Uuid
+  value       String
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  event       events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id, sort_order])
+  @@schema("icecream")
+}
+
+model event_artists {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id         String            @db.Uuid
+  artist_user_id   String?           @db.Uuid
+  display_name     String
+  photo_url        String?
+  role             EventArtistRole   @default(ARTIST)
+  performance_time String?
+  sort_order       Int               @default(0)
+  metadata         Json?
+  created_at       DateTime          @default(now()) @db.Timestamp(6)
+  updated_at       DateTime          @updatedAt @db.Timestamp(6)
+  event            events            @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  artist_profile   user?             @relation("event_artist_profiles", fields: [artist_user_id], references: [id], onDelete: SetNull)
+
+  @@index([event_id, sort_order])
+  @@schema("icecream")
+}
+
+model event_images {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id    String   @db.Uuid
+  image_url   String
+  alt_text    String?
+  kind        String   @default("gallery")
+  is_cover    Boolean  @default(false)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  updated_at  DateTime @updatedAt @db.Timestamp(6)
+  event       events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id, sort_order])
+  @@schema("icecream")
+}
+
+model event_ticket_types {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id         String              @db.Uuid
+  kind             EventTicketTypeKind @default(REGULAR)
+  name             String
+  description      String?
+  price            Decimal             @db.Decimal(14, 2)
+  currency         String              @default("RUB")
+  quantity_total   Int                 @default(0)
+  quantity_sold    Int                 @default(0)
+  per_user_limit   Int                 @default(10)
+  sales_start_at   DateTime?           @db.Timestamp(6)
+  sales_end_at     DateTime?           @db.Timestamp(6)
+  enabled          Boolean             @default(true)
+  sort_order       Int                 @default(0)
+  metadata         Json?
+  created_at       DateTime            @default(now()) @db.Timestamp(6)
+  updated_at       DateTime            @updatedAt @db.Timestamp(6)
+  event            events              @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  tickets          event_tickets[]
+  orders           ticket_orders[]
+
+  @@index([event_id, sort_order])
+  @@schema("icecream")
+}
+
+model ticket_orders {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id            String              @db.Uuid
+  ticket_type_id      String              @db.Uuid
+  buyer_user_id       String?             @db.Uuid
+  order_number        String?             @unique
+  status              EventPaymentStatus  @default(PENDING_PAYMENT)
+  buyer_email         String
+  buyer_name          String?
+  buyer_phone         String?
+  quantity            Int                 @default(1)
+  total_amount        Decimal             @db.Decimal(14, 2)
+  currency            String              @default("RUB")
+  payment_provider    String?
+  payment_reference   String?
+  paid_at             DateTime?           @db.Timestamp(6)
+  completed_at        DateTime?           @db.Timestamp(6)
+  cancelled_at        DateTime?           @db.Timestamp(6)
+  email_sent_at       DateTime?           @db.Timestamp(6)
+  email_delivery_status String?
+  provider_message_id String?
+  metadata            Json?
+  created_at          DateTime            @default(now()) @db.Timestamp(6)
+  updated_at          DateTime            @updatedAt @db.Timestamp(6)
+  event               events              @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  ticket_type         event_ticket_types  @relation(fields: [ticket_type_id], references: [id], onDelete: Cascade)
+  buyer               user?               @relation("ticket_orders_buyer", fields: [buyer_user_id], references: [id], onDelete: SetNull)
+  tickets             event_tickets[]
+  payments            ticket_payments[]
+  financials          event_financial_transactions[]
+
+  @@index([event_id, created_at])
+  @@index([buyer_user_id, created_at])
+  @@index([status, created_at])
+  @@schema("icecream")
+}
+
+model ticket_payments {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  order_id             String              @db.Uuid
+  event_id             String              @db.Uuid
+  amount               Decimal             @db.Decimal(14, 2)
+  currency             String              @default("RUB")
+  provider             String?
+  provider_payment_id  String?
+  status               EventPaymentStatus  @default(PENDING_PAYMENT)
+  raw_payload          Json?
+  confirmed_at         DateTime?           @db.Timestamp(6)
+  created_at           DateTime            @default(now()) @db.Timestamp(6)
+  updated_at           DateTime            @updatedAt @db.Timestamp(6)
+  order                ticket_orders       @relation(fields: [order_id], references: [id], onDelete: Cascade)
+  event                events              @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  financials           event_financial_transactions[]
+
+  @@index([order_id, created_at])
+  @@index([provider_payment_id])
+  @@schema("icecream")
+}
+
+model event_tickets {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id         String             @db.Uuid
+  ticket_type_id   String             @db.Uuid
+  order_id         String?            @db.Uuid
+  buyer_user_id    String?            @db.Uuid
+  ticket_code      String             @unique
+  public_token     String?            @unique
+  qr_payload       String
+  status           EventTicketStatus  @default(AVAILABLE)
+  holder_name      String?
+  buyer_email      String?
+  buyer_phone      String?
+  purchase_at      DateTime?          @db.Timestamp(6)
+  checked_in_at    DateTime?          @db.Timestamp(6)
+  checked_in_by_type String?
+  checked_in_by_id String?
+  used_at          DateTime?          @db.Timestamp(6)
+  cancelled_at     DateTime?          @db.Timestamp(6)
+  refunded_at      DateTime?          @db.Timestamp(6)
+  metadata         Json?
+  created_at       DateTime           @default(now()) @db.Timestamp(6)
+  updated_at       DateTime           @updatedAt @db.Timestamp(6)
+  event            events             @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  ticket_type      event_ticket_types @relation(fields: [ticket_type_id], references: [id], onDelete: Cascade)
+  order            ticket_orders?     @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  buyer            user?              @relation("event_tickets_buyer", fields: [buyer_user_id], references: [id], onDelete: SetNull)
+  checkins         ticket_checkins[]
+  check_logs       ticket_check_logs[]
+
+  @@index([event_id, status, created_at])
+  @@index([event_id, public_token])
+  @@index([buyer_user_id, created_at])
+  @@schema("icecream")
+}
+
+model staff_access_tokens {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id           String    @db.Uuid
+  token_hash         String    @unique
+  label              String?
+  role               String    @default("staff")
+  expires_at         DateTime  @db.Timestamp(6)
+  revoked_at         DateTime? @db.Timestamp(6)
+  created_by_user_id String    @db.Uuid
+  last_used_at       DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @updatedAt @db.Timestamp(6)
+  event              events    @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  created_by         user      @relation("staff_access_tokens_created_by", fields: [created_by_user_id], references: [id], onDelete: Cascade)
+  check_logs         ticket_check_logs[]
+
+  @@index([event_id, created_at])
+  @@index([event_id, expires_at])
+  @@schema("icecream")
+}
+
+model ticket_checkins {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id            String   @db.Uuid
+  ticket_id           String   @db.Uuid
+  checked_in_by_user_id String @db.Uuid
+  method              String   @default("qr")
+  gate_name           String?
+  notes               String?
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+  event               events   @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  ticket              event_tickets @relation(fields: [ticket_id], references: [id], onDelete: Cascade)
+  actor               user     @relation("ticket_checkins_actor", fields: [checked_in_by_user_id], references: [id], onDelete: Cascade)
+
+  @@index([event_id, created_at])
+  @@index([ticket_id])
+  @@schema("icecream")
+}
+
+model ticket_check_logs {
+  id              String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id        String               @db.Uuid
+  ticket_id       String?              @db.Uuid
+  check_mode      String
+  result          String
+  staff_access_id String?              @db.Uuid
+  scanner_ip      String?
+  user_agent      String?
+  created_at      DateTime             @default(now()) @db.Timestamp(6)
+  event           events               @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  ticket          event_tickets?       @relation(fields: [ticket_id], references: [id], onDelete: SetNull)
+  staff_access    staff_access_tokens? @relation(fields: [staff_access_id], references: [id], onDelete: SetNull)
+
+  @@index([event_id, created_at])
+  @@index([ticket_id, created_at])
+  @@index([staff_access_id, created_at])
+  @@schema("icecream")
+}
+
+model event_financial_transactions {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id             String                 @db.Uuid
+  organizer_user_id    String                 @db.Uuid
+  order_id             String?                @db.Uuid
+  payment_id           String?                @db.Uuid
+  payout_id            String?                @db.Uuid
+  direction            EventFinancialDirection
+  gross_amount         Decimal                @db.Decimal(14, 2)
+  commission_amount    Decimal                @default(0) @db.Decimal(14, 2)
+  net_amount           Decimal                @db.Decimal(14, 2)
+  currency             String                 @default("RUB")
+  description          String?
+  metadata             Json?
+  created_at           DateTime               @default(now()) @db.Timestamp(6)
+  event                events                 @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  organizer            user                   @relation("event_financial_transactions_organizer", fields: [organizer_user_id], references: [id], onDelete: Cascade)
+  order                ticket_orders?         @relation(fields: [order_id], references: [id], onDelete: SetNull)
+  payment              ticket_payments?       @relation(fields: [payment_id], references: [id], onDelete: SetNull)
+  payout               event_payouts?         @relation(fields: [payout_id], references: [id], onDelete: SetNull)
+
+  @@index([organizer_user_id, created_at])
+  @@index([event_id, created_at])
+  @@schema("icecream")
+}
+
+model event_payouts {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizer_user_id   String              @db.Uuid
+  event_id            String?             @db.Uuid
+  status              EventPaymentStatus  @default(PENDING_PAYMENT)
+  amount              Decimal             @db.Decimal(14, 2)
+  currency            String              @default("RUB")
+  method              String?
+  notes               String?
+  requested_at        DateTime            @default(now()) @db.Timestamp(6)
+  paid_at             DateTime?           @db.Timestamp(6)
+  created_at          DateTime            @default(now()) @db.Timestamp(6)
+  updated_at          DateTime            @updatedAt @db.Timestamp(6)
+  organizer           user                @relation("event_payouts_organizer", fields: [organizer_user_id], references: [id], onDelete: Cascade)
+  event               events?             @relation(fields: [event_id], references: [id], onDelete: SetNull)
+  financials          event_financial_transactions[]
+
+  @@index([organizer_user_id, requested_at])
+  @@schema("icecream")
+}
+
 model release {
   id                           String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   preview                      String
@@ -168,8 +553,15 @@ model release {
   analytics_daily_summaries    analytics_daily_summaries[]
   analytics_platform_summaries analytics_platform_summaries[]
   analytics_report_snapshots   analytics_report_snapshots[]
+  catalog_conflicts            catalog_conflicts[]
+  catalog_import_rows          catalog_import_rows[]
+  financial_import_rows        financial_import_rows[]
   partner_code_usages          partner_code_usages[]
   promo_links                  promo_links[]
+  promo_submissions            promo_submissions[]
+  royalty                      royalty[]
+  royalty_transactions         royalty_transactions[]
+  created_in_catalog_rows      catalog_import_rows[]        @relation("catalog_import_rows_created_release")
   unmatched_analytics_imports  unmatched_analytics_imports[]  @relation("unmatched_analytics_imports_resolved_release")
   user                         user                           @relation(fields: [userId], references: [id], onDelete: Cascade, map: "release_userId_user_id_fk")
   track                        track[]
@@ -262,6 +654,11 @@ model track {
   author_rights              String
   video_shot                 String?
   index                      Int       @db.SmallInt
+  catalog_conflicts          catalog_conflicts[]
+  catalog_import_rows        catalog_import_rows[]
+  financial_import_rows      financial_import_rows[]
+  royalty_transactions       royalty_transactions[]
+  created_in_catalog_rows    catalog_import_rows[] @relation("catalog_import_rows_created_track")
   release                    release   @relation(fields: [releaseId], references: [id], onDelete: Cascade, map: "track_releaseId_release_id_fk")
 
   @@schema("icecream")
@@ -315,21 +712,44 @@ model user {
   analytics_import_jobs        analytics_import_jobs[]        @relation("analytics_import_jobs_created_by_admin")
   analytics_platform_summaries analytics_platform_summaries[]
   analytics_report_snapshots   analytics_report_snapshots[]
+  balance_transactions         balance_transactions[]
   ai_generations               ai_generations[]
   ai_chat_threads              ai_chat_threads[]
   ai_chat_messages             ai_chat_messages[]
   ai_token_transactions        ai_token_transactions[]
   ai_user_notifications        ai_user_notifications[]
   ai_uploads                   ai_uploads[]
+  catalog_imports              catalog_imports[]
+  commission_calculations      commission_calculations[]
+  contract_commission_rates    contract_commission_rates[]
+  financeReport                financeReport[]
+  financial_import_rows        financial_import_rows[]
+  financial_imports            financial_imports[]
+  event_artist_profiles        event_artists[]                @relation("event_artist_profiles")
+  event_checkins               ticket_checkins[]              @relation("ticket_checkins_actor")
+  created_staff_access_tokens  staff_access_tokens[]          @relation("staff_access_tokens_created_by")
+  event_financial_transactions event_financial_transactions[] @relation("event_financial_transactions_organizer")
+  event_payouts                event_payouts[]                @relation("event_payouts_organizer")
+  event_ticket_orders          ticket_orders[]                @relation("ticket_orders_buyer")
+  event_tickets                event_tickets[]                @relation("event_tickets_buyer")
+  event_venues                 venues[]                       @relation("venues_owner")
+  events_organized             events[]                       @relation("events_organizer")
+  payoutRequest                payoutRequest[]
   orders                       orders[]
   partnerCodeUsages            partner_code_usages[]
   partnerCodesAllowed          partner_codes[]                @relation("partner_codes_allowed_user")
   partnerCodesCreated          partner_codes[]                @relation("partner_codes_created_by_admin")
   payment_methods              payment_methods[]
   payouts                      payouts[]
+  promo_submissions            promo_submissions[]          @relation("promo_submissions_user")
+  promo_submissions_reviewed   promo_submissions[]          @relation("promo_submissions_reviewed_by")
   release                      release[]
+  royalty                      royalty[]
+  royalty_transactions         royalty_transactions[]
   sessions                     sessions[]
+  transaction                  transaction[]
   unmatched_analytics_imports  unmatched_analytics_imports[]  @relation("unmatched_analytics_imports_resolved_by_admin")
+  user_commission_rates        user_commission_rates[]
   verification                 verification[]
   verification_tokens          verification_tokens[]
 
@@ -485,6 +905,423 @@ model ai_user_notifications {
   user       user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@index([user_id, created_at])
+  @@schema("icecream")
+}
+
+model financeReport {
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String              @db.Uuid
+  periodStart DateTime           @db.Timestamp(6)
+  periodEnd  DateTime            @db.Timestamp(6)
+  amount     Decimal             @db.Decimal(12, 2)
+  currency   String              @default("RUB")
+  status     FinanceReportStatus @default(READY_TO_CONFIRM)
+  agreedAt   DateTime?           @db.Timestamp(6)
+  createdAt  DateTime            @default(now()) @db.Timestamp(6)
+  updatedAt  DateTime            @updatedAt @db.Timestamp(6)
+  user       user                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, periodStart, periodEnd])
+  @@schema("icecream")
+}
+
+model transaction {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String            @db.Uuid
+  amount      Decimal           @db.Decimal(12, 2)
+  type        TransactionType
+  status      TransactionStatus @default(PENDING)
+  description String?
+  createdAt   DateTime          @default(now()) @db.Timestamp(6)
+  processedAt DateTime?         @db.Timestamp(6)
+  metadata    Json?
+  user        user              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([type, status])
+  @@schema("icecream")
+}
+
+model payoutRequest {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String              @db.Uuid
+  amount      Decimal             @db.Decimal(12, 2)
+  method      PayoutMethod
+  status      PayoutRequestStatus @default(REQUESTED)
+  requisites  Json?
+  createdAt   DateTime            @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime            @updatedAt @db.Timestamp(6)
+  processedAt DateTime?           @db.Timestamp(6)
+  paidAt      DateTime?           @db.Timestamp(6)
+  rejectedAt  DateTime?           @db.Timestamp(6)
+  user        user                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@schema("icecream")
+}
+
+model royalty {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @db.Uuid
+  releaseId     String   @db.Uuid
+  amount        Decimal  @db.Decimal(12, 2)
+  statementDate DateTime @db.Timestamp(6)
+  streams       Int      @default(0)
+  createdAt     DateTime @default(now()) @db.Timestamp(6)
+  user          user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  release       release  @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+
+  @@index([userId, statementDate])
+  @@index([releaseId, statementDate])
+  @@schema("icecream")
+}
+
+model catalog_imports {
+  id                 String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind               String               @default("catalog")
+  source_file_name   String
+  file_format        String
+  detected_encoding  String?
+  detected_delimiter String?
+  header_row_index   Int                  @default(0)
+  status             SmartImportStatus    @default(PREVIEW)
+  total_rows         Int                  @default(0)
+  matched_rows       Int                  @default(0)
+  update_rows        Int                  @default(0)
+  create_rows        Int                  @default(0)
+  conflict_rows      Int                  @default(0)
+  skipped_rows       Int                  @default(0)
+  error_rows         Int                  @default(0)
+  create_missing     Boolean              @default(false)
+  auto_detected_map  Json?
+  summary            Json?
+  started_at         DateTime?            @db.Timestamp(6)
+  confirmed_at       DateTime?            @db.Timestamp(6)
+  rolled_back_at     DateTime?            @db.Timestamp(6)
+  error_message      String?
+  created_by_admin_id String              @db.Uuid
+  created_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @updatedAt @db.Timestamp(6)
+  user               user                 @relation(fields: [created_by_admin_id], references: [id], onDelete: Cascade)
+  rows               catalog_import_rows[]
+  logs               catalog_import_logs[]
+  conflicts          catalog_conflicts[]
+  updates            catalog_updates[]
+
+  @@index([status, created_at])
+  @@index([created_by_admin_id, created_at])
+  @@schema("icecream")
+}
+
+model catalog_import_rows {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  import_id           String                @db.Uuid
+  row_number          Int
+  action              SmartImportRowAction
+  confidence_score    Float                 @default(0)
+  raw_data            Json
+  normalized_data     Json?
+  detected_match_rule String?
+  error_message       String?
+  matched_release_id  String?               @db.Uuid
+  matched_track_id    String?               @db.Uuid
+  created_release_id  String?               @db.Uuid
+  created_track_id    String?               @db.Uuid
+  created_at          DateTime              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime              @updatedAt @db.Timestamp(6)
+  import              catalog_imports       @relation(fields: [import_id], references: [id], onDelete: Cascade)
+  matched_release     release?              @relation(fields: [matched_release_id], references: [id], onDelete: SetNull)
+  matched_track       track?                @relation(fields: [matched_track_id], references: [id], onDelete: SetNull)
+  created_release     release?              @relation("catalog_import_rows_created_release", fields: [created_release_id], references: [id], onDelete: SetNull)
+  created_track       track?                @relation("catalog_import_rows_created_track", fields: [created_track_id], references: [id], onDelete: SetNull)
+  conflicts           catalog_conflicts[]
+  updates             catalog_updates[]
+
+  @@unique([import_id, row_number])
+  @@index([action, row_number])
+  @@schema("icecream")
+}
+
+model catalog_import_logs {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  import_id  String   @db.Uuid
+  level      String
+  message    String
+  metadata   Json?
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  import     catalog_imports @relation(fields: [import_id], references: [id], onDelete: Cascade)
+
+  @@index([import_id, created_at])
+  @@schema("icecream")
+}
+
+model catalog_conflicts {
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  import_id           String             @db.Uuid
+  row_id              String?            @db.Uuid
+  field_name          String
+  existing_value      String?
+  incoming_value      String?
+  resolution_status   SmartConflictStatus @default(PENDING)
+  matched_release_id  String?            @db.Uuid
+  matched_track_id    String?            @db.Uuid
+  notes               String?
+  created_at          DateTime           @default(now()) @db.Timestamp(6)
+  updated_at          DateTime           @updatedAt @db.Timestamp(6)
+  import              catalog_imports    @relation(fields: [import_id], references: [id], onDelete: Cascade)
+  row                 catalog_import_rows? @relation(fields: [row_id], references: [id], onDelete: SetNull)
+  matched_release     release?           @relation(fields: [matched_release_id], references: [id], onDelete: SetNull)
+  matched_track       track?             @relation(fields: [matched_track_id], references: [id], onDelete: SetNull)
+
+  @@index([import_id, resolution_status])
+  @@schema("icecream")
+}
+
+model catalog_updates {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  import_id     String      @db.Uuid
+  row_id        String?     @db.Uuid
+  entity_type   String
+  entity_id     String
+  operation     String
+  before_state  Json?
+  after_state   Json?
+  applied_at    DateTime    @default(now()) @db.Timestamp(6)
+  rolled_back_at DateTime?  @db.Timestamp(6)
+  import        catalog_imports @relation(fields: [import_id], references: [id], onDelete: Cascade)
+  row           catalog_import_rows? @relation(fields: [row_id], references: [id], onDelete: SetNull)
+
+  @@index([import_id, applied_at])
+  @@schema("icecream")
+}
+
+model import_history {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  import_type  String
+  import_id    String   @db.Uuid
+  action       String
+  actor_id     String?  @db.Uuid
+  description  String?
+  metadata     Json?
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([import_type, import_id, created_at])
+  @@schema("icecream")
+}
+
+model financial_imports {
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source_file_name    String
+  file_format         String
+  detected_encoding   String?
+  detected_delimiter  String?
+  header_row_index    Int                @default(0)
+  status              SmartImportStatus  @default(PREVIEW)
+  total_rows          Int                @default(0)
+  matched_rows        Int                @default(0)
+  update_rows         Int                @default(0)
+  create_rows         Int                @default(0)
+  conflict_rows       Int                @default(0)
+  skipped_rows        Int                @default(0)
+  error_rows          Int                @default(0)
+  gross_amount_total  Decimal            @default(0) @db.Decimal(14, 2)
+  net_amount_total    Decimal            @default(0) @db.Decimal(14, 2)
+  commission_total    Decimal            @default(0) @db.Decimal(14, 2)
+  auto_detected_map   Json?
+  summary             Json?
+  started_at          DateTime?          @db.Timestamp(6)
+  confirmed_at        DateTime?          @db.Timestamp(6)
+  rolled_back_at      DateTime?          @db.Timestamp(6)
+  error_message       String?
+  created_by_admin_id String             @db.Uuid
+  created_at          DateTime           @default(now()) @db.Timestamp(6)
+  updated_at          DateTime           @updatedAt @db.Timestamp(6)
+  user                user               @relation(fields: [created_by_admin_id], references: [id], onDelete: Cascade)
+  rows                financial_import_rows[]
+  royalty_transactions royalty_transactions[]
+  commission_calculations commission_calculations[]
+  matching_logs       royalty_matching_logs[]
+
+  @@index([status, created_at])
+  @@index([created_by_admin_id, created_at])
+  @@schema("icecream")
+}
+
+model financial_import_rows {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  import_id           String                @db.Uuid
+  row_number          Int
+  action              SmartImportRowAction
+  confidence_score    Float                 @default(0)
+  raw_data            Json
+  normalized_data     Json?
+  detected_match_rule String?
+  error_message       String?
+  matched_release_id  String?               @db.Uuid
+  matched_track_id    String?               @db.Uuid
+  user_id             String?               @db.Uuid
+  gross_amount        Decimal?              @db.Decimal(14, 2)
+  net_amount          Decimal?              @db.Decimal(14, 2)
+  commission_amount   Decimal?              @db.Decimal(14, 2)
+  commission_rate     Decimal?              @db.Decimal(7, 4)
+  created_at          DateTime              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime              @updatedAt @db.Timestamp(6)
+  import              financial_imports     @relation(fields: [import_id], references: [id], onDelete: Cascade)
+  matched_release     release?              @relation(fields: [matched_release_id], references: [id], onDelete: SetNull)
+  matched_track       track?                @relation(fields: [matched_track_id], references: [id], onDelete: SetNull)
+  user                user?                 @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  royalty_transactions royalty_transactions[]
+  matching_logs       royalty_matching_logs[]
+  commission_calculations commission_calculations[]
+
+  @@unique([import_id, row_number])
+  @@index([action, row_number])
+  @@schema("icecream")
+}
+
+model royalty_transactions {
+  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financial_import_id    String?              @db.Uuid
+  financial_import_row_id String?             @db.Uuid
+  user_id                String               @db.Uuid
+  release_id             String?              @db.Uuid
+  track_id               String?              @db.Uuid
+  gross_amount           Decimal              @db.Decimal(14, 2)
+  platform_commission_amount Decimal         @db.Decimal(14, 2)
+  commission_rate        Decimal              @db.Decimal(7, 4)
+  net_amount             Decimal              @db.Decimal(14, 2)
+  currency               String               @default("RUB")
+  platform_name          String?
+  source_reference       String?
+  metadata               Json?
+  created_at             DateTime             @default(now()) @db.Timestamp(6)
+  reversed_at            DateTime?            @db.Timestamp(6)
+  import                 financial_imports?   @relation(fields: [financial_import_id], references: [id], onDelete: SetNull)
+  import_row             financial_import_rows? @relation(fields: [financial_import_row_id], references: [id], onDelete: SetNull)
+  user                   user                 @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  release                release?             @relation(fields: [release_id], references: [id], onDelete: SetNull)
+  track                  track?               @relation(fields: [track_id], references: [id], onDelete: SetNull)
+  balance_transactions   balance_transactions[]
+
+  @@index([user_id, created_at])
+  @@index([financial_import_id, created_at])
+  @@schema("icecream")
+}
+
+model royalty_matching_logs {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financial_import_id String              @db.Uuid
+  row_id              String?             @db.Uuid
+  rule_name           String
+  matched             Boolean             @default(false)
+  confidence_score    Float               @default(0)
+  details             Json?
+  created_at          DateTime            @default(now()) @db.Timestamp(6)
+  import              financial_imports   @relation(fields: [financial_import_id], references: [id], onDelete: Cascade)
+  row                 financial_import_rows? @relation(fields: [row_id], references: [id], onDelete: SetNull)
+
+  @@index([financial_import_id, created_at])
+  @@schema("icecream")
+}
+
+model commission_calculations {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  financial_import_id String?             @db.Uuid
+  row_id              String?             @db.Uuid
+  user_id             String?             @db.Uuid
+  source_type         String
+  source_reference    String?
+  gross_amount        Decimal             @db.Decimal(14, 2)
+  commission_rate     Decimal             @db.Decimal(7, 4)
+  commission_amount   Decimal             @db.Decimal(14, 2)
+  net_amount          Decimal             @db.Decimal(14, 2)
+  created_at          DateTime            @default(now()) @db.Timestamp(6)
+  import              financial_imports?  @relation(fields: [financial_import_id], references: [id], onDelete: SetNull)
+  row                 financial_import_rows? @relation(fields: [row_id], references: [id], onDelete: SetNull)
+  user                user?               @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([financial_import_id, created_at])
+  @@schema("icecream")
+}
+
+model balance_transactions {
+  id                     String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                String                @db.Uuid
+  royalty_transaction_id String?               @db.Uuid
+  amount                 Decimal               @db.Decimal(14, 2)
+  direction              SmartBalanceDirection
+  balance_before         Decimal               @default(0) @db.Decimal(14, 2)
+  balance_after          Decimal               @default(0) @db.Decimal(14, 2)
+  description            String?
+  metadata               Json?
+  created_at             DateTime              @default(now()) @db.Timestamp(6)
+  user                   user                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  royalty_transaction    royalty_transactions? @relation(fields: [royalty_transaction_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at])
+  @@schema("icecream")
+}
+
+model user_commission_rates {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String   @db.Uuid
+  commission_rate  Decimal  @db.Decimal(7, 4)
+  active           Boolean  @default(true)
+  notes            String?
+  starts_at        DateTime? @db.Timestamp(6)
+  ends_at          DateTime? @db.Timestamp(6)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  updated_at       DateTime @updatedAt @db.Timestamp(6)
+  user             user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, active])
+  @@schema("icecream")
+}
+
+model label_commission_rates {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  label_name       String
+  commission_rate  Decimal  @db.Decimal(7, 4)
+  active           Boolean  @default(true)
+  notes            String?
+  starts_at        DateTime? @db.Timestamp(6)
+  ends_at          DateTime? @db.Timestamp(6)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  updated_at       DateTime @updatedAt @db.Timestamp(6)
+
+  @@unique([label_name, active], map: "label_commission_rates_label_name_active_uniq")
+  @@index([label_name])
+  @@schema("icecream")
+}
+
+model contract_commission_rates {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id           String   @db.Uuid
+  contract_reference String?
+  commission_rate   Decimal  @db.Decimal(7, 4)
+  active            Boolean  @default(true)
+  notes             String?
+  starts_at         DateTime? @db.Timestamp(6)
+  ends_at           DateTime? @db.Timestamp(6)
+  created_at        DateTime @default(now()) @db.Timestamp(6)
+  updated_at        DateTime @updatedAt @db.Timestamp(6)
+  user              user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, active])
+  @@schema("icecream")
+}
+
+model platform_settings {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key           String   @unique
+  value_string  String?
+  value_number  Decimal? @db.Decimal(14, 4)
+  value_json    Json?
+  updated_by_id String?  @db.Uuid
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @updatedAt @db.Timestamp(6)
+
   @@schema("icecream")
 }
 
@@ -708,6 +1545,182 @@ enum AnalyticsImportJobStatus {
   SUCCESS
   PARTIAL
   FAILED
+
+  @@schema("icecream")
+}
+
+enum FinanceReportStatus {
+  READY_TO_CONFIRM
+  AGREED
+
+  @@schema("icecream")
+}
+
+enum TransactionType {
+  ROYALTY
+  PAYOUT
+  REFUND
+  FEE
+
+  @@schema("icecream")
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+
+  @@schema("icecream")
+}
+
+enum PayoutMethod {
+  BANK_TRANSFER
+  CARD
+  SBP
+
+  @@schema("icecream")
+}
+
+enum PayoutRequestStatus {
+  REQUESTED
+  PROCESSING
+  PAID
+  REJECTED
+
+  @@schema("icecream")
+}
+
+enum PromoSubmissionStatus {
+  SUBMITTED
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  SENT_TO_PARTNERS
+  CANCELLED
+
+  @@schema("icecream")
+}
+
+enum SmartImportStatus {
+  PREVIEW
+  CONFIRMED
+  ROLLED_BACK
+  FAILED
+
+  @@schema("icecream")
+}
+
+enum SmartImportRowAction {
+  MATCH
+  UPDATE
+  CREATE
+  CONFLICT
+  SKIP
+  ERROR
+  NEEDS_REVIEW
+
+  @@schema("icecream")
+}
+
+enum SmartConflictStatus {
+  PENDING
+  RESOLVED
+  SKIPPED
+
+  @@schema("icecream")
+}
+
+enum SmartBalanceDirection {
+  CREDIT
+  DEBIT
+
+  @@schema("icecream")
+}
+
+enum EventStatus {
+  DRAFT
+  PENDING_MODERATION
+  PUBLISHED
+  SOLD_OUT
+  CANCELLED
+  FINISHED
+  HIDDEN
+
+  @@schema("icecream")
+}
+
+enum EventType {
+  CONCERT
+  FESTIVAL
+  CLUB_SHOW
+  LIVESTREAM
+  SHOWCASE
+  MEETUP
+  OTHER
+
+  @@schema("icecream")
+}
+
+enum EventAgeRestriction {
+  ALL_AGES
+  AGE_6
+  AGE_12
+  AGE_16
+  AGE_18
+  AGE_21
+
+  @@schema("icecream")
+}
+
+enum EventArtistRole {
+  HEADLINER
+  ARTIST
+  DJ
+  MC
+  GUEST
+  HOST
+  SPECIAL_GUEST
+
+  @@schema("icecream")
+}
+
+enum EventTicketTypeKind {
+  REGULAR
+  EARLY_BIRD
+  VIP
+  BACKSTAGE
+  GUEST_LIST
+  FREE
+
+  @@schema("icecream")
+}
+
+enum EventTicketStatus {
+  AVAILABLE
+  RESERVED
+  PAID
+  USED
+  CANCELLED
+  REFUNDED
+  EXPIRED
+
+  @@schema("icecream")
+}
+
+enum EventPaymentStatus {
+  PENDING_PAYMENT
+  PREPARING
+  COMPLETED
+  FAILED
+  REFUNDED
+  CANCELLED
+
+  @@schema("icecream")
+}
+
+enum EventFinancialDirection {
+  CREDIT
+  DEBIT
 
   @@schema("icecream")
 }

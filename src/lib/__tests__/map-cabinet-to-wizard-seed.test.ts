@@ -53,6 +53,12 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
         {
           fileName: "track.wav",
           hasAudio: true,
+          audioFile: {
+            storageKey: "uploads/release-1/track.wav",
+            url: "https://cdn.example.com/uploads/release-1/track.wav",
+            sizeBytes: 123456,
+            contentType: "audio/wav"
+          },
           durationSec: 180,
           title: "Track 1",
           subtitle: "",
@@ -89,10 +95,52 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
   assert.equal(seed.title, "Submission Title");
   assert.equal(seed.releaseKind, "standard");
   assert.equal(seed.tracks?.length, 1);
+  assert.equal(
+    seed.tracks?.[0]?.audioUrl,
+    "https://cdn.example.com/uploads/release-1/track.wav"
+  );
+  assert.equal(seed.tracks?.[0]?.audioUpload?.storageKey, "uploads/release-1/track.wav");
   assert.equal(seed.tracks?.[0]?.meta.title, "Track 1");
   assert.equal(seed.tracks?.[0]?.meta.trackPersons.length, 1);
   assert.equal(seed.tracks?.[0]?.meta.versionDrugReference, true);
   assert.equal(seed.tracks?.[0]?.meta.aiAssistanceUsed, true);
   assert.equal(seed.tracks?.[0]?.meta.aiGeneratedMusicOnly, true);
   assert.equal(seed.tracks?.[0]?.meta.aiProcessedTrackOnly, true);
+});
+
+test("mapCabinetReleaseToWizardSeed restores track audio from cabinet tracks when submissionData is missing", () => {
+  const seed = mapCabinetReleaseToWizardSeed({
+    id: "rel_2",
+    number: 1,
+    coverUrl: "/hero/drop.png",
+    title: "Released",
+    artist: "Released Artist",
+    upc: "123456789012",
+    label: "ICECREAMMUSIC",
+    preorderDate: "2026-04-20",
+    releaseDate: "2026-04-25",
+    startDate: "2026-04-25",
+    territories: "Все страны",
+    platforms: "Все площадки",
+    genre: "Pop",
+    status: "approved",
+    paid: true,
+    tracks: [
+      {
+        num: 1,
+        title: "Track 1",
+        duration: "03:00",
+        durationSec: 180,
+        audioUrl: "/api/uploads/object/uploads/release-2/track.wav",
+        isrc: "USRC17607839",
+        partnerCode: "TR-1",
+        trackPersons: [{ name: "Released Artist", role: "Исполнитель" }],
+        metadataLanguage: "Русский"
+      }
+    ]
+  });
+
+  assert.equal(seed.tracks?.length, 1);
+  assert.equal(seed.tracks?.[0]?.audioUrl, "/api/uploads/object/uploads/release-2/track.wav");
+  assert.equal(seed.tracks?.[0]?.meta.title, "Track 1");
 });

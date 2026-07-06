@@ -118,7 +118,13 @@ export function StepInfo() {
     () => buildCoverImageSrcCandidates(data.cover),
     [data.cover]
   );
-  const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
+  const localCoverPreview =
+    typeof data.cover === "string" &&
+    (data.cover.startsWith("data:image/") || data.cover.startsWith("blob:"))
+      ? data.cover
+      : null;
+  const safeCoverSrc = localCoverPreview ?? coverCandidates[coverCandidateIndex] ?? null;
+  const showCoverLoadingState = Boolean(data.cover) && !safeCoverSrc && !coverError;
   const normalizedPartnerCode = data.partnerCode.trim().toUpperCase();
 
   React.useEffect(() => {
@@ -284,11 +290,16 @@ export function StepInfo() {
                   )
                 }
               />
+            ) : showCoverLoadingState ? (
+              <span className="flex flex-col items-center gap-2 text-center text-white/55">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-[12px]">Подготавливаем превью…</span>
+              </span>
             ) : (
               <span className="flex flex-col items-center gap-2 text-center text-white/40">
                 <Upload className="h-5 w-5" />
                 <span className="text-[12px]">
-                  {data.cover ? "Обложка недоступна" : "Загрузить файл"}
+                  Загрузить файл
                 </span>
               </span>
             )}

@@ -14,6 +14,7 @@ export default async function FinancePage() {
   return (
     <FinancePageClient
       initialReports={data.reports}
+      initialTransactions={data.transactions}
       initialAgreedBalance={data.agreedBalance}
       initialPendingPayout={data.pendingPayout}
       initialAccruals={data.accruals}

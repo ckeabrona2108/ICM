@@ -232,6 +232,33 @@ async function uploadBlobToStorage(params: {
   };
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) return;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(concurrency, items.length)) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return results;
+}
+
 export function ReleaseWizard({
   seed,
   submissionMode = "new",
@@ -583,18 +610,18 @@ function WizardInner({
       }
     }
 
-    for (let index = 0; index < preparedTracks.length; index += 1) {
-      const track = preparedTracks[index];
+    const uploadResults = await mapWithConcurrency(preparedTracks, 3, async (track, index) => {
       const trackState = data.tracks[index];
-      if (!trackState || track.hasAudio === false) continue;
+      if (!trackState || track.hasAudio === false) {
+        return { index, upload: null as UploadedFileRef | null };
+      }
 
       if (track.audioFile?.storageKey && track.audioFile?.url) {
-        continue;
+        return { index, upload: track.audioFile };
       }
 
       if (trackState.audioUpload?.storageKey && trackState.audioUpload?.url) {
-        track.audioFile = trackState.audioUpload;
-        continue;
+        return { index, upload: trackState.audioUpload };
       }
 
       if (!trackState.localAudioFile && !trackState.audioUrl) {
@@ -617,15 +644,16 @@ function WizardInner({
           );
         }
       }
+
       const contentType = audioBlob.type || inferContentTypeFromName(trackState.name);
-      let upload: UploadedFileRef;
       try {
-        upload = await uploadBlobToStorage({
+        const upload = await uploadBlobToStorage({
           fileName: trackState.name,
           contentType,
           blob: audioBlob,
           kind: "audio"
         });
+        return { index, upload };
       } catch (error) {
         const reason =
           error instanceof Error && error.message
@@ -635,14 +663,30 @@ function WizardInner({
           `Не удалось загрузить аудиофайл трека «${trackState.name}» в хранилище. Проверьте подключение и повторите.${reason}`
         );
       }
-      track.audioFile = upload;
+    });
+
+    for (const result of uploadResults) {
+      if (!result.upload) continue;
+      const track = preparedTracks[result.index];
+      const trackState = data.tracks[result.index];
+      if (!track || !trackState) continue;
+      track.audioFile = result.upload;
+
+      if (
+        trackState.audioUpload?.storageKey === result.upload.storageKey &&
+        trackState.audioUpload?.url === result.upload.url &&
+        !trackState.localAudioFile
+      ) {
+        continue;
+      }
+
       tracksChanged = true;
       updatedTracks = updatedTracks.map((item, itemIndex) =>
-        itemIndex === index
+        itemIndex === result.index
           ? {
               ...item,
               localAudioFile: null,
-              audioUpload: upload
+              audioUpload: result.upload
             }
           : item
       );

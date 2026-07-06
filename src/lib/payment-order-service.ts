@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   activateAiStudioSystemStatus,
@@ -46,6 +46,16 @@ interface PaymentOrderResult {
 function readMetadata(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function markSubmittedToModeration(value: unknown): Prisma.InputJsonValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { submittedToModeration: true } as Prisma.InputJsonValue;
+  }
+  return {
+    ...(value as Record<string, unknown>),
+    submittedToModeration: true
+  } as Prisma.InputJsonValue;
 }
 
 function mapTariffToSubscribeLevel(value: unknown): "standard" | "professional" | "enterprise" {
@@ -254,9 +264,11 @@ async function applyConfirmedOrder(params: {
         data: {
           confirmed: true,
           status: "moderating",
-          roles: mergeReleaseRolesPaymentUsage(
-            release?.roles ?? null,
-            buildStandalonePaymentUsage({ orderId: params.order.id })
+          roles: markSubmittedToModeration(
+            mergeReleaseRolesPaymentUsage(
+              release?.roles ?? null,
+              buildStandalonePaymentUsage({ orderId: params.order.id })
+            )
           )
         }
       });

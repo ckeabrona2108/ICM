@@ -802,31 +802,9 @@ function ReleaseRowCardBase({
                   </PreviewSection>
 
                   <PreviewSection title="Персоны и роли">
-                    <PreviewRow
-                      label="Исполнитель"
-                      value={joinPreviewValues(quickPreviewData?.roles.performer)}
-                    />
-                    <PreviewRow label="feat" value={joinPreviewValues(quickPreviewData?.roles.feat)} />
-                    <PreviewRow
-                      label="Remixer"
-                      value={joinPreviewValues(quickPreviewData?.roles.remixer)}
-                    />
-                    <PreviewRow
-                      label="Соисполнитель"
-                      value={joinPreviewValues(quickPreviewData?.roles.coPerformer)}
-                    />
-                    <PreviewRow
-                      label="Продюсер"
-                      value={joinPreviewValues(quickPreviewData?.roles.producer)}
-                    />
-                    <PreviewRow
-                      label="Автор музыки"
-                      value={joinPreviewValues(quickPreviewData?.roles.musicAuthor)}
-                    />
-                    <PreviewRow
-                      label="Автор слов"
-                      value={joinPreviewValues(quickPreviewData?.roles.lyricsAuthor)}
-                    />
+                    {buildQuickPreviewRoleRows(quickPreviewData).map((row) => (
+                      <PreviewRow key={row.label} label={row.label} value={row.value} />
+                    ))}
                   </PreviewSection>
 
                   <PreviewSection title="Права">
@@ -1010,6 +988,20 @@ function PreviewRow({ label, value }: { label: string; value?: string }) {
       </span>
     </div>
   );
+}
+
+function buildQuickPreviewRoleRows(data: TrackQuickPreviewData | null): Array<{ label: string; value: string }> {
+  const rows = [
+    { label: "Исполнитель", value: joinPreviewValues(data?.roles.performer) },
+    { label: "feat", value: joinPreviewValues(data?.roles.feat) },
+    { label: "Remixer", value: joinPreviewValues(data?.roles.remixer) },
+    { label: "Соисполнитель", value: joinPreviewValues(data?.roles.coPerformer) },
+    { label: "Продюсер", value: joinPreviewValues(data?.roles.producer) },
+    { label: "Автор музыки", value: joinPreviewValues(data?.roles.musicAuthor) },
+    { label: "Автор слов", value: joinPreviewValues(data?.roles.lyricsAuthor) }
+  ].filter((row) => row.value !== "Данные не указаны");
+
+  return rows.length > 0 ? rows : [{ label: "Персоны", value: "Данные не указаны" }];
 }
 
 function joinPreviewValues(values: string[] | undefined): string {

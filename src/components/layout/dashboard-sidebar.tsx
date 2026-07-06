@@ -9,6 +9,7 @@ import {
   BarChart3,
   Bell,
   BookOpenText,
+  CalendarDays,
   ChevronDown,
   CreditCard,
   ExternalLink,
@@ -22,6 +23,7 @@ import {
   Rocket,
   Sparkles,
   Store,
+  Ticket,
   UserRound,
   Wallet
 } from "lucide-react";
@@ -106,7 +108,6 @@ function buildNav(counts: {
       id: "music",
       label: "Ваша музыка",
       icon: Music2,
-      defaultOpen: true,
       children: [
         {
           href: "/dashboard/releases",
@@ -114,11 +115,6 @@ function buildNav(counts: {
           icon: Package,
           count: counts.totalReleases,
           countTone: "brand"
-        },
-        {
-          href: "/dashboard/smart-links",
-          label: "Smart Links",
-          icon: ExternalLink
         },
         { href: "/dashboard/releases/new", label: "Новый релиз", icon: Sparkles },
         {
@@ -149,6 +145,18 @@ function buildNav(counts: {
       href: "/dashboard/statistics",
       label: "Аналитика",
       icon: BarChart3
+    },
+    {
+      type: "leaf",
+      href: "/dashboard/promo",
+      label: "Промо",
+      icon: Rocket
+    },
+    {
+      type: "leaf",
+      href: "/dashboard/smart-links",
+      label: "Smart Links",
+      icon: ExternalLink
     },
     { type: "leaf", href: "/dashboard/faq", label: "FAQ", icon: HelpCircle },
     {
@@ -185,7 +193,6 @@ function buildNav(counts: {
     id: "ai",
     label: "AI",
     icon: RobotStickerIcon,
-    defaultOpen: true,
     children: [
       {
         href: "/dashboard/ai-recommendations",
@@ -475,12 +482,11 @@ export function DashboardSidebar({
     const map: Record<string, boolean> = {};
     for (const item of nav) {
       if (item.type === "group") {
-        map[item.id] =
-          item.defaultOpen || item.children.some((child) => pathname.startsWith(child.href));
+        map[item.id] = false;
       }
     }
     return map;
-  }, [nav, pathname]);
+  }, [nav]);
 
   const [open, setOpen] = React.useState<Record<string, boolean>>(initialOpen);
 

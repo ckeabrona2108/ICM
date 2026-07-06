@@ -11,6 +11,10 @@ import { authOptions } from "@/lib/auth";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import { prisma } from "@/lib/prisma";
 import {
+  getReleaseLifecycleStatus,
+  withReleaseLifecycleState
+} from "@/lib/release-counts";
+import {
   checkPartnerCodeForRelease,
   consumePartnerCodeForRelease
 } from "@/lib/partner-codes";
@@ -51,19 +55,8 @@ function mergeSubmissionData(roles: unknown, submissionData: Record<string, unkn
       : {};
   return {
     ...root,
-    submittedToModeration: true,
     submissionData
   };
-}
-
-function markSubmittedToModeration(roles: Prisma.InputJsonValue): Prisma.InputJsonValue {
-  if (!roles || typeof roles !== "object" || Array.isArray(roles)) {
-    return { submittedToModeration: true };
-  }
-  return {
-    ...(roles as Record<string, unknown>),
-    submittedToModeration: true
-  } as Prisma.InputJsonValue;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -74,6 +67,24 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function readCoverUploadUrl(data: Record<string, unknown>): string | null {
   const coverUpload = asRecord(data.coverUpload);
   return normalizeReleaseCoverUrl(coverUpload, null);
+}
+
+function readPerformer(data: Record<string, unknown>): string | null {
+  const explicit = typeof data.artist === "string" ? data.artist.trim() : "";
+  if (explicit) return explicit;
+
+  const persons = Array.isArray(data.persons) ? data.persons : [];
+  const performerNames = persons
+    .map((item) => (item && typeof item === "object" && !Array.isArray(item) ? (item as Record<string, unknown>) : null))
+    .filter(Boolean)
+    .filter((item) => {
+      const role = typeof item?.role === "string" ? item.role.trim().toLowerCase() : "";
+      return role === "исполнитель";
+    })
+    .map((item) => (typeof item?.name === "string" ? item.name.trim() : ""))
+    .filter(Boolean);
+
+  return performerNames.join(", ") || null;
 }
 
 function readSubmissionDataCover(data: Record<string, unknown>): string | null {
@@ -198,7 +209,7 @@ export async function POST(request: Request) {
   const baseReleaseData = {
     title: typeof data.title === "string" && data.title.trim() ? data.title.trim() : "Новый релиз",
     subtitle: typeof data.subtitle === "string" ? data.subtitle : null,
-    performer: typeof data.artist === "string" && data.artist.trim() ? data.artist.trim() : null,
+    performer: readPerformer(data),
     genre: typeof data.genre === "string" && data.genre.trim() ? data.genre.trim() : "Не указан",
     preview,
     language: typeof data.language === "string" && data.language.trim() ? data.language.trim() : "Russian",
@@ -289,11 +300,12 @@ export async function POST(request: Request) {
     await updateReleaseAndSyncTracks({
       confirmed: existing.confirmed,
       status: shouldResubmit ? "moderating" : existing.status,
-      roles: shouldResubmit
-        ? markSubmittedToModeration(
-            mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
-          )
-        : (mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue),
+      roles: withReleaseLifecycleState(
+        mergeSubmissionData(existing.roles, submissionData),
+        shouldResubmit
+          ? "moderation"
+          : (getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus ?? "draft")
+      ) as Prisma.InputJsonValue,
       afterSync: shouldResubmit
         ? async (tx) => {
             await tx.release.update({
@@ -367,15 +379,16 @@ export async function POST(request: Request) {
     await updateReleaseAndSyncTracks({
       confirmed: true,
       status: "moderating",
-      roles: markSubmittedToModeration(
+      roles: withReleaseLifecycleState(
         mergeReleaseRolesPaymentUsage(
           existing.roles,
           buildPartnerCodePaymentUsage({
             partnerCode: submittedPartnerCode
           }),
           submissionData
-        )
-      ),
+        ),
+        "moderation"
+      ) as Prisma.InputJsonValue,
       afterSync: async (tx) => {
         partnerCodeResult = await consumePartnerCodeForRelease({
           prisma: tx,
@@ -392,7 +405,7 @@ export async function POST(request: Request) {
         await tx.release.update({
           where: { id: existing.id },
           data: {
-            roles: markSubmittedToModeration(
+            roles: withReleaseLifecycleState(
               mergeReleaseRolesPaymentUsage(
                 existing.roles,
                 buildPartnerCodePaymentUsage({
@@ -400,8 +413,9 @@ export async function POST(request: Request) {
                   partnerCodeId: partnerCodeResult.partnerCodeId
                 }),
                 submissionData
-              )
-            )
+              ),
+              "moderation"
+            ) as Prisma.InputJsonValue
           }
         });
       }
@@ -427,7 +441,10 @@ export async function POST(request: Request) {
     await updateReleaseAndSyncTracks({
       confirmed: false,
       status: "moderating",
-      roles: mergeSubmissionData(existing.roles, submissionData) as Prisma.InputJsonValue
+      roles: withReleaseLifecycleState(
+        mergeSubmissionData(existing.roles, submissionData),
+        "moderation"
+      ) as Prisma.InputJsonValue
     });
     await notifyReleaseSubmittedSafe({
       releaseId: existing.id,
@@ -455,13 +472,14 @@ export async function POST(request: Request) {
   await updateReleaseAndSyncTracks({
     confirmed: true,
     status: "moderating",
-    roles: markSubmittedToModeration(
+    roles: withReleaseLifecycleState(
       mergeReleaseRolesPaymentUsage(
         existing.roles,
         buildSubscriptionPaymentUsage({ quota }),
         submissionData
-      )
-    )
+      ),
+      "moderation"
+    ) as Prisma.InputJsonValue
   });
   await notifyReleaseSubmittedSafe({
     releaseId: existing.id,

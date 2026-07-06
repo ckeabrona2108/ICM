@@ -1,18 +1,46 @@
-// @ts-nocheck
-import type { ReleaseStatus } from "@prisma/client";
+import type { verification_status } from "@prisma/client";
 
-export function canSaveDraftForStatus(status: ReleaseStatus): boolean {
-  return status === "DRAFT" || status === "CHANGES_REQUIRED";
-}
+import { mapReleaseStatusToSection } from "@/lib/release-counts";
 
-export function canDeleteDraftForStatus(status: ReleaseStatus): boolean {
-  return status === "DRAFT";
-}
-
-export function canSaveDraft(params: {
-  status: ReleaseStatus;
+interface DraftAccessParams {
+  status: verification_status;
+  confirmed?: boolean | null;
+  upc?: string | null;
+  roles?: unknown;
   isOwner: boolean;
-}): { allowed: boolean; reason?: string } {
+}
+
+function readSubmittedToModeration(roles: unknown): boolean {
+  return (
+    Boolean(roles) &&
+    typeof roles === "object" &&
+    !Array.isArray(roles) &&
+    (roles as Record<string, unknown>).submittedToModeration === true
+  );
+}
+
+function resolveReleaseSection(params: Omit<DraftAccessParams, "isOwner">) {
+  return mapReleaseStatusToSection(
+    params.status,
+    params.confirmed,
+    readSubmittedToModeration(params.roles),
+    {
+      upc: params.upc,
+      roles: params.roles
+    }
+  );
+}
+
+export function canSaveDraftForStatus(params: Omit<DraftAccessParams, "isOwner">): boolean {
+  const section = resolveReleaseSection(params);
+  return section === "draft" || section === "changes_required";
+}
+
+export function canDeleteDraftForStatus(params: Omit<DraftAccessParams, "isOwner">): boolean {
+  return resolveReleaseSection(params) === "draft";
+}
+
+export function canSaveDraft(params: DraftAccessParams): { allowed: boolean; reason?: string } {
   if (!params.isOwner) {
     return {
       allowed: false,
@@ -20,7 +48,7 @@ export function canSaveDraft(params: {
     };
   }
 
-  if (!canSaveDraftForStatus(params.status)) {
+  if (!canSaveDraftForStatus(params)) {
     return {
       allowed: false,
       reason: "forbidden_status"
@@ -30,10 +58,7 @@ export function canSaveDraft(params: {
   return { allowed: true };
 }
 
-export function canDeleteDraft(params: {
-  status: ReleaseStatus;
-  isOwner: boolean;
-}): { allowed: boolean; reason?: string } {
+export function canDeleteDraft(params: DraftAccessParams): { allowed: boolean; reason?: string } {
   if (!params.isOwner) {
     return {
       allowed: false,
@@ -41,7 +66,7 @@ export function canDeleteDraft(params: {
     };
   }
 
-  if (!canDeleteDraftForStatus(params.status)) {
+  if (!canDeleteDraftForStatus(params)) {
     return {
       allowed: false,
       reason: "forbidden_status"

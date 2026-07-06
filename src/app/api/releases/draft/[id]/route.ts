@@ -3,34 +3,18 @@ import { NextResponse } from "next/server";
 
 import type { ReleaseDraftDeleteResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
+import { canDeleteDraft } from "@/lib/draft-policy";
 import { prisma } from "@/lib/prisma";
-import { mapReleaseStatusToSection } from "@/lib/release-counts";
+import { getReleaseSidebarCountsForUser } from "@/lib/release-counts";
 
 export const dynamic = "force-dynamic";
 
 async function draftsCount(userId: string): Promise<number> {
-  const releases = await prisma.release.findMany({
-    where: { userId },
-    select: { status: true, confirmed: true, upc: true, roles: true }
+  const counts = await getReleaseSidebarCountsForUser({
+    userId,
+    prisma
   });
-
-  return releases.reduce((count, release) => {
-    const submittedToModeration =
-      Boolean(release.roles) &&
-      typeof release.roles === "object" &&
-      !Array.isArray(release.roles) &&
-      (release.roles as Record<string, unknown>).submittedToModeration === true;
-    const section = mapReleaseStatusToSection(
-      release.status,
-      release.confirmed,
-      submittedToModeration,
-      {
-        upc: release.upc,
-        roles: release.roles
-      }
-    );
-    return section === "draft" ? count + 1 : count;
-  }, 0);
+  return counts.draft;
 }
 
 export async function DELETE(_request: Request, context: { params: { id: string } }) {
@@ -42,28 +26,34 @@ export async function DELETE(_request: Request, context: { params: { id: string 
     return NextResponse.json({ error: "releaseId is required" }, { status: 400 });
   }
 
-  const draft = await prisma.release.findFirst({
+  const draft = await prisma.release.findUnique({
     where: {
-      id: releaseId,
-      userId: session.user.id
+      id: releaseId
     },
-    select: { id: true, status: true, confirmed: true, upc: true, roles: true }
+    select: { id: true, userId: true, status: true, confirmed: true, upc: true, roles: true }
   });
 
-  const submittedToModeration =
-    Boolean(draft?.roles) &&
-    typeof draft?.roles === "object" &&
-    !Array.isArray(draft?.roles) &&
-    (draft?.roles as Record<string, unknown>).submittedToModeration === true;
-  const section = draft
-    ? mapReleaseStatusToSection(draft.status, draft.confirmed, submittedToModeration, {
-        upc: draft.upc,
-        roles: draft.roles
-      })
-    : null;
+  if (!draft) {
+    return NextResponse.json({ error: "Релиз не найден." }, { status: 404 });
+  }
 
-  if (!draft || section !== "draft") {
-    return NextResponse.json({ error: "Черновик не найден" }, { status: 404 });
+  const policy = canDeleteDraft({
+    status: draft.status,
+    confirmed: draft.confirmed,
+    upc: draft.upc,
+    roles: draft.roles,
+    isOwner: draft.userId === session.user.id
+  });
+
+  if (!policy.allowed) {
+    if (policy.reason === "forbidden_owner") {
+      return NextResponse.json({ error: "Нельзя удалить чужой релиз." }, { status: 403 });
+    }
+
+    return NextResponse.json(
+      { error: "Удалять можно только релизы в статусе черновика." },
+      { status: 409 }
+    );
   }
 
   await prisma.release.delete({ where: { id: releaseId } });

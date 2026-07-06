@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { getAdminReleaseDownloadTarget } from "@/lib/admin-release-details";
-import { canManageReleases } from "@/lib/admin-release-service";
+import { prisma } from "@/lib/prisma";
+import { canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
 import { createPresignedDownload } from "@/lib/s3";
 
 export async function GET(
@@ -14,7 +15,7 @@ export async function GET(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canManageReleases(session.user.role)) {
+  if (!(await canManageReleasesSession({ prisma, userId: session.user.id, role: session.user.role }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

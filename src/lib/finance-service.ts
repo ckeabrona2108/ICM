@@ -6,6 +6,7 @@ import {
 import { randomUUID } from "node:crypto";
 
 import { createAdminLog } from "@/lib/admin-log-service";
+import { isAnyPrismaTableMissingError, isPrismaTableMissingError } from "@/lib/prisma-errors";
 
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   return Number(value ?? 0);
@@ -53,6 +54,7 @@ const TX_TYPE_ROYALTY = "ROYALTY";
 const TX_TYPE_PAYOUT = "PAYOUT";
 const TX_TYPE_REFUND = "REFUND";
 const TX_TYPE_FEE = "FEE";
+const FINANCE_TABLE_FALLBACKS = ["FinanceReport", "financeReport", "Transaction", "transaction", "PayoutRequest", "payoutRequest", "payouts"];
 
 function getRepo<T = unknown>(prisma: PrismaClient, key: string): T | null {
   const repo = (prisma as unknown as Record<string, unknown>)[key];
@@ -157,54 +159,73 @@ export async function getUserBalanceTotals(
     { findMany: (args: unknown) => Promise<Array<{ type: string; amount: Prisma.Decimal | number }>> }
   >(prisma, "transaction");
 
-  const [agreedReportsRaw, pendingReportsRaw, pendingPayoutRaw, settlementRows] = await Promise.all([
-    financeReportRepo
-      ? financeReportRepo.aggregate({
-          where: { userId, status: REPORT_STATUS_AGREED },
-          _sum: { amount: true }
-        })
-      : Promise.resolve({ _sum: { amount: 0 } }),
-    financeReportRepo
-      ? financeReportRepo.aggregate({
-          where: { userId, status: REPORT_STATUS_READY_TO_CONFIRM },
-          _sum: { amount: true }
-        })
-      : Promise.resolve({ _sum: { amount: 0 } }),
-    payoutRequestRepo
-      ? payoutRequestRepo.aggregate({
-          where: {
-            userId,
-            status: {
-              in: [PAYOUT_STATUS_REQUESTED, PAYOUT_STATUS_PROCESSING]
-            }
-          },
-          _sum: { amount: true }
-        })
-      : payoutsRepo
-        ? payoutsRepo.aggregate({
-            where: {
-              userId,
-              confirmed: false
-            },
+  let agreedReportsRaw;
+  let pendingReportsRaw;
+  let pendingPayoutRaw;
+  let settlementRows;
+
+  try {
+    [agreedReportsRaw, pendingReportsRaw, pendingPayoutRaw, settlementRows] = await Promise.all([
+      financeReportRepo
+        ? financeReportRepo.aggregate({
+            where: { userId, status: REPORT_STATUS_AGREED },
             _sum: { amount: true }
           })
         : Promise.resolve({ _sum: { amount: 0 } }),
-    transactionRepo
-      ? transactionRepo.findMany({
-          where: {
-            userId,
-            status: TX_STATUS_COMPLETED,
-            type: {
-              in: [TX_TYPE_PAYOUT, TX_TYPE_REFUND, TX_TYPE_FEE]
+      financeReportRepo
+        ? financeReportRepo.aggregate({
+            where: { userId, status: REPORT_STATUS_READY_TO_CONFIRM },
+            _sum: { amount: true }
+          })
+        : Promise.resolve({ _sum: { amount: 0 } }),
+      payoutRequestRepo
+        ? payoutRequestRepo.aggregate({
+            where: {
+              userId,
+              status: {
+                in: [PAYOUT_STATUS_REQUESTED, PAYOUT_STATUS_PROCESSING]
+              }
+            },
+            _sum: { amount: true }
+          })
+        : payoutsRepo
+          ? payoutsRepo.aggregate({
+              where: {
+                userId,
+                confirmed: false
+              },
+              _sum: { amount: true }
+            })
+          : Promise.resolve({ _sum: { amount: 0 } }),
+      transactionRepo
+        ? transactionRepo.findMany({
+            where: {
+              userId,
+              status: TX_STATUS_COMPLETED,
+              type: {
+                in: [TX_TYPE_PAYOUT, TX_TYPE_REFUND, TX_TYPE_FEE]
+              }
+            },
+            select: {
+              type: true,
+              amount: true
             }
-          },
-          select: {
-            type: true,
-            amount: true
-          }
-        })
-      : Promise.resolve([])
-  ]);
+          })
+        : Promise.resolve([])
+    ]);
+  } catch (error) {
+    if (isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
+      return {
+        agreedReportsBalance: 0,
+        settlementDelta: 0,
+        agreedBalance: 0,
+        pendingBalance: 0,
+        pendingPayout: 0,
+        availableToWithdraw: 0
+      };
+    }
+    throw error;
+  }
 
   const agreedReportsBalance = toNumber(agreedReportsRaw._sum.amount);
   const pendingBalance = toNumber(pendingReportsRaw._sum.amount);
@@ -245,17 +266,38 @@ export async function getUserFinanceView(
     }
   >(prisma, "transaction");
 
-  const [totals, reportsCount, transactions] = await Promise.all([
-    getUserBalanceTotals(prisma, userId),
-    financeReportRepo ? financeReportRepo.count({ where: { userId } }) : Promise.resolve(0),
-    transactionRepo
-      ? transactionRepo.findMany({
-          where: { userId },
-          orderBy: { createdAt: "desc" },
-          take: 100
-        })
-      : Promise.resolve([])
-  ]);
+  let totals;
+  let reportsCount;
+  let transactions;
+
+  try {
+    [totals, reportsCount, transactions] = await Promise.all([
+      getUserBalanceTotals(prisma, userId),
+      financeReportRepo ? financeReportRepo.count({ where: { userId } }) : Promise.resolve(0),
+      transactionRepo
+        ? transactionRepo.findMany({
+            where: { userId },
+            orderBy: { createdAt: "desc" },
+            take: 100
+          })
+        : Promise.resolve([])
+    ]);
+  } catch (error) {
+    if (isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
+      totals = {
+        agreedReportsBalance: 0,
+        settlementDelta: 0,
+        agreedBalance: 0,
+        pendingBalance: 0,
+        pendingPayout: 0,
+        availableToWithdraw: 0
+      };
+      reportsCount = 0;
+      transactions = [];
+    } else {
+      throw error;
+    }
+  }
 
   return {
     agreedBalance: totals.agreedBalance,
@@ -350,19 +392,25 @@ export async function topUpUserBalanceByAdmin(params: {
         updatedAt: now
       }
     });
-    await tx.transaction.create({
-      data: {
-        id: randomUUID(),
-        userId: params.userId,
-        amount: amountDecimal,
-        currency: "RUB",
-        type: TX_TYPE_ROYALTY,
-        status: TX_STATUS_COMPLETED,
-        description: params.comment?.trim() || "Пополнение баланса администратором",
-        reference: report.id,
-        processedAt: now
+    try {
+      await tx.transaction.create({
+        data: {
+          id: randomUUID(),
+          userId: params.userId,
+          amount: amountDecimal,
+          currency: "RUB",
+          type: TX_TYPE_ROYALTY,
+          status: TX_STATUS_COMPLETED,
+          description: params.comment?.trim() || "Пополнение баланса администратором",
+          reference: report.id,
+          processedAt: now
+        }
+      });
+    } catch (error) {
+      if (!isPrismaTableMissingError(error, "transaction")) {
+        throw error;
       }
-    });
+    }
     await createAdminLog(tx, {
       adminId: params.adminId,
       action: "USER_BALANCE_TOPUP",
@@ -457,33 +505,45 @@ export async function adjustUserBalanceByAdmin(params: {
           updatedAt: now
         }
       });
-      await tx.transaction.create({
-        data: {
-          id: randomUUID(),
-          userId: params.userId,
-          amount: amountDecimal,
-          currency: "RUB",
-          type: TX_TYPE_ROYALTY,
-          status: TX_STATUS_COMPLETED,
-          description: normalizedComment,
-          reference: report.id,
-          processedAt: now
+      try {
+        await tx.transaction.create({
+          data: {
+            id: randomUUID(),
+            userId: params.userId,
+            amount: amountDecimal,
+            currency: "RUB",
+            type: TX_TYPE_ROYALTY,
+            status: TX_STATUS_COMPLETED,
+            description: normalizedComment,
+            reference: report.id,
+            processedAt: now
+          }
+        });
+      } catch (error) {
+        if (!isPrismaTableMissingError(error, "transaction")) {
+          throw error;
         }
-      });
+      }
     } else {
-      await tx.transaction.create({
-        data: {
-          id: randomUUID(),
-          userId: params.userId,
-          amount: amountDecimal,
-          currency: "RUB",
-          type: TX_TYPE_FEE,
-          status: TX_STATUS_COMPLETED,
-          description: normalizedComment,
-          reference: `admin-debit:${params.adminId}`,
-          processedAt: now
+      try {
+        await tx.transaction.create({
+          data: {
+            id: randomUUID(),
+            userId: params.userId,
+            amount: amountDecimal,
+            currency: "RUB",
+            type: TX_TYPE_FEE,
+            status: TX_STATUS_COMPLETED,
+            description: normalizedComment,
+            reference: `admin-debit:${params.adminId}`,
+            processedAt: now
+          }
+        });
+      } catch (error) {
+        if (!isPrismaTableMissingError(error, "transaction")) {
+          throw error;
         }
-      });
+      }
     }
 
     await writeBalanceAdminLogIfAvailable(tx, {

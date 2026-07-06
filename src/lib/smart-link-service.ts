@@ -4,7 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
 import { buildStoredFileRouteUrl } from "@/lib/file-resolver";
 import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
-import { getReleasePlatformLabel } from "@/lib/release-platforms";
+import {
+  getSmartLinkPlatformLabel,
+  SMART_LINK_PRIMARY_PLATFORM_CODES,
+  SMART_LINK_PLATFORM_CODES
+} from "@/lib/smart-link-platforms";
 
 type RecordLike = Record<string, unknown>;
 
@@ -16,6 +20,7 @@ export interface SmartLinkPlatformConfig {
   label: string;
   status: SmartLinkPlatformStatus;
   url: string | null;
+  order: number;
 }
 
 export interface SmartLinkFollowLinks {
@@ -26,6 +31,56 @@ export interface SmartLinkFollowLinks {
   vk: string;
   discord: string;
   website: string;
+}
+
+export interface SmartLinkNewsFeedLinks {
+  vk: string;
+}
+
+export interface SmartLinkVideoEntry {
+  id: string;
+  title: string;
+  url: string;
+  enabled: boolean;
+}
+
+export interface SmartLinkCreditRow {
+  id: string;
+  name: string;
+  role: string;
+  link: string;
+  enabled: boolean;
+}
+
+export interface SmartLinkCreditSection {
+  key: string;
+  title: string;
+  description: string;
+  rows: SmartLinkCreditRow[];
+}
+
+export interface SmartLinkContactEntry {
+  id: string;
+  label: string;
+  value: string;
+  enabled: boolean;
+}
+
+export interface SmartLinkPixelEntry {
+  id: string;
+  label: string;
+  value: string;
+  enabled: boolean;
+}
+
+export interface SmartLinkSectionVisibility {
+  videos: boolean;
+  credits: boolean;
+  links: boolean;
+  contacts: boolean;
+  socials: boolean;
+  newsFeed: boolean;
+  pixels: boolean;
 }
 
 export interface SmartLinkVisitorEvent {
@@ -63,7 +118,15 @@ export interface SmartLinkState {
   theme: SmartLinkTheme;
   allowWaveDownload: boolean;
   platformLinks: Record<string, SmartLinkPlatformConfig>;
+  platformOrder: string[];
   followLinks: SmartLinkFollowLinks;
+  newsFeedLinks: SmartLinkNewsFeedLinks;
+  sectionVisibility: SmartLinkSectionVisibility;
+  coverVideoUrl: string;
+  inlineVideos: SmartLinkVideoEntry[];
+  creditSections: SmartLinkCreditSection[];
+  contacts: SmartLinkContactEntry[];
+  pixels: SmartLinkPixelEntry[];
   analytics: SmartLinkAnalyticsState;
 }
 
@@ -71,6 +134,7 @@ export interface SmartLinkOwnerView {
   releaseId: string;
   title: string;
   artist: string;
+  upc: string | null;
   publicSlug: string;
   publicUrl: string;
   theme: SmartLinkTheme;
@@ -80,12 +144,37 @@ export interface SmartLinkOwnerView {
   genre: string;
   platforms: SmartLinkPlatformConfig[];
   followLinks: SmartLinkFollowLinks;
+  newsFeedLinks: SmartLinkNewsFeedLinks;
+  sectionVisibility: SmartLinkSectionVisibility;
+  coverVideoUrl: string;
+  inlineVideos: SmartLinkVideoEntry[];
+  creditSections: SmartLinkCreditSection[];
+  contacts: SmartLinkContactEntry[];
+  pixels: SmartLinkPixelEntry[];
   analytics: SmartLinkAnalyticsState;
+}
+
+export interface SmartLinkNewsFeedWidget {
+  provider: "vk";
+  title: string;
+  sourceUrl: string;
+  embedUrl: string;
+}
+
+export interface SmartLinkNewsFeedPost {
+  id: string;
+  url: string;
+  publishedAt: string;
+  publishedLabel: string;
+  text: string;
+  imageUrl: string | null;
 }
 
 export interface SmartLinkPublicView extends SmartLinkOwnerView {
   explicit: boolean;
   waveDownloadUrl: string | null;
+  newsFeedWidget: SmartLinkNewsFeedWidget | null;
+  newsFeedPosts: SmartLinkNewsFeedPost[];
 }
 
 export interface SmartLinkOwnerUpdateInput {
@@ -96,20 +185,17 @@ export interface SmartLinkOwnerUpdateInput {
     code: string;
     url?: string | null;
     status?: SmartLinkPlatformStatus;
+    order?: number;
   }>;
   followLinks?: Partial<SmartLinkFollowLinks>;
+  newsFeedLinks?: Partial<SmartLinkNewsFeedLinks>;
+  sectionVisibility?: Partial<SmartLinkSectionVisibility>;
+  coverVideoUrl?: string | null;
+  inlineVideos?: SmartLinkVideoEntry[];
+  creditSections?: SmartLinkCreditSection[];
+  contacts?: SmartLinkContactEntry[];
+  pixels?: SmartLinkPixelEntry[];
 }
-
-const SMART_LINK_PLATFORM_ORDER = [
-  "spotify",
-  "apple_music",
-  "yandex_music",
-  "vk_music",
-  "youtube_music",
-  "deezer",
-  "amazon_music",
-  "tiktok"
-] as const;
 
 const SMART_LINK_FOLLOW_KEYS = [
   "instagram",
@@ -121,8 +207,11 @@ const SMART_LINK_FOLLOW_KEYS = [
   "website"
 ] as const;
 
-type SmartLinkPlatformCode = (typeof SMART_LINK_PLATFORM_ORDER)[number];
-type SmartLinkFollowKey = (typeof SMART_LINK_FOLLOW_KEYS)[number];
+type SmartLinkPlatformCode = (typeof SMART_LINK_PLATFORM_CODES)[number];
+
+const VK_WIDGET_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+
 
 function asRecord(value: unknown): RecordLike | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -168,7 +257,7 @@ function getBaseUrl(): string {
   ).replace(/\/$/, "");
 }
 
-function getDefaultFollowLinks(user: {
+function getDefaultFollowLinks(_user: {
   telegram?: string | null;
   vk?: string | null;
   personalSiteUrl?: string | null;
@@ -176,11 +265,17 @@ function getDefaultFollowLinks(user: {
   return {
     instagram: "",
     tiktok: "",
-    telegram: user.telegram?.trim() || "",
+    telegram: asString(_user.telegram) ?? "",
     youtube: "",
-    vk: user.vk?.trim() || "",
+    vk: asString(_user.vk) ?? "",
     discord: "",
-    website: user.personalSiteUrl?.trim() || ""
+    website: asString(_user.personalSiteUrl) ?? ""
+  };
+}
+
+function getDefaultNewsFeedLinks(): SmartLinkNewsFeedLinks {
+  return {
+    vk: ""
   };
 }
 
@@ -201,8 +296,144 @@ function getDefaultAnalytics(): SmartLinkAnalyticsState {
   };
 }
 
+function getDefaultSectionVisibility(): SmartLinkSectionVisibility {
+  return {
+    videos: false,
+    credits: false,
+    links: false,
+    contacts: false,
+    socials: false,
+    newsFeed: false,
+    pixels: false
+  };
+}
+
+function getDefaultCreditSections(): SmartLinkCreditSection[] {
+  return [
+    {
+      key: "produced",
+      title: "Produced",
+      description: "Укажите авторов, чей вклад играет важную роль в релизе, к примеру: продюсер, композитор и тд.",
+      rows: [{ id: "produced-1", name: "", role: "", link: "", enabled: true }]
+    },
+    {
+      key: "sound",
+      title: "Sound",
+      description: "Укажите авторов, чей вклад играет важную роль в выбранном релизе — мастеринг, наименование студии и тд.",
+      rows: [{ id: "sound-1", name: "", role: "", link: "", enabled: true }]
+    },
+    {
+      key: "production_team",
+      title: "Production team",
+      description: "Укажите авторов, чей вклад играет важную роль в выбранном релизе — аранжировщик, remixer и тд.",
+      rows: [{ id: "production-team-1", name: "", role: "", link: "", enabled: true }]
+    },
+    {
+      key: "cover",
+      title: "Cover",
+      description: "Укажите авторов, чей вклад играет важную роль в выбранном релизе — дизайнер, фотограф и тд.",
+      rows: [{ id: "cover-1", name: "", role: "", link: "", enabled: true }]
+    },
+    {
+      key: "performer",
+      title: "Performer",
+      description: "Укажите авторов, чей вклад играет важную роль в выбранном релизе — вокал, бэк-вокал и тд.",
+      rows: [{ id: "performer-1", name: "", role: "", link: "", enabled: true }]
+    }
+  ];
+}
+
+function getDefaultInlineVideos(): SmartLinkVideoEntry[] {
+  return [{ id: "video-1", title: "", url: "", enabled: true }];
+}
+
+function getDefaultContacts(): SmartLinkContactEntry[] {
+  return [{ id: "contact-1", label: "Контактный e-mail", value: "", enabled: true }];
+}
+
+function getDefaultPixels(): SmartLinkPixelEntry[] {
+  return [
+    { id: "pixel-1", label: "VK Pixel", value: "", enabled: true },
+    { id: "pixel-2", label: "Meta Pixel", value: "", enabled: true }
+  ];
+}
+
+function normalizeTheme(value: unknown): SmartLinkTheme {
+  return value === "light" || value === "auto" ? value : "dark";
+}
+
 function normalizePlatformStatus(value: unknown): SmartLinkPlatformStatus {
   return value === "live" || value === "hidden" ? value : "soon";
+}
+
+function normalizeVideoEntries(value: unknown, fallback: SmartLinkVideoEntry[]): SmartLinkVideoEntry[] {
+  if (!Array.isArray(value)) return fallback;
+  const rows = value
+    .map((item) => asRecord(item))
+    .filter(Boolean)
+    .map((item, index): SmartLinkVideoEntry => ({
+      id: asString(item?.id) ?? `video-${index + 1}`,
+      title: asString(item?.title) ?? "",
+      url: asString(item?.url) ?? "",
+      enabled: asBoolean(item?.enabled) ?? true
+    }));
+  return rows.length > 0 ? rows : fallback;
+}
+
+function normalizeCreditRows(value: unknown, fallbackPrefix: string): SmartLinkCreditRow[] {
+  if (!Array.isArray(value)) {
+    return [{ id: `${fallbackPrefix}-1`, name: "", role: "", link: "", enabled: true }];
+  }
+  const rows = value
+    .map((item) => asRecord(item))
+    .filter(Boolean)
+    .map((item, index): SmartLinkCreditRow => ({
+      id: asString(item?.id) ?? `${fallbackPrefix}-${index + 1}`,
+      name: asString(item?.name) ?? "",
+      role: asString(item?.role) ?? "",
+      link: asString(item?.link) ?? "",
+      enabled: asBoolean(item?.enabled) ?? true
+    }));
+  return rows.length > 0 ? rows : [{ id: `${fallbackPrefix}-1`, name: "", role: "", link: "", enabled: true }];
+}
+
+function normalizeCreditSections(value: unknown): SmartLinkCreditSection[] {
+  const defaults = getDefaultCreditSections();
+  const source = Array.isArray(value) ? value.map((item) => asRecord(item)).filter(Boolean) : [];
+  return defaults.map((section) => {
+    const existing = source.find((item) => asString(item?.key) === section.key);
+    return {
+      key: section.key,
+      title: asString(existing?.title) ?? section.title,
+      description: asString(existing?.description) ?? section.description,
+      rows: normalizeCreditRows(existing?.rows, section.key)
+    };
+  });
+}
+
+function normalizeInfoEntries<T extends SmartLinkContactEntry | SmartLinkPixelEntry>(
+  value: unknown,
+  fallback: T[]
+): T[] {
+  if (!Array.isArray(value)) return fallback;
+  const rows = value
+    .map((item) => asRecord(item))
+    .filter(Boolean)
+    .map((item, index) => {
+      const normalizedLabel = asString(item?.label) ?? fallback[index]?.label ?? "";
+      const normalizedValue = asString(item?.value);
+      return {
+        id: asString(item?.id) ?? `${fallback[index]?.id ?? `item-${index + 1}`}`,
+        label: normalizedLabel,
+        value:
+          normalizedValue && !["null", "undefined"].includes(normalizedValue.trim().toLowerCase())
+            ? normalizedValue
+            : "",
+        enabled: asBoolean(item?.enabled) ?? true
+      };
+    })
+    .filter((item) => item.label.trim().toLowerCase() !== "название лейбла") as T[];
+  return rows.length > 0 ? rows : fallback;
 }
 
 function normalizeFollowLinks(value: unknown, defaults: SmartLinkFollowLinks): SmartLinkFollowLinks {
@@ -210,7 +441,11 @@ function normalizeFollowLinks(value: unknown, defaults: SmartLinkFollowLinks): S
   const next = { ...defaults };
   if (!source) return next;
   for (const key of SMART_LINK_FOLLOW_KEYS) {
-    next[key] = asString(source[key]) ?? defaults[key];
+    const normalized = asString(source[key]);
+    next[key] =
+      normalized && !["null", "undefined"].includes(normalized.trim().toLowerCase())
+        ? normalized
+        : defaults[key];
   }
   return next;
 }
@@ -250,16 +485,44 @@ function normalizeAnalytics(value: unknown): SmartLinkAnalyticsState {
   };
 }
 
+function normalizeNewsFeedLinks(value: unknown): SmartLinkNewsFeedLinks {
+  const source = asRecord(value);
+  const defaults = getDefaultNewsFeedLinks();
+  return {
+    vk: asString(source?.vk) ?? defaults.vk
+  };
+}
+
+function normalizeSectionVisibility(value: unknown): SmartLinkSectionVisibility {
+  const source = asRecord(value);
+  const defaults = getDefaultSectionVisibility();
+  if (!source) return defaults;
+  return {
+    videos: asBoolean(source.videos) ?? defaults.videos,
+    credits: asBoolean(source.credits) ?? defaults.credits,
+    links: asBoolean(source.links) ?? defaults.links,
+    contacts: asBoolean(source.contacts) ?? defaults.contacts,
+    socials: asBoolean(source.socials) ?? defaults.socials,
+    newsFeed: asBoolean(source.newsFeed) ?? defaults.newsFeed,
+    pixels: asBoolean(source.pixels) ?? defaults.pixels
+  };
+}
+
+function hasStoredSectionVisibility(value: unknown): boolean {
+  const source = asRecord(value);
+  return Boolean(source) && Object.prototype.hasOwnProperty.call(source, "sectionVisibility");
+}
+
 function normalizeSelectedPlatforms(roles: unknown): string[] {
   const root = asRecord(roles);
   const submission = asRecord(root?.submissionData);
   const raw = submission?.platforms;
-  if (!Array.isArray(raw)) return [...SMART_LINK_PLATFORM_ORDER];
+  if (!Array.isArray(raw)) return [...SMART_LINK_PRIMARY_PLATFORM_CODES];
   return unique(
     raw
       .map((item) => asString(item))
       .filter(Boolean)
-      .filter((item): item is string => SMART_LINK_PLATFORM_ORDER.includes(item as SmartLinkPlatformCode))
+      .filter((item): item is string => SMART_LINK_PLATFORM_CODES.includes(item as SmartLinkPlatformCode))
   );
 }
 
@@ -270,7 +533,12 @@ function normalizePlatformLinks(
   const source = asRecord(value);
   const next: Record<string, SmartLinkPlatformConfig> = {};
   const effectiveCodes = unique(
-    [...SMART_LINK_PLATFORM_ORDER.filter((code) => selectedCodes.includes(code)), ...selectedCodes]
+    [
+      ...SMART_LINK_PRIMARY_PLATFORM_CODES,
+      ...SMART_LINK_PLATFORM_CODES.filter((code) => selectedCodes.includes(code)),
+      ...Object.keys(source ?? {}),
+      ...selectedCodes
+    ]
       .filter((code): code is string => Boolean(code))
   );
 
@@ -280,13 +548,38 @@ function normalizePlatformLinks(
     const status = normalizePlatformStatus(item?.status ?? (url ? "live" : "soon"));
     next[code] = {
       code,
-      label: getReleasePlatformLabel(code),
+      label: getSmartLinkPlatformLabel(code),
       url,
-      status: !url && status !== "hidden" ? "soon" : url && status === "soon" ? "live" : status
+      status: !url && status !== "hidden" ? "soon" : url && status === "soon" ? "live" : status,
+      order: typeof item?.order === "number" ? item.order : effectiveCodes.indexOf(code)
     };
   }
 
   return next;
+}
+
+function normalizePlatformOrder(
+  value: unknown,
+  platformLinks: Record<string, SmartLinkPlatformConfig>,
+  selectedCodes: string[]
+): string[] {
+  const explicit = Array.isArray(value)
+    ? value
+        .map((item) => asString(item))
+        .filter(Boolean)
+        .filter((item): item is string => SMART_LINK_PLATFORM_CODES.includes(item as SmartLinkPlatformCode))
+    : [];
+
+  const byStoredOrder = Object.values(platformLinks)
+    .slice()
+    .sort((left, right) => left.order - right.order)
+    .map((item) => item.code);
+
+  return unique(
+    [...explicit, ...byStoredOrder, ...selectedCodes, ...SMART_LINK_PRIMARY_PLATFORM_CODES].filter(
+      (code): code is string => Boolean(code) && Boolean(platformLinks[code])
+    )
+  );
 }
 
 function readSmartLinkState(
@@ -296,11 +589,22 @@ function readSmartLinkState(
 ): SmartLinkState {
   const root = asRecord(roles);
   const raw = asRecord(root?.smartLink);
+  const platformLinks = normalizePlatformLinks(raw?.platformLinks, selectedCodes);
   return {
-    theme: raw?.theme === "light" || raw?.theme === "auto" ? raw.theme : "dark",
+    theme: normalizeTheme(raw?.theme),
     allowWaveDownload: asBoolean(raw?.allowWaveDownload) ?? false,
-    platformLinks: normalizePlatformLinks(raw?.platformLinks, selectedCodes),
+    platformLinks,
+    platformOrder: normalizePlatformOrder(raw?.platformOrder, platformLinks, selectedCodes),
     followLinks: normalizeFollowLinks(raw?.followLinks, userDefaults),
+    newsFeedLinks: normalizeNewsFeedLinks(raw?.newsFeedLinks),
+    sectionVisibility: hasStoredSectionVisibility(raw)
+      ? normalizeSectionVisibility(raw?.sectionVisibility)
+      : getDefaultSectionVisibility(),
+    coverVideoUrl: asString(raw?.coverVideoUrl) ?? "",
+    inlineVideos: normalizeVideoEntries(raw?.inlineVideos, getDefaultInlineVideos()),
+    creditSections: normalizeCreditSections(raw?.creditSections),
+    contacts: normalizeInfoEntries(raw?.contacts, getDefaultContacts()),
+    pixels: normalizeInfoEntries(raw?.pixels, getDefaultPixels()),
     analytics: normalizeAnalytics(raw?.analytics)
   };
 }
@@ -358,13 +662,237 @@ function buildWaveDownloadUrl(input: {
   return null;
 }
 
-function ensurePlatformOrder(platformLinks: Record<string, SmartLinkPlatformConfig>): SmartLinkPlatformConfig[] {
+function ensurePlatformOrder(
+  platformLinks: Record<string, SmartLinkPlatformConfig>,
+  platformOrder: string[]
+): SmartLinkPlatformConfig[] {
   const ordered: SmartLinkPlatformConfig[] = [];
-  for (const code of SMART_LINK_PLATFORM_ORDER) {
+  const codes = unique([
+    ...platformOrder,
+    ...SMART_LINK_PLATFORM_CODES,
+    ...Object.keys(platformLinks)
+  ]);
+
+  for (const code of codes) {
     const item = platformLinks[code];
     if (item) ordered.push(item);
   }
   return ordered;
+}
+
+function extractVkDomainToken(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
+    if (!/(^|\.)vk\.com$/iu.test(parsed.hostname)) return null;
+    const [segment = ""] = parsed.pathname.split("/").filter(Boolean);
+    return segment || null;
+  } catch {
+    const normalized = trimmed
+      .replace(/^https?:\/\/(?:m\.)?vk\.com\//iu, "")
+      .replace(/^@/u, "")
+      .split(/[?#/]/u)[0]
+      ?.trim();
+    return normalized || null;
+  }
+}
+
+function normalizeVkSourceUrl(input: string): string | null {
+  const token = extractVkDomainToken(input);
+  if (!token) return null;
+  return `https://vk.com/${token}`;
+}
+
+async function readResponseText(response: Response, encoding = "utf-8"): Promise<string> {
+  const buffer = await response.arrayBuffer();
+  return new TextDecoder(encoding).decode(buffer);
+}
+
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([\da-f]+);/giu, (_match, code) => String.fromCharCode(Number.parseInt(code, 16)))
+    .replace(/&quot;/gu, '"')
+    .replace(/&amp;/gu, '&')
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&nbsp;/gu, ' ')
+    .replace(/&hellip;/gu, '...')
+    .replace(/&mdash;/gu, '—')
+    .replace(/&ndash;/gu, '–')
+    .replace(/&laquo;/gu, '«')
+    .replace(/&raquo;/gu, '»')
+    .replace(/&rsquo;/gu, '’')
+    .replace(/&ldquo;/gu, '“')
+    .replace(/&rdquo;/gu, '”');
+}
+
+function stripHtml(input: string): string {
+  const normalized = decodeHtmlEntities(
+    input
+      .replace(/<br\s*\/?>(?=.)/giu, "\n")
+      .replace(/<[^>]+>/gu, " ")
+      .replace(/[ \t]{2,}/gu, " ")
+  );
+
+  return normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
+}
+
+function formatVkPostDate(timestampSeconds: number): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  }).format(new Date(timestampSeconds * 1000));
+}
+
+function extractVkCommunityIdFromHtml(html: string): string | null {
+  const patterns = [/"group_id":(\d+)/u, /"owner_id":-(\d+)/u, /public(\d+)/u, /club(\d+)/u];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+function buildVkCommunityWidgetUrl(groupId: string, theme: SmartLinkTheme): string {
+  const colors =
+    theme === "light"
+      ? { color1: "FFFFFF", color2: "3C3C3C", color3: "5181B8" }
+      : { color1: "11121C", color2: "F5F7FB", color3: "7B6CFF" };
+
+  const params = new URLSearchParams({
+    app: "0",
+    width: "100%",
+    _ver: "1",
+    gid: groupId,
+    mode: "4",
+    wide: "1",
+    height: "560",
+    color1: colors.color1,
+    color2: colors.color2,
+    color3: colors.color3
+  });
+
+  return `https://vk.com/widget_community.php?${params.toString()}`;
+}
+
+async function resolveVkCommunity(params: {
+  source: string;
+  theme: SmartLinkTheme;
+}): Promise<{ widget: SmartLinkNewsFeedWidget; groupId: string } | null> {
+  const sourceUrl = normalizeVkSourceUrl(params.source);
+  if (!sourceUrl) return null;
+
+  const directMatch = sourceUrl.match(/vk\.com\/(?:club|public)(\d+)/iu);
+  let groupId = directMatch?.[1] ?? null;
+
+  if (!groupId) {
+    const domain = extractVkDomainToken(sourceUrl);
+    if (!domain) return null;
+
+    try {
+      const response = await fetch(`https://vk.com/${domain}`, {
+        headers: {
+          "user-agent": VK_WIDGET_USER_AGENT,
+          "accept-language": "ru,en;q=0.8"
+        },
+        next: { revalidate: 900 }
+      });
+
+      if (!response.ok) return null;
+      const html = await readResponseText(response, "windows-1251");
+      groupId = extractVkCommunityIdFromHtml(html);
+    } catch {
+      return null;
+    }
+  }
+
+  if (!groupId) return null;
+
+  return {
+    groupId,
+    widget: {
+      provider: "vk",
+      title: "ВКонтакте",
+      sourceUrl,
+      embedUrl: buildVkCommunityWidgetUrl(groupId, params.theme)
+    }
+  };
+}
+
+function extractVkPostImageUrl(block: string): string | null {
+  const styleMatch = block.match(/background-image:\s*url\(([^)]+)\)/iu);
+  if (!styleMatch?.[1]) return null;
+  return styleMatch[1].trim().replace(/^['"]|['"]$/gu, "");
+}
+
+function parseVkCommunityPosts(html: string): SmartLinkNewsFeedPost[] {
+  const matches = Array.from(
+    html.matchAll(
+      /<div id="wpt-([^"]+)" class="wall_post_cont _wall_post_cont">([\s\S]*?)(?=<div id="wpt-|<div class="wcommunity_footer|<\/body>)/gu
+    )
+  );
+
+  return matches
+    .map((match) => {
+      const postKey = match[1]?.trim() ?? "";
+      const block = match[2] ?? "";
+      const wallPostId = postKey.startsWith("-") || postKey.startsWith("wall") ? postKey : `wall-${postKey}`;
+      const href = `https://vk.com/${wallPostId}`;
+      const timestamp = Number(block.match(/data-date="(\d{9,})"/u)?.[1] ?? "0");
+      const textHtml = block.match(/<div class="wall_post_text"[^>]*>([\s\S]*?)<\/div>/u)?.[1] ?? "";
+      const text = stripHtml(textHtml).replace(/Показать ещё/gu, "").trim();
+      const imageUrl = extractVkPostImageUrl(block);
+      if (!postKey || !timestamp || (!text && !imageUrl)) return null;
+
+      return {
+        id: wallPostId,
+        url: href,
+        publishedAt: new Date(timestamp * 1000).toISOString(),
+        publishedLabel: formatVkPostDate(timestamp),
+        text,
+        imageUrl
+      } satisfies SmartLinkNewsFeedPost;
+    })
+    .filter((item): item is SmartLinkNewsFeedPost => Boolean(item))
+    .slice(0, 6);
+}
+
+async function resolveVkNewsFeedPosts(params: {
+  source: string;
+  theme: SmartLinkTheme;
+}): Promise<{ widget: SmartLinkNewsFeedWidget; posts: SmartLinkNewsFeedPost[] } | null> {
+  const community = await resolveVkCommunity(params);
+  if (!community) return null;
+
+  try {
+    const response = await fetch(community.widget.embedUrl, {
+      headers: {
+        "user-agent": VK_WIDGET_USER_AGENT,
+        "accept-language": "ru,en;q=0.8"
+      },
+      next: { revalidate: 900 }
+    });
+
+    if (!response.ok) {
+      return { widget: community.widget, posts: [] };
+    }
+
+    const html = await readResponseText(response, "windows-1251");
+    return {
+      widget: community.widget,
+      posts: parseVkCommunityPosts(html)
+    };
+  } catch {
+    return { widget: community.widget, posts: [] };
+  }
 }
 
 function todayKey(date = new Date()): string {
@@ -418,6 +946,7 @@ async function buildOwnerViewFromRelease(params: {
       vk: string | null;
       personalSiteUrl: string | null;
     };
+    labelName: string | null;
     track: Array<{ explicit: boolean | null }>;
   };
 }): Promise<SmartLinkOwnerView> {
@@ -444,6 +973,7 @@ async function buildOwnerViewFromRelease(params: {
     releaseId: params.release.id,
     title: params.release.title,
     artist,
+    upc: params.release.upc?.trim() || null,
     publicSlug: params.promoLink.shortName,
     publicUrl: `${getBaseUrl()}/l/${params.promoLink.shortName}`,
     theme: state.theme,
@@ -451,8 +981,15 @@ async function buildOwnerViewFromRelease(params: {
     coverUrl: cover.url,
     releaseDate: toIsoDate(params.release.date),
     genre: params.release.genre,
-    platforms: ensurePlatformOrder(state.platformLinks),
+    platforms: ensurePlatformOrder(state.platformLinks, state.platformOrder),
     followLinks: state.followLinks,
+    newsFeedLinks: state.newsFeedLinks,
+    sectionVisibility: state.sectionVisibility,
+    coverVideoUrl: state.coverVideoUrl,
+    inlineVideos: state.inlineVideos,
+    creditSections: state.creditSections,
+    contacts: state.contacts,
+    pixels: state.pixels,
     analytics: state.analytics
   };
 }
@@ -790,29 +1327,63 @@ export async function updateSmartLinkOwnerSettings(params: {
     ...currentState,
     theme: params.input.theme ?? currentState.theme,
     allowWaveDownload: params.input.allowWaveDownload ?? currentState.allowWaveDownload,
+    sectionVisibility: params.input.sectionVisibility
+      ? { ...currentState.sectionVisibility, ...params.input.sectionVisibility }
+      : currentState.sectionVisibility,
+    coverVideoUrl: params.input.coverVideoUrl?.trim() ?? currentState.coverVideoUrl,
+    inlineVideos: params.input.inlineVideos ? normalizeVideoEntries(params.input.inlineVideos, getDefaultInlineVideos()) : currentState.inlineVideos,
+    creditSections: params.input.creditSections ? normalizeCreditSections(params.input.creditSections) : currentState.creditSections,
+    contacts: params.input.contacts ? normalizeInfoEntries(params.input.contacts, getDefaultContacts()) : currentState.contacts,
+    pixels: params.input.pixels ? normalizeInfoEntries(params.input.pixels, getDefaultPixels()) : currentState.pixels,
+    newsFeedLinks: {
+      ...currentState.newsFeedLinks,
+      ...params.input.newsFeedLinks
+    },
     followLinks: {
       ...currentState.followLinks,
       ...params.input.followLinks
     },
-    platformLinks: { ...currentState.platformLinks }
+    platformLinks: { ...currentState.platformLinks },
+    platformOrder: currentState.platformOrder.slice()
   };
 
+  const inputPlatformOrder = (params.input.platforms ?? [])
+    .map((item) => item.code)
+    .filter((code): code is string => SMART_LINK_PLATFORM_CODES.includes(code as SmartLinkPlatformCode));
+
   for (const item of params.input.platforms ?? []) {
-    if (!SMART_LINK_PLATFORM_ORDER.includes(item.code as SmartLinkPlatformCode)) continue;
+    if (!SMART_LINK_PLATFORM_CODES.includes(item.code as SmartLinkPlatformCode)) continue;
     const current = nextState.platformLinks[item.code] ?? {
       code: item.code,
-      label: getReleasePlatformLabel(item.code),
+      label: getSmartLinkPlatformLabel(item.code),
       status: "soon" as SmartLinkPlatformStatus,
-      url: null
+      url: null,
+      order: nextState.platformOrder.length
     };
     const url = item.url === undefined ? current.url : (item.url?.trim() || null);
     const status = item.status ?? (url ? "live" : current.status);
     nextState.platformLinks[item.code] = {
       ...current,
       url,
-      status: !url && status !== "hidden" ? "soon" : url && status === "soon" ? "live" : status
+      status: !url && status !== "hidden" ? "soon" : url && status === "soon" ? "live" : status,
+      order: typeof item.order === "number" ? item.order : current.order
     };
   }
+
+  nextState.platformOrder = normalizePlatformOrder(
+    inputPlatformOrder,
+    nextState.platformLinks,
+    normalizeSelectedPlatforms(release.roles)
+  );
+  nextState.platformOrder.forEach((code, index) => {
+    const item = nextState.platformLinks[code];
+    if (item) {
+      nextState.platformLinks[code] = {
+        ...item,
+        order: index
+      };
+    }
+  });
 
   if (params.input.slug) {
     const nextSlug = slugify(params.input.slug);
@@ -874,6 +1445,14 @@ export async function getSmartLinkPublicView(slug: string): Promise<SmartLinkPub
     normalizeSelectedPlatforms(release.roles)
   );
 
+  const newsFeedData =
+    state.sectionVisibility.newsFeed && state.newsFeedLinks.vk.trim().length > 0
+      ? await resolveVkNewsFeedPosts({
+          source: state.newsFeedLinks.vk,
+          theme: state.theme
+        })
+      : null;
+
   return {
     ...ownerView,
     explicit: deriveExplicit({
@@ -883,7 +1462,9 @@ export async function getSmartLinkPublicView(slug: string): Promise<SmartLinkPub
     waveDownloadUrl: buildWaveDownloadUrl({
       allowWaveDownload: state.allowWaveDownload,
       roles: release.roles
-    })
+    }),
+    newsFeedWidget: newsFeedData?.widget ?? null,
+    newsFeedPosts: newsFeedData?.posts ?? []
   };
 }
 

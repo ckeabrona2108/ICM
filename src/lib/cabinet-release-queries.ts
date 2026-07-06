@@ -21,8 +21,16 @@ const cabinetReleaseSelect = {
       id: true,
       index: true,
       title: true,
+      subtitle: true,
       track: true,
-      isrc: true
+      isrc: true,
+      partner_code: true,
+      language: true,
+      preview_start: true,
+      focus: true,
+      explicit: true,
+      author_rights: true,
+      roles: true
     }
   },
   userId: true

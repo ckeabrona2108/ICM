@@ -42,6 +42,11 @@ export function UserProfileForm({
   const [contractViewerOpen, setContractViewerOpen] = React.useState(false);
 
   const canViewContract = effectiveVerification.isVerified;
+  const subscriptionActive = Boolean(user?.hasActiveSubscription);
+  const subscriptionLabel = subscriptionActive ? "Подписка активна" : "Активной подписки нет";
+  const subscriptionClassName = subscriptionActive
+    ? "border-emerald-400/30 bg-emerald-500/12 text-emerald-200"
+    : "border-rose-400/30 bg-rose-500/12 text-rose-200";
 
   React.useEffect(() => {
     if (!user) return;
@@ -158,6 +163,14 @@ export function UserProfileForm({
               </p>
             </div>
             <div className="flex w-full items-stretch justify-start gap-2 sm:ml-auto sm:w-auto sm:justify-end">
+              <div
+                className={[
+                  "inline-flex h-10 min-h-10 items-center rounded-full border px-4 py-0 text-[12.5px] font-semibold leading-none",
+                  subscriptionClassName
+                ].join(" ")}
+              >
+                {subscriptionLabel}
+              </div>
               <VerificationStatusBadge
                 status={effectiveVerification.status}
                 className="h-10 min-h-10 items-center rounded-full px-4 py-0 text-[12.5px] font-semibold leading-none"

@@ -11,6 +11,10 @@ export interface FinanceTransactionView {
   amount: number;
   status: "Completed" | "Pending" | "Failed";
   description: string;
+  releaseTitle: string | null;
+  trackTitle: string | null;
+  platformName: string | null;
+  sourceReference: string | null;
 }
 
 export interface FinanceDashboardViewData {
@@ -113,20 +117,30 @@ export async function getFinanceDashboardViewData(
   userId: string
 ): Promise<FinanceDashboardViewData> {
   let reportsRaw;
-  let transactionsRaw;
+  let balanceTransactionsRaw;
   let accrualTransactionsRaw;
+  let accrualTotalRaw;
+  let commissionTotalRaw;
   let totals;
   const financeReportRepo = getRepo<{
     findMany: (args: unknown) => Promise<unknown[]>;
   }>(prisma, "financeReport");
-  const transactionRepo = getRepo<{
+  const balanceTransactionsRepo = getRepo<{
     findMany: (args: unknown) => Promise<unknown[]>;
-  }>(prisma, "transaction");
+    aggregate?: (args: unknown) => Promise<{
+      _sum: { amount?: number | null };
+    }>;
+  }>(prisma, "balance_transactions");
+  const royaltyTransactionsRepo = getRepo<{
+    aggregate?: (args: unknown) => Promise<{
+      _sum: { platform_commission_amount?: number | null };
+    }>;
+  }>(prisma, "royalty_transactions");
   const monthBuckets = buildRecentMonthBuckets(6);
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
   try {
-    [reportsRaw, transactionsRaw, accrualTransactionsRaw, totals] =
+    [reportsRaw, balanceTransactionsRaw, accrualTransactionsRaw, accrualTotalRaw, commissionTotalRaw, totals] =
       await Promise.all([
         financeReportRepo
           ? financeReportRepo.findMany({
@@ -134,42 +148,78 @@ export async function getFinanceDashboardViewData(
               orderBy: { periodStart: "desc" }
             })
           : Promise.resolve([]),
-        transactionRepo
-          ? transactionRepo.findMany({
-              where: { userId },
-              orderBy: { createdAt: "desc" },
+        balanceTransactionsRepo
+          ? balanceTransactionsRepo.findMany({
+              where: { user_id: userId },
+              orderBy: { created_at: "desc" },
               take: 20
-            })
-          : Promise.resolve([]),
-        transactionRepo
-          ? transactionRepo.findMany({
-              where: {
-                userId,
-                type: "ROYALTY",
-                status: "COMPLETED",
-                OR: [
-                  { processedAt: { gte: accrualWindowStart } },
-                  {
-                    AND: [
-                      { processedAt: null },
-                      { createdAt: { gte: accrualWindowStart } }
-                    ]
+              ,
+              include: {
+                royalty_transaction: {
+                  select: {
+                    id: true,
+                    gross_amount: true,
+                    platform_commission_amount: true,
+                    net_amount: true,
+                    currency: true,
+                    platform_name: true,
+                    source_reference: true,
+                    release: {
+                      select: {
+                        title: true,
+                        upc: true
+                      }
+                    },
+                    track: {
+                      select: {
+                        title: true
+                      }
+                    }
                   }
-                ]
-              },
-              select: {
-                amount: true,
-                createdAt: true,
-                processedAt: true
+                }
               }
             })
           : Promise.resolve([]),
+        balanceTransactionsRepo
+          ? balanceTransactionsRepo.findMany({
+              where: {
+                user_id: userId,
+                direction: "CREDIT",
+                royalty_transaction_id: { not: null },
+                created_at: { gte: accrualWindowStart }
+              },
+              select: {
+                amount: true,
+                created_at: true
+              }
+            })
+          : Promise.resolve([]),
+        balanceTransactionsRepo && typeof balanceTransactionsRepo.aggregate === "function"
+          ? balanceTransactionsRepo.aggregate({
+              where: {
+                user_id: userId,
+                direction: "CREDIT",
+                royalty_transaction_id: { not: null }
+              },
+              _sum: { amount: true }
+            })
+          : Promise.resolve({ _sum: { amount: 0 } }),
+        royaltyTransactionsRepo && typeof royaltyTransactionsRepo.aggregate === "function"
+          ? royaltyTransactionsRepo.aggregate({
+              where: {
+                user_id: userId,
+                reversed_at: null
+              },
+              _sum: { platform_commission_amount: true }
+            })
+          : Promise.resolve({ _sum: { platform_commission_amount: 0 } }),
         getUserBalanceTotals(prisma, userId)
       ]);
   } catch (error) {
     if (
       isPrismaTableMissingError(error, "FinanceReport") ||
-      isPrismaTableMissingError(error, "Transaction") ||
+      isPrismaTableMissingError(error, "balance_transactions") ||
+      isPrismaTableMissingError(error, "royalty_transactions") ||
       isPrismaTableMissingError(error, "PayoutRequest") ||
       isPrismaTableMissingError(error, "payouts")
     ) {
@@ -204,27 +254,67 @@ export async function getFinanceDashboardViewData(
     (report) => report.status === "ready_to_confirm"
   ).length;
 
-  const transactions: FinanceTransactionView[] = transactionsRaw.map(
-    (transaction) => ({
-      id: transaction.id,
-      date: toDate(transaction.processedAt ?? transaction.createdAt),
-      type: toTransactionType(transaction.type),
-      amount: decimalToNumber(transaction.amount),
-      status: toTransactionStatus(transaction.status),
-      description: transaction.description ?? ""
-    })
-  );
+  const transactions: FinanceTransactionView[] = balanceTransactionsRaw.map((transaction) => {
+    const amount = decimalToNumber(transaction.amount);
+    const royalty = transaction.royalty_transaction;
+    const loweredDescription = String(transaction.description ?? "").toLowerCase();
+    const type =
+      royalty
+        ? "Royalty"
+        : transaction.direction === "DEBIT" &&
+            (loweredDescription.includes("payout") ||
+              loweredDescription.includes("withdraw") ||
+              loweredDescription.includes("выплат"))
+          ? "Payout"
+          : transaction.direction === "DEBIT"
+            ? "Fee"
+            : "Royalty";
 
-  const accruals = transactions
-    .filter(
-      (transaction) =>
-        transaction.type === "Royalty" && transaction.status === "Completed"
-    )
-    .reduce((sum, transaction) => sum + Math.max(0, transaction.amount), 0);
+    const status =
+      transaction.direction === "DEBIT" &&
+      (loweredDescription.includes("pending") ||
+        loweredDescription.includes("processing") ||
+        loweredDescription.includes("ожидан"))
+        ? "Pending"
+        : "Completed";
+
+    const releaseTitle = royalty?.release?.title?.trim();
+    const trackTitle = royalty?.track?.title?.trim();
+    const platformName = royalty?.platform_name?.trim();
+    const sourceReference = royalty?.source_reference?.trim();
+    const trackLabel = trackTitle
+      ? releaseTitle && releaseTitle !== trackTitle
+        ? `${releaseTitle} / ${trackTitle}`
+        : trackTitle
+      : releaseTitle;
+    const descriptionParts = [
+      trackLabel,
+      platformName,
+      sourceReference && !String(sourceReference).startsWith("Royalty import") ? sourceReference : null
+    ].filter(Boolean);
+
+    return {
+      id: transaction.id,
+      date: toDate(transaction.created_at),
+      type,
+      amount,
+      status,
+      releaseTitle,
+      trackTitle,
+      platformName,
+      sourceReference: sourceReference ?? null,
+      description:
+        descriptionParts.length > 0
+          ? descriptionParts.join(" • ")
+          : transaction.description ?? ""
+    };
+  });
+
+  const accruals = Number(decimalToNumber(accrualTotalRaw?._sum?.amount).toFixed(2));
 
   const accrualByMonth = new Map<string, number>();
   for (const transaction of accrualTransactionsRaw) {
-    const date = transaction.processedAt ?? transaction.createdAt;
+    const date = transaction.created_at;
     const key = monthKey(date);
     const value = Math.max(0, decimalToNumber(transaction.amount));
     accrualByMonth.set(key, (accrualByMonth.get(key) ?? 0) + value);
@@ -235,9 +325,9 @@ export async function getFinanceDashboardViewData(
     amount: Number((accrualByMonth.get(bucket.key) ?? 0).toFixed(2))
   }));
 
-  const deductionsAndCommission = transactions
-    .filter((transaction) => transaction.type === "Fee")
-    .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+  const deductionsAndCommission = Number(
+    decimalToNumber(commissionTotalRaw?._sum?.platform_commission_amount).toFixed(2)
+  );
 
   return {
     reports,

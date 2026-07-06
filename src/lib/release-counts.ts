@@ -1,4 +1,6 @@
-// @ts-nocheck
+import { isPrismaConnectionError } from "@/lib/prisma-errors";
+import type { ReleaseLifecycleStatus } from "@/lib/release-policy";
+
 export interface ReleaseSidebarCounts {
   all: number;
   draft: number;
@@ -13,6 +15,13 @@ type LifecycleStatus =
   | "changes_required"
   | "approved"
   | "archived";
+
+const lifecycleRoleKeys = [
+  "lifecycleState",
+  "lifecycleStatus",
+  "releaseLifecycleState",
+  "releaseLifecycleStatus"
+] as const;
 
 const lifecycleAliases: Record<string, LifecycleStatus> = {
   draft: "draft",
@@ -36,6 +45,43 @@ export function normalizeLifecycleStatus(status: string | null | undefined): Lif
   if (!status) return null;
   const normalized = status.trim().toLowerCase();
   return lifecycleAliases[normalized] ?? null;
+}
+
+export function getExplicitReleaseLifecycleStatus(roles: unknown): LifecycleStatus | null {
+  const root = asRecord(roles);
+  if (!root) return null;
+
+  for (const key of lifecycleRoleKeys) {
+    const normalized = normalizeLifecycleStatus(normalizeOptionalString(root[key]));
+    if (normalized) return normalized;
+  }
+
+  const lifecycle = asRecord(root.lifecycle);
+  const nested = normalizeLifecycleStatus(normalizeOptionalString(lifecycle?.state));
+  if (nested) return nested;
+
+  return null;
+}
+
+export function getReleaseLifecycleStatus(
+  status: string | null | undefined,
+  roles?: unknown
+): LifecycleStatus | null {
+  return getExplicitReleaseLifecycleStatus(roles) ?? normalizeLifecycleStatus(status);
+}
+
+export function withReleaseLifecycleState(
+  roles: unknown,
+  lifecycleState: ReleaseLifecycleStatus | LifecycleStatus
+): Record<string, unknown> {
+  const root = asRecord(roles) ? structuredClone(roles as Record<string, unknown>) : {};
+  const submittedToModeration =
+    lifecycleState === "moderation" || lifecycleState === "pending_verification";
+
+  root.lifecycleState = lifecycleState;
+  root.submittedToModeration = submittedToModeration;
+
+  return root;
 }
 
 function normalizeOptionalString(value: unknown): string | null {
@@ -111,7 +157,12 @@ export function shouldTreatReleaseAsApproved(params: {
   upc?: string | null;
   roles?: unknown;
 }): boolean {
-  const lifecycle = normalizeLifecycleStatus(params.status);
+  const explicitLifecycle = getExplicitReleaseLifecycleStatus(params.roles);
+  if (explicitLifecycle && explicitLifecycle !== "approved" && explicitLifecycle !== "archived") {
+    return false;
+  }
+
+  const lifecycle = getReleaseLifecycleStatus(params.status, params.roles);
   if (lifecycle === "approved") return true;
 
   const signals = readLegacyReleaseSignals(params.roles);
@@ -166,7 +217,8 @@ export function mapReleaseStatusToSection(
     return "all";
   }
 
-  const lifecycle = normalizeLifecycleStatus(status);
+  const explicitLifecycle = getExplicitReleaseLifecycleStatus(options?.roles);
+  const lifecycle = getReleaseLifecycleStatus(status, options?.roles);
   switch (lifecycle) {
     case "approved":
       return "all";
@@ -175,8 +227,11 @@ export function mapReleaseStatusToSection(
     case "pending_verification":
       return "moderation";
     case "moderation":
+      if (explicitLifecycle === "moderation" || explicitLifecycle === "pending_verification") {
+        return "moderation";
+      }
       if (submittedToModeration) return "moderation";
-      return confirmed === false ? "draft" : "moderation";
+      return "moderation";
     case "draft":
       return "draft";
     case "archived":
@@ -248,17 +303,25 @@ export async function getReleaseSidebarCountsForUser(
     };
   }
 ): Promise<ReleaseSidebarCounts> {
-  const releases = await params.prisma.release.findMany({
-    where: { userId: params.userId },
-    select: { status: true, confirmed: true, upc: true, roles: true }
-  });
-
   const counts: ReleaseSidebarCounts = {
     all: 0,
     draft: 0,
     moderation: 0,
     changes_required: 0
   };
+
+  let releases: ReleaseCountItem[];
+  try {
+    releases = await params.prisma.release.findMany({
+      where: { userId: params.userId },
+      select: { status: true, confirmed: true, upc: true, roles: true }
+    });
+  } catch (error) {
+    if (isPrismaConnectionError(error)) {
+      return counts;
+    }
+    throw error;
+  }
 
   for (const release of releases) {
     const section = mapReleaseStatusToSection(

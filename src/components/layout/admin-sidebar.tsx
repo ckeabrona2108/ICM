@@ -26,7 +26,9 @@ const items = [
   { href: "/admin/ai-tokens", label: "AI-токены пользователей", icon: CreditCard },
   { href: "/admin/partner-codes", label: "Партнёрские коды", icon: Ticket },
   { href: "/admin/support/tickets", label: "Поддержка", icon: Headset },
+  { href: "/admin/promo", label: "Промо", icon: Ticket },
   { href: "/admin/analytics", label: "Аналитика CSV", icon: BarChart3 },
+  { href: "/admin/catalog-sync", label: "Smart Catalog Sync", icon: BarChart3 },
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
   { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard }

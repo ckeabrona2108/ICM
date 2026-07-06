@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canManageReleases, rejectReleaseByAdmin } from "@/lib/admin-release-service";
+import { canManageReleases, canManageReleasesSession, rejectReleaseByAdmin } from "@/lib/admin-release-service";
 
 export async function POST(
   request: Request,
@@ -13,7 +13,7 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canManageReleases(session.user.role)) {
+  if (!(await canManageReleasesSession({ prisma, userId: session.user.id, role: session.user.role }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

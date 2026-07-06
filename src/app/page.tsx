@@ -42,7 +42,7 @@ const COMPANY_STATS = [
     kicker: "Старт"
   },
   { value: "1 500+", label: "релизов выпущено", note: "от первых синглов до полноформатных альбомов" },
-  { value: "500+", label: "артистов", note: "музыканты, продюсеры и независимые проекты, которые выпускают музыку через ICE CREAM MUSIC" },
+  { value: "90%", label: "дохода остается артисту", note: "Вы получаете максимум от каждого релиза" },
   { value: "240+", label: "площадок", note: "мировые стриминговые сервисы, социальные платформы и локальные музыкальные витрины" },
   {
     value: "7/7",
@@ -281,7 +281,7 @@ export default function HomePage() {
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Link
-                href="/register"
+                href="/login"
                 className="group inline-flex items-center gap-2 rounded-xl bg-[#7b61ff] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_36px_-10px_rgba(123,97,255,0.7)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#6a4ff0] hover:shadow-[0_18px_44px_-10px_rgba(123,97,255,0.85)]"
               >
                 Вход в аккаунт

@@ -31,6 +31,16 @@ const RELEASE_STATUS_PENDING_VERIFICATION = "moderating";
 const RELEASE_STATUS_MODERATION = "moderating";
 const RELEASE_STATUS_CHANGES_REQUIRED = "rejected";
 
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isReleaseActuallyOnModeration(status: string, confirmed: boolean, roles: unknown): boolean {
+  if (status != RELEASE_STATUS_MODERATION) return false;
+  if (confirmed) return true;
+  return isRecordLike(roles) && roles.submittedToModeration === true;
+}
+
 export interface ContractSignatureListItem {
   id: string;
   userId: string;
@@ -1766,18 +1776,40 @@ export async function getAdminVerificationCounts(params: {
   releases_moderation: number;
   releases_pending_verification: number;
 }> {
+  const countReleaseStates = async () => {
+    const releases = await params.prisma.release.findMany({
+      select: {
+        status: true,
+        confirmed: true,
+        roles: true
+      }
+    });
+
+    let releasesModeration = 0;
+    let releasesPendingVerification = 0;
+
+    for (const release of releases) {
+      if (release.status === "pending_verification") {
+        releasesPendingVerification += 1;
+        continue;
+      }
+
+      if (isReleaseActuallyOnModeration(release.status, release.confirmed, release.roles)) {
+        releasesModeration += 1;
+      }
+    }
+
+    return {
+      releasesModeration,
+      releasesPendingVerification
+    };
+  };
+
   const model = getModel(params.prisma);
   if (!model) {
     const records = await readStore();
     const verificationPending = records.filter((item) => item.status === "pending").length;
-    const [releasesModeration, releasesPendingVerification] = await Promise.all([
-      params.prisma.release.count({
-        where: { status: RELEASE_STATUS_MODERATION }
-      }),
-      params.prisma.release.count({
-        where: { status: RELEASE_STATUS_PENDING_VERIFICATION }
-      })
-    ]);
+    const { releasesModeration, releasesPendingVerification } = await countReleaseStates();
     return {
       verification_pending: verificationPending,
       releases_moderation: releasesModeration,
@@ -1786,36 +1818,24 @@ export async function getAdminVerificationCounts(params: {
   }
 
   try {
-    const [verificationPending, releasesModeration, releasesPendingVerification] = await Promise.all([
+    const [verificationPending, releaseStateCounts] = await Promise.all([
       params.prisma.verification.count({
         where: { status: toDbStatus("pending") }
       }),
-      params.prisma.release.count({
-        where: { status: RELEASE_STATUS_MODERATION }
-      }),
-      params.prisma.release.count({
-        where: { status: RELEASE_STATUS_PENDING_VERIFICATION }
-      })
+      countReleaseStates()
     ]);
 
     return {
       verification_pending: verificationPending,
-      releases_moderation: releasesModeration,
-      releases_pending_verification: releasesPendingVerification
+      releases_moderation: releaseStateCounts.releasesModeration,
+      releases_pending_verification: releaseStateCounts.releasesPendingVerification
     };
   } catch (error) {
     if (!isSchemaUnavailableError(error)) throw error;
 
     const records = await readStore();
     const verificationPending = records.filter((item) => item.status === "pending").length;
-    const [releasesModeration, releasesPendingVerification] = await Promise.all([
-      params.prisma.release.count({
-        where: { status: RELEASE_STATUS_MODERATION }
-      }),
-      params.prisma.release.count({
-        where: { status: RELEASE_STATUS_PENDING_VERIFICATION }
-      })
-    ]);
+    const { releasesModeration, releasesPendingVerification } = await countReleaseStates();
     return {
       verification_pending: verificationPending,
       releases_moderation: releasesModeration,

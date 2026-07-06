@@ -7,7 +7,11 @@ import type { ReleaseDraftSaveRequest, ReleaseDraftSaveResponse } from "@/lib/ap
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
-import { mapReleaseStatusToSection } from "@/lib/release-counts";
+import {
+  getReleaseSidebarCountsForUser,
+  getReleaseLifecycleStatus,
+  withReleaseLifecycleState
+} from "@/lib/release-counts";
 import { readReleaseTypeFromSubmissionData } from "@/lib/release-submit-tracks";
 
 export const dynamic = "force-dynamic";
@@ -50,8 +54,21 @@ function readLabel(data: Record<string, unknown>): string | null {
 }
 
 function readPerformer(data: Record<string, unknown>): string | null {
-  const value = typeof data.artist === "string" ? data.artist.trim() : "";
-  return value || null;
+  const explicit = typeof data.artist === "string" ? data.artist.trim() : "";
+  if (explicit) return explicit;
+
+  const persons = Array.isArray(data.persons) ? data.persons : [];
+  const performerNames = persons
+    .map((item) => asRecord(item))
+    .filter(Boolean)
+    .filter((item) => {
+      const role = typeof item?.role === "string" ? item.role.trim().toLowerCase() : "";
+      return role === "исполнитель";
+    })
+    .map((item) => (typeof item?.name === "string" ? item.name.trim() : ""))
+    .filter(Boolean);
+
+  return performerNames.join(", ") || null;
 }
 
 function mergeSubmissionData(roles: unknown, submissionData: Record<string, unknown>): Record<string, unknown> {
@@ -70,28 +87,11 @@ function readSubmissionDataCover(data: Record<string, unknown>): string | null {
 }
 
 async function draftsCount(userId: string) {
-  const releases = await prisma.release.findMany({
-    where: { userId },
-    select: { status: true, confirmed: true, upc: true, roles: true }
+  const counts = await getReleaseSidebarCountsForUser({
+    userId,
+    prisma
   });
-
-  return releases.reduce((count, release) => {
-    const submittedToModeration =
-      Boolean(release.roles) &&
-      typeof release.roles === "object" &&
-      !Array.isArray(release.roles) &&
-      (release.roles as Record<string, unknown>).submittedToModeration === true;
-    const section = mapReleaseStatusToSection(
-      release.status,
-      release.confirmed,
-      submittedToModeration,
-      {
-        upc: release.upc,
-        roles: release.roles
-      }
-    );
-    return section === "draft" ? count + 1 : count;
-  }, 0);
+  return counts.draft;
 }
 
 export async function POST(request: Request) {
@@ -152,9 +152,12 @@ export async function POST(request: Request) {
       type: readReleaseTypeFromSubmissionData(data),
       confirmed: false,
       status: "moderating",
-      roles: {
-        submissionData: payload.data
-      }
+      roles: withReleaseLifecycleState(
+        {
+          submissionData: payload.data
+        },
+        "draft"
+      ) as Prisma.InputJsonValue
     },
     select: { id: true }
   });
@@ -242,9 +245,12 @@ export async function PATCH(request: Request) {
       type: readReleaseTypeFromSubmissionData(data),
       confirmed: existing.confirmed,
       status: existing.status,
-      roles: mergeSubmissionData(
-        existing.roles,
-        payload.data as Record<string, unknown>
+      roles: withReleaseLifecycleState(
+        mergeSubmissionData(
+          existing.roles,
+          payload.data as Record<string, unknown>
+        ),
+        getReleaseLifecycleStatus(existing.status, existing.roles) ?? "draft"
       ) as Prisma.InputJsonValue
     }
   });

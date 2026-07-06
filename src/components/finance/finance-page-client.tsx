@@ -18,6 +18,7 @@ import type {
 } from "@/lib/api/contracts";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { FinanceReportStatus } from "@/lib/finance-policy";
+import type { FinanceTransactionView } from "@/lib/finance-dashboard-server";
 import { computeAvailableToWithdraw } from "@/lib/payouts";
 
 const RevenueChart = dynamic(
@@ -32,9 +33,12 @@ const RevenueChart = dynamic(
 
 const financeTabs = ["Запрос выплаты", "Начисления"] as const;
 type FinanceTab = (typeof financeTabs)[number];
+const transactionFilters = ["Все", "Начисления", "Списания", "Выплаты"] as const;
+type TransactionFilter = (typeof transactionFilters)[number];
 
 export function FinancePageClient({
   initialReports,
+  initialTransactions,
   initialAgreedBalance,
   initialPendingPayout,
   initialAccruals,
@@ -42,6 +46,7 @@ export function FinancePageClient({
   minimumPayoutAmount
 }: {
   initialReports: FinanceReportClientItem[];
+  initialTransactions: FinanceTransactionView[];
   initialAgreedBalance: number;
   initialPendingPayout: number;
   initialAccruals: number;
@@ -67,6 +72,8 @@ export function FinancePageClient({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<FinanceTab>("Запрос выплаты");
+  const [transactionFilter, setTransactionFilter] =
+    React.useState<TransactionFilter>("Все");
 
   const pendingReportsCount = reports.filter(
     (report) => report.status === "ready_to_confirm"
@@ -83,6 +90,13 @@ export function FinancePageClient({
   const reportStatuses: FinanceReportStatus[] = reports.map(
     (report) => report.status
   );
+  const filteredTransactions = initialTransactions.filter((transaction) => {
+    if (transactionFilter === "Все") return true;
+    if (transactionFilter === "Начисления") return transaction.type === "Royalty";
+    if (transactionFilter === "Списания") return transaction.type === "Fee";
+    if (transactionFilter === "Выплаты") return transaction.type === "Payout";
+    return true;
+  });
 
   async function requestPayout() {
     setError(null);
@@ -346,6 +360,130 @@ export function FinancePageClient({
               <h2 className="text-[20px] font-semibold text-white">Начисления</h2>
               <div className="mt-4">
                 <RevenueChart data={initialAccrualSeries} />
+              </div>
+
+              <div className="mt-6">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[18px] font-semibold text-white">История операций</h3>
+                  <span className="text-[13px] font-semibold text-white/55">
+                    Источник: ledger
+                  </span>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {transactionFilters.map((filter) => {
+                    const active = transactionFilter === filter;
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setTransactionFilter(filter)}
+                        className={cn(
+                          "rounded-full border px-3.5 py-2 text-[13px] font-semibold transition-colors",
+                          active
+                            ? "border-[#7b3df5]/40 bg-[#7b3df5]/18 text-white"
+                            : "border-white/10 bg-white/[0.03] text-white/65 hover:border-white/20 hover:text-white"
+                        )}
+                      >
+                        {filter}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {filteredTransactions.length ? (
+                  <div className="mt-4 grid gap-3">
+                    {filteredTransactions.map((transaction) => {
+                      const amountTone =
+                        transaction.type === "Royalty"
+                          ? "text-emerald-300"
+                          : transaction.type === "Payout"
+                            ? "text-amber-300"
+                            : "text-white";
+                      const amountPrefix =
+                        transaction.type === "Royalty"
+                          ? "+"
+                          : transaction.type === "Payout" || transaction.type === "Fee"
+                            ? "-"
+                            : "";
+
+                      return (
+                        <div
+                          key={transaction.id}
+                          className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)]"
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-white/72">
+                                  {transaction.type === "Royalty"
+                                    ? "Начисление"
+                                    : transaction.type === "Payout"
+                                      ? "Выплата"
+                                      : "Списание"}
+                                </span>
+                                <span className="text-[12px] font-semibold text-white/45">
+                                  {transaction.date}
+                                </span>
+                              </div>
+                              <p className="text-[14px] font-medium leading-6 text-white/78">
+                                {transaction.description || "Операция без описания"}
+                              </p>
+                              {(transaction.releaseTitle ||
+                                transaction.trackTitle ||
+                                transaction.platformName) ? (
+                                <div className="grid gap-1 pt-1 text-[12px] font-medium text-white/50 sm:grid-cols-3">
+                                  <div className="min-w-0">
+                                    <span className="uppercase tracking-[0.12em] text-white/36">
+                                      Релиз
+                                    </span>
+                                    <p className="truncate pt-1 text-white/72">
+                                      {transaction.releaseTitle ?? "—"}
+                                    </p>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className="uppercase tracking-[0.12em] text-white/36">
+                                      Трек
+                                    </span>
+                                    <p className="truncate pt-1 text-white/72">
+                                      {transaction.trackTitle ?? "—"}
+                                    </p>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <span className="uppercase tracking-[0.12em] text-white/36">
+                                      Площадка
+                                    </span>
+                                    <p className="truncate pt-1 text-white/72">
+                                      {transaction.platformName ?? "—"}
+                                    </p>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div className="shrink-0 text-right">
+                              <p className={cn("text-[17px] font-semibold tabular-nums", amountTone)}>
+                                {amountPrefix}
+                                {formatCurrency(Math.abs(transaction.amount), "RUB")}
+                              </p>
+                              <p className="mt-1 text-[12px] font-semibold text-white/45">
+                                {transaction.status === "Completed"
+                                  ? "Проведено"
+                                  : transaction.status === "Pending"
+                                    ? "В обработке"
+                                    : "Ошибка"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-5 text-[14px] font-medium text-white/58">
+                    По выбранному фильтру операций пока нет.
+                  </div>
+                )}
               </div>
             </PageSection>
           ) : null}

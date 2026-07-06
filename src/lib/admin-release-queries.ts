@@ -69,6 +69,19 @@ function isAcceptedForAdminView(source: {
   });
 }
 
+function isSubmittedToModeration(roles: unknown): boolean {
+  return asRecord(roles)?.submittedToModeration === true;
+}
+
+function isActuallyOnModeration(source: {
+  status: string;
+  confirmed: boolean;
+  roles: unknown;
+}): boolean {
+  if (source.status !== "moderating") return false;
+  return source.confirmed || isSubmittedToModeration(source.roles);
+}
+
 function matchStatus(source: {
   status: string;
   confirmed: boolean;
@@ -82,7 +95,7 @@ function matchStatus(source: {
   if (filter === "approved") return accepted;
   if (filter === "rejected") return status === "rejected";
   if (filter === "pending_verification") return status === "pending_verification";
-  return status === "moderating";
+  return isActuallyOnModeration(source);
 }
 
 export function resolveAdminReleaseCoverUrl(input: {
@@ -192,8 +205,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         filter
       );
     })
-    .filter((release) => (filter === "approved" || filter === "all" ? true : release.confirmed))
-    .map(async (source) => {
+        .map(async (source) => {
       const resolvedUpc = resolveReleaseUpc({
         upc: source.upc,
         roles: source.roles

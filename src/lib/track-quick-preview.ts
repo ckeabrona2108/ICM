@@ -5,22 +5,8 @@ interface SubmissionTrackPersonLike {
   role?: string;
 }
 
-interface SubmissionTrackLike {
-  title?: string;
-  subtitle?: string;
-  isrc?: string;
-  partnerCode?: string;
-  trackPersons?: SubmissionTrackPersonLike[];
-  copyrightPct?: string;
-  relatedRightsPct?: string;
-  previewStart?: string;
-  focusTrack?: boolean;
-  versionExplicit?: boolean;
-  metadataLanguage?: string;
-}
-
 interface SubmissionDataLike {
-  tracks?: SubmissionTrackLike[];
+  tracks?: unknown[];
 }
 
 export interface TrackQuickPreviewData {
@@ -52,6 +38,27 @@ export interface TrackQuickPreviewData {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function asBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return undefined;
+}
+
 function normalizeRole(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/gu, " ");
 }
@@ -65,8 +72,8 @@ function parseSubmissionData(value: unknown): SubmissionDataLike | null {
   return value as SubmissionDataLike;
 }
 
-function formatSharePercent(value: string | undefined): string {
-  const raw = (value ?? "").trim().replace(",", ".");
+function formatSharePercent(value: unknown): string {
+  const raw = typeof value === "number" ? String(value) : (asString(value) ?? "").replace(",", ".");
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return "Данные не указаны";
   const clamped = Math.min(100, Math.max(0, parsed));
@@ -74,6 +81,58 @@ function formatSharePercent(value: string | undefined): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })} %`;
+}
+
+function formatLanguageLabel(value: string | null): string {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (!normalized) return "Данные не указаны";
+  if (["ru", "rus", "russian", "русский"].includes(normalized)) return "Русский";
+  if (["en", "eng", "english", "английский"].includes(normalized)) return "Английский";
+  return value?.trim() || "Данные не указаны";
+}
+
+function readStringFromRecords(records: Array<Record<string, unknown> | null>, keys: string[]): string | null {
+  for (const record of records) {
+    if (!record) continue;
+    for (const key of keys) {
+      const value = asString(record[key]);
+      if (value) return value;
+    }
+  }
+  return null;
+}
+
+function readBooleanFromRecords(records: Array<Record<string, unknown> | null>, keys: string[]): boolean | undefined {
+  for (const record of records) {
+    if (!record) continue;
+    for (const key of keys) {
+      const value = asBoolean(record[key]);
+      if (value !== undefined) return value;
+    }
+  }
+  return undefined;
+}
+
+function collectTrackPersons(records: Array<Record<string, unknown> | null>): SubmissionTrackPersonLike[] {
+  const persons: SubmissionTrackPersonLike[] = [];
+
+  for (const record of records) {
+    if (!record) continue;
+    for (const key of ["trackPersons", "track_persons", "persons", "contributors"]) {
+      const raw = record[key];
+      if (!Array.isArray(raw)) continue;
+      for (const item of raw) {
+        const source = asRecord(item);
+        if (!source) continue;
+        const name = asString(source.name);
+        const role = asString(source.role);
+        if (!name || !role) continue;
+        persons.push({ name, role });
+      }
+    }
+  }
+
+  return persons;
 }
 
 function groupTrackPersons(persons: SubmissionTrackPersonLike[]) {
@@ -147,34 +206,46 @@ export function buildTrackQuickPreviewData(
   if (!baseTrack) return null;
 
   const parsedSubmission = parseSubmissionData(release.submissionData);
-  const submissionTrack =
-    parsedSubmission?.tracks?.[Math.max(0, trackNum - 1)] ?? null;
+  const submissionTrack = asRecord(parsedSubmission?.tracks?.[Math.max(0, trackNum - 1)] ?? null);
+  const baseTrackRecord = asRecord(baseTrack);
+  const sources = [submissionTrack, baseTrackRecord];
 
-  const trackPersons = submissionTrack?.trackPersons ?? [];
-  const grouped = groupTrackPersons(trackPersons);
+  const grouped = groupTrackPersons(collectTrackPersons(sources));
 
   return {
     num: trackNum,
-    title: submissionTrack?.title?.trim() || baseTrack.title || "Данные не указаны",
-    subtitle: submissionTrack?.subtitle?.trim() || "Данные не указаны",
+    title:
+      readStringFromRecords(sources, ["title", "fileName", "file_name"]) ||
+      baseTrack.title ||
+      "Данные не указаны",
+    subtitle: readStringFromRecords(sources, ["subtitle"]) || "Данные не указаны",
     identification: {
       isrc:
-        submissionTrack?.isrc?.trim() ||
+        readStringFromRecords(sources, ["isrc"]) ||
         release.isrc?.trim() ||
         "Данные не указаны",
-      partnerCode: submissionTrack?.partnerCode?.trim() || "Данные не указаны"
+      partnerCode:
+        readStringFromRecords(sources, ["partnerCode", "partner_code"]) ||
+        "Данные не указаны"
     },
     roles: grouped,
     rights: {
-      copyrightPct: formatSharePercent(submissionTrack?.copyrightPct),
-      relatedRightsPct: formatSharePercent(submissionTrack?.relatedRightsPct)
+      copyrightPct: formatSharePercent(
+        readStringFromRecords(sources, ["copyrightPct", "copyright_pct", "author_rights"])
+      ),
+      relatedRightsPct: formatSharePercent(
+        readStringFromRecords(sources, ["relatedRightsPct", "related_rights_pct", "related_rights", "neighboringRights"])
+      )
     },
     additional: {
-      focusTrack: Boolean(submissionTrack?.focusTrack),
-      previewStart: submissionTrack?.previewStart?.trim() || "Данные не указаны",
-      explicit: Boolean(submissionTrack?.versionExplicit),
-      language:
-        submissionTrack?.metadataLanguage?.trim() || "Данные не указаны"
+      focusTrack: Boolean(readBooleanFromRecords(sources, ["focusTrack", "focus_track", "focus"])),
+      previewStart:
+        readStringFromRecords(sources, ["previewStart", "preview_start"]) ||
+        "Данные не указаны",
+      explicit: Boolean(readBooleanFromRecords(sources, ["versionExplicit", "version_explicit", "explicit"])),
+      language: formatLanguageLabel(
+        readStringFromRecords(sources, ["metadataLanguage", "metadata_language", "language"])
+      )
     }
   };
 }

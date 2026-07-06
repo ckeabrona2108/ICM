@@ -2,8 +2,9 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { getAdminReleases, type AdminReleaseStatusFilter } from "@/lib/admin-release-queries";
-import { canManageReleases } from "@/lib/admin-release-service";
+import { canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
 
 const allowedStatuses = new Set<AdminReleaseStatusFilter>([
   "moderation",
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canManageReleases(session.user.role)) {
+  if (!(await canManageReleasesSession({ prisma, userId: session.user.id, role: session.user.role }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

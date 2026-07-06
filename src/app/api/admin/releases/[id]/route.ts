@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAdminReleaseDetailsById } from "@/lib/admin-release-details";
-import { canManageReleases, deleteReleaseByAdmin } from "@/lib/admin-release-service";
+import { canManageReleases, canManageReleasesSession, deleteReleaseByAdmin } from "@/lib/admin-release-service";
 
 export async function GET(
   _request: Request,
@@ -14,7 +14,7 @@ export async function GET(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canManageReleases(session.user.role)) {
+  if (!(await canManageReleasesSession({ prisma, userId: session.user.id, role: session.user.role }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -39,7 +39,7 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canManageReleases(session.user.role)) {
+  if (!(await canManageReleasesSession({ prisma, userId: session.user.id, role: session.user.role }))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

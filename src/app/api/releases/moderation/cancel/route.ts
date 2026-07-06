@@ -1,9 +1,12 @@
+import type { Prisma } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import type { CancelModerationRequest, CancelModerationSuccessResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canCancelModeration } from "@/lib/release-policy";
+import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 
 export const dynamic = "force-dynamic";
 
@@ -27,14 +30,20 @@ export async function POST(request: Request) {
       id: payload.releaseId,
       userId: session.user.id
     },
-    select: { id: true, status: true }
+    select: { id: true, status: true, confirmed: true, roles: true }
   });
 
   if (!release) {
     return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
   }
 
-  if (release.status !== "moderating") {
+  const effectiveStatus = getReleaseLifecycleStatus(release.status, release.roles) ?? "draft";
+  const cancelPolicy = canCancelModeration({
+    status: effectiveStatus,
+    moderationStarted: effectiveStatus === "moderation" && Boolean(release.confirmed)
+  });
+
+  if (!cancelPolicy.allowed) {
     return NextResponse.json(
       {
         ok: false,
@@ -42,7 +51,9 @@ export async function POST(request: Request) {
           {
             code: "INVALID_STATUS",
             field: "currentStatus",
-            message: "Отменить модерацию можно только для релиза на модерации."
+            message:
+              cancelPolicy.message ??
+              "Отменить модерацию можно только для релиза на модерации."
           }
         ]
       },
@@ -53,7 +64,11 @@ export async function POST(request: Request) {
   await prisma.release.update({
     where: { id: release.id },
     data: {
-      confirmed: false
+      confirmed: false,
+      roles: withReleaseLifecycleState(
+        release.roles,
+        "changes_required"
+      ) as Prisma.InputJsonValue
     }
   });
 

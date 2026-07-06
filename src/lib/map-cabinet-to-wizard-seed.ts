@@ -5,6 +5,25 @@ import {
   type ReleaseSubmissionData
 } from "@/lib/release-policy";
 
+function resolveUploadedAudioUrl(input: {
+  url?: string | null;
+  storageKey?: string | null;
+}): string | undefined {
+  const directUrl = input.url?.trim();
+  if (directUrl) return directUrl;
+
+  const storageKey = input.storageKey?.trim();
+  if (!storageKey) return undefined;
+
+  const encoded = storageKey
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  return encoded ? `/api/uploads/object/${encoded}` : undefined;
+}
+
 function formatDuration(seconds?: number | null): string | undefined {
   if (!Number.isFinite(seconds) || !seconds || seconds <= 0) return undefined;
   const safe = Math.max(0, Math.floor(seconds));
@@ -60,6 +79,13 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
         name: track.fileName || `track-${String(index + 1).padStart(2, "0")}`,
         size: track.audioFile?.sizeBytes ?? 0,
         hasAudio: track.hasAudio ?? true,
+        audioUrl:
+          resolveUploadedAudioUrl({
+            url: track.audioFile?.url ?? null,
+            storageKey: track.audioFile?.storageKey ?? null
+          }) ??
+          r.tracks[index]?.audioUrl ??
+          undefined,
         audioUpload: track.audioFile ?? null,
         durationSec: track.durationSec ?? undefined,
         durationLabel: formatDuration(track.durationSec ?? undefined),
@@ -142,7 +168,50 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
     platformMode: "all",
     platforms: [],
     language: "Русский",
-    tracks: [],
+    tracks: r.tracks.map((track, index) => ({
+      id: crypto.randomUUID(),
+      name: track.title?.trim() || `track-${String(index + 1).padStart(2, "0")}`,
+      size: 0,
+      hasAudio: Boolean(track.audioUrl),
+      audioUrl: track.audioUrl ?? undefined,
+      audioUpload: null,
+      durationSec: track.durationSec ?? undefined,
+      durationLabel: formatDuration(track.durationSec ?? undefined),
+      meta: {
+        title: track.title ?? "",
+        subtitle: track.subtitle ?? "",
+        isrc: track.isrc ?? "",
+        partnerCode: track.partnerCode ?? "",
+        trackPersons: (track.trackPersons ?? []).map((person) => ({
+          id: crypto.randomUUID(),
+          name: person.name,
+          role: person.role
+        })),
+        copyrightPct: track.copyrightPct ?? "",
+        relatedRightsPct: track.relatedRightsPct ?? "100",
+        previewStart: track.previewStart ?? "",
+        instantGratification: false,
+        focusTrack: Boolean(track.focusTrack),
+        versionExplicit: Boolean(track.versionExplicit),
+        versionLive: false,
+        versionCover: false,
+        versionRemix: false,
+        versionInstrumental: false,
+        versionDrugReference: false,
+        aiAssistanceUsed: false,
+        aiGeneratedFullTrack: false,
+        aiGeneratedMusicOnly: false,
+        aiGeneratedLyricsOnly: false,
+        aiProcessedTrackOnly: false,
+        metadataLanguage: track.metadataLanguage ?? "Русский",
+        lyrics: "",
+        ringtoneDurationSec: "",
+        syncedLyricsFile: null,
+        ringtoneFile: null,
+        videoFile: null,
+        syncedLyrics: []
+      }
+    })),
     earlyRussiaStart: false,
     realTimeDelivery: false,
     yandexPreReleaseDate: "",

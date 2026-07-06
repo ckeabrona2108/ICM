@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Image from "next/image";
-import { ExternalLink, ImageIcon } from "lucide-react";
+import { ExternalLink, ImageIcon, Loader2 } from "lucide-react";
 
 import { buildCoverImageSrcCandidates } from "@/lib/image-src";
 import { getReleasePlatformLabel } from "@/lib/release-platforms";
@@ -58,7 +58,13 @@ export function StepReview({
     () => buildCoverImageSrcCandidates(data.cover),
     [data.cover]
   );
-  const safeCoverSrc = coverCandidates[coverCandidateIndex] ?? null;
+  const localCoverPreview =
+    typeof data.cover === "string" &&
+    (data.cover.startsWith("data:image/") || data.cover.startsWith("blob:"))
+      ? data.cover
+      : null;
+  const safeCoverSrc = localCoverPreview ?? coverCandidates[coverCandidateIndex] ?? null;
+  const showCoverLoadingState = Boolean(data.cover) && !safeCoverSrc;
 
   React.useEffect(() => {
     setCoverCandidateIndex(0);
@@ -173,6 +179,13 @@ export function StepReview({
                   )
                 }
               />
+            ) : showCoverLoadingState ? (
+              <div className="grid h-full w-full place-items-center text-center text-white/45">
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <span className="text-[12px] text-white/55">Подготавливаем превью…</span>
+                </div>
+              </div>
             ) : (
               <div className="grid h-full w-full place-items-center text-center text-white/30">
                 <div className="flex flex-col items-center gap-2">

@@ -15,6 +15,24 @@ export function canManageReleases(role: string | null | undefined): boolean {
   return role === "ADMIN";
 }
 
+export async function canManageReleasesSession(params: {
+  prisma: PrismaClient;
+  userId: string | null | undefined;
+  role: string | null | undefined;
+}): Promise<boolean> {
+  if (canManageReleases(params.role)) return true;
+
+  const userId = params.userId?.trim();
+  if (!userId) return false;
+
+  const user = await params.prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true }
+  });
+
+  return user?.isAdmin === true;
+}
+
 function canApproveReleaseStatus(status: verification_status): boolean {
   return status === "moderating" || status === "rejected" || status === "approved";
 }

@@ -11,7 +11,7 @@
     "test": "tsx --test src/lib/__tests__/*.test.ts",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit --incremental false",
-    "postinstall": "node scripts/copy-pdf-worker.mjs",
+    "postinstall": "prisma generate && node scripts/copy-pdf-worker.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
@@ -63,6 +63,7 @@
     "tailwind-merge": "^3.3.1",
     "telegraf": "^4.16.3",
     "tone": "^15.1.22",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.1",
     "zustand": "^5.0.5"
   },

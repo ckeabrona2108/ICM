@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
+import { withReleaseLifecycleState } from "@/lib/release-counts";
 
 function baseRelease(status: "ARCHIVED" | "MODERATION" | "DRAFT" | "CHANGES_REQUIRED") {
   const submissionData = {
@@ -130,6 +131,22 @@ test("mapReleaseToCabinetRelease maps priority flag for card badge", async () =>
   assert.equal(release.priority, true);
 });
 
+test("mapReleaseToCabinetRelease falls back to submission performers when performer is null", async () => {
+  const source = {
+    ...baseRelease("MODERATION"),
+    performer: null,
+    roles: {
+      submissionData: {
+        ...(baseRelease("MODERATION").submissionData as Record<string, unknown>),
+        persons: [{ name: "Recovered Artist", role: "Исполнитель" }]
+      }
+    }
+  };
+
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(release.artist, "Recovered Artist");
+});
+
 test("mapReleaseToCabinetRelease falls back to submission cover when cover image is absent", async () => {
   const source = {
     ...baseRelease("MODERATION"),
@@ -242,6 +259,25 @@ test("mapReleaseToCabinetRelease does not fallback to account name when persons 
   assert.equal(release.artist, "Не указан");
 });
 
+test("mapReleaseToCabinetRelease respects lifecycleState draft over legacy moderating status", async () => {
+  const source = {
+    ...baseRelease("MODERATION"),
+    confirmed: false,
+    upc: null,
+    moderationStartedAt: null,
+    roles: withReleaseLifecycleState(
+      {
+        submissionData: baseRelease("MODERATION").submissionData
+      },
+      "draft"
+    )
+  };
+
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(release.status, "draft");
+  assert.equal(release.moderationStarted, false);
+});
+
 test("mapReleaseToCabinetRelease handles incomplete draft fields with safe fallbacks", async () => {
   const source = {
     ...baseRelease("DRAFT"),
@@ -264,6 +300,40 @@ test("mapReleaseToCabinetRelease handles incomplete draft fields with safe fallb
   assert.equal(release.coverUrl, "");
 });
 
+test("mapReleaseToCabinetRelease exposes audio url from track roles for edit fallback", async () => {
+  const source = {
+    ...baseRelease("ARCHIVED"),
+    track: [
+      {
+        id: "trk_audio_1",
+        index: 1,
+        title: "Track 1",
+        subtitle: null,
+        track: "wav",
+        isrc: "USRC17607839",
+        partner_code: null,
+        language: "Русский",
+        preview_start: null,
+        focus: false,
+        explicit: false,
+        author_rights: null,
+        roles: {
+          audioFile: {
+            storageKey: "uploads/release-audio/track-01.wav"
+          }
+        }
+      }
+    ],
+    roles: {}
+  };
+
+  const release = await mapReleaseToCabinetRelease(source as never, 1);
+  assert.equal(
+    release.tracks[0]?.audioUrl,
+    "/api/uploads/object/uploads/release-audio/track-01.wav"
+  );
+});
+
 test("mapReleaseToCabinetRelease keeps moderation comment as rejection reason for changes_required", async () => {
   const source = {
     ...baseRelease("CHANGES_REQUIRED"),
@@ -274,6 +344,6 @@ test("mapReleaseToCabinetRelease keeps moderation comment as rejection reason fo
   };
 
   const release = await mapReleaseToCabinetRelease(source as never, 1);
-  assert.equal(release.status, "draft");
+  assert.equal(release.status, "changes_required");
   assert.equal(release.coverUrl, "");
 });

@@ -8,10 +8,28 @@ export type CabinetReleaseStatus =
   | "distributed"
   | "archived";
 
+export interface CabinetTrackPerson {
+  name: string;
+  role: string;
+}
+
 export interface CabinetTrack {
   num: number;
   title: string;
   duration: string;
+  subtitle?: string;
+  audioUrl?: string | null;
+  isrc?: string | null;
+  partnerCode?: string | null;
+  trackPersons?: CabinetTrackPerson[];
+  contributors?: unknown;
+  copyrightPct?: string | null;
+  relatedRightsPct?: string | null;
+  previewStart?: string | null;
+  focusTrack?: boolean;
+  versionExplicit?: boolean;
+  metadataLanguage?: string | null;
+  durationSec?: number | null;
 }
 
 export interface ModerationRemark {

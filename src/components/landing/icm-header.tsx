@@ -84,7 +84,7 @@ export function IcmHeader() {
               Войти
             </Link>
             <Link
-              href="https://www.icecreammusic.net/register"
+              href="/login"
               className="hidden rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.75)] transition-all duration-200 hover:bg-[#6a4ff0] sm:inline-flex"
             >
               Создать аккаунт
@@ -133,7 +133,7 @@ export function IcmHeader() {
               Войти
             </Link>
             <Link
-              href="https://www.icecreammusic.net/register"
+              href="/login"
               onClick={() => setOpen(false)}
               className="mt-1 block rounded-2xl bg-[#7b61ff] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#6a4ff0]"
             >

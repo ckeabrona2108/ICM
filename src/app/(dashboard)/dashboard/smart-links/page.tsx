@@ -38,9 +38,24 @@ export default async function SmartLinksDashboardPage() {
             return (
               <PageSection key={item.releaseId} className="overflow-hidden">
                 <div className="flex flex-col gap-4 sm:flex-row">
-                  <div className="h-24 w-24 shrink-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03]">
+                  <div className="aspect-square h-24 w-24 shrink-0 overflow-hidden rounded-[22px] border border-white/[0.08] bg-[radial-gradient(circle_at_top,rgba(123,61,245,0.16),transparent_48%),rgba(255,255,255,0.03)] p-2">
                     {item.coverUrl ? (
-                      <img src={item.coverUrl} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
+                      <div className="relative h-full w-full overflow-hidden rounded-[16px]">
+                        <img
+                          src={item.coverUrl}
+                          alt=""
+                          aria-hidden="true"
+                          className="absolute inset-0 h-full w-full scale-110 object-cover opacity-35 blur-xl"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(9,10,16,0.06),rgba(9,10,16,0.32))]" />
+                        <img
+                          src={item.coverUrl}
+                          alt={item.title}
+                          className="relative z-[1] h-full w-full object-contain object-center"
+                          loading="lazy"
+                        />
+                      </div>
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.24em] text-white/38">
                         No Cover
@@ -52,13 +67,15 @@ export default async function SmartLinksDashboardPage() {
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-xl font-semibold text-white">{item.title}</p>
-                        <p className="mt-1 truncate text-sm font-medium text-white/62">{item.artist}</p>
+                        <p className="mt-1 truncate text-sm font-medium text-white/62">
+                          UPC: {item.upc || "—"}
+                        </p>
                         <p className="mt-2 truncate text-sm text-white/46">{item.publicUrl}</p>
                       </div>
 
-                      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-right">
+                      <div className="rounded-2xl border border-violet-400/22 bg-violet-500/10 px-3 py-2 text-right shadow-[0_12px_32px_-22px_rgba(123,61,245,0.9)]">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/42">Дата</p>
-                        <p className="mt-1 text-sm font-medium text-white/82">{item.releaseDate}</p>
+                        <p className="mt-1 text-sm font-semibold text-violet-50">{item.releaseDate}</p>
                       </div>
                     </div>
 
@@ -94,7 +111,7 @@ export default async function SmartLinksDashboardPage() {
                         className="inline-flex h-10 items-center gap-2 rounded-xl border border-violet-400/18 bg-violet-500/10 px-3.5 text-sm font-medium text-violet-100 transition hover:bg-violet-500/16"
                       >
                         <Settings2 className="h-4 w-4" />
-                        Настроить
+                        Редактировать
                       </Link>
                     </div>
                   </div>

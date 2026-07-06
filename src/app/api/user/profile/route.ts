@@ -61,6 +61,9 @@ async function mapCurrentUserProfile(userId: string) {
   const aiTokenBalance = hasAiTokenBalanceColumn
     ? Number(("aiTokenBalance" in user ? user.aiTokenBalance : 0) ?? 0)
     : await getAiTokenBalance(prisma, userId);
+  const hasActiveSubscription = Boolean(
+    user.isSubscribed && (!user.expiresAt || user.expiresAt.getTime() > Date.now())
+  );
 
   return {
     id: user.id,
@@ -69,6 +72,7 @@ async function mapCurrentUserProfile(userId: string) {
     avatarUrl: user.avatar,
     royaltyBalance: user.balance,
     aiTokenBalance,
+    hasActiveSubscription,
     currentPlan: resolveAiStudioPlan({
       isSubscribed: user.isSubscribed,
       subscribeLevel: user.subscribeLevel,

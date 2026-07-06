@@ -87,6 +87,50 @@ test("buildTrackQuickPreviewData returns fallbacks when data is missing", () => 
   assert.equal(details?.additional.language, "Данные не указаны");
 });
 
+test("buildTrackQuickPreviewData falls back to cabinet track metadata when submission track is incomplete", () => {
+  const release = createRelease({
+    tracks: [
+      {
+        num: 1,
+        title: "Track 1",
+        duration: "03:00",
+        isrc: "USRC17607839",
+        partnerCode: "DB-PARTNER-01",
+        trackPersons: [
+          { name: "Main Artist", role: "Исполнитель" },
+          { name: "Producer", role: "Продюсер" },
+          { name: "Composer", role: "Автор музыки" },
+          { name: "Lyricist", role: "Автор слов" }
+        ],
+        copyrightPct: "80",
+        relatedRightsPct: "20",
+        previewStart: "00:45",
+        focusTrack: true,
+        versionExplicit: true,
+        metadataLanguage: "Русский"
+      }
+    ],
+    submissionData: {
+      tracks: [{ title: "Track 1", trackPersons: [] }]
+    }
+  });
+
+  const details = buildTrackQuickPreviewData(release, 1);
+  assert.ok(details);
+  assert.equal(details?.identification.isrc, "USRC17607839");
+  assert.equal(details?.identification.partnerCode, "DB-PARTNER-01");
+  assert.deepEqual(details?.roles.performer, ["Main Artist"]);
+  assert.deepEqual(details?.roles.producer, ["Producer"]);
+  assert.deepEqual(details?.roles.musicAuthor, ["Composer"]);
+  assert.deepEqual(details?.roles.lyricsAuthor, ["Lyricist"]);
+  assert.equal(details?.rights.copyrightPct, "80,00 %");
+  assert.equal(details?.rights.relatedRightsPct, "20,00 %");
+  assert.equal(details?.additional.previewStart, "00:45");
+  assert.equal(details?.additional.focusTrack, true);
+  assert.equal(details?.additional.explicit, true);
+  assert.equal(details?.additional.language, "Русский");
+});
+
 test("buildTrackQuickPreviewData returns null for missing track", () => {
   const release = createRelease();
   const details = buildTrackQuickPreviewData(release, 5);

@@ -38,12 +38,12 @@ function usage(type: ReleasePaymentUsage["type"], usedAt = new Date()): unknown 
     type,
     usedAt: usedAt.toISOString(),
     plan: type === "subscription" ? "STANDARD" : undefined,
-    releasesLimit: type === "subscription" ? 1 : undefined,
+    releasesLimit: type === "subscription" ? 2 : undefined,
     releasesUsedAfterSubmit: type === "subscription" ? 1 : undefined
   });
 }
 
-test("STANDARD allows one included release and then requires payment", async () => {
+test("STANDARD allows two included releases before payment is required", async () => {
   const client = createClient({
     user: {
       isSubscribed: true,
@@ -55,10 +55,10 @@ test("STANDARD allows one included release and then requires payment", async () 
 
   const quota = await getUserReleaseQuota("user_1", client);
   assert.equal(quota.plan, "STANDARD");
-  assert.equal(quota.includedLimit, 1);
+  assert.equal(quota.includedLimit, 2);
   assert.equal(quota.used, 1);
-  assert.equal(quota.remaining, 0);
-  assert.equal(quota.requiresPaymentForNextRelease, true);
+  assert.equal(quota.remaining, 1);
+  assert.equal(quota.requiresPaymentForNextRelease, false);
 });
 
 test("PRO allows six included releases", async () => {
@@ -132,7 +132,7 @@ test("standalone paid release does not consume subscription quota", async () => 
 
   const quota = await getUserReleaseQuota("user_1", client);
   assert.equal(quota.used, 0);
-  assert.equal(quota.remaining, 1);
+  assert.equal(quota.remaining, 2);
   assert.equal(quota.requiresPaymentForNextRelease, false);
 });
 
@@ -148,6 +148,6 @@ test("partner-code paid release does not consume subscription quota", async () =
 
   const quota = await getUserReleaseQuota("user_1", client);
   assert.equal(quota.used, 0);
-  assert.equal(quota.remaining, 1);
+  assert.equal(quota.remaining, 2);
   assert.equal(quota.requiresPaymentForNextRelease, false);
 });

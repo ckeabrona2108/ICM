@@ -48,7 +48,7 @@ function toPlan(tariffId: string): EffectivePlan | null {
 function planReleaseLimit(plan: EffectivePlan): number | null {
   if (plan === "ENTERPRISE") return null;
   if (plan === "PRO") return 6;
-  return 1;
+  return 2;
 }
 
 function readSubmissionData(value: unknown): Record<string, unknown> | null {

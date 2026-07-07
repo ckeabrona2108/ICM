@@ -50,7 +50,7 @@ function includedLimitForPlan(plan: ReleaseQuotaPlan, active: boolean): number |
   if (!active) return 0;
   if (plan === "ENTERPRISE") return null;
   if (plan === "PRO") return 6;
-  return 1;
+  return 2;
 }
 
 function isInsidePeriod(value: Date, start: Date, end: Date): boolean {

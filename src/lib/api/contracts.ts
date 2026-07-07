@@ -153,7 +153,7 @@ export interface CurrentUserProfileResponse {
   avatarUrl: string | null;
   royaltyBalance: number;
   aiTokenBalance: number;
-  currentPlan: "FREE" | "PRO" | "ENTERPRISE";
+  currentPlan: "FREE" | "STANDARD" | "PRO" | "ENTERPRISE";
   hasActiveSubscription: boolean;
   hasAiStudioAccess: boolean;
   verification: import("@/lib/contract-verification-shared").ContractStatusPayload;

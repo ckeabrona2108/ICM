@@ -2,11 +2,12 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { hasAiStudioAccess, resolveAiStudioPlan } from "@/lib/ai-studio";
+import { hasAiStudioAccess } from "@/lib/ai-studio";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
+import { resolveActiveSubscriptionPlan } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
 import { updateUserAvatarSchema, validateAvatarDataUrl } from "@/lib/user-profile-policy";
 
@@ -72,11 +73,12 @@ async function mapCurrentUserProfile(userId: string) {
     avatarUrl: user.avatar,
     royaltyBalance: user.balance,
     aiTokenBalance,
-    currentPlan: resolveAiStudioPlan({
-      isSubscribed: user.isSubscribed,
-      subscribeLevel: user.subscribeLevel,
-      expiresAt: user.expiresAt
-    }),
+    currentPlan:
+      resolveActiveSubscriptionPlan({
+        isSubscribed: user.isSubscribed,
+        subscribeLevel: user.subscribeLevel,
+        expiresAt: user.expiresAt
+      }) ?? "FREE",
     hasActiveSubscription,
     hasAiStudioAccess: hasAiStudioAccess({
       isSubscribed: user.isSubscribed,

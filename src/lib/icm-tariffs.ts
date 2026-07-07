@@ -26,14 +26,14 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
   {
     id: "standard",
     badge: 153,
-    title: "STANDART",
+    title: "STANDARD",
     icon: "mic2",
     iconColor: "#a78bfa",
     description: "🎧 Твой первый шаг в индустрию — просто, быстро, без стресса.",
-    price: "₽350",
+    price: "₽550",
     period: "/ Мес",
     features: [
-      "🎵 1 релиз в месяц — идеально для старта",
+      "🎵 2 релиза в месяц — идеально для старта",
       "🚀 Доставка на площадки за 5 дней",
       "🌍 Твоя музыка появится на всех стримингах"
     ],

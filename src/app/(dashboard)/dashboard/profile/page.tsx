@@ -13,7 +13,7 @@ import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { prisma } from "@/lib/prisma";
 
 const SUBSCRIPTION_TARIFFS = {
-  standard: { label: "STANDART", amountRub: 350 },
+  standard: { label: "STANDARD", amountRub: 550 },
   pro: { label: "PRO", amountRub: 990 },
   enterprise: { label: "ENTERPRISE", amountRub: 1990 }
 } as const;
@@ -48,7 +48,7 @@ function normalizeUserPlan(value: unknown): string | null {
   if (plan === "professional" || plan === "pro") return "PRO";
   if (plan === "enterprise") return "ENTERPRISE";
   if (plan === "premium") return "PREMIUM";
-  if (plan === "standard") return "STANDART";
+  if (plan === "standard") return "STANDARD";
   return plan.toUpperCase();
 }
 

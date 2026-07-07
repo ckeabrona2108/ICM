@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 const RELEASE_PAYMENT_AMOUNT_RUB = 350;
 
 const TARIFFS: Record<"standard" | "pro" | "enterprise", { title: string; amountRub: number }> = {
-  standard: { title: "STANDART", amountRub: 350 },
+  standard: { title: "STANDARD", amountRub: 550 },
   pro: { title: "PRO", amountRub: 990 },
   enterprise: { title: "ENTERPRISE", amountRub: 1990 }
 };

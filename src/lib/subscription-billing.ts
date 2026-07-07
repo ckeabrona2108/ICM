@@ -11,8 +11,8 @@ export interface SubscriptionTariffConfig {
 export const subscriptionTariffs: SubscriptionTariffConfig[] = [
   {
     id: "standard",
-    title: "STANDART",
-    amountRub: 350,
+    title: "STANDARD",
+    amountRub: 550,
     plan: SubscriptionPlan.STANDARD
   },
   {

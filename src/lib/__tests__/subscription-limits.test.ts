@@ -94,7 +94,7 @@ function makePeriod() {
   return { startedAt, renewalAt };
 }
 
-test("user has 10 old releases and STANDARD subscription: included limit starts from 0/1", async () => {
+test("user has 10 old releases and STANDARD subscription: included limit starts from 0/2", async () => {
   const { startedAt, renewalAt } = makePeriod();
   const { prisma } = createMockPrisma({
     subscription: {
@@ -119,7 +119,7 @@ test("user has 10 old releases and STANDARD subscription: included limit starts 
   const decision = await checkReleaseCreationLimit(prisma, "user_1");
 
   assert.equal(decision.plan, "STANDARD");
-  assert.equal(decision.limits.releasesLimit, 1);
+  assert.equal(decision.limits.releasesLimit, 2);
   assert.equal(decision.usage.releasesUsed, 0);
   assert.equal(decision.allowed, true);
 });
@@ -154,7 +154,7 @@ test("user has 10 old releases and PRO subscription: included limit starts from 
   assert.equal(decision.allowed, true);
 });
 
-test("STANDARD first included release consumes limit: next one requires payment", async () => {
+test("STANDARD allows two included releases before payment is required", async () => {
   const { startedAt, renewalAt } = makePeriod();
   const { prisma } = createMockPrisma({
     subscription: {
@@ -166,7 +166,7 @@ test("STANDARD first included release consumes limit: next one requires payment"
     },
     usage: {
       id: "usage_3",
-      releasesUsed: 1,
+      releasesUsed: 2,
       aiRequestsUsedDay: 0,
       aiRequestsUsedMonth: 0,
       lastAiResetDay: new Date(nowStart()),
@@ -179,7 +179,7 @@ test("STANDARD first included release consumes limit: next one requires payment"
 
   assert.equal(decision.allowed, false);
   assert.equal(decision.code, "release_limit_reached");
-  assert.equal(decision.usage.releasesUsed, 1);
+  assert.equal(decision.usage.releasesUsed, 2);
 });
 
 test("STANDARD over limit decision does not mutate usage counters", async () => {
@@ -194,7 +194,7 @@ test("STANDARD over limit decision does not mutate usage counters", async () => 
     },
     usage: {
       id: "usage_4",
-      releasesUsed: 1,
+      releasesUsed: 2,
       aiRequestsUsedDay: 0,
       aiRequestsUsedMonth: 0,
       lastAiResetDay: new Date(nowStart()),
@@ -208,8 +208,8 @@ test("STANDARD over limit decision does not mutate usage counters", async () => 
   const after = state.usage?.releasesUsed;
 
   assert.equal(decision.allowed, false);
-  assert.equal(before, 1);
-  assert.equal(after, 1);
+  assert.equal(before, 2);
+  assert.equal(after, 2);
 });
 
 test("PRO after 6 included releases requires payment for next release", async () => {

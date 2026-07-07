@@ -59,6 +59,12 @@ export interface LimitDecision {
   };
 }
 
+export interface SubscriptionAccessInput {
+  isSubscribed: boolean;
+  subscribeLevel: string | null | undefined;
+  expiresAt: Date | null;
+}
+
 type SubscriptionPlan = "STANDARD" | "PRO" | "ENTERPRISE" | "LABEL";
 type SubscriptionStatus = "ACTIVE" | "TRIALING" | "CANCELED";
 
@@ -89,6 +95,23 @@ function mapSubscribeLevelToPlan(level: string | null | undefined): Subscription
   return "STANDARD";
 }
 
+export function hasActiveSubscriptionAccess(input: SubscriptionAccessInput): boolean {
+  if (!input.isSubscribed) return false;
+  if (!input.expiresAt) return true;
+  return input.expiresAt.getTime() > Date.now();
+}
+
+export function resolveActiveSubscriptionPlan(
+  input: SubscriptionAccessInput
+): EffectivePlan | null {
+  if (!hasActiveSubscriptionAccess(input)) return null;
+  return normalizePlan(
+    mapSubscribeLevelToPlan(
+      typeof input.subscribeLevel === "string" ? input.subscribeLevel : null
+    )
+  );
+}
+
 function getPlanLimits(plan: EffectivePlan, hasActiveSubscription: boolean): PlanLimits {
   if (plan === "ENTERPRISE") {
     return {
@@ -110,7 +133,7 @@ function getPlanLimits(plan: EffectivePlan, hasActiveSubscription: boolean): Pla
 
   if (plan === "STANDARD") {
     return {
-      releasesLimit: hasActiveSubscription ? 1 : 0,
+      releasesLimit: hasActiveSubscription ? 2 : 0,
       aiDayLimit: 0,
       aiMonthLimit: 0,
       aiEnabled: false

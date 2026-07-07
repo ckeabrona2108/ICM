@@ -16,7 +16,7 @@ const schema = z.object({
 });
 
 const TARIFFS: Record<"standard" | "pro" | "enterprise", { title: string; amountRub: number }> = {
-  standard: { title: "STANDART", amountRub: 350 },
+  standard: { title: "STANDARD", amountRub: 550 },
   pro: { title: "PRO", amountRub: 990 },
   enterprise: { title: "ENTERPRISE", amountRub: 1990 }
 };

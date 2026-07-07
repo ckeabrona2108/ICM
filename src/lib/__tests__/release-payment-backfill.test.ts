@@ -38,7 +38,7 @@ test("backfill assigns snapshots by plan window and release order", () => {
   assert.equal(updates[0]?.releaseId, "r1");
   assert.equal(updates[0]?.snapshot.plan, "STANDARD");
   assert.equal(updates[0]?.snapshot.releasesUsedAfterSubmit, 1);
-  assert.equal(updates[0]?.snapshot.releasesLimit, 1);
+  assert.equal(updates[0]?.snapshot.releasesLimit, 2);
 });
 
 test("backfill skips one-time paid releases and keeps next included", () => {

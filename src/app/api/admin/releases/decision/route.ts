@@ -32,6 +32,8 @@ function resetNeedsChangesFlags(roles: unknown): Record<string, unknown> | null 
   next.rejectionReason = null;
   next.moderationComment = null;
   next.moderatorComment = null;
+  next.lifecycleState = "approved";
+  delete next.submittedToModeration;
   const submission = asRecord(next.submissionData);
   if (submission) {
     next.submissionData = {
@@ -41,8 +43,10 @@ function resetNeedsChangesFlags(roles: unknown): Record<string, unknown> | null 
       rejectReason: null,
       rejectionReason: null,
       moderationComment: null,
-      moderatorComment: null
+      moderatorComment: null,
+      lifecycleState: "approved"
     };
+    delete (next.submissionData as Record<string, unknown>).submittedToModeration;
   }
   return next;
 }

@@ -31,7 +31,8 @@ const items = [
   { href: "/admin/catalog-sync", label: "Smart Catalog Sync", icon: BarChart3 },
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
-  { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard }
+  { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard },
+  { href: "/admin/playlists", label: "Плейлисты", icon: Music2 }
 ];
 
 export function AdminSidebar() {

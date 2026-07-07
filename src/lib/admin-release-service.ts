@@ -57,6 +57,8 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
   next.rejectionReason = null;
   next.moderationComment = null;
   next.moderatorComment = null;
+  next.lifecycleState = "approved";
+  delete next.submittedToModeration;
 
   const submission = asRecord(next.submissionData);
   if (submission) {
@@ -67,8 +69,10 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
       rejectReason: null,
       rejectionReason: null,
       moderationComment: null,
-      moderatorComment: null
+      moderatorComment: null,
+      lifecycleState: "approved"
     };
+    delete (next.submissionData as Record<string, unknown>).submittedToModeration;
   }
 
   return next as Prisma.InputJsonValue;

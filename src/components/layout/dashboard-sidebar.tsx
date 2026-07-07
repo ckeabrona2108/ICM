@@ -158,6 +158,12 @@ function buildNav(counts: {
       label: "Smart Links",
       icon: ExternalLink
     },
+    {
+      type: "leaf",
+      href: "/dashboard/playlists",
+      label: "Плейлисты",
+      icon: Music2
+    },
     { type: "leaf", href: "/dashboard/faq", label: "FAQ", icon: HelpCircle },
     {
       type: "leaf",

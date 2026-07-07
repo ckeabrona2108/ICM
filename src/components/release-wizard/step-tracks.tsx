@@ -645,14 +645,14 @@ export function StepTracks() {
                   key={t.id}
                   className="overflow-hidden rounded-lg border border-white/[0.05] bg-white/[0.02]"
                 >
-                  <div className="flex items-center gap-2 px-3 py-2.5 sm:gap-3">
-                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-white/[0.04] text-[11px] tabular-nums text-white/55">
+                  <div className="flex items-center gap-3 px-4 py-3.5 sm:gap-4">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-white/[0.04] text-xs tabular-nums text-white/55">
                       {String(i + 1).padStart(2, "0")}
                     </span>
-                    <Music2 className="h-3.5 w-3.5 shrink-0 text-white/45" />
+                    <Music2 className="h-4 w-4 shrink-0 text-white/45" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] text-white/85">{displayTitle}</p>
-                      <p className="truncate text-[11px] text-white/40">{t.name}</p>
+                      <p className="truncate text-[14px] text-white/85">{displayTitle}</p>
+                      <p className="truncate text-xs text-white/40">{t.name}</p>
                     </div>
 
                     {!t.hasAudio ? (

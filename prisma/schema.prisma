@@ -565,6 +565,7 @@ model release {
   unmatched_analytics_imports  unmatched_analytics_imports[]  @relation("unmatched_analytics_imports_resolved_release")
   user                         user                           @relation(fields: [userId], references: [id], onDelete: Cascade, map: "release_userId_user_id_fk")
   track                        track[]
+  playlist_placements          playlist_placements[]
 
   @@schema("icecream")
 }
@@ -752,6 +753,7 @@ model user {
   user_commission_rates        user_commission_rates[]
   verification                 verification[]
   verification_tokens          verification_tokens[]
+  playlist_placements          playlist_placements[]
 
   @@schema("icecream")
 }

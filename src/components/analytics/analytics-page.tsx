@@ -11,7 +11,6 @@ import {
 } from "@/components/analytics/analytics-filters";
 import { AnalyticsOverviewCard } from "@/components/analytics/analytics-overview-card";
 import { AnalyticsReleaseTable } from "@/components/analytics/analytics-release-table";
-import { getCachedRequest } from "@/lib/client-request-cache";
 import type {
   AnalyticsOverviewResponse,
   AnalyticsReleaseDetailsResponse,
@@ -52,6 +51,7 @@ function buildOverviewUrl(filters: AnalyticsFilterState): string {
 
 function buildReleasesUrl(filters: AnalyticsFilterState): string {
   const params = new URLSearchParams();
+  params.set("days", String(filters.days));
   if (filters.country.trim()) params.set("country", filters.country.trim());
   if (filters.upc.trim()) params.set("upc", filters.upc.trim());
   if (filters.platform.trim()) params.set("platform", filters.platform.trim());
@@ -89,7 +89,7 @@ export function AnalyticsPage() {
   const [detailsError, setDetailsError] = React.useState<string | null>(null);
   const releasesUrl = React.useMemo(
     () => buildReleasesUrl(filters),
-    [filters.country, filters.platform, filters.upc]
+    [filters.country, filters.days, filters.platform, filters.upc]
   );
   const overviewUrl = React.useMemo(
     () => buildOverviewUrl(filters),
@@ -132,28 +132,20 @@ export function AnalyticsPage() {
     const run = async () => {
       setLoadingReleases(true);
       setReleasesError(null);
+      setReleases([]);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
       try {
-        const payload = await getCachedRequest(
-          `analytics:releases:${releasesUrl}`,
-          30_000,
-          async () => {
-            const response = await fetch(releasesUrl, { method: "GET" });
-            const parsed = (await response.json().catch(() => null)) as
-              | AnalyticsReleaseListItemResponse[]
-              | { error?: string }
-              | null;
-            if (!response.ok || !Array.isArray(parsed)) {
-              throw new Error(
-                parsed && !Array.isArray(parsed) && "error" in parsed
-                  ? parsed.error || "Не удалось загрузить список релизов"
-                  : "Не удалось загрузить список релизов"
-              );
-            }
-            return parsed;
-          }
-        );
+        const response = await fetch(releasesUrl, {
+          method: "GET",
+          signal: controller.signal
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | AnalyticsReleaseListItemResponse[]
+          | { error?: string }
+          | null;
 
-        if (!Array.isArray(payload)) {
+        if (!response.ok || !Array.isArray(payload)) {
           throw new Error("Не удалось загрузить список релизов");
         }
 
@@ -161,8 +153,15 @@ export function AnalyticsPage() {
         setReleases(payload);
       } catch (error) {
         if (cancelled) return;
-        setReleasesError(error instanceof Error ? error.message : "Ошибка загрузки релизов");
+        setReleasesError(
+          error instanceof DOMException && error.name === "AbortError"
+            ? "Загрузка списка релизов заняла слишком много времени"
+            : error instanceof Error
+              ? error.message
+              : "Ошибка загрузки релизов"
+        );
       } finally {
+        window.clearTimeout(timeoutId);
         if (!cancelled) setLoadingReleases(false);
       }
     };
@@ -174,34 +173,40 @@ export function AnalyticsPage() {
   }, [releasesUrl]);
 
   React.useEffect(() => {
+    if (!filters.releaseId) return;
+    if (releases.some((release) => release.release_id === filters.releaseId)) return;
+    setFilters((prev) => {
+      if (!prev.releaseId) return prev;
+      return {
+        ...prev,
+        releaseId: ""
+      };
+    });
+  }, [filters.releaseId, releases]);
+
+  React.useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
       setLoadingOverview(true);
       setOverviewError(null);
+      setOverview(null);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
 
       try {
-        const payload = await getCachedRequest(
-          `analytics:overview:${overviewUrl}`,
-          30_000,
-          async () => {
-            const response = await fetch(overviewUrl, { method: "GET" });
-            const parsed = (await response.json().catch(() => null)) as
-              | AnalyticsOverviewResponse
-              | { error?: string }
-              | null;
-
-            if (!response.ok || !parsed || Array.isArray(parsed) || !("chart" in parsed)) {
-              throw new Error(
-                parsed && !Array.isArray(parsed) && "error" in parsed
-                  ? parsed.error || "Не удалось загрузить аналитику"
-                  : "Не удалось загрузить аналитику"
-              );
-            }
-            return parsed;
-          }
-        );
+        const response = await fetch(overviewUrl, {
+          method: "GET",
+          signal: controller.signal
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | AnalyticsOverviewResponse
+          | { error?: string }
+          | null;
         if (!payload || Array.isArray(payload) || !("chart" in payload)) {
+          throw new Error("Не удалось загрузить аналитику");
+        }
+        if (!response.ok) {
           throw new Error("Не удалось загрузить аналитику");
         }
 
@@ -209,8 +214,15 @@ export function AnalyticsPage() {
         setOverview(payload);
       } catch (error) {
         if (cancelled) return;
-        setOverviewError(error instanceof Error ? error.message : "Ошибка загрузки аналитики");
+        setOverviewError(
+          error instanceof DOMException && error.name === "AbortError"
+            ? "Загрузка аналитики заняла слишком много времени"
+            : error instanceof Error
+              ? error.message
+              : "Ошибка загрузки аналитики"
+        );
       } finally {
+        window.clearTimeout(timeoutId);
         if (!cancelled) setLoadingOverview(false);
       }
     };
@@ -233,30 +245,22 @@ export function AnalyticsPage() {
     const run = async () => {
       setLoadingDetails(true);
       setDetailsError(null);
+      setReleaseDetails(null);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
       try {
-        const payload = await getCachedRequest(
-          `analytics:details:${detailsUrl}`,
-          30_000,
-          async () => {
-            const response = await fetch(detailsUrl, {
-              method: "GET"
-            });
-            const parsed = (await response.json().catch(() => null)) as
-              | AnalyticsReleaseDetailsResponse
-              | { error?: string }
-              | null;
-
-            if (!response.ok || !parsed || Array.isArray(parsed) || !("release_id" in parsed)) {
-              throw new Error(
-                parsed && !Array.isArray(parsed) && "error" in parsed
-                  ? parsed.error || "Не удалось загрузить детали релиза"
-                  : "Не удалось загрузить детали релиза"
-              );
-            }
-            return parsed;
-          }
-        );
+        const response = await fetch(detailsUrl, {
+          method: "GET",
+          signal: controller.signal
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | AnalyticsReleaseDetailsResponse
+          | { error?: string }
+          | null;
         if (!payload || Array.isArray(payload) || !("release_id" in payload)) {
+          throw new Error("Не удалось загрузить детали релиза");
+        }
+        if (!response.ok) {
           throw new Error("Не удалось загрузить детали релиза");
         }
 
@@ -264,8 +268,15 @@ export function AnalyticsPage() {
         setReleaseDetails(payload);
       } catch (error) {
         if (cancelled) return;
-        setDetailsError(error instanceof Error ? error.message : "Ошибка загрузки деталей релиза");
+        setDetailsError(
+          error instanceof DOMException && error.name === "AbortError"
+            ? "Загрузка деталей релиза заняла слишком много времени"
+            : error instanceof Error
+              ? error.message
+              : "Ошибка загрузки деталей релиза"
+        );
       } finally {
+        window.clearTimeout(timeoutId);
         if (!cancelled) setLoadingDetails(false);
       }
     };
@@ -286,12 +297,11 @@ export function AnalyticsPage() {
       <AnalyticsFilters
         value={filters}
         releases={releases}
-        platforms={platformOptions}
         onChange={setFilters}
       />
 
       <div className="mt-4 space-y-4">
-        <AnalyticsOverviewCard data={overview} />
+        <AnalyticsOverviewCard data={overview} loading={loadingOverview} />
 
         <PageSection>
           {loadingOverview ? (

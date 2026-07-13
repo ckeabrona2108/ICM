@@ -168,6 +168,27 @@ test("mapAdminReleaseDetails includes tracks, stores, territories and moderation
   assert.equal(details.tracks[0]?.ai_usage.generated_music_only, true);
 });
 
+test("mapAdminReleaseDetails prefers lifecycleState draft over legacy moderation status", () => {
+  const details = mapAdminReleaseDetails({
+    id: "rel_draft",
+    userId: "user_1",
+    title: "Draft Title",
+    status: "MODERATION",
+    confirmed: false,
+    upc: null,
+    roles: {
+      lifecycleState: "draft",
+      submissionData: {
+        title: "Draft Title"
+      }
+    },
+    priority: false,
+    tracks: []
+  } as never);
+
+  assert.equal(details.status, "draft");
+});
+
 test("resolveAdminReleaseFileTargetFromRelease resolves known file ids only", () => {
   const release = {
     tracks: [{ id: "trk_1", trackNumber: 1 }],

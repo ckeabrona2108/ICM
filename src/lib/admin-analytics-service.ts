@@ -14,6 +14,11 @@ import {
   recomputeSummariesForReportDate,
   relinkUnmatchedAnalyticsRowToRelease
 } from "@/lib/analytics-import-service";
+import {
+  buildAnalyticsPeriodStorageTag,
+  extractAnalyticsPeriodDaysFromStoragePath,
+  normalizeAnalyticsPeriodDays
+} from "@/lib/analytics-period";
 import { isAnyPrismaTableMissingError, isPrismaTableMissingError } from "@/lib/prisma-errors";
 
 const IMPORT_STORAGE_DIR = "/private/tmp/icm-analytics-imports";
@@ -143,9 +148,12 @@ function statusByResult(matched_rows: number, unmatched_rows: number): Analytics
 export async function storeAnalyticsCsvFile(params: {
   source_file_name: string;
   csvText: string;
+  period_days?: number;
 }): Promise<string> {
   await fs.mkdir(IMPORT_STORAGE_DIR, { recursive: true });
-  const safeName = `${Date.now()}-${params.source_file_name.replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
+  const safeName = `${Date.now()}-${buildAnalyticsPeriodStorageTag(
+    params.period_days
+  )}-${params.source_file_name.replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
   const fullPath = `${IMPORT_STORAGE_DIR}/${safeName}`;
   await fs.writeFile(fullPath, params.csvText, "utf8");
   return fullPath;
@@ -203,7 +211,7 @@ export async function importAnalyticsCsvDirect(params: {
     prisma: params.prisma,
     source_file_name: params.source_file_name,
     csvText: params.csvText,
-    period_days: params.period_days ?? 30
+    period_days: normalizeAnalyticsPeriodDays(params.period_days)
   });
 }
 
@@ -251,12 +259,13 @@ export async function processAnalyticsImportJob(params: {
 
   try {
     const csvText = params.csvText ?? (await readJobCsv(job));
+    const periodDays = extractAnalyticsPeriodDaysFromStoragePath(job.stored_file_path);
 
     const result = await importAnalyticsCsvReport({
       prisma: params.prisma,
       source_file_name: job.source_file_name,
       csvText,
-      period_days: 30,
+      period_days: periodDays,
       import_job_id: job.id
     });
 

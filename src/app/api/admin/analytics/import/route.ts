@@ -10,6 +10,7 @@ import {
   processAnalyticsImportJob,
   storeAnalyticsCsvFile
 } from "@/lib/admin-analytics-service";
+import { normalizeAnalyticsPeriodDays } from "@/lib/analytics-period";
 import { prisma } from "@/lib/prisma";
 
 const INLINE_PROCESS_MAX_BYTES = 2 * 1024 * 1024;
@@ -25,6 +26,7 @@ export async function POST(request: Request) {
 
   let sourceFileName = "";
   let csvText = "";
+  let periodDays = 30;
 
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -33,6 +35,10 @@ export async function POST(request: Request) {
       const formData = await request.formData();
       const file = formData.get("file");
       const fileName = formData.get("fileName");
+      const periodField = formData.get("period_days") ?? formData.get("periodDays");
+      periodDays = normalizeAnalyticsPeriodDays(
+        typeof periodField === "string" ? periodField : undefined
+      );
 
       if (!(file instanceof File)) {
         return NextResponse.json(
@@ -49,11 +55,14 @@ export async function POST(request: Request) {
             sourceFileName?: string;
             fileName?: string;
             csvText?: string;
+            period_days?: number;
+            periodDays?: number;
           }
         | null;
 
       sourceFileName = String(payload?.sourceFileName ?? payload?.fileName ?? "").trim();
       csvText = String(payload?.csvText ?? "");
+      periodDays = normalizeAnalyticsPeriodDays(payload?.period_days ?? payload?.periodDays);
     }
   } catch {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
@@ -67,7 +76,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const storedFilePath = await storeAnalyticsCsvFile({ source_file_name: sourceFileName, csvText });
+    const storedFilePath = await storeAnalyticsCsvFile({
+      source_file_name: sourceFileName,
+      csvText,
+      period_days: periodDays
+    });
     const sizeBytes = Buffer.byteLength(csvText, "utf8");
     try {
       const job = await createAnalyticsImportJob({
@@ -89,6 +102,7 @@ export async function POST(request: Request) {
             ok: true,
             mode: "inline",
             job_id: job.id,
+            period_days: periodDays,
             report_date: job.report_date.toISOString().slice(0, 10),
             result
           },
@@ -106,6 +120,7 @@ export async function POST(request: Request) {
           ok: true,
           mode: "background",
           job_id: job.id,
+          period_days: periodDays,
           report_date: job.report_date.toISOString().slice(0, 10),
           message:
             "Import job created and scheduled. Poll import status in /api/admin/analytics/imports."
@@ -121,13 +136,15 @@ export async function POST(request: Request) {
         const result = await importAnalyticsCsvDirect({
           prisma,
           source_file_name: sourceFileName,
-          csvText
+          csvText,
+          period_days: periodDays
         });
 
         return NextResponse.json(
           {
             ok: true,
             mode: "direct_fallback",
+            period_days: periodDays,
             report_date: result.report_date,
             result,
             message:

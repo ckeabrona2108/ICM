@@ -8,14 +8,36 @@ function formatCount(value: number): string {
   return value.toLocaleString("ru-RU");
 }
 
-function AnalyticsOverviewCardBase({ data }: { data: AnalyticsOverviewResponse | null }) {
+function AnalyticsOverviewValue({
+  value,
+  loading
+}: {
+  value: number | null | undefined;
+  loading: boolean;
+}) {
+  if (loading) {
+    return <span className="text-white/45">—</span>;
+  }
+
+  return <>{formatCount(value ?? 0)}</>;
+}
+
+function AnalyticsOverviewCardBase({
+  data,
+  loading = false
+}: {
+  data: AnalyticsOverviewResponse | null;
+  loading?: boolean;
+}) {
   return (
     <section className="rounded-2xl border border-white/[0.1] bg-[#13151d]/85 p-4 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)] backdrop-blur-xl sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-[20px] font-semibold text-white">Прослушивания</h2>
           <p className="mt-1 text-[13px] font-medium text-white/60">
-            {data?.latest_report_date
+            {loading
+              ? "Загружаем данные…"
+              : data?.latest_report_date
               ? `Последний отчёт: ${data.latest_report_date}`
               : "Данных пока нет"}
           </p>
@@ -25,7 +47,7 @@ function AnalyticsOverviewCardBase({ data }: { data: AnalyticsOverviewResponse |
             Ваша топ площадка 🎉
           </p>
           <p className="mt-1 text-[14px] font-semibold text-white">
-            {data?.top_platform ?? "—"}
+            {loading ? "Загрузка…" : (data?.top_platform ?? "—")}
           </p>
         </div>
       </div>
@@ -36,7 +58,7 @@ function AnalyticsOverviewCardBase({ data }: { data: AnalyticsOverviewResponse |
             Прослушивания больше 30 секунд
           </p>
           <p className="mt-2 text-[clamp(1.1rem,2.2vw,1.55rem)] font-semibold leading-[1.15] text-white">
-            {formatCount(data?.total_pay_streams ?? 0)}
+            <AnalyticsOverviewValue value={data?.total_pay_streams} loading={loading} />
           </p>
         </article>
 
@@ -45,7 +67,7 @@ function AnalyticsOverviewCardBase({ data }: { data: AnalyticsOverviewResponse |
             Все прослушивания
           </p>
           <p className="mt-2 text-[clamp(1.1rem,2.2vw,1.55rem)] font-semibold leading-[1.15] text-white">
-            {formatCount(data?.total_streams ?? 0)}
+            <AnalyticsOverviewValue value={data?.total_streams} loading={loading} />
           </p>
         </article>
       </div>

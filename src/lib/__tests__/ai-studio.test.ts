@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   formatAiTokenAmount,
   formatTokenUsdValue,
+  getAiStudioSubscriptionBonusTokensByTariffId,
   getAiStudioEntitlements,
   hasAiStudioAccess,
   resolveAiStudioGenerationCostTokens,
@@ -21,7 +22,7 @@ test("professional subscriber gets PRO access and limits", () => {
   assert.equal(hasAiStudioAccess(input), true);
 
   const entitlements = getAiStudioEntitlements(input);
-  assert.equal(entitlements.monthlyBonusTokens, 500);
+  assert.equal(entitlements.monthlyBonusTokens, 1000);
   assert.equal(entitlements.dailyLimits.imagesPerDay, 20);
   assert.equal(entitlements.dailyLimits.audioPerDay, 10);
   assert.equal(entitlements.dailyLimits.videoPerDay, 5);
@@ -68,6 +69,13 @@ test("expired or inactive subscriptions lose access", () => {
 test("token formatting stays human readable", () => {
   assert.equal(formatAiTokenAmount(4850).replace(/\s/g, ""), "4850");
   assert.equal(formatTokenUsdValue(10000), "$10.00");
+});
+
+test("subscription bonus tokens respect billing period for PRO and ENTERPRISE", () => {
+  assert.equal(getAiStudioSubscriptionBonusTokensByTariffId("pro", "monthly"), 1000);
+  assert.equal(getAiStudioSubscriptionBonusTokensByTariffId("enterprise", "monthly"), 2500);
+  assert.equal(getAiStudioSubscriptionBonusTokensByTariffId("pro", "yearly"), 5000);
+  assert.equal(getAiStudioSubscriptionBonusTokensByTariffId("enterprise", "yearly"), 20000);
 });
 
 test("video duration pricing matches the AI Studio matrix", () => {

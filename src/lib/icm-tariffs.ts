@@ -1,5 +1,10 @@
 /** Публичные тарифы ICM (как на лендинге) — единый источник для сайта и ЛК */
 
+import {
+  getSubscriptionTariffConfig,
+  type SubscriptionBillingPeriod
+} from "@/lib/subscription-billing";
+
 export type IcmTariffIconId = "mic2" | "camera" | "dollar";
 
 export interface IcmTariffTier {
@@ -16,22 +21,55 @@ export interface IcmTariffTier {
   };
   price: string;
   period: string;
+  secondaryPrice?: string;
+  savingsNote?: string;
+  billingBadge?: {
+    label: string;
+    tone: "emerald" | "violet";
+  };
   features: string[];
   footer: string;
   button: { label: string; className: string };
   popular?: boolean;
 }
 
-export const ICM_TARIFFS: IcmTariffTier[] = [
-  {
+function formatRub(value: number): string {
+  return `₽${new Intl.NumberFormat("ru-RU").format(value)}`;
+}
+
+export function getIcmTariffs(
+  billingPeriod: SubscriptionBillingPeriod = "monthly"
+): IcmTariffTier[] {
+  const standardTariff = getSubscriptionTariffConfig("standard", billingPeriod);
+  const proTariff = getSubscriptionTariffConfig("pro", billingPeriod);
+  const enterpriseTariff = getSubscriptionTariffConfig("enterprise", billingPeriod);
+
+  if (!standardTariff || !proTariff || !enterpriseTariff) {
+    return [];
+  }
+
+  return [
+    {
     id: "standard",
     badge: 153,
     title: "STANDARD",
     icon: "mic2",
     iconColor: "#a78bfa",
     description: "🎧 Твой первый шаг в индустрию — просто, быстро, без стресса.",
-    price: "₽550",
-    period: "/ Мес",
+    price: formatRub(standardTariff.amountRub),
+    period: billingPeriod === "yearly" ? "/ Год" : "/ Мес",
+    secondaryPrice:
+      billingPeriod === "yearly"
+        ? `или ${formatRub(standardTariff.yearlyMonthlyEquivalentRub)}/мес`
+        : undefined,
+    savingsNote:
+      billingPeriod === "yearly"
+        ? `Экономия ${formatRub(standardTariff.yearlySavingsRub)}`
+        : undefined,
+    billingBadge:
+      billingPeriod === "yearly"
+        ? { label: standardTariff.yearlyBadge, tone: "emerald" }
+        : undefined,
     features: [
       "🎵 2 релиза в месяц — идеально для старта",
       "🚀 Доставка на площадки за 5 дней",
@@ -52,17 +90,34 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
     iconColor: "#fb923c",
     description: "🔥 Больше релизов — больше шансов залететь. Для тех, кто настроен на результат.",
     aiGiftDescription:
-      "🎁 1 000 AI-токенов в подарок. Генерируйте изображения, видео, аудио и общайтесь с AI без дополнительных расходов в первый месяц.",
+      billingPeriod === "yearly"
+        ? "🎁 5 000 AI-токенов в подарок"
+        : "🎁 1 000 AI-токенов в подарок. Генерируйте изображения, видео, аудио и общайтесь с AI без дополнительных расходов в первый месяц.",
     promoBadge: {
-      label: "🎁 +1 000 AI-токенов",
+      label: billingPeriod === "yearly" ? "🎁 5 000 AI-токенов" : "🎁 +1 000 AI-токенов",
       tone: "emerald"
     },
-    price: "₽990",
-    period: "/ Мес",
+    price: formatRub(proTariff.amountRub),
+    period: billingPeriod === "yearly" ? "/ Год" : "/ Мес",
+    secondaryPrice:
+      billingPeriod === "yearly"
+        ? `или ${formatRub(proTariff.yearlyMonthlyEquivalentRub)}/мес`
+        : undefined,
+    savingsNote:
+      billingPeriod === "yearly"
+        ? `Экономия ${formatRub(proTariff.yearlySavingsRub)}`
+        : undefined,
+    billingBadge:
+      billingPeriod === "yearly"
+        ? { label: proTariff.yearlyBadge, tone: "violet" }
+        : undefined,
     features: [
       "🎵 До 6 релизов в месяц — масштабируйся",
-      "⚡ Быстрая выгрузка — до 3 дней",
-      "🤝 Поддержка на каждом этапе"
+      "⚡ Выгрузка до 3-х дней",
+      "🎨 Создавай обложки и арты",
+      "🎵 Генерируй идеи и тексты песен",
+      "🤖 Общайся с AI без доплат",
+      "⚡ Доступ ко всем AI-инструментам"
     ],
     footer: "🎯 Делай музыку чаще — расти быстрее.",
     button: {
@@ -80,18 +135,35 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
     iconColor: "#7b61ff",
     description: "👑 Максимум возможностей для серьёзных артистов. Уровень, где начинается настоящий рост.",
     aiGiftDescription:
-      "🎁 2 500 AI-токенов в подарок. Максимальный бонус для профессиональной работы с AI Студией: больше генераций, больше возможностей, больше результата.",
+      billingPeriod === "yearly"
+        ? "🔥 20 000 AI-токенов включено"
+        : "🎁 2 500 AI-токенов в подарок. Максимальный бонус для профессиональной работы с AI Студией: больше генераций, больше возможностей, больше результата.",
     promoBadge: {
-      label: "🔥 +2 500 AI-токенов",
+      label: billingPeriod === "yearly" ? "🔥 20 000 AI-токенов" : "🔥 +2 500 AI-токенов",
       tone: "violet"
     },
-    price: "₽1990",
-    period: "/ Мес",
+    price: formatRub(enterpriseTariff.amountRub),
+    period: billingPeriod === "yearly" ? "/ Год" : "/ Мес",
+    secondaryPrice:
+      billingPeriod === "yearly"
+        ? `или ${formatRub(enterpriseTariff.yearlyMonthlyEquivalentRub)}/мес`
+        : undefined,
+    savingsNote:
+      billingPeriod === "yearly"
+        ? `Экономия ${formatRub(enterpriseTariff.yearlySavingsRub)}`
+        : undefined,
+    billingBadge:
+      billingPeriod === "yearly"
+        ? { label: enterpriseTariff.yearlyBadge, tone: "violet" }
+        : undefined,
     features: [
       "♾️ Безлимитные релизы",
       "⚡ Выгрузка от 24 часов",
       "🛡️ Приоритетная поддержка",
-      "✨ Доп. функции для продвижения"
+      "🎨 Генерация изображений",
+      "🎵 AI для музыки",
+      "🎬 Генерация видео",
+      "🤖 Общение с AI без доплат"
     ],
     footer: "💎 Делай сколько хочешь — мы всё вывезем.",
     button: {
@@ -100,4 +172,7 @@ export const ICM_TARIFFS: IcmTariffTier[] = [
         "bg-[#7b61ff] hover:bg-[#6a4ff0] shadow-[0_8px_24px_-8px_rgba(123,97,255,0.6)]"
     }
   }
-];
+  ];
+}
+
+export const ICM_TARIFFS: IcmTariffTier[] = getIcmTariffs("monthly");

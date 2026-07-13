@@ -147,7 +147,7 @@ interface FileItem {
   download_url: string | null;
 }
 
-type ActionKind = "approve" | "reject" | "delete";
+type ActionKind = "approve" | "reject" | "delete" | "payment";
 
 const boolView = (value: boolean) =>
   value ? (
@@ -283,6 +283,29 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
       router.refresh();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Не удалось удалить релиз.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const togglePaymentStatus = async (paid: boolean) => {
+    setBusy("payment");
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${details.id}/payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paid })
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Не удалось обновить статус оплаты.");
+      router.refresh();
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? actionError.message
+          : "Не удалось обновить статус оплаты."
+      );
     } finally {
       setBusy(null);
     }
@@ -473,6 +496,17 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         >
           <X className="h-4 w-4" />
           Отклонить
+        </button>
+        <button
+          type="button"
+          disabled={busy !== null}
+          onClick={() => {
+            void togglePaymentStatus(details.payment_status !== "paid");
+          }}
+          className="inline-flex h-10 items-center gap-1 rounded-lg border border-sky-400/30 bg-sky-500/10 px-3 text-[13px] font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:opacity-50"
+        >
+          <CheckCircle2 className="h-4 w-4" />
+          {details.payment_status === "paid" ? "Снять оплату" : "Отметить как оплачено"}
         </button>
         <button
           type="button"

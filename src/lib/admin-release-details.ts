@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import {
+  getReleaseLifecycleStatus,
+  shouldTreatReleaseAsApproved
+} from "@/lib/release-counts";
+import {
   ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES,
   resolveRenderableStoredFileUrl
 } from "@/lib/s3";
@@ -703,8 +707,31 @@ function inflateTrackRow(value: unknown): Record<string, unknown> {
   return roles ? { ...roles, ...track } : track;
 }
 
-function resolveReleaseStatus(raw: unknown): string {
-  const normalized = (asString(raw) ?? "").toLowerCase();
+function resolveReleaseStatus(input: {
+  status: unknown;
+  roles: unknown;
+  confirmed?: boolean | null;
+  upc?: string | null;
+}): string {
+  if (
+    shouldTreatReleaseAsApproved({
+      status: asString(input.status),
+      confirmed: input.confirmed,
+      upc: input.upc,
+      roles: input.roles
+    })
+  ) {
+    return "approved";
+  }
+
+  const lifecycle = getReleaseLifecycleStatus(asString(input.status), input.roles);
+  if (lifecycle === "changes_required") return "changes_required";
+  if (lifecycle === "approved" || lifecycle === "archived") return "approved";
+  if (lifecycle === "draft") return "draft";
+  if (lifecycle === "pending_verification") return "pending_verification";
+  if (lifecycle === "moderation") return "moderation";
+
+  const normalized = (asString(input.status) ?? "").toLowerCase();
   if (normalized === "moderating" || normalized === "moderation") return "moderation";
   if (normalized === "rejected") return "changes_required";
   if (normalized === "approved") return "approved";
@@ -974,7 +1001,12 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
 
   return {
     id: asString(release.id) ?? "",
-    status: resolveReleaseStatus(release.status),
+    status: resolveReleaseStatus({
+      status: release.status,
+      roles: release.roles,
+      confirmed: Boolean(release.confirmed),
+      upc: asString(submissionData?.upc) ?? asString(release.upc)
+    }),
     payment_status: Boolean(release.confirmed) ? "paid" : "unpaid",
     payment_label: Boolean(release.confirmed) ? "Оплачен" : "Не оплачен",
     payment_usage: null,

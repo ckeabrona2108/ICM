@@ -23,6 +23,10 @@ import {
   buildStandalonePaymentUsage,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
+import {
+  calculateSubscriptionEndDate,
+  normalizeSubscriptionBillingPeriod
+} from "@/lib/subscription-billing";
 import { sendAiTokensCreditedEmail, sendAiTokensPendingEmail } from "@/lib/user-event-email";
 import { getYooKassaPaymentStatus, type YooKassaPaymentStatus } from "@/lib/yookassa";
 
@@ -90,7 +94,8 @@ function readAiTokenPaymentSummary(metadata: unknown): PaymentOrderResult["payme
 function readSubscriptionPaymentSummary(metadata: unknown): PaymentOrderResult["paymentSummary"] {
   const payload = readMetadata(metadata);
   const tariffId = typeof payload.tariffId === "string" ? payload.tariffId.trim().toLowerCase() : "standard";
-  const bonusTokens = getAiStudioSubscriptionBonusTokensByTariffId(tariffId);
+  const billingPeriod = normalizeSubscriptionBillingPeriod(payload.billingPeriod);
+  const bonusTokens = getAiStudioSubscriptionBonusTokensByTariffId(tariffId, billingPeriod);
   if (bonusTokens <= 0) {
     return null;
   }
@@ -282,10 +287,19 @@ async function applyConfirmedOrder(params: {
 
   if (params.order.type === "subscription") {
     const now = new Date();
-    const expiresAt = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 30);
     const tariffId = typeof metadata.tariffId === "string" ? metadata.tariffId.trim().toLowerCase() : "standard";
+    const billingPeriod = normalizeSubscriptionBillingPeriod(metadata.billingPeriod);
     const providerPaymentId =
       typeof metadata.providerPaymentId === "string" ? metadata.providerPaymentId.trim() : "";
+    const currentSubscriptionUser = await params.prisma.user.findFirst({
+      where: { id: params.order.userId },
+      select: { expiresAt: true }
+    });
+    const expiresAt = calculateSubscriptionEndDate({
+      billingPeriod,
+      now,
+      currentEnd: currentSubscriptionUser?.expiresAt ?? null
+    });
     await params.prisma.user.updateMany({
       where: { id: params.order.userId },
       data: {
@@ -312,7 +326,8 @@ async function applyConfirmedOrder(params: {
         const pendingResult = await queueAiTokensForSubscriptionBonus({
           prisma: tx,
           userId: params.order.userId,
-          tariffId
+          tariffId,
+          billingPeriod
         });
         if (!pendingResult.ok) {
           throw new Error(pendingResult.error);
@@ -354,6 +369,7 @@ async function applyConfirmedOrder(params: {
       prisma: params.prisma,
       userId: params.order.userId,
       tariffId,
+      billingPeriod,
       providerPaymentId: providerPaymentId || null,
       orderId: params.order.id
     });
@@ -438,10 +454,12 @@ export async function activateAIStudio(params: { prisma: PrismaClient }) {
       );
     } else if (order.type === "subscription") {
       const tariffId = typeof metadata.tariffId === "string" ? metadata.tariffId.trim().toLowerCase() : "standard";
+      const billingPeriod = normalizeSubscriptionBillingPeriod(metadata.billingPeriod);
       const result = await grantAiTokensForSubscriptionBonus({
         prisma: params.prisma,
         userId: order.userId,
         tariffId,
+        billingPeriod,
         providerPaymentId: providerPaymentId || null,
         orderId: order.id
       });

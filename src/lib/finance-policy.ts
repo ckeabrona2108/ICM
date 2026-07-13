@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const financeReportStatusSchema = z.enum(["ready_to_confirm", "agreed"]);
+export const financeReportStatusSchema = z.enum(["ready_to_confirm", "changes_requested", "agreed"]);
 export type FinanceReportStatus = z.infer<typeof financeReportStatusSchema>;
 
 const payoutMethodSchema = z.enum(["bank_transfer", "paypal", "other"]);

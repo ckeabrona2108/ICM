@@ -773,8 +773,9 @@ export async function queueAiTokensForSubscriptionBonus(params: {
   prisma: AiTokenMutationClient;
   userId: string;
   tariffId: string;
+  billingPeriod?: "monthly" | "yearly";
 }): Promise<AiPendingTokenMutationSuccess | AiTokenMutationFailure> {
-  const bonusTokens = getAiStudioSubscriptionBonusTokensByTariffId(params.tariffId);
+  const bonusTokens = getAiStudioSubscriptionBonusTokensByTariffId(params.tariffId, params.billingPeriod ?? "monthly");
   if (bonusTokens <= 0) {
     return {
       ok: true,
@@ -808,10 +809,11 @@ export async function grantAiTokensForSubscriptionBonus(params: {
   prisma: AiTokenMutationClient;
   userId: string;
   tariffId: string;
+  billingPeriod?: "monthly" | "yearly";
   providerPaymentId?: string | null;
   orderId?: string | null;
 }): Promise<AiTokenMutationSuccess | AiTokenMutationFailure> {
-  const bonusTokens = getAiStudioSubscriptionBonusTokensByTariffId(params.tariffId);
+  const bonusTokens = getAiStudioSubscriptionBonusTokensByTariffId(params.tariffId, params.billingPeriod ?? "monthly");
   if (bonusTokens <= 0) {
     return { ok: true, newBalance: await getAiTokenBalance(params.prisma, params.userId), transactionId: "subscription-bonus-none" };
   }
@@ -861,6 +863,7 @@ export async function grantAiTokensForSubscriptionBonus(params: {
             mode: "subscription_bonus",
             source: "subscription",
             tariffId: normalizedTariffId,
+            billingPeriod: params.billingPeriod ?? "monthly",
             bonusTokens,
             providerPaymentId: params.providerPaymentId ?? null,
             orderId: params.orderId ?? null

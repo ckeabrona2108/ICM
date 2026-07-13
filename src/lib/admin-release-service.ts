@@ -220,3 +220,35 @@ export async function deleteReleaseByAdmin(params: {
   await params.prisma.release.delete({ where: { id: params.releaseId } });
   return { releaseId: params.releaseId };
 }
+
+export async function updateReleasePaymentStatusByAdmin(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  releaseId: string;
+  paid: boolean;
+}) {
+  const release = await params.prisma.release.findUnique({
+    where: { id: params.releaseId },
+    select: { id: true, confirmed: true }
+  });
+  if (!release) return null;
+
+  if (Boolean(release.confirmed) === params.paid) {
+    return {
+      releaseId: params.releaseId,
+      confirmed: params.paid
+    } as const;
+  }
+
+  await params.prisma.release.update({
+    where: { id: params.releaseId },
+    data: {
+      confirmed: params.paid
+    }
+  });
+
+  return {
+    releaseId: params.releaseId,
+    confirmed: params.paid
+  } as const;
+}

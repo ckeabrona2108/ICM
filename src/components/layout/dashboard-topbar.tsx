@@ -4,16 +4,36 @@ import Link from "next/link";
 import Image from "next/image";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, Coins, LogOut, PanelLeft, Sparkles, UserRound, Wallet } from "lucide-react";
+import {
+  AlertCircle,
+  Bell,
+  CheckCircle2,
+  ChevronDown,
+  CircleDollarSign,
+  Coins,
+  FileSpreadsheet,
+  LogOut,
+  MessageSquareText,
+  PanelLeft,
+  Sparkles,
+  UserRound,
+  Wallet
+} from "lucide-react";
 
 import { useCurrentUser } from "@/components/user/user-provider";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { ServiceWorkStatus } from "@/components/layout/service-work-status";
+import type {
+  DashboardNotificationItemResponse,
+  DashboardNotificationsResponse
+} from "@/lib/api/contracts";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { VerificationStatusBadge } from "@/components/verification/verification-status-badge";
 import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { cn } from "@/lib/utils";
+
+const DASHBOARD_NOTIFICATIONS_LAST_READ_AT_KEY = "dashboard-notifications:last-read-at";
 
 function formatRuCount(count: number, one: string, few: string, many: string): string {
   const mod10 = count % 10;
@@ -54,6 +74,98 @@ function formatSubscriptionExpiry(endsAt?: string | null, nowTs = Date.now()): s
   return `Подписка истечёт через ${countdownDays} ${formatRuCount(countdownDays, "день", "дня", "дней")}`;
 }
 
+function formatNotificationTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.max(1, Math.floor(diffMs / 60_000));
+  if (diffMinutes < 60) {
+    return `${diffMinutes} ${formatRuCount(diffMinutes, "минуту", "минуты", "минут")} назад`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours} ${formatRuCount(diffHours, "час", "часа", "часов")} назад`;
+  }
+
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  });
+}
+
+function parseNotificationTimestamp(value: string): number {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function readStoredNotificationsLastReadAt(): number {
+  if (typeof window === "undefined") return 0;
+  const raw = window.localStorage.getItem(DASHBOARD_NOTIFICATIONS_LAST_READ_AT_KEY);
+  if (!raw) return 0;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function applyClientReadState(
+  payload: DashboardNotificationsResponse,
+  lastReadAtMs: number
+): DashboardNotificationsResponse {
+  if (!lastReadAtMs) {
+    return payload;
+  }
+
+  const items = payload.items.map((item) => ({
+    ...item,
+    isUnread: item.isUnread && parseNotificationTimestamp(item.createdAt) > lastReadAtMs
+  }));
+
+  return {
+    unreadCount: items.filter((item) => item.isUnread).length,
+    items
+  };
+}
+
+function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
+  icon: React.ComponentType<{ className?: string }>;
+  toneClassName: string;
+} {
+  switch (kind) {
+    case "release_approved":
+    case "report_agreed":
+    case "payout_paid":
+      return {
+        icon: CheckCircle2,
+        toneClassName: "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
+      };
+    case "support_reply":
+      return {
+        icon: MessageSquareText,
+        toneClassName: "border-cyan-400/20 bg-cyan-500/10 text-cyan-200"
+      };
+    case "report_ready":
+    case "report_changes_requested":
+      return {
+        icon: FileSpreadsheet,
+        toneClassName: "border-sky-400/20 bg-sky-500/10 text-sky-200"
+      };
+    case "payout_requested":
+    case "payout_paid":
+    case "payout_rejected":
+      return {
+        icon: CircleDollarSign,
+        toneClassName: "border-amber-400/20 bg-amber-500/10 text-amber-200"
+      };
+    default:
+      return {
+        icon: AlertCircle,
+        toneClassName: "border-violet-400/20 bg-violet-500/10 text-violet-200"
+      };
+  }
+}
+
 export function DashboardTopbar({
   userName,
   userEmail,
@@ -87,19 +199,38 @@ export function DashboardTopbar({
   const [nowTs, setNowTs] = React.useState(() => Date.now());
   const subscriptionExpiresLabel =
     hasSubscription && effectivePlan ? formatSubscriptionExpiry(subscriptionEndsAt, nowTs) : null;
-  const [activeMenu, setActiveMenu] = React.useState<"user" | "ai" | null>(null);
+  const [activeMenu, setActiveMenu] = React.useState<"user" | "ai" | "notifications" | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const aiButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const notificationsButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const userButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const aiMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const notificationsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const userMenuRef = React.useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = React.useState<{
     ai: { top: number; right: number } | null;
+    notifications: { top: number; right: number } | null;
     user: { top: number; right: number } | null;
   }>({
     ai: null,
+    notifications: null,
     user: null
   });
+  const [notifications, setNotifications] = React.useState<DashboardNotificationsResponse>({
+    unreadCount: 0,
+    items: []
+  });
+  const [notificationsLoading, setNotificationsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const sync = () => {
+      const nextLastReadAtMs = readStoredNotificationsLastReadAt();
+      setNotifications((current) => applyClientReadState(current, nextLastReadAtMs));
+    };
+    sync();
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
 
   React.useEffect(() => {
     if (!hasSubscription || !subscriptionEndsAt) return;
@@ -115,8 +246,9 @@ export function DashboardTopbar({
       if (!target) return;
       const insideHeader = menuRef.current?.contains(target) ?? false;
       const insideAiMenu = aiMenuRef.current?.contains(target) ?? false;
+      const insideNotificationsMenu = notificationsMenuRef.current?.contains(target) ?? false;
       const insideUserMenu = userMenuRef.current?.contains(target) ?? false;
-      if (!insideHeader && !insideAiMenu && !insideUserMenu) {
+      if (!insideHeader && !insideAiMenu && !insideNotificationsMenu && !insideUserMenu) {
         setActiveMenu(null);
       }
     };
@@ -135,8 +267,70 @@ export function DashboardTopbar({
     };
   }, [activeMenu]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const loadNotifications = async (showLoader: boolean) => {
+      if (showLoader) {
+        setNotificationsLoading(true);
+      }
+      try {
+        const response = await fetch("/api/dashboard/notifications", {
+          method: "GET",
+          cache: "no-store"
+        });
+        if (!response.ok) {
+          throw new Error("Не удалось загрузить уведомления.");
+        }
+        const payload = (await response.json()) as DashboardNotificationsResponse;
+        if (!cancelled) {
+          setNotifications(applyClientReadState(payload, readStoredNotificationsLastReadAt()));
+        }
+      } catch {
+        if (!cancelled) {
+          setNotifications((current) => current);
+        }
+      } finally {
+        if (!cancelled) {
+          setNotificationsLoading(false);
+        }
+      }
+    };
+
+    void loadNotifications(true);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void loadNotifications(false);
+    }, 45_000);
+
+    const onFocus = () => {
+      void loadNotifications(false);
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, []);
+
+  const markAllNotificationsAsRead = React.useCallback(() => {
+    const nextLastReadAtMs = Date.now();
+    window.localStorage.setItem(
+      DASHBOARD_NOTIFICATIONS_LAST_READ_AT_KEY,
+      new Date(nextLastReadAtMs).toISOString()
+    );
+    setNotifications((current) => applyClientReadState(current, nextLastReadAtMs));
+  }, []);
+
   const updateMenuPositions = React.useCallback(() => {
     const nextAi = aiButtonRef.current?.getBoundingClientRect();
+    const nextNotifications = notificationsButtonRef.current?.getBoundingClientRect();
     const nextUser = userButtonRef.current?.getBoundingClientRect();
 
     setMenuPosition({
@@ -144,6 +338,12 @@ export function DashboardTopbar({
         ? {
             top: nextAi.bottom + 8,
             right: Math.max(16, window.innerWidth - nextAi.right)
+          }
+        : null,
+      notifications: nextNotifications
+        ? {
+            top: nextNotifications.bottom + 8,
+            right: Math.max(16, window.innerWidth - nextNotifications.right)
           }
         : null,
       user: nextUser
@@ -252,6 +452,85 @@ export function DashboardTopbar({
 
         <div className="relative">
           <button
+            ref={notificationsButtonRef}
+            type="button"
+            onClick={() => setActiveMenu((prev) => (prev === "notifications" ? null : "notifications"))}
+            className={cn(
+              "relative inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors sm:h-10 sm:w-10",
+              activeMenu === "notifications"
+                ? "border-[#7b3df5]/40 bg-[#7b3df5]/10 text-white"
+                : "border-white/[0.12] bg-white/[0.03] text-white/82 hover:border-white/[0.20] hover:bg-white/[0.05]"
+            )}
+            aria-label="Открыть уведомления"
+            aria-haspopup="menu"
+            aria-expanded={activeMenu === "notifications"}
+          >
+            <Bell className="h-4 w-4" />
+            {notifications.unreadCount > 0 ? (
+              <span className="absolute -right-1.5 -top-1.5 inline-flex min-w-[20px] items-center justify-center rounded-full border border-[#0d0f16] bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#05120b]">
+                {notifications.unreadCount > 99 ? "99+" : notifications.unreadCount}
+              </span>
+            ) : null}
+          </button>
+
+          {activeMenu === "notifications" && menuPosition.notifications
+            ? createPortal(
+                <div
+                  ref={notificationsMenuRef}
+                  className="fixed z-[120] w-[min(380px,calc(100vw-24px))] rounded-xl border border-white/[0.12] bg-[#141824]/95 p-1.5 shadow-[0_16px_32px_-20px_rgba(0,0,0,0.78)] backdrop-blur-[8px]"
+                  style={{
+                    top: menuPosition.notifications.top,
+                    right: menuPosition.notifications.right
+                  }}
+                >
+                  <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+                    <div>
+                      <div className="text-[14px] font-semibold text-white">Уведомления</div>
+                      <div className="text-[12px] text-white/50">
+                        {notifications.unreadCount > 0
+                          ? `${notifications.unreadCount} новых`
+                          : "Новых уведомлений нет"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={markAllNotificationsAsRead}
+                      disabled={notifications.unreadCount === 0}
+                      className="text-[12px] font-medium text-white/55 transition-colors hover:text-white disabled:cursor-default disabled:text-white/30"
+                    >
+                      Прочитать все
+                    </button>
+                  </div>
+
+                  <div className="mt-1.5 max-h-[420px] overflow-y-auto pr-1">
+                    {notificationsLoading ? (
+                      <div className="rounded-lg px-3 py-6 text-center text-[13px] text-white/55">
+                        Загружаем уведомления...
+                      </div>
+                    ) : notifications.items.length > 0 ? (
+                      <div className="grid gap-1">
+                        {notifications.items.map((item) => (
+                          <NotificationMenuItem
+                            key={item.id}
+                            item={item}
+                            onNavigate={() => setActiveMenu(null)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg px-3 py-6 text-center text-[13px] text-white/55">
+                        Пока ничего нет.
+                      </div>
+                    )}
+                  </div>
+                </div>,
+                document.body
+              )
+            : null}
+        </div>
+
+        <div className="relative">
+          <button
             ref={userButtonRef}
             type="button"
             onClick={() => setActiveMenu((prev) => (prev === "user" ? null : "user"))}
@@ -339,19 +618,64 @@ function MenuStat({ label, value }: { label: string; value: string }) {
 function TopbarMenuLink({
   href,
   icon: Icon,
-  label
+  label,
+  onClick
 }: {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
+  onClick?: () => void;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       className="flex items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-white/80 transition-colors hover:bg-white/[0.05] hover:text-white"
     >
       <Icon className="h-4 w-4" />
       <span>{label}</span>
+    </Link>
+  );
+}
+
+function NotificationMenuItem({
+  item,
+  onNavigate
+}: {
+  item: DashboardNotificationItemResponse;
+  onNavigate: () => void;
+}) {
+  const meta = getNotificationMeta(item.kind);
+  const Icon = meta.icon;
+
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      className="flex items-start gap-3 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-white/[0.05]"
+    >
+      <span
+        className={cn(
+          "mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border",
+          meta.toneClassName
+        )}
+      >
+        <Icon className="h-4.5 w-4.5" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-start justify-between gap-3">
+          <span className="block text-[13px] font-semibold text-white">{item.title}</span>
+          {item.isUnread ? (
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+          ) : null}
+        </span>
+        <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-white/58">
+          {item.message}
+        </span>
+        <span className="mt-1.5 block text-[11px] font-medium text-white/36">
+          {formatNotificationTimestamp(item.createdAt)}
+        </span>
+      </span>
     </Link>
   );
 }

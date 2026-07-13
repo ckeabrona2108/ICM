@@ -23,7 +23,11 @@ export async function POST(request: Request, context: RouteContext) {
   try {
     const { kind, id } = await context.params;
     const payload = (await request.json().catch(() => null)) as
-      | { allocations?: Array<{ rowId?: string; netAmount?: number | string }> }
+      | {
+          allocations?: Array<{ rowId?: string; netAmount?: number | string }>;
+          reportQuarter?: number | string | null;
+          reportYear?: number | string | null;
+        }
       | null;
     const allocations = Array.isArray(payload?.allocations)
       ? payload.allocations
@@ -33,10 +37,24 @@ export async function POST(request: Request, context: RouteContext) {
             netAmount: Number(item?.netAmount ?? 0)
           }))
       : undefined;
+    const reportQuarter =
+      payload?.reportQuarter === null || payload?.reportQuarter === undefined
+        ? null
+        : Number(payload.reportQuarter);
+    const reportYear =
+      payload?.reportYear === null || payload?.reportYear === undefined
+        ? null
+        : Number(payload.reportYear);
     const item =
       kind === "catalog"
         ? await applyCatalogImport({ importId: id, adminId: session.user.id })
-        : await applyFinancialImport({ importId: id, adminId: session.user.id, allocations });
+        : await applyFinancialImport({
+            importId: id,
+            adminId: session.user.id,
+            allocations,
+            reportQuarter,
+            reportYear
+          });
 
     return NextResponse.json({ ok: true, item }, { status: 200 });
   } catch (error) {

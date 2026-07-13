@@ -3,10 +3,17 @@
 import Link from "next/link";
 import * as React from "react";
 
+import {
+  ANALYTICS_PERIOD_OPTIONS,
+  getAnalyticsPeriodLabel,
+  normalizeAnalyticsPeriodDays
+} from "@/lib/analytics-period";
+
 interface ImportJobItem {
   id: string;
   sourceFileName: string;
   reportDate: string;
+  periodDays: number;
   status: "PENDING" | "PROCESSING" | "SUCCESS" | "PARTIAL" | "FAILED";
   totalRows: number;
   importedRows: number;
@@ -23,6 +30,7 @@ interface ImportJobItem {
 interface ImportResultView {
   source_file_name: string;
   report_date: string;
+  period_days: number;
   total_rows: number;
   imported_rows: number;
   matched_rows: number;
@@ -64,6 +72,7 @@ function normalizeImportJob(input: Record<string, unknown>): ImportJobItem {
     id: readString("id"),
     sourceFileName: readString("sourceFileName", "source_file_name"),
     reportDate: readString("reportDate", "report_date"),
+    periodDays: readNumber("periodDays", "period_days") || 30,
     status,
     totalRows: readNumber("totalRows", "total_rows"),
     importedRows: readNumber("importedRows", "imported_rows"),
@@ -95,6 +104,7 @@ function statusTone(status: ImportJobItem["status"]): string {
 
 export function AdminAnalyticsClient() {
   const [file, setFile] = React.useState<File | null>(null);
+  const [periodDays, setPeriodDays] = React.useState<number>(30);
   const [uploading, setUploading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [jobs, setJobs] = React.useState<ImportJobItem[]>([]);
@@ -136,6 +146,7 @@ export function AdminAnalyticsClient() {
     try {
       const formData = new FormData();
       formData.set("file", file);
+      formData.set("period_days", String(periodDays));
 
       const response = await fetch("/api/admin/analytics/import", {
         method: "POST",
@@ -146,6 +157,7 @@ export function AdminAnalyticsClient() {
             ok?: boolean;
             mode?: "inline" | "background";
             job_id?: string;
+            period_days?: number;
             result?: {
               sourceFileName: string;
               reportDate: string;
@@ -175,6 +187,7 @@ export function AdminAnalyticsClient() {
         setLastResult({
           source_file_name: payload.result.sourceFileName,
           report_date: payload.result.reportDate,
+          period_days: normalizeAnalyticsPeriodDays(payload.period_days),
           total_rows: payload.result.totalCsvRows,
           imported_rows: payload.result.importedRows,
           matched_rows: payload.result.matchedRows,
@@ -256,6 +269,20 @@ export function AdminAnalyticsClient() {
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
+          <label className="min-w-[220px] text-[12px] font-semibold uppercase tracking-[0.08em] text-white/60">
+            Период отчёта
+            <select
+              value={periodDays}
+              onChange={(event) => setPeriodDays(normalizeAnalyticsPeriodDays(event.target.value))}
+              className="mt-1.5 h-10 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] font-medium text-white outline-none transition-colors focus:border-[#7b3df5]/60"
+            >
+              {ANALYTICS_PERIOD_OPTIONS.map((option) => (
+                <option key={option.days} value={option.days}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <input
             type="file"
             accept=".csv,text/csv"
@@ -284,6 +311,7 @@ export function AdminAnalyticsClient() {
           <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-[13px] text-white/80">
             <div>source_file_name: {lastResult.source_file_name}</div>
             <div>report_date: {lastResult.report_date}</div>
+            <div>period_days: {getAnalyticsPeriodLabel(lastResult.period_days)}</div>
             <div>total_rows: {lastResult.total_rows}</div>
             <div>imported_rows: {lastResult.imported_rows}</div>
             <div>matched_rows: {lastResult.matched_rows}</div>
@@ -311,6 +339,7 @@ export function AdminAnalyticsClient() {
                 <th className="px-2 py-2">date</th>
                 <th className="px-2 py-2">file name</th>
                 <th className="px-2 py-2">report_date</th>
+                <th className="px-2 py-2">period</th>
                 <th className="px-2 py-2">status</th>
                 <th className="px-2 py-2">total rows</th>
                 <th className="px-2 py-2">matched</th>
@@ -327,6 +356,7 @@ export function AdminAnalyticsClient() {
                   <td className="px-2 py-2">{job.createdAt.slice(0, 10)}</td>
                   <td className="px-2 py-2">{job.sourceFileName}</td>
                   <td className="px-2 py-2">{job.reportDate.slice(0, 10)}</td>
+                  <td className="px-2 py-2">{getAnalyticsPeriodLabel(job.periodDays)}</td>
                   <td className="px-2 py-2">
                     <span className={`rounded-md border px-2 py-0.5 text-[11px] ${statusTone(job.status)}`}>
                       {statusLabel(job.status)}
@@ -387,7 +417,7 @@ export function AdminAnalyticsClient() {
               ))}
               {jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-2 py-6 text-center text-white/60">
+                  <td colSpan={12} className="px-2 py-6 text-center text-white/60">
                     История импортов пока пустая.
                   </td>
                 </tr>

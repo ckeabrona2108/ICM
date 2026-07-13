@@ -10,6 +10,7 @@ export type SubscriptionPurchaseRow = {
   id: string;
   tariffLabel: string;
   amountRub: number;
+  billingLabel: string;
   purchasedAt: string | null;
   endsAt: string | null;
   status: SubscriptionPurchaseStatus;
@@ -81,9 +82,11 @@ export function SubscriptionPurchaseStats({
               История оплат, тарифы и даты окончания подписок.
             </p>
           </div>
-          <div className="rounded-full border border-emerald-300/25 bg-emerald-300/[0.08] px-4 py-2 text-[13px] font-semibold text-emerald-200">
-            {currentPlan ? `Активна: ${currentPlan}` : "Активной подписки нет"}
-          </div>
+          {currentPlan ? (
+            <div className="rounded-full border border-emerald-300/25 bg-emerald-300/[0.08] px-4 py-2 text-[13px] font-semibold text-emerald-200">
+              {`Активна: ${currentPlan}`}
+            </div>
+          ) : null}
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
@@ -137,14 +140,20 @@ export function SubscriptionPurchaseStats({
                 <div>
                   <p className="text-[15px] font-bold text-white">{purchase.tariffLabel}</p>
                   <p className="mt-0.5 text-[12px] font-medium text-white/40">
-                    Заказ {purchase.id.slice(0, 8)}
+                    {purchase.billingLabel} · заказ {purchase.id.slice(0, 8)}
                   </p>
                 </div>
                 <MobileLabeledValue label="Оплата" value={formatDateTime(purchase.purchasedAt)} />
                 <MobileLabeledValue
                   label="Окончание"
                   value={purchase.endsAt ? formatDateTime(purchase.endsAt) : "—"}
-                  hint={purchase.status === "paid" ? "расчётно 30 дней" : undefined}
+                  hint={
+                    purchase.status === "paid"
+                      ? purchase.billingLabel === "Годовая оплата"
+                        ? "расчётно 12 месяцев"
+                        : "расчётно 1 месяц"
+                      : undefined
+                  }
                 />
                 <MobileLabeledValue label="Сумма" value={formatRub(purchase.amountRub)} />
                 <div>

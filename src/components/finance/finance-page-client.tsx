@@ -31,10 +31,47 @@ const RevenueChart = dynamic(
   }
 );
 
-const financeTabs = ["Запрос выплаты", "Начисления"] as const;
+const financeTabs = ["Отчеты", "Запрос выплаты", "Начисления"] as const;
 type FinanceTab = (typeof financeTabs)[number];
 const transactionFilters = ["Все", "Начисления", "Списания", "Выплаты"] as const;
 type TransactionFilter = (typeof transactionFilters)[number];
+
+function formatReportPeriod(periodStart: string, periodEnd: string): string {
+  const start = new Date(periodStart);
+  const end = new Date(periodEnd);
+  const startMonth = start.toLocaleString("ru-RU", { month: "short", timeZone: "UTC" }).replace(".", "");
+  const endMonth = end.toLocaleString("ru-RU", { month: "short", timeZone: "UTC" }).replace(".", "");
+  const year = end.getUTCFullYear();
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${year}`;
+  }
+
+  return `${startMonth}–${endMonth} ${year}`;
+}
+
+function reportStatusLabel(status: FinanceReportStatus): string {
+  if (status === "agreed") return "Согласован";
+  if (status === "changes_requested") return "На доработке";
+  return "Ожидает согласования";
+}
+
+function getVisibleReportComment(comment: string | null): string | null {
+  if (!comment) {
+    return null;
+  }
+
+  const normalizedComment = comment.trim();
+  if (!normalizedComment) {
+    return null;
+  }
+
+  if (/^Импорт\s+.+$/i.test(normalizedComment)) {
+    return null;
+  }
+
+  return normalizedComment;
+}
 
 export function FinancePageClient({
   initialReports,
@@ -65,19 +102,32 @@ export function FinancePageClient({
   const [bankName, setBankName] = React.useState("");
   const [paypalEmail] = React.useState("");
   const [taxId, setTaxId] = React.useState("");
-  const reports = initialReports;
-  const agreedBalance = initialAgreedBalance;
+  const [reports, setReports] = React.useState(initialReports);
+  const [agreedBalance, setAgreedBalance] = React.useState(initialAgreedBalance);
   const [pendingPayout, setPendingPayout] = React.useState<number>(initialPendingPayout);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
-  const [activeTab, setActiveTab] = React.useState<FinanceTab>("Запрос выплаты");
+  const [reportNotice, setReportNotice] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<FinanceTab>(
+    initialReports.some((report) => report.status === "ready_to_confirm") ? "Отчеты" : "Запрос выплаты"
+  );
   const [transactionFilter, setTransactionFilter] =
     React.useState<TransactionFilter>("Все");
+  const [selectedReportId, setSelectedReportId] = React.useState<string | null>(
+    initialReports.find((report) => report.status === "ready_to_confirm")?.id ?? null
+  );
+  const [reportComment, setReportComment] = React.useState("");
+  const [reportActionBusy, setReportActionBusy] = React.useState<null | "agree" | "reject">(null);
 
   const pendingReportsCount = reports.filter(
     (report) => report.status === "ready_to_confirm"
   ).length;
+  const changesRequestedCount = reports.filter(
+    (report) => report.status === "changes_requested"
+  ).length;
+  const historyReportsCount = reports.filter((report) => report.status === "agreed").length;
+  const selectedReport = reports.find((report) => report.id === selectedReportId) ?? null;
 
   const availableToWithdraw = computeAvailableToWithdraw({
     agreedBalance,
@@ -164,6 +214,66 @@ export function FinancePageClient({
     }
   }
 
+  async function submitReportDecision(decision: "agree" | "reject") {
+    if (!selectedReport) {
+      return;
+    }
+
+    setReportActionBusy(decision);
+    setReportNotice(null);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/finance/reports/agree", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reportId: selectedReport.id,
+          decision,
+          comment: reportComment.trim() || undefined
+        })
+      });
+
+      const parsed = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string; nextStatus?: FinanceReportStatus }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(parsed?.error ?? "Не удалось обновить статус отчета.");
+      }
+
+      setReports((current) =>
+        current.map((report) =>
+          report.id !== selectedReport.id
+            ? report
+            : {
+                ...report,
+                status: decision === "agree" ? "agreed" : "changes_requested",
+                userComment: decision === "reject" ? reportComment.trim() || report.userComment : report.userComment
+              }
+        )
+      );
+
+      if (decision === "agree") {
+        setAgreedBalance((current) => current + selectedReport.amount);
+      }
+
+      setReportNotice(
+        parsed?.message ??
+          (decision === "agree"
+            ? "Отчет согласован, баланс обновлен."
+            : "Отчет отправлен администратору на доработку.")
+      );
+      setReportComment("");
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error ? submitError.message : "Не удалось обновить статус отчета."
+      );
+    } finally {
+      setReportActionBusy(null);
+    }
+  }
+
   return (
     <DashboardShell>
       <PageHeader
@@ -244,6 +354,91 @@ export function FinancePageClient({
           exit={{ opacity: 0, y: -8, filter: "blur(6px)" }}
           transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         >
+          {activeTab === "Отчеты" ? (
+            <PageSection className="mt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-[20px] font-semibold text-white">Отчеты</h2>
+                </div>
+                <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[12px] font-semibold text-white/64">
+                  {reports.length} отчет{reports.length === 1 ? "" : reports.length < 5 ? "а" : "ов"}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <ReportSummaryCard label="На согласовании" value={pendingReportsCount} tone="amber" />
+                <ReportSummaryCard label="На доработке" value={changesRequestedCount} tone="rose" />
+                <ReportSummaryCard label="История" value={historyReportsCount} tone="emerald" />
+              </div>
+
+              {reportNotice ? (
+                <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-[13px] font-medium text-emerald-100">
+                  {reportNotice}
+                </div>
+              ) : null}
+
+              {reports.length ? (
+                <div className="mt-4 grid gap-3">
+                  {reports.map((report) => (
+                    <button
+                      key={report.id}
+                      type="button"
+                      onClick={() => setSelectedReportId(report.id)}
+                      className={cn(
+                        "w-full rounded-2xl border px-4 py-4 text-left transition-all",
+                        selectedReportId === report.id
+                          ? "border-[#7b3df5]/40 bg-[#7b3df5]/10 shadow-[0_18px_40px_-30px_rgba(123,61,245,0.75)]"
+                          : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.14]"
+                      )}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-[17px] font-semibold text-white">
+                              {report.quarterLabel}
+                            </span>
+                            <span
+                              className={cn(
+                                "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]",
+                                report.status === "agreed"
+                                  ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                                  : report.status === "changes_requested"
+                                    ? "border-rose-400/25 bg-rose-500/10 text-rose-100"
+                                    : "border-amber-400/25 bg-amber-500/10 text-amber-100"
+                              )}
+                            >
+                              {reportStatusLabel(report.status)}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-[14px] text-white/62">
+                            {formatReportPeriod(report.periodStart, report.periodEnd)} ·{" "}
+                            {new Date(report.periodStart).toLocaleDateString("ru-RU")} -{" "}
+                            {new Date(report.periodEnd).toLocaleDateString("ru-RU")}
+                          </p>
+                          <p className="mt-3 text-[22px] font-semibold text-white">
+                            {formatCurrency(report.amount, "RUB")}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-white/38">
+                            Площадок
+                          </p>
+                          <p className="mt-1 text-[18px] font-semibold text-white">
+                            {report.platformTotals.length}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-5 text-[14px] font-medium text-white/58">
+                  Отчетов пока нет.
+                </div>
+              )}
+            </PageSection>
+          ) : null}
+
           {activeTab === "Запрос выплаты" ? (
             <PageSection className="mt-4">
               <div className="flex items-center justify-between gap-3">
@@ -490,6 +685,25 @@ export function FinancePageClient({
 
         </motion.div>
       </AnimatePresence>
+
+      {selectedReport ? (
+        <ReportDetailsModal
+          report={selectedReport}
+          comment={reportComment}
+          onCommentChange={setReportComment}
+          onClose={() => {
+            setSelectedReportId(null);
+            setReportComment("");
+          }}
+          onAgree={() => {
+            void submitReportDecision("agree");
+          }}
+          onReject={() => {
+            void submitReportDecision("reject");
+          }}
+          busy={reportActionBusy}
+        />
+      ) : null}
     </DashboardShell>
   );
 }
@@ -542,5 +756,188 @@ function MetricCard({
         ) : null}
       </div>
     </motion.div>
+  );
+}
+
+function ReportSummaryCard({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: number;
+  tone: "amber" | "rose" | "emerald";
+}) {
+  const toneClass =
+    tone === "emerald"
+      ? "border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+      : tone === "rose"
+        ? "border-rose-400/20 bg-rose-500/10 text-rose-100"
+        : "border-amber-400/20 bg-amber-500/10 text-amber-100";
+
+  return (
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+      <span className={cn("inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]", toneClass)}>
+        {label}
+      </span>
+      <p className="mt-3 text-[28px] font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function ReportDetailsModal({
+  report,
+  comment,
+  onCommentChange,
+  onClose,
+  onAgree,
+  onReject,
+  busy
+}: {
+  report: FinanceReportClientItem;
+  comment: string;
+  onCommentChange: (value: string) => void;
+  onClose: () => void;
+  onAgree: () => void;
+  onReject: () => void;
+  busy: null | "agree" | "reject";
+}) {
+  const visibleAdminComment = getVisibleReportComment(report.adminComment);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#05060b]/80 px-4 py-6 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[28px] border border-white/10 bg-[#11131a] p-5 shadow-[0_30px_90px_-42px_rgba(0,0,0,0.95)] sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-[24px] font-semibold text-white">{report.quarterLabel}</h3>
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]",
+                  report.status === "agreed"
+                    ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                    : report.status === "changes_requested"
+                      ? "border-rose-400/25 bg-rose-500/10 text-rose-100"
+                      : "border-amber-400/25 bg-amber-500/10 text-amber-100"
+                )}
+              >
+                {reportStatusLabel(report.status)}
+              </span>
+            </div>
+            <p className="mt-2 text-[14px] text-white/58">
+              {formatReportPeriod(report.periodStart, report.periodEnd)} ·{" "}
+              {new Date(report.periodStart).toLocaleDateString("ru-RU")} -{" "}
+              {new Date(report.periodEnd).toLocaleDateString("ru-RU")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[12px] font-semibold text-white/72 hover:border-white/20 hover:text-white"
+          >
+            Закрыть
+          </button>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-white/40">
+            Сумма за квартал
+          </p>
+          <p className="mt-2 text-[30px] font-semibold text-white">
+            {formatCurrency(report.amount, "RUB")}
+          </p>
+          {visibleAdminComment ? (
+            <p className="mt-3 text-[14px] leading-6 text-white/70">{visibleAdminComment}</p>
+          ) : null}
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[0.95fr,1.05fr]">
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+            <h4 className="text-[15px] font-semibold text-white">По площадкам</h4>
+            <div className="mt-3 space-y-2">
+              {report.platformTotals.length ? (
+                report.platformTotals.map((item) => (
+                  <div
+                    key={item.platformName}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2"
+                  >
+                    <span className="text-[14px] text-white/78">{item.platformName}</span>
+                    <span className="text-[14px] font-semibold text-white">
+                      {formatCurrency(item.amount, "RUB")}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="text-[14px] text-white/58">Площадки не указаны.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+            <h4 className="text-[15px] font-semibold text-white">Релизы и UPC</h4>
+            <div className="mt-3 space-y-2">
+              {report.items.length ? (
+                report.items.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-3"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[14px] font-semibold text-white">{item.releaseTitle}</p>
+                        <p className="mt-1 text-[12px] text-white/52">UPC: {item.upc || "—"}</p>
+                      </div>
+                      <span className="text-[14px] font-semibold text-white">
+                        {formatCurrency(item.amount, "RUB")}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-[14px] text-white/58">Детализация по релизам не добавлена.</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {report.userComment ? (
+          <div className="mt-5 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-[14px] text-rose-100">
+            Комментарий по доработке: {report.userComment}
+          </div>
+        ) : null}
+
+        {report.status === "ready_to_confirm" ? (
+          <div className="mt-5 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+            <label className="block text-[13px] font-semibold text-white/70">
+              Комментарий для администратора
+              <textarea
+                value={comment}
+                onChange={(event) => onCommentChange(event.target.value)}
+                placeholder="Если нужен пересчёт или исправление, коротко опишите причину."
+                className="mt-2 min-h-[104px] w-full rounded-2xl border border-white/[0.12] bg-black/25 px-3.5 py-3 text-[14px] text-white outline-none transition-colors placeholder:text-white/38 focus:border-[#7b3df5]/60"
+              />
+            </label>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button
+                type="button"
+                onClick={onAgree}
+                disabled={busy !== null}
+                className="btn-shine h-11 px-5 text-[14px]"
+              >
+                {busy === "agree" ? "Согласование..." : "Согласовать отчет"}
+              </Button>
+              <button
+                type="button"
+                onClick={onReject}
+                disabled={busy !== null}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-5 text-[14px] font-semibold text-rose-100 transition-colors hover:border-rose-400/35 hover:bg-rose-500/14 disabled:opacity-50"
+              >
+                {busy === "reject" ? "Отправка..." : "Вернуть на доработку"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }

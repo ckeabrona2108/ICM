@@ -6,20 +6,19 @@ import { z } from "zod";
 import type { SubscriptionCheckoutRequest, SubscriptionCheckoutResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  getSubscriptionTariffConfig,
+  normalizeSubscriptionBillingPeriod
+} from "@/lib/subscription-billing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
   tariffId: z.enum(["standard", "pro", "enterprise"]),
+  billingPeriod: z.enum(["monthly", "yearly"]).optional(),
   returnUrl: z.string().url().optional()
 });
-
-const TARIFFS: Record<"standard" | "pro" | "enterprise", { title: string; amountRub: number }> = {
-  standard: { title: "STANDARD", amountRub: 550 },
-  pro: { title: "PRO", amountRub: 990 },
-  enterprise: { title: "ENTERPRISE", amountRub: 1990 }
-};
 
 function getAppBaseUrl(request: Request): string {
   const configured = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_DOMAIN?.trim();
@@ -44,7 +43,11 @@ export async function POST(request: Request) {
   }
 
   const orderId = randomUUID();
-  const tariff = TARIFFS[parsed.data.tariffId];
+  const billingPeriod = normalizeSubscriptionBillingPeriod(parsed.data.billingPeriod);
+  const tariff = getSubscriptionTariffConfig(parsed.data.tariffId, billingPeriod);
+  if (!tariff) {
+    return NextResponse.json({ error: "Unknown tariff" }, { status: 400 });
+  }
   const returnUrl =
     parsed.data.returnUrl ?? `${getAppBaseUrl(request)}/dashboard/subscription?pay_order=${orderId}`;
   let payment;
@@ -59,6 +62,7 @@ export async function POST(request: Request) {
         orderId,
         kind: "subscription",
         tariffId: parsed.data.tariffId,
+        billingPeriod,
         userId: session.user.id
       }
     });
@@ -87,6 +91,9 @@ export async function POST(request: Request) {
       confirmed: false,
       metadata: {
         tariffId: parsed.data.tariffId,
+        billingPeriod,
+        tariffTitle: tariff.title,
+        amountRub: tariff.amountRub,
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
+import { listUserReports } from "@/lib/report-service";
 
 export interface FinanceTransactionView {
   id: string;
@@ -35,19 +36,12 @@ function getRepo<T = Record<string, unknown>>(client: unknown, name: string): T 
   return repo as T;
 }
 
-function toReportStatus(status: string): "agreed" | "ready_to_confirm" {
-  return String(status).toLowerCase() === "agreed" ? "agreed" : "ready_to_confirm";
-}
-
-function formatPeriod(start: Date, end: Date): string {
-  const startMonth = start.toLocaleString("ru-RU", { month: "short" });
-  const endMonth = end.toLocaleString("ru-RU", { month: "short" });
-  const year = end.getUTCFullYear();
-
-  if (startMonth === endMonth) {
-    return `${startMonth} ${year}`;
-  }
-  return `${startMonth}–${endMonth} ${year}`;
+function toReportStatus(
+  lifecycleState: string
+): "agreed" | "ready_to_confirm" | "changes_requested" {
+  if (lifecycleState === "agreed") return "agreed";
+  if (lifecycleState === "changes_requested") return "changes_requested";
+  return "ready_to_confirm";
 }
 
 function toTransactionType(type: string): "Royalty" | "Payout" | "Fee" {
@@ -122,9 +116,6 @@ export async function getFinanceDashboardViewData(
   let accrualTotalRaw;
   let commissionTotalRaw;
   let totals;
-  const financeReportRepo = getRepo<{
-    findMany: (args: unknown) => Promise<unknown[]>;
-  }>(prisma, "financeReport");
   const balanceTransactionsRepo = getRepo<{
     findMany: (args: unknown) => Promise<unknown[]>;
     aggregate?: (args: unknown) => Promise<{
@@ -142,12 +133,7 @@ export async function getFinanceDashboardViewData(
   try {
     [reportsRaw, balanceTransactionsRaw, accrualTransactionsRaw, accrualTotalRaw, commissionTotalRaw, totals] =
       await Promise.all([
-        financeReportRepo
-          ? financeReportRepo.findMany({
-              where: { userId },
-              orderBy: { periodStart: "desc" }
-            })
-          : Promise.resolve([]),
+        listUserReports(prisma, userId),
         balanceTransactionsRepo
           ? balanceTransactionsRepo.findMany({
               where: { user_id: userId },
@@ -218,6 +204,7 @@ export async function getFinanceDashboardViewData(
   } catch (error) {
     if (
       isPrismaTableMissingError(error, "FinanceReport") ||
+      isPrismaTableMissingError(error, "transaction") ||
       isPrismaTableMissingError(error, "balance_transactions") ||
       isPrismaTableMissingError(error, "royalty_transactions") ||
       isPrismaTableMissingError(error, "PayoutRequest") ||
@@ -243,9 +230,17 @@ export async function getFinanceDashboardViewData(
 
   const reports: FinanceReportClientItem[] = reportsRaw.map((report) => ({
     id: report.id,
-    period: formatPeriod(report.periodStart, report.periodEnd),
+    periodStart: report.periodStart,
+    periodEnd: report.periodEnd,
     amount: decimalToNumber(report.amount),
-    status: toReportStatus(report.status)
+    status: toReportStatus(report.lifecycleState),
+    quarter: report.quarter,
+    year: report.year,
+    quarterLabel: report.quarterLabel,
+    adminComment: report.adminComment,
+    userComment: report.userComment,
+    items: report.items,
+    platformTotals: report.platformTotals
   }));
 
   const agreedBalance = totals.agreedBalance;

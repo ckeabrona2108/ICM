@@ -11,19 +11,19 @@ import { authOptions } from "@/lib/auth";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateSubscriptionEndDate,
+  getSubscriptionTariffConfig,
+  normalizeSubscriptionBillingPeriod
+} from "@/lib/subscription-billing";
 
-const SUBSCRIPTION_TARIFFS = {
-  standard: { label: "STANDARD", amountRub: 550 },
-  pro: { label: "PRO", amountRub: 990 },
-  enterprise: { label: "ENTERPRISE", amountRub: 1990 }
-} as const;
-
-type SubscriptionTariffId = keyof typeof SUBSCRIPTION_TARIFFS;
+type SubscriptionTariffId = "standard" | "pro" | "enterprise";
 
 type SubscriptionPurchaseRow = {
   id: string;
   tariffLabel: string;
   amountRub: number;
+  billingLabel: string;
   purchasedAt: string | null;
   endsAt: string | null;
   status: "paid" | "incomplete" | "canceled";
@@ -72,11 +72,6 @@ function normalizeOrderStatus(
   }
 
   return "incomplete";
-}
-
-function addDays(date: Date | null, days: number): Date | null {
-  if (!date) return null;
-  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
 export default async function ProfilePage() {
@@ -128,16 +123,33 @@ export default async function ProfilePage() {
   const purchases: SubscriptionPurchaseRow[] = subscriptionOrders.map((order) => {
     const metadata = readOrderMetadata(order.metadata);
     const tariffId = normalizeTariffId(metadata.tariffId);
-    const tariff = SUBSCRIPTION_TARIFFS[tariffId];
+    const billingPeriod = normalizeSubscriptionBillingPeriod(metadata.billingPeriod);
+    const tariff =
+      getSubscriptionTariffConfig(tariffId, billingPeriod) ??
+      getSubscriptionTariffConfig("standard", billingPeriod);
     const purchasedAt = order.createdAt ?? null;
     const status = normalizeOrderStatus(metadata, order.confirmed);
+    const explicitAmountRub = Number(metadata.amountRub);
+    const amountRub =
+      Number.isFinite(explicitAmountRub) && explicitAmountRub > 0
+        ? explicitAmountRub
+        : (tariff?.amountRub ?? 0);
+    const endsAt =
+      status === "paid" && purchasedAt
+        ? calculateSubscriptionEndDate({
+            billingPeriod,
+            now: purchasedAt,
+            currentEnd: null
+          }).toISOString()
+        : null;
 
     return {
       id: order.id,
-      tariffLabel: tariff.label,
-      amountRub: tariff.amountRub,
+      tariffLabel: tariff?.title ?? "STANDARD",
+      amountRub,
+      billingLabel: billingPeriod === "yearly" ? "Годовая оплата" : "Помесячная оплата",
       purchasedAt: purchasedAt?.toISOString() ?? null,
-      endsAt: status === "paid" ? addDays(purchasedAt, 30)?.toISOString() ?? null : null,
+      endsAt,
       status
     };
   });

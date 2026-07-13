@@ -2,7 +2,10 @@ import { prisma } from "@/lib/prisma";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
-import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import {
+  getReleaseLifecycleStatus,
+  shouldTreatReleaseAsApproved
+} from "@/lib/release-counts";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
 
 export type AdminReleaseStatusFilter =
@@ -23,10 +26,12 @@ function formatDateTime(value: Date): string {
   return value.toISOString().slice(0, 16).replace("T", " ");
 }
 
-export function toAdminStatus(status: string): AdminReleaseStatus {
-  if (status === "approved") return "approved";
-  if (status === "rejected") return "rejected";
-  if (status === "draft") return "draft";
+export function toAdminStatus(status: string, roles?: unknown): AdminReleaseStatus {
+  const lifecycle = getReleaseLifecycleStatus(status, roles);
+  if (lifecycle === "approved" || lifecycle === "archived") return "approved";
+  if (lifecycle === "changes_required") return "changes_required";
+  if (lifecycle === "draft") return "draft";
+  if (lifecycle === "pending_verification") return "pending_verification";
   return "moderation";
 }
 
@@ -69,17 +74,13 @@ function isAcceptedForAdminView(source: {
   });
 }
 
-function isSubmittedToModeration(roles: unknown): boolean {
-  return asRecord(roles)?.submittedToModeration === true;
-}
-
 function isActuallyOnModeration(source: {
   status: string;
   confirmed: boolean;
   roles: unknown;
 }): boolean {
-  if (source.status !== "moderating") return false;
-  return source.confirmed || isSubmittedToModeration(source.roles);
+  const lifecycle = getReleaseLifecycleStatus(source.status, source.roles);
+  return lifecycle === "moderation" || lifecycle === "pending_verification";
 }
 
 function matchStatus(source: {
@@ -289,7 +290,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         territoriesCount: 244,
         platformsCount: 0,
         genre: source.genre,
-        status: accepted ? "approved" : toAdminStatus(source.status),
+        status: accepted ? "approved" : toAdminStatus(source.status, source.roles),
         submittedAt: formatDateTime(source.date),
         approvedAt: source.status === "approved" ? formatDateTime(source.date) : undefined,
         rejectedAt: source.status === "rejected" ? formatDateTime(source.date) : undefined,

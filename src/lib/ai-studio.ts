@@ -165,8 +165,17 @@ export function hasAiStudioAccess(input: AiStudioAccessInput): boolean {
   return plan === "PRO" || plan === "ENTERPRISE";
 }
 
-export function getAiStudioSubscriptionBonusTokensByTariffId(tariffId: string | null | undefined): number {
+export function getAiStudioSubscriptionBonusTokensByTariffId(
+  tariffId: string | null | undefined,
+  billingPeriod: "monthly" | "yearly" = "monthly"
+): number {
   const normalized = typeof tariffId === "string" ? tariffId.trim().toLowerCase() : "standard";
+  if (billingPeriod === "yearly") {
+    if (normalized === "enterprise") return 20_000;
+    if (normalized === "pro") return 5_000;
+    return 0;
+  }
+
   if (normalized === "enterprise") return AI_STUDIO_SUBSCRIPTION_BONUS_TOKENS.enterprise;
   if (normalized === "pro") return AI_STUDIO_SUBSCRIPTION_BONUS_TOKENS.pro;
   return AI_STUDIO_SUBSCRIPTION_BONUS_TOKENS.standard;

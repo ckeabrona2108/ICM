@@ -3,7 +3,10 @@ import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { getAnalyticsOverview } from "@/lib/analytics-query-service";
+import {
+  getAnalyticsOverview,
+  listAnalyticsAccessibleReleaseIds
+} from "@/lib/analytics-query-service";
 import { prisma } from "@/lib/prisma";
 
 function toDateKey(value: Date): string {
@@ -14,6 +17,14 @@ const MAX_READABLE_CHANGE_PERCENT = 150;
 
 function clampReadableChangePercent(value: number): number {
   return Math.max(-MAX_READABLE_CHANGE_PERCENT, Math.min(MAX_READABLE_CHANGE_PERCENT, value));
+}
+
+function sqlUuid(value: string): Prisma.Sql {
+  return Prisma.sql`${value}::uuid`;
+}
+
+function sqlUuidList(values: string[]): Prisma.Sql {
+  return Prisma.join(values.map((value) => sqlUuid(value)));
 }
 
 export async function GET(request: Request) {
@@ -30,16 +41,10 @@ export async function GET(request: Request) {
   const country = url.searchParams.get("country") ?? undefined;
   const upc = url.searchParams.get("upc") ?? undefined;
   const platform = url.searchParams.get("platform") ?? undefined;
-  const approvedReleases = await prisma.release.findMany({
-    where: {
-      userId: session.user.id,
-      confirmed: true,
-      status: "approved",
-      ...(releaseId ? { id: releaseId } : {})
-    },
-    select: { id: true }
+  const approvedReleaseIds = await listAnalyticsAccessibleReleaseIds(prisma, {
+    user_id: session.user.id,
+    ...(releaseId ? { release_id: releaseId } : {})
   });
-  const approvedReleaseIds = approvedReleases.map((release) => release.id);
 
   if (approvedReleaseIds.length === 0) {
     return NextResponse.json(
@@ -109,10 +114,11 @@ export async function GET(request: Request) {
     const normalizedPlatform = platform?.trim() || undefined;
 
     try {
-      const conditions: Prisma.Sql[] = [Prisma.sql`"user_id" = ${session.user.id}`];
-      if (releaseId) conditions.push(Prisma.sql`"release_id" = ${releaseId}`);
+      const conditions: Prisma.Sql[] = [Prisma.sql`"user_id" = ${sqlUuid(session.user.id)}`];
+      conditions.push(Prisma.sql`"period_days" = ${days}`);
+      if (releaseId) conditions.push(Prisma.sql`"release_id" = ${sqlUuid(releaseId)}`);
       if (!releaseId) {
-        conditions.push(Prisma.sql`"release_id" IN (${Prisma.join(approvedReleaseIds)})`);
+        conditions.push(Prisma.sql`"release_id" IN (${sqlUuidList(approvedReleaseIds)})`);
       }
       if (normalizedCountry) conditions.push(Prisma.sql`"country" = ${normalizedCountry}`);
       if (normalizedUpc) conditions.push(Prisma.sql`"upc" = ${normalizedUpc}`);

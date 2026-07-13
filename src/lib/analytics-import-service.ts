@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { applyAnalyticsPeriodVariant, normalizeAnalyticsPeriodDays } from "@/lib/analytics-period";
 import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import {
   normalizeAnalyticsPlatform,
@@ -700,7 +701,7 @@ function groupAnalyticsRows(rows: ParsedAnalyticsCsvRow[]): GroupedAnalyticsRow[
   const grouped = new Map<string, GroupedAnalyticsRow>();
 
   for (const row of rows) {
-    const key = `${toDateKey(row.report_date)}::${row.upc}::${row.country}::${row.platform}`;
+    const key = `${row.report_date.toISOString()}::${row.upc}::${row.country}::${row.platform}`;
     const current = grouped.get(key);
     if (!current) {
       grouped.set(key, {
@@ -751,6 +752,8 @@ function toRoundedPercent(value: number): Prisma.Decimal {
 }
 
 const MAX_READABLE_CHANGE_PERCENT = 150;
+const ANALYTICS_IMPORT_TRANSACTION_TIMEOUT_MS = 180_000;
+const ANALYTICS_RECOMPUTE_TRANSACTION_TIMEOUT_MS = 300_000;
 
 function clampReadableChangePercent(value: number): number {
   return Math.max(-MAX_READABLE_CHANGE_PERCENT, Math.min(MAX_READABLE_CHANGE_PERCENT, value));
@@ -1052,7 +1055,7 @@ export async function recomputeSummariesForReportDate(params: {
     },
     {
       maxWait: 10_000,
-      timeout: 120_000
+      timeout: ANALYTICS_RECOMPUTE_TRANSACTION_TIMEOUT_MS
     }
   );
 
@@ -1079,10 +1082,14 @@ export async function importAnalyticsCsvReport(params: {
   };
 
   const fallbackReportDate = parseReportDateFromFilename(params.source_file_name);
-  const parsedRows = parseAnalyticsCsv(params.csvText, fallbackReportDate);
+  const periodDays = normalizeAnalyticsPeriodDays(params.period_days);
+  const parsedRows = parseAnalyticsCsv(params.csvText, fallbackReportDate).map((row) => ({
+    ...row,
+    report_date: applyAnalyticsPeriodVariant(row.report_date, periodDays)
+  }));
   const groupedRows = groupAnalyticsRows(parsedRows);
-  const reportDateKeys = Array.from(new Set(groupedRows.map((row) => toDateKey(row.report_date))));
-  const reportDates = reportDateKeys.map((key) => new Date(`${key}T00:00:00.000Z`));
+  const reportTimestamps = Array.from(new Set(groupedRows.map((row) => row.report_date.toISOString())));
+  const reportDates = reportTimestamps.map((value) => new Date(value));
 
   const uniqueUpcs = Array.from(
     new Set(
@@ -1242,14 +1249,14 @@ export async function importAnalyticsCsvReport(params: {
         matched_rows += 1;
         touchedUserIds.add(release.userId);
         touchedReleaseIds.add(release.id);
-        const dateKey = toDateKey(row.report_date);
-        const touchedForDate = touchedByDate.get(dateKey) ?? {
+        const reportTimestamp = row.report_date.toISOString();
+        const touchedForDate = touchedByDate.get(reportTimestamp) ?? {
           userIds: new Set<string>(),
           releaseIds: new Set<string>()
         };
         touchedForDate.userIds.add(release.userId);
         touchedForDate.releaseIds.add(release.id);
-        touchedByDate.set(dateKey, touchedForDate);
+        touchedByDate.set(reportTimestamp, touchedForDate);
         platformsSet.add(row.platform);
         if (row.platform === "Unknown") {
           rows_with_unknown_platform += 1;
@@ -1263,7 +1270,7 @@ export async function importAnalyticsCsvReport(params: {
             user_id: release.userId,
             upc: csvUpc,
             report_date: row.report_date,
-            period_days: Math.max(1, Math.floor(params.period_days ?? 30)),
+            period_days: periodDays,
             country: row.country,
             platform: row.platform,
             streams: row.streams,
@@ -1282,23 +1289,23 @@ export async function importAnalyticsCsvReport(params: {
           data: unmatchedPayload
         });
       }
-
-      if (touchedByDate.size > 0) {
-        for (const [dateKey, touched] of touchedByDate.entries()) {
-          await recomputeSummariesForReportDateTx({
-            tx,
-            report_date: new Date(`${dateKey}T00:00:00.000Z`),
-            touchedUserIds: Array.from(touched.userIds),
-            touchedReleaseIds: Array.from(touched.releaseIds)
-          });
-        }
-      }
     },
     {
       maxWait: 10_000,
-      timeout: 120_000
+      timeout: ANALYTICS_IMPORT_TRANSACTION_TIMEOUT_MS
     }
   );
+
+  if (touchedByDate.size > 0) {
+    for (const [reportTimestamp, touched] of touchedByDate.entries()) {
+      await recomputeSummariesForReportDate({
+        prisma: params.prisma,
+        report_date: new Date(reportTimestamp),
+        touchedUserIds: Array.from(touched.userIds),
+        touchedReleaseIds: Array.from(touched.releaseIds)
+      });
+    }
+  }
 
   devLog("import-summary", {
     source_file_name: params.source_file_name,

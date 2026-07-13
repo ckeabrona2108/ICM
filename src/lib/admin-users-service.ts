@@ -12,7 +12,12 @@ import {
   type AdminUserProfileDetails
 } from "@/lib/admin-user-service";
 import { adjustUserBalanceByAdmin, topUpUserBalanceByAdmin } from "@/lib/finance-service";
-import { createUserReportByAdmin, listUserReports } from "@/lib/report-service";
+import {
+  createUserReportByAdmin,
+  listUserReports,
+  updateUserReportByAdmin,
+  type UserReportLineItem
+} from "@/lib/report-service";
 import {
   getUserSubscription,
   updateUserSubscriptionByAdmin
@@ -27,8 +32,23 @@ export const adminTopUpSchema = z.object({
 export const adminCreateReportSchema = z.object({
   periodStart: z.string().datetime(),
   periodEnd: z.string().datetime(),
-  amount: z.number().positive("Сумма отчёта должна быть больше 0.").max(10_000_000),
+  amount: z.number().nonnegative("Сумма отчёта не может быть отрицательной.").max(10_000_000),
   status: z.enum(["READY_TO_CONFIRM", "AGREED"]),
+  quarter: z.number().int().min(1).max(4).nullable().optional(),
+  year: z.number().int().min(2000).max(3000).nullable().optional(),
+  items: z
+    .array(
+      z.object({
+        id: z.string().trim().min(1).max(120).optional(),
+        platformName: z.string().trim().min(1, "Укажите площадку.").max(160),
+        upc: z.string().trim().max(120).optional().default(""),
+        releaseTitle: z.string().trim().min(1, "Укажите релиз.").max(240),
+        amount: z.number().positive("Сумма строки должна быть больше 0.").max(10_000_000)
+      })
+    )
+    .max(500)
+    .optional()
+    .default([]),
   comment: z.string().trim().max(500).optional()
 });
 
@@ -119,6 +139,9 @@ export async function adminCreateUserFinanceReport(params: {
   periodEnd: string;
   amount: number;
   status: "READY_TO_CONFIRM" | "AGREED";
+  quarter?: number | null;
+  year?: number | null;
+  items?: UserReportLineItem[];
   comment?: string;
 }) {
   return createUserReportByAdmin({
@@ -132,6 +155,42 @@ export async function adminCreateUserFinanceReport(params: {
       params.status === "AGREED"
         ? FinanceReportStatus.AGREED
         : FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: params.quarter ?? null,
+    year: params.year ?? null,
+    items: params.items ?? [],
+    comment: params.comment
+  });
+}
+
+export async function adminUpdateUserFinanceReport(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  reportId: string;
+  userId: string;
+  periodStart: string;
+  periodEnd: string;
+  amount: number;
+  status: "READY_TO_CONFIRM" | "AGREED";
+  quarter?: number | null;
+  year?: number | null;
+  items?: UserReportLineItem[];
+  comment?: string;
+}) {
+  return updateUserReportByAdmin({
+    prisma: params.prisma,
+    adminId: params.adminId,
+    reportId: params.reportId,
+    userId: params.userId,
+    periodStart: new Date(params.periodStart),
+    periodEnd: new Date(params.periodEnd),
+    amount: params.amount,
+    status:
+      params.status === "AGREED"
+        ? FinanceReportStatus.AGREED
+        : FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: params.quarter ?? null,
+    year: params.year ?? null,
+    items: params.items ?? [],
     comment: params.comment
   });
 }

@@ -71,6 +71,33 @@ export interface SupportUnreadCountResponse {
   count: number;
 }
 
+export type DashboardNotificationKind =
+  | "release_approved"
+  | "release_rejected"
+  | "release_changes_required"
+  | "report_ready"
+  | "report_changes_requested"
+  | "report_agreed"
+  | "payout_requested"
+  | "payout_paid"
+  | "payout_rejected"
+  | "support_reply";
+
+export interface DashboardNotificationItemResponse {
+  id: string;
+  kind: DashboardNotificationKind;
+  title: string;
+  message: string;
+  href: string;
+  createdAt: string;
+  isUnread: boolean;
+}
+
+export interface DashboardNotificationsResponse {
+  unreadCount: number;
+  items: DashboardNotificationItemResponse[];
+}
+
 export interface ModerationRemark {
   field: string;
   message: string;
@@ -500,16 +527,20 @@ export interface PayoutRequestFailureResponse {
 
 export interface FinanceReportAgreementRequest {
   reportId: string;
+  decision?: "agree" | "reject";
+  comment?: string;
 }
 
 export interface FinanceReportAgreementResponse {
   ok: true;
   reportId: string;
   nextStatus: FinanceReportStatus;
+  message?: string;
 }
 
 export interface SubscriptionCheckoutRequest {
   tariffId: "standard" | "pro" | "enterprise";
+  billingPeriod?: "monthly" | "yearly";
   returnUrl?: string;
 }
 

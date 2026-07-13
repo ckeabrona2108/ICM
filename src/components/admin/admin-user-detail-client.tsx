@@ -39,6 +39,7 @@ type UserReleasesPayload = {
 
 type AdminSubscriptionPlan = "standard" | "professional" | "premium" | "enterprise";
 type AdminSubscriptionStatus = "active" | "canceled";
+type EditableReportLine = UserReportItem["items"][number];
 
 const SUBSCRIPTION_PLAN_OPTIONS: AdminSubscriptionPlan[] = [
   "standard",
@@ -51,6 +52,34 @@ const RELEASE_STATUS_OPTIONS: ReleaseStatusFilterValue[] = ["moderating", "appro
 
 function reportStatusLabel(status: FinanceReportStatusValue): string {
   return status === "AGREED" ? "Согласован" : "Ожидает согласования";
+}
+
+function reportLifecycleLabel(report: UserReportItem): string {
+  if (report.lifecycleState === "agreed") return "Согласован";
+  if (report.lifecycleState === "changes_requested") return "На доработке";
+  return "Ожидает согласования";
+}
+
+function normalizeQuarterYear(dateValue: string): { quarter: number; year: number } {
+  const date = new Date(`${dateValue}T00:00:00.000Z`);
+  return {
+    quarter: Math.floor(date.getUTCMonth() / 3) + 1,
+    year: date.getUTCFullYear()
+  };
+}
+
+function createEmptyReportLine(index: number): EditableReportLine {
+  return {
+    id: `line-${Date.now()}-${index}`,
+    platformName: "",
+    upc: "",
+    releaseTitle: "",
+    amount: 0
+  };
+}
+
+function sumReportLines(items: EditableReportLine[]): number {
+  return Number(items.reduce((sum, item) => sum + Number(item.amount ?? 0), 0).toFixed(2));
 }
 
 function transactionTypeLabel(type: TransactionTypeValue): string {
@@ -99,11 +128,16 @@ export function AdminUserDetailClient({
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const defaultQuarterYear = normalizeQuarterYear(monthStart);
   const [reportPeriodStart, setReportPeriodStart] = React.useState(monthStart);
   const [reportPeriodEnd, setReportPeriodEnd] = React.useState(monthEnd);
   const [reportAmount, setReportAmount] = React.useState("1000");
   const [reportStatus, setReportStatus] = React.useState<"READY_TO_CONFIRM" | "AGREED">("READY_TO_CONFIRM");
   const [reportComment, setReportComment] = React.useState("");
+  const [reportQuarter, setReportQuarter] = React.useState<number>(defaultQuarterYear.quarter);
+  const [reportYear, setReportYear] = React.useState<number>(defaultQuarterYear.year);
+  const [reportItems, setReportItems] = React.useState<EditableReportLine[]>([]);
+  const [editingReportId, setEditingReportId] = React.useState<string | null>(null);
   const [showReportConfirm, setShowReportConfirm] = React.useState(false);
 
   const [plan, setPlan] = React.useState<AdminSubscriptionPlan>(
@@ -114,6 +148,8 @@ export function AdminUserDetailClient({
   );
   const [endsAt, setEndsAt] = React.useState(initialSubscription?.endsAt?.slice(0, 10) ?? "");
   const [subscriptionComment, setSubscriptionComment] = React.useState("");
+  const reportAmountFromItems = sumReportLines(reportItems);
+  const effectiveReportAmount = reportItems.length > 0 ? reportAmountFromItems : Number(reportAmount || 0);
 
   const reloadAll = React.useCallback(async () => {
     setBusy("reload");
@@ -173,6 +209,44 @@ export function AdminUserDetailClient({
     return () => clearTimeout(timer);
   }, [toast]);
 
+  function resetReportForm() {
+    const nextQuarterYear = normalizeQuarterYear(monthStart);
+    setEditingReportId(null);
+    setReportPeriodStart(monthStart);
+    setReportPeriodEnd(monthEnd);
+    setReportAmount("1000");
+    setReportStatus("READY_TO_CONFIRM");
+    setReportComment("");
+    setReportQuarter(nextQuarterYear.quarter);
+    setReportYear(nextQuarterYear.year);
+    setReportItems([]);
+  }
+
+  function loadReportIntoForm(report: UserReportItem) {
+    setEditingReportId(report.id);
+    setReportPeriodStart(report.periodStart.slice(0, 10));
+    setReportPeriodEnd(report.periodEnd.slice(0, 10));
+    setReportAmount(String(report.amount));
+    setReportStatus(report.status);
+    setReportComment(report.adminComment ?? "");
+    setReportQuarter(report.quarter ?? normalizeQuarterYear(report.periodStart.slice(0, 10)).quarter);
+    setReportYear(report.year ?? new Date(report.periodEnd).getUTCFullYear());
+    setReportItems(
+      report.items.length
+        ? report.items.map((item, index) => ({
+            ...item,
+            id: item.id || `line-${index + 1}`
+          }))
+        : []
+    );
+  }
+
+  function updateReportLine(index: number, patch: Partial<EditableReportLine>) {
+    setReportItems((current) =>
+      current.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item))
+    );
+  }
+
   async function reloadReleases(page = releases.page, status = releaseStatusFilter) {
     try {
       const params = new URLSearchParams();
@@ -225,24 +299,45 @@ export function AdminUserDetailClient({
     setBusy("report");
     setError(null);
     try {
-      const response = await fetch(`/api/admin/users/${profile.id}/reports`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          periodStart: new Date(`${reportPeriodStart}T00:00:00.000Z`).toISOString(),
-          periodEnd: new Date(`${reportPeriodEnd}T23:59:59.999Z`).toISOString(),
-          amount: Number(reportAmount),
-          status: reportStatus,
-          comment: reportComment.trim() || undefined
-        })
-      });
-      const payload = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+      const normalizedItems = reportItems
+        .map((item) => ({
+          id: item.id,
+          platformName: item.platformName.trim(),
+          upc: item.upc.trim(),
+          releaseTitle: item.releaseTitle.trim(),
+          amount: Number(item.amount)
+        }))
+        .filter((item) => item.platformName && item.releaseTitle && Number.isFinite(item.amount) && item.amount > 0);
+      const requestBody = {
+        periodStart: new Date(`${reportPeriodStart}T00:00:00.000Z`).toISOString(),
+        periodEnd: new Date(`${reportPeriodEnd}T23:59:59.999Z`).toISOString(),
+        amount: normalizedItems.length > 0 ? sumReportLines(normalizedItems) : Number(reportAmount),
+        status: reportStatus,
+        quarter: reportQuarter,
+        year: reportYear,
+        items: normalizedItems,
+        comment: reportComment.trim() || undefined
+      };
+      const response = await fetch(
+        editingReportId
+          ? `/api/admin/users/${profile.id}/reports/${editingReportId}`
+          : `/api/admin/users/${profile.id}/reports`,
+        {
+          method: editingReportId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody)
+        }
+      );
+      const responsePayload = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
       if (!response.ok) {
-        throw new Error(payload?.error ?? "Не удалось добавить отчет.");
+        throw new Error(responsePayload?.error ?? "Не удалось добавить отчет.");
       }
       setShowReportConfirm(false);
-      setReportComment("");
-      setToast(payload?.message ?? "Отчет добавлен.");
+      resetReportForm();
+      setToast(
+        responsePayload?.message ??
+          (editingReportId ? "Отчет обновлен." : "Отчет отправлен пользователю.")
+      );
       await reloadAll();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Не удалось добавить отчет.");
@@ -446,12 +541,35 @@ export function AdminUserDetailClient({
       </section>
 
       <section className="rounded-2xl border border-white/[0.08] bg-[#15161d]/90 p-5">
-        <h2 className="text-[18px] font-semibold text-white">Отчеты</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-[18px] font-semibold text-white">Отчеты</h2>
+            <p className="mt-1 text-[13px] text-white/58">
+              Создайте квартальный отчет, при необходимости скорректируйте строки по площадкам и релизам.
+            </p>
+          </div>
+          {editingReportId ? (
+            <button
+              type="button"
+              onClick={resetReportForm}
+              className="rounded-xl border border-white/[0.12] bg-white/[0.04] px-3 py-2 text-[13px] font-semibold text-white/80 hover:bg-white/[0.08]"
+            >
+              Сбросить редактирование
+            </button>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <input
             type="date"
             value={reportPeriodStart}
-            onChange={(event) => setReportPeriodStart(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setReportPeriodStart(value);
+              const nextQuarterYear = normalizeQuarterYear(value);
+              setReportQuarter(nextQuarterYear.quarter);
+              setReportYear(nextQuarterYear.year);
+            }}
             className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
           />
           <input
@@ -460,13 +578,33 @@ export function AdminUserDetailClient({
             onChange={(event) => setReportPeriodEnd(event.target.value)}
             className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
           />
+          <select
+            value={reportQuarter}
+            onChange={(event) => setReportQuarter(Number(event.target.value))}
+            className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+          >
+            <option value={1}>1 квартал</option>
+            <option value={2}>2 квартал</option>
+            <option value={3}>3 квартал</option>
+            <option value={4}>4 квартал</option>
+          </select>
           <input
             type="number"
-            min={1}
+            min={2020}
+            max={3000}
+            value={reportYear}
+            onChange={(event) => setReportYear(Number(event.target.value))}
+            className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+            placeholder="Год"
+          />
+          <input
+            type="number"
+            min={0}
             value={reportAmount}
             onChange={(event) => setReportAmount(event.target.value)}
-            className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+            className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white/60 outline-none focus:border-[#7b3df5]/60"
             placeholder="Сумма, ₽"
+            disabled={reportItems.length > 0}
           />
           <select
             value={reportStatus}
@@ -476,20 +614,109 @@ export function AdminUserDetailClient({
             <option value="READY_TO_CONFIRM">READY_TO_CONFIRM</option>
             <option value="AGREED">AGREED</option>
           </select>
-          <button
-            type="button"
-            onClick={() => setShowReportConfirm(true)}
-            disabled={busy !== null}
-            className="inline-flex h-11 items-center justify-center rounded-xl bg-[#7b3df5] px-4 text-[14px] font-semibold text-white hover:bg-[#8b4ff7] disabled:opacity-50"
-          >
-            Добавить отчет
-          </button>
           <input
             value={reportComment}
             onChange={(event) => setReportComment(event.target.value)}
             placeholder="Комментарий администратора"
-            className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60 sm:col-span-2 lg:col-span-5"
+            className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60 sm:col-span-2 lg:col-span-6"
           />
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/[0.08] bg-black/20 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[15px] font-semibold text-white">Детализация отчета</h3>
+              <p className="mt-1 text-[13px] text-white/56">
+                Пользователь увидит только свою сумму по строкам, без процента площадки.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[13px] font-semibold text-white/68">
+                Итого: {formatRubCurrency(effectiveReportAmount)}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setReportItems((current) => [...current, createEmptyReportLine(current.length + 1)])
+                }
+                className="rounded-xl border border-white/[0.12] bg-white/[0.04] px-3 py-2 text-[13px] font-semibold text-white/80 hover:bg-white/[0.08]"
+              >
+                Добавить строку
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {reportItems.length === 0 ? (
+              <p className="text-[14px] text-white/56">
+                Можно оставить только общую сумму, либо добавить строки по площадкам, UPC и релизам.
+              </p>
+            ) : (
+              reportItems.map((item, index) => (
+                <div
+                  key={item.id}
+                  className="grid gap-3 rounded-2xl border border-white/[0.08] bg-[#12131a] p-3 lg:grid-cols-[1.1fr,0.8fr,1.2fr,0.7fr,auto]"
+                >
+                  <input
+                    value={item.platformName}
+                    onChange={(event) => updateReportLine(index, { platformName: event.target.value })}
+                    placeholder="Площадка"
+                    className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+                  />
+                  <input
+                    value={item.upc}
+                    onChange={(event) => updateReportLine(index, { upc: event.target.value })}
+                    placeholder="UPC"
+                    className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+                  />
+                  <input
+                    value={item.releaseTitle}
+                    onChange={(event) => updateReportLine(index, { releaseTitle: event.target.value })}
+                    placeholder="Релиз"
+                    className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={item.amount}
+                    onChange={(event) => updateReportLine(index, { amount: Number(event.target.value) })}
+                    placeholder="Сумма"
+                    className="h-11 rounded-xl border border-white/[0.12] bg-black/25 px-3 text-[14px] text-white outline-none focus:border-[#7b3df5]/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReportItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                    }
+                    className="inline-flex h-11 items-center justify-center rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 text-[13px] font-semibold text-rose-100 hover:border-rose-400/30"
+                  >
+                    Удалить
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setShowReportConfirm(true)}
+              disabled={busy !== null}
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-[#7b3df5] px-4 text-[14px] font-semibold text-white hover:bg-[#8b4ff7] disabled:opacity-50"
+            >
+              {editingReportId ? "Обновить отчет" : "Отправить отчет"}
+            </button>
+            {editingReportId ? (
+              <button
+                type="button"
+                onClick={resetReportForm}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] px-4 text-[14px] font-semibold text-white/80 hover:bg-white/[0.08]"
+              >
+                Отменить редактирование
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-4 space-y-2">
@@ -499,22 +726,50 @@ export function AdminUserDetailClient({
             reports.map((report) => (
               <div
                 key={report.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-2"
+                className="rounded-xl border border-white/[0.08] bg-black/20 px-3 py-3"
               >
-                <p className="text-[14px] text-white/85">
-                  {new Date(report.periodStart).toLocaleDateString("ru-RU")} —{" "}
-                  {new Date(report.periodEnd).toLocaleDateString("ru-RU")} · {formatRubCurrency(report.amount)}
-                </p>
-                <span
-                  className={cn(
-                    "rounded-md border px-2 py-0.5 text-[12px]",
-                    report.status === "AGREED"
-                      ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
-                      : "border-amber-300/30 bg-amber-400/10 text-amber-200"
-                  )}
-                >
-                  {reportStatusLabel(report.status)}
-                </span>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[15px] font-semibold text-white">
+                      {report.quarterLabel} · {formatRubCurrency(report.amount)}
+                    </p>
+                    <p className="mt-1 text-[13px] text-white/62">
+                      {new Date(report.periodStart).toLocaleDateString("ru-RU")} —{" "}
+                      {new Date(report.periodEnd).toLocaleDateString("ru-RU")}
+                    </p>
+                    <p className="mt-1 text-[12px] text-white/48">
+                      Строк: {report.items.length} · Площадок: {report.platformTotals.length}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "rounded-md border px-2 py-0.5 text-[12px]",
+                        report.lifecycleState === "agreed"
+                          ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                          : report.lifecycleState === "changes_requested"
+                            ? "border-rose-400/25 bg-rose-500/10 text-rose-100"
+                            : "border-amber-300/30 bg-amber-400/10 text-amber-200"
+                      )}
+                    >
+                      {reportLifecycleLabel(report)}
+                    </span>
+                    {report.lifecycleState !== "agreed" ? (
+                      <button
+                        type="button"
+                        onClick={() => loadReportIntoForm(report)}
+                        className="rounded-md border border-white/[0.12] bg-white/[0.04] px-2.5 py-1 text-[12px] text-white/85 hover:bg-white/[0.08]"
+                      >
+                        Редактировать
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {report.userComment ? (
+                  <p className="mt-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-100">
+                    Комментарий пользователя: {report.userComment}
+                  </p>
+                ) : null}
               </div>
             ))
           )}
@@ -596,8 +851,8 @@ export function AdminUserDetailClient({
 
       {showReportConfirm ? (
         <ConfirmModal
-          title="Подтвердите добавление отчета"
-          description={`Добавить отчет на ${formatRubCurrency(Number(reportAmount || 0))}?`}
+          title={editingReportId ? "Подтвердите обновление отчета" : "Подтвердите отправку отчета"}
+          description={`${editingReportId ? "Обновить" : "Отправить"} отчет на ${formatRubCurrency(effectiveReportAmount)}?`}
           busy={busy === "report"}
           onCancel={() => setShowReportConfirm(false)}
           onConfirm={() => {

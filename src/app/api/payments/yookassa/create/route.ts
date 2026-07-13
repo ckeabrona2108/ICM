@@ -4,17 +4,15 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  getSubscriptionTariffConfig,
+  normalizeSubscriptionBillingPeriod
+} from "@/lib/subscription-billing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
 export const dynamic = "force-dynamic";
 
 const RELEASE_PAYMENT_AMOUNT_RUB = 350;
-
-const TARIFFS: Record<"standard" | "pro" | "enterprise", { title: string; amountRub: number }> = {
-  standard: { title: "STANDARD", amountRub: 550 },
-  pro: { title: "PRO", amountRub: 990 },
-  enterprise: { title: "ENTERPRISE", amountRub: 1990 }
-};
 
 function getAppBaseUrl(request: Request): string {
   const configured = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_DOMAIN?.trim();
@@ -30,6 +28,7 @@ export async function POST(request: Request) {
     kind?: "release" | "subscription";
     releaseId?: string;
     tariffId?: "standard" | "pro" | "enterprise";
+    billingPeriod?: "monthly" | "yearly";
     returnUrl?: string;
   };
 
@@ -41,10 +40,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "releaseId is required" }, { status: 400 });
   }
 
-  if (kind === "subscription" && payload.tariffId && !(payload.tariffId in TARIFFS)) {
-    return NextResponse.json({ error: "Unknown tariff" }, { status: 400 });
-  }
-
   const returnUrl =
     payload.returnUrl ??
     (kind === "subscription"
@@ -53,12 +48,18 @@ export async function POST(request: Request) {
 
   let amountRub = RELEASE_PAYMENT_AMOUNT_RUB;
   let description = "Оплата релиза ICECREAMMUSIC";
+  const billingPeriod = normalizeSubscriptionBillingPeriod(payload.billingPeriod);
+  const subscriptionTariff =
+    kind === "subscription"
+      ? getSubscriptionTariffConfig(payload.tariffId ?? "standard", billingPeriod)
+      : null;
 
   if (kind === "subscription") {
-    const tariffId = payload.tariffId ?? "standard";
-    const tariff = TARIFFS[tariffId];
-    amountRub = tariff.amountRub;
-    description = `Подписка ICECREAMMUSIC ${tariff.title}`;
+    if (!subscriptionTariff) {
+      return NextResponse.json({ error: "Unknown tariff" }, { status: 400 });
+    }
+    amountRub = subscriptionTariff.amountRub;
+    description = `Подписка ICECREAMMUSIC ${subscriptionTariff.title}`;
   } else if (payload.releaseId) {
     const release = await prisma.release.findFirst({
       where: {
@@ -90,6 +91,7 @@ export async function POST(request: Request) {
         kind,
         releaseId: payload.releaseId ?? "",
         tariffId: payload.tariffId ?? "",
+        billingPeriod,
         userId: session.user.id
       }
     });
@@ -119,6 +121,9 @@ export async function POST(request: Request) {
       metadata: {
         releaseId: payload.releaseId ?? null,
         tariffId: payload.tariffId ?? null,
+        billingPeriod: kind === "subscription" ? billingPeriod : null,
+        tariffTitle: subscriptionTariff?.title ?? null,
+        amountRub: kind === "subscription" ? amountRub : null,
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

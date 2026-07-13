@@ -1,14 +1,35 @@
 // @ts-nocheck
 import { Prisma, type PrismaClient } from "@prisma/client";
+import {
+  getAnalyticsPeriodVariantHour,
+  normalizeAnalyticsPeriodDays
+} from "@/lib/analytics-period";
 import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import { normalizeAnalyticsPlatform } from "@/lib/analytics-platform";
+import {
+  isPrismaColumnMissingError,
+  isPrismaTableMissingError
+} from "@/lib/prisma-errors";
+import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
 
 type AnalyticsDailySummaryRepo = {
   findMany: (args: unknown) => Promise<
     Array<{
       report_date: Date;
+      release_id?: string | null;
       total_streams: number;
       total_pay_streams: number;
+    }>
+  >;
+};
+
+type AnalyticsPlatformSummaryRepo = {
+  findMany: (args: unknown) => Promise<
+    Array<{
+      report_date: Date;
+      platform: string;
+      streams: number;
+      pay_streams: number;
     }>
   >;
 };
@@ -18,6 +39,13 @@ function getAnalyticsDailySummaryRepo(
 ): AnalyticsDailySummaryRepo | null {
   return (prisma as unknown as { analytics_daily_summaries?: AnalyticsDailySummaryRepo })
     .analytics_daily_summaries ?? null;
+}
+
+function getAnalyticsPlatformSummaryRepo(
+  prisma: PrismaClient
+): AnalyticsPlatformSummaryRepo | null {
+  return (prisma as unknown as { analytics_platform_summaries?: AnalyticsPlatformSummaryRepo })
+    .analytics_platform_summaries ?? null;
 }
 
 function isUnknownSnapshotPlatformFieldError(error: unknown): boolean {
@@ -37,10 +65,44 @@ function isRawPlatformQueryUnavailableError(error: unknown): boolean {
   );
 }
 
+function isAnalyticsSummaryUnavailableError(error: unknown): boolean {
+  return (
+    isPrismaTableMissingError(error, "analytics_daily_summaries") ||
+    isPrismaTableMissingError(error, "analytics_platform_summaries") ||
+    isPrismaColumnMissingError(error, "release_id") ||
+    isPrismaColumnMissingError(error, "platform") ||
+    (error instanceof Error &&
+      (error.message.includes("analytics_daily_summaries") ||
+        error.message.includes("analytics_platform_summaries")))
+  );
+}
+
 function toNumber(value: bigint | number | null): number {
   if (value == null) return 0;
   if (typeof value === "bigint") return Number(value);
   return value;
+}
+
+function hasRawQueryClient(prisma: PrismaClient): prisma is PrismaClient & {
+  $queryRaw: typeof prisma.$queryRaw;
+} {
+  return typeof (prisma as PrismaClient & { $queryRaw?: unknown }).$queryRaw === "function";
+}
+
+function sqlUuid(value: string): Prisma.Sql {
+  return Prisma.sql`${value}::uuid`;
+}
+
+function sqlUuidList(values: string[]): Prisma.Sql {
+  return Prisma.join(values.map((value) => sqlUuid(value)));
+}
+
+function buildLegacyPeriodHourCondition(periodDays: number): Prisma.Sql {
+  return Prisma.sql`EXTRACT(HOUR FROM "report_date") = ${getAnalyticsPeriodVariantHour(periodDays)}`;
+}
+
+function matchesAnalyticsPeriodVariant(date: Date, periodDays: number): boolean {
+  return date.getUTCHours() === getAnalyticsPeriodVariantHour(periodDays);
 }
 
 async function groupSnapshotPlatformsCompat(
@@ -48,6 +110,7 @@ async function groupSnapshotPlatformsCompat(
   where: {
     user_id: string;
     report_date?: Date;
+    period_days?: number;
     release_id?: string;
     release_ids?: string[];
     country?: string;
@@ -58,6 +121,7 @@ async function groupSnapshotPlatformsCompat(
   const snapshotWhere = {
     user_id: where.user_id,
     ...(where.report_date ? { report_date: where.report_date } : {}),
+    ...(where.period_days ? { period_days: where.period_days } : {}),
     ...(where.release_id ? { release_id: where.release_id } : {}),
     ...(where.release_ids?.length ? { release_id: { in: where.release_ids } } : {}),
     ...(where.country ? { country: where.country } : {}),
@@ -91,13 +155,22 @@ async function groupSnapshotPlatformsCompat(
     if (!isUnknownSnapshotPlatformFieldError(error)) throw error;
   }
 
+  if (!hasRawQueryClient(prisma)) {
+    return [];
+  }
+
   const conditions: Prisma.Sql[] = [
-    Prisma.sql`"user_id" = ${where.user_id}`
+    Prisma.sql`"user_id" = ${sqlUuid(where.user_id)}`
   ];
   if (where.report_date) conditions.push(Prisma.sql`"report_date" = ${where.report_date}`);
-  if (where.release_id) conditions.push(Prisma.sql`"release_id" = ${where.release_id}`);
+  if (where.period_days) {
+    conditions.push(
+      Prisma.sql`("period_days" = ${where.period_days} OR ${buildLegacyPeriodHourCondition(where.period_days)})`
+    );
+  }
+  if (where.release_id) conditions.push(Prisma.sql`"release_id" = ${sqlUuid(where.release_id)}`);
   if (where.release_ids?.length) {
-    conditions.push(Prisma.sql`"release_id" IN (${Prisma.join(where.release_ids)})`);
+    conditions.push(Prisma.sql`"release_id" IN (${sqlUuidList(where.release_ids)})`);
   }
   if (where.country) conditions.push(Prisma.sql`"country" = ${where.country}`);
   if (where.upc) conditions.push(Prisma.sql`"upc" = ${where.upc}`);
@@ -142,6 +215,7 @@ async function buildAllTimePlatformsBreakdown(
     user_id: string;
     release_id?: string;
     release_ids?: string[];
+    period_days?: number;
     country?: string;
     upc?: string;
     platform?: string;
@@ -153,6 +227,7 @@ async function buildAllTimePlatformsBreakdown(
     user_id: params.user_id,
     ...(params.release_id ? { release_id: params.release_id } : {}),
     ...(params.release_ids?.length ? { release_ids: params.release_ids } : {}),
+    ...(params.period_days ? { period_days: params.period_days } : {}),
     ...(params.country ? { country: params.country } : {}),
     ...(params.upc ? { upc: params.upc } : {}),
     ...(params.platform ? { platform: params.platform } : {})
@@ -192,6 +267,7 @@ async function groupSnapshotPlatformsChartCompat(
     user_id: string;
     release_id?: string;
     release_ids?: string[];
+    period_days?: number;
     country?: string;
     upc?: string;
     platform?: string;
@@ -205,6 +281,7 @@ async function groupSnapshotPlatformsChartCompat(
     },
     ...(where.release_id ? { release_id: where.release_id } : {}),
     ...(where.release_ids?.length ? { release_id: { in: where.release_ids } } : {}),
+    ...(where.period_days ? { period_days: where.period_days } : {}),
     ...(where.country ? { country: where.country } : {}),
     ...(where.upc ? { upc: where.upc } : {}),
     ...(where.platform ? { platform: where.platform } : {})
@@ -241,13 +318,22 @@ async function groupSnapshotPlatformsChartCompat(
     if (!isUnknownSnapshotPlatformFieldError(error)) throw error;
   }
 
+  if (!hasRawQueryClient(prisma)) {
+    return [];
+  }
+
   const conditions: Prisma.Sql[] = [
-    Prisma.sql`"user_id" = ${where.user_id}`,
+    Prisma.sql`"user_id" = ${sqlUuid(where.user_id)}`,
     Prisma.sql`"report_date" >= ${where.rangeStart}`
   ];
-  if (where.release_id) conditions.push(Prisma.sql`"release_id" = ${where.release_id}`);
+  if (where.release_id) conditions.push(Prisma.sql`"release_id" = ${sqlUuid(where.release_id)}`);
   if (where.release_ids?.length) {
-    conditions.push(Prisma.sql`"release_id" IN (${Prisma.join(where.release_ids)})`);
+    conditions.push(Prisma.sql`"release_id" IN (${sqlUuidList(where.release_ids)})`);
+  }
+  if (where.period_days) {
+    conditions.push(
+      Prisma.sql`("period_days" = ${where.period_days} OR ${buildLegacyPeriodHourCondition(where.period_days)})`
+    );
   }
   if (where.country) conditions.push(Prisma.sql`"country" = ${where.country}`);
   if (where.upc) conditions.push(Prisma.sql`"upc" = ${where.upc}`);
@@ -372,8 +458,7 @@ export interface AnalyticsOverviewParams {
 }
 
 function clampDays(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 30;
-  return Math.max(1, Math.min(90, Math.floor(value ?? 30)));
+  return normalizeAnalyticsPeriodDays(value);
 }
 
 function emptyAnalyticsOverview(): AnalyticsOverviewResponse {
@@ -391,21 +476,67 @@ function emptyAnalyticsOverview(): AnalyticsOverviewResponse {
   };
 }
 
-async function getApprovedAnalyticsReleaseIds(
+export async function listAnalyticsAccessibleReleaseIds(
   prisma: PrismaClient,
   params: { user_id: string; release_id?: string }
 ): Promise<string[]> {
   const releases = await prisma.release.findMany({
     where: {
       userId: params.user_id,
-      confirmed: true,
-      status: "approved",
       ...(params.release_id ? { id: params.release_id } : {})
     },
-    select: { id: true }
+    select: {
+      id: true,
+      status: true,
+      confirmed: true,
+      upc: true,
+      roles: true
+    }
   });
 
-  return releases.map((release) => release.id);
+  const approvedReleaseIds = releases
+    .filter((release) =>
+      shouldTreatReleaseAsApproved({
+        status: release.status,
+        confirmed: release.confirmed,
+        upc: release.upc,
+        roles: release.roles
+      })
+    )
+    .map((release) => release.id);
+
+  const hiddenReleaseIds = releases
+    .map((release) => release.id)
+    .filter((releaseId) => !approvedReleaseIds.includes(releaseId));
+
+  if (hiddenReleaseIds.length === 0) {
+    return approvedReleaseIds;
+  }
+
+  let snapshotBackedReleaseIds: string[] = [];
+
+  try {
+    const rows = await prisma.analytics_report_snapshots.groupBy({
+      by: ["release_id"],
+      where: {
+        user_id: params.user_id,
+        release_id: { in: hiddenReleaseIds }
+      }
+    });
+    snapshotBackedReleaseIds = rows.map((row) => row.release_id);
+  } catch {
+    if (hasRawQueryClient(prisma)) {
+      const rows = await prisma.$queryRaw<Array<{ release_id: string }>>(Prisma.sql`
+        SELECT DISTINCT "release_id" AS "release_id"
+        FROM "analytics_report_snapshots"
+        WHERE "user_id" = ${sqlUuid(params.user_id)}
+          AND "release_id" IN (${sqlUuidList(hiddenReleaseIds)})
+      `);
+      snapshotBackedReleaseIds = rows.map((row) => row.release_id);
+    }
+  }
+
+  return Array.from(new Set([...approvedReleaseIds, ...snapshotBackedReleaseIds]));
 }
 
 function toDateKey(date: Date): string {
@@ -433,6 +564,445 @@ function buildReportRangeFromLatest(latest: Date, days: number): Date {
   start.setUTCHours(0, 0, 0, 0);
   start.setUTCDate(start.getUTCDate() - days + 1);
   return start;
+}
+
+async function buildOverviewFromUpcs(
+  prisma: PrismaClient,
+  params: {
+    upcs: string[];
+    days: number;
+    country?: string;
+    platform?: string;
+    upc?: string;
+  }
+): Promise<AnalyticsOverviewResponse | null> {
+  if (!hasRawQueryClient(prisma) || params.upcs.length === 0) {
+    return null;
+  }
+
+  const targetUpcs = params.upc ? params.upcs.filter((item) => item === params.upc) : params.upcs;
+  if (targetUpcs.length === 0) {
+    return null;
+  }
+
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`"upc" IN (${Prisma.join(targetUpcs)})`,
+    Prisma.sql`("period_days" = ${params.days} OR ${buildLegacyPeriodHourCondition(params.days)})`
+  ];
+  if (params.country) conditions.push(Prisma.sql`"country" = ${params.country}`);
+  if (params.platform) conditions.push(Prisma.sql`"platform" = ${params.platform}`);
+
+  const latestRows = await prisma.$queryRaw<
+    Array<{ report_date: Date; streams: bigint | number | null; pay_streams: bigint | number | null }>
+  >(Prisma.sql`
+    SELECT
+      "report_date" AS "report_date",
+      SUM("streams")::bigint AS "streams",
+      SUM("pay_streams")::bigint AS "pay_streams"
+    FROM "analytics_report_snapshots"
+    WHERE ${Prisma.join(conditions, " AND ")}
+    GROUP BY "report_date"
+    ORDER BY "report_date" DESC
+    LIMIT 2
+  `);
+
+  if (latestRows.length === 0) {
+    return null;
+  }
+
+  const current = latestRows[0];
+  const previous = latestRows[1];
+  const rangeStart = buildReportRangeFromLatest(current.report_date, params.days);
+  const chartRows = await prisma.$queryRaw<
+    Array<{ report_date: Date; streams: bigint | number | null; pay_streams: bigint | number | null }>
+  >(Prisma.sql`
+    SELECT
+      "report_date" AS "report_date",
+      SUM("streams")::bigint AS "streams",
+      SUM("pay_streams")::bigint AS "pay_streams"
+    FROM "analytics_report_snapshots"
+    WHERE ${Prisma.join([...conditions, Prisma.sql`"report_date" >= ${rangeStart}`], " AND ")}
+    GROUP BY "report_date"
+    ORDER BY "report_date" ASC
+  `);
+
+  const currentStreams = toNumber(current.streams);
+  const currentPayStreams = toNumber(current.pay_streams);
+  const previousStreams = toNumber(previous?.streams ?? 0);
+  const previousPayStreams = toNumber(previous?.pay_streams ?? 0);
+  const periodStreams = chartRows.reduce((sum, row) => sum + toNumber(row.streams), 0);
+  const periodPayStreams = chartRows.reduce((sum, row) => sum + toNumber(row.pay_streams), 0);
+
+  return {
+    totalStreams: periodStreams,
+    totalPayStreams: periodPayStreams,
+    streamsChangePercent: calculateChangePercent(currentStreams, previousStreams),
+    payStreamsChangePercent: calculateChangePercent(currentPayStreams, previousPayStreams),
+    latestReportDate: toDateKey(current.report_date),
+    topPlatform: null,
+    platforms_count: 0,
+    platformsBreakdown: [],
+    chart: chartRows.map((row) => ({
+      date: toDateKey(row.report_date),
+      streams: toNumber(row.streams),
+      pay_streams: toNumber(row.pay_streams)
+    })),
+    platformsChart: []
+  };
+}
+
+async function enrichOverviewWithPlatformChartsByUpcs(
+  prisma: PrismaClient,
+  params: {
+    base: AnalyticsOverviewResponse;
+    upcs: string[];
+    days: number;
+    country?: string;
+    platform?: string;
+    upc?: string;
+  }
+): Promise<AnalyticsOverviewResponse> {
+  if (!hasRawQueryClient(prisma) || params.base.latestReportDate == null || params.upcs.length === 0) {
+    return params.base;
+  }
+
+  const targetUpcs = params.upc ? params.upcs.filter((item) => item === params.upc) : params.upcs;
+  if (targetUpcs.length === 0) {
+    return params.base;
+  }
+
+  const baseConditions: Prisma.Sql[] = [
+    Prisma.sql`"upc" IN (${Prisma.join(targetUpcs)})`,
+    Prisma.sql`("period_days" = ${params.days} OR ${buildLegacyPeriodHourCondition(params.days)})`
+  ];
+  if (params.country) baseConditions.push(Prisma.sql`"country" = ${params.country}`);
+  if (params.platform) baseConditions.push(Prisma.sql`"platform" = ${params.platform}`);
+
+  const latestDate = new Date(`${params.base.latestReportDate}T00:00:00.000Z`);
+  const rangeStart = buildReportRangeFromLatest(latestDate, params.days);
+
+  const platformRows = await prisma.$queryRaw<
+    Array<{ platform: string | null; streams: bigint | number | null; pay_streams: bigint | number | null }>
+  >(Prisma.sql`
+    SELECT
+      "platform" AS "platform",
+      SUM("streams")::bigint AS "streams",
+      SUM("pay_streams")::bigint AS "pay_streams"
+    FROM "analytics_report_snapshots"
+    WHERE ${Prisma.join(baseConditions, " AND ")}
+    GROUP BY "platform"
+    ORDER BY SUM("streams") DESC
+  `);
+
+  const totalStreams = platformRows.reduce((sum, row) => sum + toNumber(row.streams), 0);
+  const platformsBreakdown = platformRows.map((row) => {
+    const streams = toNumber(row.streams);
+    return {
+      platform: row.platform ?? "Unknown",
+      streams,
+      pay_streams: toNumber(row.pay_streams),
+      sharePercent: totalStreams > 0 ? Number(((streams / totalStreams) * 100).toFixed(3)) : 0,
+      changePercent: null
+    };
+  });
+
+  const platformChartRows = await prisma.$queryRaw<
+    Array<{ report_date: Date; platform: string | null; streams: bigint | number | null; pay_streams: bigint | number | null }>
+  >(Prisma.sql`
+    SELECT
+      "report_date" AS "report_date",
+      "platform" AS "platform",
+      SUM("streams")::bigint AS "streams",
+      SUM("pay_streams")::bigint AS "pay_streams"
+    FROM "analytics_report_snapshots"
+    WHERE ${Prisma.join([...baseConditions, Prisma.sql`"report_date" >= ${rangeStart}`], " AND ")}
+    GROUP BY "report_date", "platform"
+    ORDER BY "report_date" ASC, "platform" ASC
+  `);
+
+  const chartByDate = new Map<string, AnalyticsPlatformsChartPoint["values"]>();
+  for (const row of platformChartRows) {
+    const dateKey = toDateKey(row.report_date);
+    const bucket = chartByDate.get(dateKey) ?? [];
+    bucket.push({
+      platform: row.platform ?? "Unknown",
+      streams: toNumber(row.streams),
+      pay_streams: toNumber(row.pay_streams)
+    });
+    chartByDate.set(dateKey, bucket);
+  }
+
+  return {
+    ...params.base,
+    topPlatform: platformsBreakdown[0]?.platform ?? null,
+    platforms_count: platformsBreakdown.length,
+    platformsBreakdown,
+    platformsChart: Array.from(chartByDate.entries()).map(([date, values]) => ({
+      date,
+      values: values.sort((left, right) => right.streams - left.streams)
+    }))
+  };
+}
+
+async function buildOverviewFromDailySummaries(
+  prisma: PrismaClient,
+  params: {
+    user_id: string;
+    release_id?: string;
+    release_ids?: string[];
+    days: number;
+  }
+): Promise<AnalyticsOverviewResponse | null> {
+  const summaryRepo = getAnalyticsDailySummaryRepo(prisma);
+  if (!summaryRepo?.findMany) {
+    return null;
+  }
+
+  let rows;
+  try {
+    rows = await summaryRepo.findMany({
+      where: {
+        user_id: params.user_id,
+        ...(params.release_id ? { release_id: params.release_id } : {}),
+        ...(params.release_ids?.length ? { release_id: { in: params.release_ids } } : {})
+      },
+      orderBy: {
+        report_date: "asc"
+      }
+    });
+  } catch (error) {
+    if (isAnalyticsSummaryUnavailableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+
+  const filteredRows = rows.filter((row) => matchesAnalyticsPeriodVariant(row.report_date, params.days));
+  if (filteredRows.length === 0) {
+    return null;
+  }
+
+  const byDate = new Map<string, { report_date: Date; streams: number; pay_streams: number }>();
+  for (const row of filteredRows) {
+    const key = row.report_date.toISOString();
+    const bucket = byDate.get(key) ?? {
+      report_date: row.report_date,
+      streams: 0,
+      pay_streams: 0
+    };
+    bucket.streams += row.total_streams ?? 0;
+    bucket.pay_streams += row.total_pay_streams ?? 0;
+    byDate.set(key, bucket);
+  }
+
+  const groupedRows = Array.from(byDate.values()).sort(
+    (left, right) => left.report_date.getTime() - right.report_date.getTime()
+  );
+  const current = groupedRows[groupedRows.length - 1];
+  const previous = groupedRows[groupedRows.length - 2];
+  if (!current) {
+    return null;
+  }
+
+  const rangeStart = buildReportRangeFromLatest(current.report_date, params.days);
+  const chartRows = groupedRows.filter((row) => row.report_date >= rangeStart);
+  const totalStreams = chartRows.reduce((sum, row) => sum + row.streams, 0);
+  const totalPayStreams = chartRows.reduce((sum, row) => sum + row.pay_streams, 0);
+
+  return {
+    totalStreams,
+    totalPayStreams,
+    streamsChangePercent: calculateChangePercent(current.streams, previous?.streams ?? 0),
+    payStreamsChangePercent: calculateChangePercent(current.pay_streams, previous?.pay_streams ?? 0),
+    latestReportDate: toDateKey(current.report_date),
+    topPlatform: null,
+    platforms_count: 0,
+    platformsBreakdown: [],
+    chart: chartRows.map((row) => ({
+      date: toDateKey(row.report_date),
+      streams: row.streams,
+      pay_streams: row.pay_streams
+    })),
+    platformsChart: []
+  };
+}
+
+async function buildPlatformChartsFromSummaries(
+  prisma: PrismaClient,
+  params: {
+    user_id: string;
+    release_id?: string;
+    release_ids?: string[];
+    days: number;
+    latestReportDate: string | null;
+  }
+): Promise<Pick<AnalyticsOverviewResponse, "topPlatform" | "platforms_count" | "platformsBreakdown" | "platformsChart"> | null> {
+  const platformRepo = getAnalyticsPlatformSummaryRepo(prisma);
+  if (!platformRepo?.findMany || !params.latestReportDate) {
+    return null;
+  }
+
+  let rows;
+  try {
+    rows = await platformRepo.findMany({
+      where: {
+        user_id: params.user_id,
+        ...(params.release_id ? { release_id: params.release_id } : {}),
+        ...(params.release_ids?.length ? { release_id: { in: params.release_ids } } : {})
+      },
+      orderBy: {
+        report_date: "asc"
+      }
+    });
+  } catch (error) {
+    if (isAnalyticsSummaryUnavailableError(error)) {
+      return null;
+    }
+    throw error;
+  }
+
+  const filteredRows = rows.filter((row) => matchesAnalyticsPeriodVariant(row.report_date, params.days));
+  if (filteredRows.length === 0) {
+    return null;
+  }
+
+  const latestDate = new Date(`${params.latestReportDate}T00:00:00.000Z`);
+  const rangeStart = buildReportRangeFromLatest(latestDate, params.days);
+
+  const totalsByPlatform = new Map<string, { streams: number; pay_streams: number }>();
+  const chartByDate = new Map<string, Map<string, { streams: number; pay_streams: number }>>();
+
+  for (const row of filteredRows) {
+    const platform = row.platform || "Unknown";
+    const totals = totalsByPlatform.get(platform) ?? { streams: 0, pay_streams: 0 };
+    totals.streams += row.streams ?? 0;
+    totals.pay_streams += row.pay_streams ?? 0;
+    totalsByPlatform.set(platform, totals);
+
+    if (row.report_date < rangeStart) continue;
+
+    const dateKey = toDateKey(row.report_date);
+    const byPlatform = chartByDate.get(dateKey) ?? new Map<string, { streams: number; pay_streams: number }>();
+    const point = byPlatform.get(platform) ?? { streams: 0, pay_streams: 0 };
+    point.streams += row.streams ?? 0;
+    point.pay_streams += row.pay_streams ?? 0;
+    byPlatform.set(platform, point);
+    chartByDate.set(dateKey, byPlatform);
+  }
+
+  const totalStreams = Array.from(totalsByPlatform.values()).reduce((sum, item) => sum + item.streams, 0);
+  const platformsBreakdown = Array.from(totalsByPlatform.entries())
+    .map(([platform, totals]) => ({
+      platform,
+      streams: totals.streams,
+      pay_streams: totals.pay_streams,
+      sharePercent: totalStreams > 0 ? Number(((totals.streams / totalStreams) * 100).toFixed(3)) : 0,
+      changePercent: null
+    }))
+    .sort((left, right) => right.streams - left.streams || left.platform.localeCompare(right.platform, "ru"));
+
+  const platformsChart = Array.from(chartByDate.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, platformMap]) => ({
+      date,
+      values: Array.from(platformMap.entries())
+        .map(([platform, totals]) => ({
+          platform,
+          streams: totals.streams,
+          pay_streams: totals.pay_streams
+        }))
+        .sort((left, right) => right.streams - left.streams)
+    }));
+
+  return {
+    topPlatform: platformsBreakdown[0]?.platform ?? null,
+    platforms_count: platformsBreakdown.length,
+    platformsBreakdown,
+    platformsChart
+  };
+}
+
+async function listAnalyticsReleasesFromDailySummaries(
+  prisma: PrismaClient,
+  params: {
+    user_id: string;
+    release_ids: string[];
+    days: number;
+  }
+): Promise<AnalyticsReleaseListItem[]> {
+  const summaryRepo = getAnalyticsDailySummaryRepo(prisma);
+  if (!summaryRepo?.findMany || params.release_ids.length === 0) {
+    return [];
+  }
+
+  let rows;
+  try {
+    rows = await summaryRepo.findMany({
+      where: {
+        user_id: params.user_id,
+        release_id: {
+          in: params.release_ids
+        }
+      },
+      orderBy: {
+        report_date: "asc"
+      }
+    });
+  } catch (error) {
+    if (isAnalyticsSummaryUnavailableError(error)) {
+      return [];
+    }
+    throw error;
+  }
+
+  const filteredRows = rows.filter(
+    (row) => row.release_id && matchesAnalyticsPeriodVariant(row.report_date, params.days)
+  );
+  if (filteredRows.length === 0) {
+    return [];
+  }
+
+  const totalsByRelease = new Map<string, { streams: number; pay_streams: number }>();
+  for (const row of filteredRows) {
+    const releaseId = row.release_id as string;
+    const totals = totalsByRelease.get(releaseId) ?? { streams: 0, pay_streams: 0 };
+    totals.streams += row.total_streams ?? 0;
+    totals.pay_streams += row.total_pay_streams ?? 0;
+    totalsByRelease.set(releaseId, totals);
+  }
+
+  const releaseIds = Array.from(totalsByRelease.keys());
+  const releasesMeta = await prisma.release.findMany({
+    where: {
+      id: { in: releaseIds },
+      userId: params.user_id
+    },
+    select: {
+      id: true,
+      title: true,
+      upc: true,
+      user: {
+        select: {
+          name: true
+        }
+      }
+    },
+    orderBy: { date: "desc" }
+  });
+
+  return releasesMeta.map((meta) => {
+    const totals = totalsByRelease.get(meta.id);
+    return {
+      release_id: meta.id,
+      title: meta.title,
+      artist: meta.user.name,
+      upc: meta.upc ?? "",
+      streams: totals?.streams ?? 0,
+      pay_streams: totals?.pay_streams ?? 0,
+      changePercent: null,
+      trend: "flat" as const
+    };
+  });
 }
 
 function normalizeCountry(value: string | undefined): string | undefined {
@@ -472,7 +1042,98 @@ async function buildOverviewFromSnapshots(
     take: 2
   });
 
-  if (latestGroups.length === 0) return null;
+  if (latestGroups.length === 0) {
+    if (!hasRawQueryClient(prisma) || !("period_days" in params.where) || !params.where.period_days) {
+      return null;
+    }
+
+    const baseConditions: Prisma.Sql[] = [];
+    const userId = params.where.user_id;
+    if (typeof userId === "string") {
+      baseConditions.push(Prisma.sql`"user_id" = ${sqlUuid(userId)}`);
+    }
+
+    const releaseId = params.where.release_id;
+    if (typeof releaseId === "string") {
+      baseConditions.push(Prisma.sql`"release_id" = ${sqlUuid(releaseId)}`);
+    } else if (
+      releaseId &&
+      typeof releaseId === "object" &&
+      "in" in releaseId &&
+      Array.isArray(releaseId.in) &&
+      releaseId.in.length > 0
+    ) {
+      baseConditions.push(Prisma.sql`"release_id" IN (${sqlUuidList(releaseId.in)})`);
+    }
+
+    if (typeof params.where.country === "string") {
+      baseConditions.push(Prisma.sql`"country" = ${params.where.country}`);
+    }
+    if (typeof params.where.upc === "string") {
+      baseConditions.push(Prisma.sql`"upc" = ${params.where.upc}`);
+    }
+    if (typeof params.where.platform === "string") {
+      baseConditions.push(Prisma.sql`"platform" = ${params.where.platform}`);
+    }
+
+    baseConditions.push(buildLegacyPeriodHourCondition(params.where.period_days as number));
+
+    const latestRows = await prisma.$queryRaw<
+      Array<{ report_date: Date; streams: bigint | number | null; pay_streams: bigint | number | null }>
+    >(Prisma.sql`
+      SELECT
+        "report_date" AS "report_date",
+        SUM("streams")::bigint AS "streams",
+        SUM("pay_streams")::bigint AS "pay_streams"
+      FROM "analytics_report_snapshots"
+      WHERE ${Prisma.join(baseConditions, " AND ")}
+      GROUP BY "report_date"
+      ORDER BY "report_date" DESC
+      LIMIT 2
+    `);
+
+    if (latestRows.length === 0) return null;
+
+    const current = latestRows[0];
+    const previous = latestRows[1];
+    const rangeStart = buildReportRangeFromLatest(current.report_date, params.days);
+    const chartRows = await prisma.$queryRaw<
+      Array<{ report_date: Date; streams: bigint | number | null; pay_streams: bigint | number | null }>
+    >(Prisma.sql`
+      SELECT
+        "report_date" AS "report_date",
+        SUM("streams")::bigint AS "streams",
+        SUM("pay_streams")::bigint AS "pay_streams"
+      FROM "analytics_report_snapshots"
+      WHERE ${Prisma.join([...baseConditions, Prisma.sql`"report_date" >= ${rangeStart}`], " AND ")}
+      GROUP BY "report_date"
+      ORDER BY "report_date" ASC
+    `);
+
+    const currentStreams = toNumber(current.streams);
+    const currentPayStreams = toNumber(current.pay_streams);
+    const previousStreams = toNumber(previous?.streams ?? 0);
+    const previousPayStreams = toNumber(previous?.pay_streams ?? 0);
+    const periodStreams = chartRows.reduce((sum, row) => sum + toNumber(row.streams), 0);
+    const periodPayStreams = chartRows.reduce((sum, row) => sum + toNumber(row.pay_streams), 0);
+
+    return {
+      totalStreams: periodStreams,
+      totalPayStreams: periodPayStreams,
+      streamsChangePercent: calculateChangePercent(currentStreams, previousStreams),
+      payStreamsChangePercent: calculateChangePercent(currentPayStreams, previousPayStreams),
+      latestReportDate: toDateKey(current.report_date),
+      topPlatform: null,
+      platforms_count: 0,
+      platformsBreakdown: [],
+      chart: chartRows.map((row) => ({
+        date: toDateKey(row.report_date),
+        streams: toNumber(row.streams),
+        pay_streams: toNumber(row.pay_streams)
+      })),
+      platformsChart: []
+    };
+  }
 
   const current = latestGroups[0];
   const previous = latestGroups[1];
@@ -527,6 +1188,7 @@ async function enrichOverviewWithPlatformCharts(
     user_id: string;
     release_id?: string;
     release_ids?: string[];
+    period_days?: number;
     country?: string;
     upc?: string;
     platform?: string;
@@ -537,6 +1199,7 @@ async function enrichOverviewWithPlatformCharts(
     user_id: params.user_id,
     ...(params.release_id ? { release_id: params.release_id } : {}),
     ...(params.release_ids?.length ? { release_ids: params.release_ids } : {}),
+    ...(params.period_days ? { period_days: params.period_days } : {}),
     ...(params.country ? { country: params.country } : {}),
     ...(params.upc ? { upc: params.upc } : {}),
     ...(params.platform ? { platform: params.platform } : {}),
@@ -552,6 +1215,7 @@ async function enrichOverviewWithPlatformCharts(
         user_id: params.user_id,
         ...(params.release_id ? { release_id: params.release_id } : {}),
         ...(params.release_ids?.length ? { release_ids: params.release_ids } : {}),
+        ...(params.period_days ? { period_days: params.period_days } : {}),
         ...(params.country ? { country: params.country } : {}),
         ...(params.upc ? { upc: params.upc } : {}),
         ...(params.platform ? { platform: params.platform } : {}),
@@ -576,8 +1240,7 @@ export async function getAnalyticsOverview(
   const country = normalizeCountry(params.country);
   const upc = normalizeUpc(params.upc);
   const platform = normalizePlatform(params.platform);
-  const usesSnapshotAggregation = Boolean(country || upc || platform);
-  const approvedReleaseIds = await getApprovedAnalyticsReleaseIds(prisma, {
+  const approvedReleaseIds = await listAnalyticsAccessibleReleaseIds(prisma, {
     user_id: params.user_id,
     ...(params.release_id ? { release_id: params.release_id } : {})
   });
@@ -586,179 +1249,47 @@ export async function getAnalyticsOverview(
     return emptyAnalyticsOverview();
   }
 
+  const canUseSummaryFastPath = !country && !upc && !platform;
+  if (canUseSummaryFastPath) {
+    try {
+      const summaryOverview = await buildOverviewFromDailySummaries(prisma, {
+        user_id: params.user_id,
+        ...(params.release_id ? { release_id: params.release_id } : {}),
+        ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+        days
+      });
+
+      if (summaryOverview) {
+        const platformSummary = await buildPlatformChartsFromSummaries(prisma, {
+          user_id: params.user_id,
+          ...(params.release_id ? { release_id: params.release_id } : {}),
+          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+          days,
+          latestReportDate: summaryOverview.latestReportDate
+        });
+
+        return platformSummary
+          ? {
+              ...summaryOverview,
+              ...platformSummary
+            }
+          : summaryOverview;
+      }
+    } catch (error) {
+      if (!isAnalyticsSummaryUnavailableError(error)) {
+        throw error;
+      }
+    }
+  }
+
   const releaseFilter = params.release_id
     ? { release_id: params.release_id }
     : { release_id: { in: approvedReleaseIds } };
 
-  if (!usesSnapshotAggregation) {
-    const dailySummaryRepo = getAnalyticsDailySummaryRepo(prisma);
-    if (!dailySummaryRepo) {
-      const fallback = await buildOverviewFromSnapshots(prisma, {
-        where: {
-          user_id: params.user_id,
-          ...releaseFilter
-        },
-        days
-      });
-      if (fallback) {
-        return enrichOverviewWithPlatformCharts(prisma, {
-          base: fallback,
-          user_id: params.user_id,
-          ...(params.release_id ? { release_id: params.release_id } : {}),
-          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
-          days
-        });
-      }
-      return {
-        ...emptyAnalyticsOverview()
-      };
-    }
-
-    const whereSummary: Prisma.analytics_daily_summariesWhereInput = {
-      user_id: params.user_id,
-      ...releaseFilter
-    };
-
-    let latestRows: Array<{
-      report_date: Date;
-      total_streams: number;
-      total_pay_streams: number;
-    }> = [];
-    try {
-      latestRows = await dailySummaryRepo.findMany({
-        where: whereSummary,
-        orderBy: { report_date: "desc" },
-        take: 2,
-        select: {
-          report_date: true,
-          total_streams: true,
-          total_pay_streams: true
-        }
-      });
-    } catch {
-      const fallback = await buildOverviewFromSnapshots(prisma, {
-        where: {
-          user_id: params.user_id,
-          ...releaseFilter
-        },
-        days
-      });
-      if (fallback) {
-        return enrichOverviewWithPlatformCharts(prisma, {
-          base: fallback,
-          user_id: params.user_id,
-          ...(params.release_id ? { release_id: params.release_id } : {}),
-          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
-          days
-        });
-      }
-      return {
-        ...emptyAnalyticsOverview()
-      };
-    }
-
-    if (latestRows.length === 0) {
-      const fallback = await buildOverviewFromSnapshots(prisma, {
-        where: {
-          user_id: params.user_id,
-          ...releaseFilter
-        },
-        days
-      });
-      if (fallback) {
-        return enrichOverviewWithPlatformCharts(prisma, {
-          base: fallback,
-          user_id: params.user_id,
-          ...(params.release_id ? { release_id: params.release_id } : {}),
-          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
-          days
-        });
-      }
-      return {
-        ...emptyAnalyticsOverview()
-      };
-    }
-
-    const current = latestRows[0];
-    const previous = latestRows[1];
-    const rangeStart = buildReportRangeFromLatest(current.report_date, days);
-
-    let chartRows: Array<{
-      report_date: Date;
-      total_streams: number;
-      total_pay_streams: number;
-    }> = [];
-    try {
-      chartRows = await dailySummaryRepo.findMany({
-        where: {
-          ...whereSummary,
-          report_date: {
-            gte: rangeStart
-          }
-        },
-        orderBy: { report_date: "asc" },
-        select: {
-          report_date: true,
-          total_streams: true,
-          total_pay_streams: true
-        }
-      });
-    } catch {
-      const fallback = await buildOverviewFromSnapshots(prisma, {
-        where: {
-          user_id: params.user_id,
-          ...releaseFilter
-        },
-        days
-      });
-      if (fallback) {
-        return enrichOverviewWithPlatformCharts(prisma, {
-          base: fallback,
-          user_id: params.user_id,
-          ...(params.release_id ? { release_id: params.release_id } : {}),
-          ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
-          days
-        });
-      }
-      return emptyAnalyticsOverview();
-    }
-
-    const periodStreams = chartRows.reduce((sum, row) => sum + row.total_streams, 0);
-    const periodPayStreams = chartRows.reduce((sum, row) => sum + row.total_pay_streams, 0);
-
-    return enrichOverviewWithPlatformCharts(prisma, {
-      base: {
-      totalStreams: periodStreams,
-      totalPayStreams: periodPayStreams,
-      streamsChangePercent: calculateChangePercent(
-        current.total_streams,
-        previous?.total_streams ?? 0
-      ),
-      payStreamsChangePercent: calculateChangePercent(
-        current.total_pay_streams,
-        previous?.total_pay_streams ?? 0
-      ),
-      latestReportDate: toDateKey(current.report_date),
-      topPlatform: null,
-      platforms_count: 0,
-      platformsBreakdown: [],
-      chart: chartRows.map((row) => ({
-        date: toDateKey(row.report_date),
-        streams: row.total_streams,
-        pay_streams: row.total_pay_streams
-      })),
-      platformsChart: []
-      },
-      user_id: params.user_id,
-      ...(params.release_id ? { release_id: params.release_id } : {}),
-      ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
-      days
-    });
-  }
-
   const snapshotWhere: Prisma.analytics_report_snapshotsWhereInput = {
     user_id: params.user_id,
     ...releaseFilter,
+    period_days: days,
     ...(country ? { country } : {}),
     ...(upc ? { upc } : {}),
     ...(platform ? { platform } : {})
@@ -769,18 +1300,38 @@ export async function getAnalyticsOverview(
     days
   });
   if (!snapshotOverview) {
-    return {
-      totalStreams: 0,
-      totalPayStreams: 0,
-      streamsChangePercent: 0,
-      payStreamsChangePercent: 0,
-      latestReportDate: null,
-      topPlatform: null,
-      platforms_count: 0,
-      platformsBreakdown: [],
-      chart: [],
-      platformsChart: []
-    };
+    const accessibleReleases = await prisma.release.findMany({
+      where: {
+        id: { in: approvedReleaseIds },
+        userId: params.user_id
+      },
+      select: {
+        upc: true
+      }
+    });
+
+    const accessibleUpcs = accessibleReleases
+      .map((release) => normalizeUpc(release.upc ?? undefined))
+      .filter((value): value is string => Boolean(value));
+
+    const fallbackOverview = await buildOverviewFromUpcs(prisma, {
+      upcs: accessibleUpcs,
+      days,
+      ...(country ? { country } : {}),
+      ...(platform ? { platform } : {}),
+      ...(upc ? { upc } : {})
+    });
+
+    return fallbackOverview
+      ? enrichOverviewWithPlatformChartsByUpcs(prisma, {
+          base: fallbackOverview,
+          upcs: accessibleUpcs,
+          days,
+          ...(country ? { country } : {}),
+          ...(platform ? { platform } : {}),
+          ...(upc ? { upc } : {})
+        })
+      : emptyAnalyticsOverview();
   }
 
   return enrichOverviewWithPlatformCharts(prisma, {
@@ -788,6 +1339,7 @@ export async function getAnalyticsOverview(
     user_id: params.user_id,
     ...(params.release_id ? { release_id: params.release_id } : {}),
     ...(!params.release_id ? { release_ids: approvedReleaseIds } : {}),
+    period_days: days,
     ...(country ? { country } : {}),
     ...(upc ? { upc } : {}),
     ...(platform ? { platform } : {}),
@@ -802,23 +1354,53 @@ export async function listAnalyticsReleases(
     country?: string;
     upc?: string;
     platform?: string;
+    days?: number;
   }
 ): Promise<AnalyticsReleaseListItem[]> {
   const country = normalizeCountry(params.country);
   const upc = normalizeUpc(params.upc);
   const platform = normalizePlatform(params.platform);
-  const usesSnapshotAggregation = Boolean(country || upc || platform);
-  const approvedReleaseIds = await getApprovedAnalyticsReleaseIds(prisma, {
+  const days = clampDays(params.days);
+  const approvedReleaseIds = await listAnalyticsAccessibleReleaseIds(prisma, {
     user_id: params.user_id
   });
   if (approvedReleaseIds.length === 0) return [];
 
-  if (usesSnapshotAggregation) {
-    const totalsRows = await prisma.analytics_report_snapshots.groupBy({
+  const canUseSummaryFastPath = !country && !upc && !platform;
+  if (canUseSummaryFastPath) {
+    try {
+      const summaryItems = await listAnalyticsReleasesFromDailySummaries(prisma, {
+        user_id: params.user_id,
+        release_ids: approvedReleaseIds,
+        days
+      });
+      if (summaryItems.length > 0) {
+        return summaryItems;
+      }
+    } catch (error) {
+      if (!isAnalyticsSummaryUnavailableError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  let totalsRows:
+    | Array<{
+        release_id: string;
+        _sum: {
+          streams: number | null;
+          pay_streams: number | null;
+        };
+      }>
+    | [] = [];
+
+  try {
+    totalsRows = await prisma.analytics_report_snapshots.groupBy({
       by: ["release_id"],
       where: {
         user_id: params.user_id,
         release_id: { in: approvedReleaseIds },
+        period_days: days,
         ...(country ? { country } : {}),
         ...(upc ? { upc } : {}),
         ...(platform ? { platform } : {})
@@ -828,106 +1410,48 @@ export async function listAnalyticsReleases(
         pay_streams: true
       }
     });
-
-    const releaseIds = Array.from(new Set(totalsRows.map((item) => item.release_id)));
-    const releasesMeta = releaseIds.length
-      ? await prisma.release.findMany({
-          where: {
-            id: { in: releaseIds },
-            userId: params.user_id,
-            confirmed: true,
-            status: "approved"
-          },
-          select: {
-            id: true,
-            title: true,
-            upc: true,
-            user: {
-              select: {
-                name: true
-              }
-            }
-          },
-          orderBy: { date: "desc" }
-        })
-      : [];
-    const totalsByRelease = new Map(
-      totalsRows.map((row) => [
-        row.release_id,
-        {
-          streams: row._sum.streams ?? 0,
-          pay_streams: row._sum.pay_streams ?? 0
-        }
-      ])
-    );
-
-    return releasesMeta.map((meta) => {
-      const totals = totalsByRelease.get(meta.id);
-      return {
-        release_id: meta.id,
-        title: meta.title,
-        artist: meta.user.name,
-        upc: meta.upc ?? "",
-        streams: totals?.streams ?? 0,
-        pay_streams: totals?.pay_streams ?? 0,
-        changePercent: null,
-        trend: "flat" as const
-      };
-    });
-  }
-
-  let totalsByRelease = new Map<string, { streams: number; pay_streams: number }>();
-  try {
-    const summaryTotals = await prisma.analytics_daily_summaries.groupBy({
-      by: ["release_id"],
-      where: {
-        user_id: params.user_id,
-        release_id: { in: approvedReleaseIds }
-      },
-      _sum: {
-        total_streams: true,
-        total_pay_streams: true
-      }
-    });
-    totalsByRelease = new Map(
-      summaryTotals
-        .filter((row): row is typeof row & { release_id: string } => Boolean(row.release_id))
-        .map((row) => [
-          row.release_id,
-          {
-            streams: row._sum?.total_streams ?? 0,
-            pay_streams: row._sum?.total_pay_streams ?? 0
-          }
-        ])
-    );
   } catch {
-    const snapshotTotals = await prisma.analytics_report_snapshots.groupBy({
-      by: ["release_id"],
-      where: {
-        user_id: params.user_id,
-        release_id: { in: approvedReleaseIds }
-      },
-      _sum: {
-        streams: true,
-        pay_streams: true
-      }
-    });
-    totalsByRelease = new Map(
-      snapshotTotals.map((row) => [
-        row.release_id,
-        {
-          streams: row._sum.streams ?? 0,
-          pay_streams: row._sum.pay_streams ?? 0
+    totalsRows = [];
+  }
+
+  let effectiveTotalsRows = totalsRows;
+  if (effectiveTotalsRows.length === 0 && hasRawQueryClient(prisma)) {
+    const conditions: Prisma.Sql[] = [
+      Prisma.sql`"user_id" = ${sqlUuid(params.user_id)}`,
+      Prisma.sql`"release_id" IN (${sqlUuidList(approvedReleaseIds)})`
+    ];
+    conditions.push(
+      Prisma.sql`("period_days" = ${days} OR ${buildLegacyPeriodHourCondition(days)})`
+    );
+    if (country) conditions.push(Prisma.sql`"country" = ${country}`);
+    if (upc) conditions.push(Prisma.sql`"upc" = ${upc}`);
+    if (platform) conditions.push(Prisma.sql`"platform" = ${platform}`);
+
+    effectiveTotalsRows = await prisma.$queryRaw<
+      Array<{ release_id: string; _sum_streams: bigint | number | null; _sum_pay_streams: bigint | number | null }>
+    >(Prisma.sql`
+      SELECT
+        "release_id" AS "release_id",
+        SUM("streams")::bigint AS "_sum_streams",
+        SUM("pay_streams")::bigint AS "_sum_pay_streams"
+      FROM "analytics_report_snapshots"
+      WHERE ${Prisma.join(conditions, " AND ")}
+      GROUP BY "release_id"
+    `).then((rows) =>
+      rows.map((row) => ({
+        release_id: row.release_id,
+        _sum: {
+          streams: toNumber(row._sum_streams),
+          pay_streams: toNumber(row._sum_pay_streams)
         }
-      ])
+      }))
     );
   }
 
-  const allReleases = await prisma.release.findMany({
+  let releasesMeta = await prisma.release.findMany({
     where: {
-      userId: params.user_id,
-      confirmed: true,
-      status: "approved"
+      id: { in: approvedReleaseIds },
+      userId: params.user_id
     },
     select: {
       id: true,
@@ -942,14 +1466,90 @@ export async function listAnalyticsReleases(
     orderBy: { date: "desc" }
   });
 
-  return allReleases.map((release) => {
-    const totals = totalsByRelease.get(release.id);
+  if (effectiveTotalsRows.length === 0 && hasRawQueryClient(prisma)) {
+    const metaByUpc = new Map(
+      releasesMeta
+        .map((meta) => {
+          const normalizedMetaUpc = normalizeUpc(meta.upc ?? undefined);
+          return normalizedMetaUpc ? [normalizedMetaUpc, meta] : null;
+        })
+        .filter((entry): entry is [string, (typeof releasesMeta)[number]] => Boolean(entry))
+    );
 
+    const targetUpcs = upc
+      ? Array.from(metaByUpc.keys()).filter((value) => value === upc)
+      : Array.from(metaByUpc.keys());
+
+    if (targetUpcs.length > 0) {
+      const conditions: Prisma.Sql[] = [
+        Prisma.sql`"upc" IN (${Prisma.join(targetUpcs)})`,
+        Prisma.sql`("period_days" = ${days} OR ${buildLegacyPeriodHourCondition(days)})`
+      ];
+      if (country) conditions.push(Prisma.sql`"country" = ${country}`);
+      if (platform) conditions.push(Prisma.sql`"platform" = ${platform}`);
+
+      const upcTotalsRows = await prisma.$queryRaw<
+        Array<{ upc: string; _sum_streams: bigint | number | null; _sum_pay_streams: bigint | number | null }>
+      >(Prisma.sql`
+        SELECT
+          "upc" AS "upc",
+          SUM("streams")::bigint AS "_sum_streams",
+          SUM("pay_streams")::bigint AS "_sum_pay_streams"
+        FROM "analytics_report_snapshots"
+        WHERE ${Prisma.join(conditions, " AND ")}
+        GROUP BY "upc"
+      `);
+
+      effectiveTotalsRows = upcTotalsRows
+        .map((row) => {
+          const meta = metaByUpc.get(normalizeUpc(row.upc) ?? "");
+          if (!meta) return null;
+
+          return {
+            release_id: meta.id,
+            _sum: {
+              streams: toNumber(row._sum_streams),
+              pay_streams: toNumber(row._sum_pay_streams)
+            }
+          };
+        })
+        .filter(
+          (
+            row
+          ): row is {
+            release_id: string;
+            _sum: {
+              streams: number | null;
+              pay_streams: number | null;
+            };
+          } => Boolean(row)
+        );
+    }
+  }
+
+  if (upc) {
+    releasesMeta = releasesMeta.filter((meta) => normalizeUpc(meta.upc ?? undefined) === upc);
+  }
+
+  if (releasesMeta.length === 0) return [];
+
+  const totalsByRelease = new Map(
+    effectiveTotalsRows.map((row) => [
+      row.release_id,
+      {
+        streams: row._sum.streams ?? 0,
+        pay_streams: row._sum.pay_streams ?? 0
+      }
+    ])
+  );
+
+  return releasesMeta.map((meta) => {
+    const totals = totalsByRelease.get(meta.id);
     return {
-      release_id: release.id,
-      title: release.title,
-      artist: release.user.name,
-      upc: release.upc ?? "",
+      release_id: meta.id,
+      title: meta.title,
+      artist: meta.user.name,
+      upc: meta.upc ?? "",
       streams: totals?.streams ?? 0,
       pay_streams: totals?.pay_streams ?? 0,
       changePercent: null,
@@ -971,153 +1571,112 @@ export async function getAnalyticsReleaseDetails(
   const release = await prisma.release.findFirst({
     where: {
       id: params.release_id,
-      userId: params.user_id,
-      confirmed: true,
-      status: "approved"
+      userId: params.user_id
     },
     select: {
       id: true,
       title: true,
       upc: true,
+      status: true,
+      confirmed: true,
+      roles: true,
       user: {
         select: { name: true }
       }
     }
   });
 
-  if (!release) return null;
-
-  const latestRows = await prisma.analytics_daily_summaries.findMany({
-    where: {
-      user_id: params.user_id,
-      release_id: params.release_id
-    },
-    orderBy: { report_date: "desc" },
-    take: 2,
-    select: {
-      report_date: true,
-      total_streams: true,
-      total_pay_streams: true
-    }
-  });
-
-  if (latestRows.length === 0) {
-    const snapshotOverview = await buildOverviewFromSnapshots(prisma, {
-      where: {
-        user_id: params.user_id,
-        release_id: params.release_id
-      },
-      days
-    });
-
-    const latestReportDate = snapshotOverview?.latestReportDate
-      ? new Date(`${snapshotOverview.latestReportDate}T00:00:00.000Z`)
-      : null;
-
-    const countriesBreakdown = latestReportDate
-      ? await prisma.analytics_report_snapshots.groupBy({
-          by: ["country"],
-          where: {
-            user_id: params.user_id,
-            release_id: params.release_id,
-            report_date: latestReportDate
-          },
-          _sum: {
-            streams: true,
-            pay_streams: true
-          },
-          orderBy: {
-            _sum: {
-              streams: "desc"
-            }
-          }
-        })
-      : [];
-
-    return {
-      release_id: release.id,
-      title: release.title,
-      artist: release.user.name,
-      upc: release.upc ?? "",
-      totalStreams: snapshotOverview?.totalStreams ?? 0,
-      totalPayStreams: snapshotOverview?.totalPayStreams ?? 0,
-      streamsChangePercent: snapshotOverview?.streamsChangePercent ?? 0,
-      payStreamsChangePercent: snapshotOverview?.payStreamsChangePercent ?? 0,
-      latestReportDate: snapshotOverview?.latestReportDate ?? null,
-      countriesBreakdown: countriesBreakdown.map((item) => ({
-        country: item.country,
-        streams: item._sum.streams ?? 0,
-        pay_streams: item._sum.pay_streams ?? 0
-      })),
-      chart: snapshotOverview?.chart ?? []
-    };
+  if (
+    !release ||
+    !shouldTreatReleaseAsApproved({
+      status: release.status,
+      confirmed: release.confirmed,
+      upc: release.upc,
+      roles: release.roles
+    })
+  ) {
+    return null;
   }
 
-  const current = latestRows[0];
-  const previous = latestRows[1];
-  const rangeStart = buildReportRangeFromLatest(current.report_date, days);
-
-  const chartRows = await prisma.analytics_daily_summaries.findMany({
+  const snapshotOverview = await buildOverviewFromSnapshots(prisma, {
     where: {
       user_id: params.user_id,
       release_id: params.release_id,
-      report_date: {
-        gte: rangeStart
-      }
+      period_days: days
     },
-    orderBy: {
-      report_date: "asc"
-    },
-    select: {
-      report_date: true,
-      total_streams: true,
-      total_pay_streams: true
-    }
+    days
   });
 
-  const countriesBreakdown = await prisma.analytics_report_snapshots.groupBy({
-    by: ["country"],
-    where: {
-      user_id: params.user_id,
-      release_id: params.release_id,
-      report_date: current.report_date
-    },
-    _sum: {
-      streams: true,
-      pay_streams: true
-    },
-    orderBy: {
-      _sum: {
-        streams: "desc"
-      }
-    }
-  });
+  const latestReportDate = snapshotOverview?.latestReportDate
+    ? new Date(`${snapshotOverview.latestReportDate}T00:00:00.000Z`)
+    : null;
+
+  const countriesBreakdown = latestReportDate
+    ? await prisma.analytics_report_snapshots.groupBy({
+        by: ["country"],
+        where: {
+          user_id: params.user_id,
+          release_id: params.release_id,
+          period_days: days,
+          report_date: {
+            gte: latestReportDate,
+            lt: new Date(latestReportDate.getTime() + 24 * 60 * 60 * 1000)
+          }
+        },
+        _sum: {
+          streams: true,
+          pay_streams: true
+        },
+        orderBy: {
+          _sum: {
+            streams: "desc"
+          }
+        }
+      })
+    : [];
+
+  const effectiveCountriesBreakdown =
+    countriesBreakdown.length > 0 || !latestReportDate || !hasRawQueryClient(prisma)
+      ? countriesBreakdown
+      : await prisma.$queryRaw<
+          Array<{ country: string; streams: bigint | number | null; pay_streams: bigint | number | null }>
+        >(Prisma.sql`
+          SELECT
+            "country" AS "country",
+            SUM("streams")::bigint AS "streams",
+            SUM("pay_streams")::bigint AS "pay_streams"
+          FROM "analytics_report_snapshots"
+          WHERE "user_id" = ${sqlUuid(params.user_id)}
+            AND "release_id" = ${sqlUuid(params.release_id)}
+            AND DATE("report_date") = DATE(${latestReportDate})
+            AND ${buildLegacyPeriodHourCondition(days)}
+          GROUP BY "country"
+          ORDER BY SUM("streams") DESC
+        `).then((rows) =>
+          rows.map((row) => ({
+            country: row.country,
+            _sum: {
+              streams: toNumber(row.streams),
+              pay_streams: toNumber(row.pay_streams)
+            }
+          }))
+        );
 
   return {
     release_id: release.id,
     title: release.title,
     artist: release.user.name,
     upc: release.upc ?? "",
-    totalStreams: current.total_streams,
-    totalPayStreams: current.total_pay_streams,
-    streamsChangePercent: calculateChangePercent(
-      current.total_streams,
-      previous?.total_streams ?? 0
-    ),
-    payStreamsChangePercent: calculateChangePercent(
-      current.total_pay_streams,
-      previous?.total_pay_streams ?? 0
-    ),
-    latestReportDate: toDateKey(current.report_date),
-    countriesBreakdown: countriesBreakdown.map((item) => ({
+    totalStreams: snapshotOverview?.totalStreams ?? 0,
+    totalPayStreams: snapshotOverview?.totalPayStreams ?? 0,
+    streamsChangePercent: snapshotOverview?.streamsChangePercent ?? 0,
+    payStreamsChangePercent: snapshotOverview?.payStreamsChangePercent ?? 0,
+    latestReportDate: snapshotOverview?.latestReportDate ?? null,
+    countriesBreakdown: effectiveCountriesBreakdown.map((item) => ({
       country: item.country,
       streams: item._sum.streams ?? 0,
       pay_streams: item._sum.pay_streams ?? 0
     })),
-      chart: chartRows.map((item) => ({
-      date: toDateKey(item.report_date),
-      streams: item.total_streams,
-      pay_streams: item.total_pay_streams
-    }))
+    chart: snapshotOverview?.chart ?? []
   };
 }

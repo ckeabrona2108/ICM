@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import * as XLSX from "xlsx";
 
 import {
@@ -10,7 +11,14 @@ import {
   type SmartCanonicalColumn
 } from "@/lib/smart-catalog-sync-config";
 import { createAdminLog } from "@/lib/admin-log-service";
+import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import { prisma } from "@/lib/prisma";
+import { isPrismaTableMissingError } from "@/lib/prisma-errors";
+import {
+  REPORT_PAYLOAD_DESCRIPTION,
+  buildStoredUserReportPayload,
+  type UserReportLineItem
+} from "@/lib/report-service";
 
 const iconvLite = require("iconv-lite") as {
   decode: (buffer: Buffer, encoding: string) => string;
@@ -84,6 +92,8 @@ type FinancialApplyState = {
   royaltyTransactionIds: string[];
   commissionIds: string[];
   balanceTransactionIds: string[];
+  reportQuarter?: number | null;
+  reportYear?: number | null;
 };
 
 type FinancialApplyContext = {
@@ -95,6 +105,22 @@ type FinancialAllocationAdjustment = {
   rowId: string;
   netAmount: number;
 };
+
+function normalizeReportQuarter(value: unknown): number | null {
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1 || numeric > 4) {
+    return null;
+  }
+  return numeric;
+}
+
+function normalizeReportYear(value: unknown): number | null {
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 2000 || numeric > 3000) {
+    return null;
+  }
+  return numeric;
+}
 
 const CATALOG_IMPORT_INCLUDE = {
   rows: {
@@ -507,6 +533,27 @@ function getClientRepo<T = unknown>(client: unknown, key: string): T | null {
   return repo ? (repo as T) : null;
 }
 
+async function hasIcecreamTable(
+  tx: Prisma.TransactionClient,
+  tableName: string
+): Promise<boolean> {
+  try {
+    const rows = await tx.$queryRaw<Array<{ exists: boolean }>>`
+      select exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'icecream' and table_name = ${tableName}
+      ) as "exists"
+    `;
+    return Boolean(rows[0]?.exists);
+  } catch (error) {
+    if (isPrismaTableMissingError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function requireClientRepo<T = unknown>(client: unknown, key: string, context: string): T {
   const repo = getClientRepo<T>(client, key);
   if (!repo) {
@@ -817,11 +864,77 @@ async function findFinancialMatch(normalized: NormalizedRow): Promise<MatchOutco
   return findFinancialMatchWithContext(normalized, createSmartMatchContext());
 }
 
+export function pickFinancialReleaseMatchByNormalizedUpc(params: {
+  normalizedUpc: string;
+  title: string | null | undefined;
+  candidates: Array<{
+    id: string;
+    upc?: string | null;
+    title?: string | null;
+    userId?: string | null;
+    confirmed?: boolean | null;
+    track?: Array<{ id: string; title?: string | null }>;
+  }>;
+}): {
+  release: {
+    id: string;
+    upc?: string | null;
+    title?: string | null;
+    userId?: string | null;
+    confirmed?: boolean | null;
+    track?: Array<{ id: string; title?: string | null }>;
+  };
+  track: { id: string; title?: string | null } | null;
+} | null {
+  const normalizedUpc = normalizeAnalyticsUpc(params.normalizedUpc);
+  if (!normalizedUpc) return null;
+
+  const title = params.title ?? "";
+  const ranked = params.candidates
+    .map((candidate) => {
+      if (normalizeAnalyticsUpc(candidate.upc ?? "") !== normalizedUpc) {
+        return null;
+      }
+
+      const releaseScore = titleSimilarity(candidate.title ?? "", title);
+      const bestTrack =
+        (candidate.track ?? [])
+          .map((track) => ({
+            track,
+            score: titleSimilarity(track.title ?? "", title)
+          }))
+          .sort((left, right) => right.score - left.score)[0] ?? null;
+
+      return {
+        release: candidate,
+        track: bestTrack?.track ?? null,
+        score: Math.max(releaseScore, bestTrack?.score ?? 0),
+        confirmedPriority: candidate.confirmed ? 1 : 0
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      if (right.confirmedPriority !== left.confirmedPriority) {
+        return right.confirmedPriority - left.confirmedPriority;
+      }
+      return right.score - left.score;
+    });
+
+  const best = ranked[0];
+  if (!best) return null;
+  if (title.trim() && best.score < 0.8 && !best.release.confirmed) return null;
+  return {
+    release: best.release,
+    track: best.track
+  };
+}
+
 async function findFinancialMatchWithContext(
   normalized: NormalizedRow,
   context: SmartMatchContext
 ): Promise<MatchOutcome> {
-  const upc = String(normalized.upc ?? "").trim();
+  const upc = normalizeAnalyticsUpc(normalized.upc ?? "");
+  const title = String(normalized.title ?? "").trim();
 
   if (!upc) {
     return {
@@ -833,14 +946,61 @@ async function findFinancialMatchWithContext(
   }
 
   const release = await getMemoized(context.releaseByUpc, upc, () =>
-    prisma.release.findFirst({
+    prisma.release.findMany({
       where: { upc },
       include: { track: true },
       orderBy: { date: "desc" }
     })
   );
 
-  if (!release) {
+  const primaryUpcMatch = Array.isArray(release)
+    ? pickFinancialReleaseMatchByNormalizedUpc({
+        normalizedUpc: upc,
+        title,
+        candidates: release
+      })
+    : null;
+
+  let matchedRelease = primaryUpcMatch?.release ?? null;
+  let matchedTrack =
+    primaryUpcMatch?.track ??
+    matchedRelease?.track.find((item) => titleSimilarity(item.title, title) >= 0.8) ??
+    null;
+
+  if (!matchedRelease && title) {
+    const titleKey = `finance-release::${normalizeCompact(title.slice(0, 80))}::${upc}`;
+    const candidates = await getMemoized(context.titleMatches, titleKey, () =>
+      prisma.release.findMany({
+        where: {
+          OR: [
+            { title: { contains: title.slice(0, 80), mode: "insensitive" } },
+            {
+              track: {
+                some: {
+                  title: { contains: title.slice(0, 80), mode: "insensitive" }
+                }
+              }
+            }
+          ]
+        },
+        include: { track: true },
+        orderBy: { date: "desc" },
+        take: 30
+      })
+    );
+
+    const fallback = pickFinancialReleaseMatchByNormalizedUpc({
+      normalizedUpc: upc,
+      title,
+      candidates
+    });
+    if (fallback) {
+      matchedRelease = fallback.release;
+      matchedTrack = fallback.track;
+    }
+  }
+
+  if (!matchedRelease) {
     return {
       action: "SKIP",
       confidence: 0,
@@ -849,19 +1009,19 @@ async function findFinancialMatchWithContext(
     };
   }
 
-  const trackCandidate =
-    release.track.find((item) => titleSimilarity(item.title, normalized.title ?? "") >= 0.8) ?? null;
-
   return {
     action: "MATCH",
     confidence: 100,
-    reason: "Matched for financial import by UPC",
+    reason:
+      release != null
+        ? "Matched for financial import by UPC"
+        : "Matched for financial import by normalized UPC + Title",
     rule: "FINANCIAL_UPC",
-    matchedReleaseId: release.id,
-    matchedTrackId: trackCandidate?.id ?? null,
-    release,
-    track: trackCandidate,
-    ownerUserId: release.userId
+    matchedReleaseId: matchedRelease.id,
+    matchedTrackId: matchedTrack?.id ?? null,
+    release: matchedRelease,
+    track: matchedTrack,
+    ownerUserId: matchedRelease.userId
   };
 }
 
@@ -1272,7 +1432,7 @@ function buildGroupedFinancialPreviewInputs(
     const raw = rows[index];
     const normalized = normalizeRow(raw, detectedColumns, index + 1);
     const grossAmount = resolveFinancialNetAmount(normalized as Record<string, unknown>);
-    const upc = String(normalized.upc ?? "").trim();
+    const upc = normalizeAnalyticsUpc(normalized.upc ?? "");
 
     if (!upc) {
       previewInputs.push({ raw, normalized });
@@ -1664,6 +1824,9 @@ export async function applyCatalogImport(params: { importId: string; adminId: st
         description: "Catalog import applied"
       }
     });
+  }, {
+    maxWait: 10_000,
+    timeout: 60_000
   });
 
   await createAdminLog(prisma, {
@@ -1734,6 +1897,9 @@ export async function rollbackCatalogImport(params: { importId: string; adminId:
         description: "Catalog import rolled back"
       }
     });
+  }, {
+    maxWait: 10_000,
+    timeout: 60_000
   });
 
   return prisma.catalog_imports.findUniqueOrThrow({
@@ -1746,6 +1912,8 @@ export async function applyFinancialImport(params: {
   importId: string;
   adminId: string;
   allocations?: FinancialAllocationAdjustment[];
+  reportQuarter?: number | null;
+  reportYear?: number | null;
 }) {
   const financialImportsRepo = requireClientRepo<{
     findUniqueOrThrow: typeof prisma.financial_imports.findUniqueOrThrow;
@@ -1770,6 +1938,8 @@ export async function applyFinancialImport(params: {
   }
 
   const allocationOverrides = new Map<string, number>();
+  const reportQuarter = normalizeReportQuarter(params.reportQuarter);
+  const reportYear = normalizeReportYear(params.reportYear);
   for (const item of params.allocations ?? []) {
     if (!item?.rowId) continue;
     allocationOverrides.set(item.rowId, numberFromLoose(item.netAmount));
@@ -1779,6 +1949,7 @@ export async function applyFinancialImport(params: {
     allocations: Array<{
       rowId: string;
       rowNumber: number;
+      platformName: string | null;
       upc: string | null;
       userId: string;
       userLabel: string | null;
@@ -1798,6 +1969,8 @@ export async function applyFinancialImport(params: {
     royaltyTransactionIds: [],
     commissionIds: [],
     balanceTransactionIds: [],
+    reportQuarter,
+    reportYear,
     allocations: []
   };
   const applyContext = createFinancialApplyContext();
@@ -1818,12 +1991,12 @@ export async function applyFinancialImport(params: {
     const transactionRepo = getTransactionRepo<{
       create?: typeof tx.transaction.create;
     }>(tx, "transaction");
-    const royaltyRepo = requireClientRepo<{
+    const royaltyRepo = getTransactionRepo<{
       create: typeof tx.royalty.create;
-    }>(tx, "royalty", "financial import apply royalties");
-    const commissionRepo = requireClientRepo<{
+    }>(tx, "royalty");
+    const commissionRepo = getTransactionRepo<{
       create: typeof tx.commission_calculations.create;
-    }>(tx, "commission_calculations", "financial import apply commissions");
+    }>(tx, "commission_calculations");
     const financialImportRowsRepo = requireClientRepo<{
       update: typeof tx.financial_import_rows.update;
     }>(tx, "financial_import_rows", "financial import apply row updates");
@@ -1841,11 +2014,14 @@ export async function applyFinancialImport(params: {
           periodEnd: Date;
           amount: number;
           currency: string;
-          status: "AGREED";
-          agreedAt: Date;
+          status: "READY_TO_CONFIRM";
+          agreedAt: Date | null;
         };
       }) => Promise<{ id: string }>;
     }>(tx, "financeReport");
+    const hasLegacyTransactionTable = await hasIcecreamTable(tx, "transaction");
+    const hasLegacyRoyaltyTable = await hasIcecreamTable(tx, "royalty");
+    const hasLegacyCommissionTable = await hasIcecreamTable(tx, "commission_calculations");
     const userAggregates = new Map<string, { amount: number; periodStart: Date; periodEnd: Date }>();
     let appliedGrossTotal = 0;
     let appliedCommissionTotal = 0;
@@ -1968,7 +2144,7 @@ export async function applyFinancialImport(params: {
       });
       state.balanceTransactionIds.push(balanceTransaction.id);
 
-      if (transactionRepo?.create) {
+      if (hasLegacyTransactionTable && transactionRepo?.create) {
         const txRecord = await transactionRepo.create({
           data: {
             userId: row.user_id,
@@ -1991,31 +2167,35 @@ export async function applyFinancialImport(params: {
         state.transactionIds.push(txRecord.id);
       }
 
-      const royalty = await royaltyRepo.create({
-        data: {
-          userId: row.user_id,
-          releaseId: row.matched_release_id,
-          amount: netAmount,
-          statementDate,
-          streams: Math.max(0, Math.trunc(numberFromLoose(normalized.quantity)))
-        }
-      });
-      state.royaltyIds.push(royalty.id);
+      if (hasLegacyRoyaltyTable && royaltyRepo?.create) {
+        const royalty = await royaltyRepo.create({
+          data: {
+            userId: row.user_id,
+            releaseId: row.matched_release_id,
+            amount: netAmount,
+            statementDate,
+            streams: Math.max(0, Math.trunc(numberFromLoose(normalized.quantity)))
+          }
+        });
+        state.royaltyIds.push(royalty.id);
+      }
 
-      const commission = await commissionRepo.create({
-        data: {
-          financial_import_id: importJob.id,
-          row_id: row.id,
-          user_id: row.user_id,
-          source_type: "royalty_import",
-          source_reference: upc || importJob.source_file_name,
-          gross_amount: grossAmount,
-          commission_rate: commissionRate,
-          commission_amount: commissionAmount,
-          net_amount: netAmount
-        }
-      });
-      state.commissionIds.push(commission.id);
+      if (hasLegacyCommissionTable && commissionRepo?.create) {
+        const commission = await commissionRepo.create({
+          data: {
+            financial_import_id: importJob.id,
+            row_id: row.id,
+            user_id: row.user_id,
+            source_type: "royalty_import",
+            source_reference: upc || importJob.source_file_name,
+            gross_amount: grossAmount,
+            commission_rate: commissionRate,
+            commission_amount: commissionAmount,
+            net_amount: netAmount
+          }
+        });
+        state.commissionIds.push(commission.id);
+      }
 
       await financialImportRowsRepo.update({
         where: { id: row.id },
@@ -2027,16 +2207,10 @@ export async function applyFinancialImport(params: {
         }
       });
 
-      await userRepo.update({
-        where: { id: row.user_id },
-        data: {
-          balance: nextBalance
-        }
-      });
-
       state.allocations.push({
         rowId: row.id,
         rowNumber: row.row_number,
+        platformName: String(normalized.platform || "") || null,
         upc,
         userId: row.user_id,
         userLabel: row.user?.name ?? row.user?.email ?? null,
@@ -2068,18 +2242,65 @@ export async function applyFinancialImport(params: {
         continue;
       }
 
-      const financeReport = await financeReportRepo.create({
-        data: {
-          userId,
-          periodStart: aggregate.periodStart,
-          periodEnd: aggregate.periodEnd,
-          amount: Number(aggregate.amount.toFixed(2)),
-          currency: "RUB",
-          status: "AGREED",
-          agreedAt: new Date()
+      const reportItems: UserReportLineItem[] = state.allocations
+        .filter((allocation) => allocation.userId === userId)
+        .map((allocation, index) => ({
+          id: `${allocation.rowId}:${index + 1}`,
+          platformName: allocation.platformName?.trim() || "Без площадки",
+          upc: allocation.upc?.trim() || "",
+          releaseTitle: allocation.releaseTitle?.trim() || "Без названия",
+          amount: Number(allocation.netAmount.toFixed(2))
+        }));
+
+      const reportId = randomUUID();
+      let persistedReportId = reportId;
+
+      try {
+        const financeReport = await financeReportRepo.create({
+          data: {
+            userId,
+            periodStart: aggregate.periodStart,
+            periodEnd: aggregate.periodEnd,
+            amount: Number(aggregate.amount.toFixed(2)),
+            currency: "RUB",
+            status: "READY_TO_CONFIRM",
+            agreedAt: null
+          }
+        });
+        persistedReportId = financeReport.id;
+        state.financeReportIds.push(financeReport.id);
+      } catch (error) {
+        if (!isPrismaTableMissingError(error, "financeReport")) {
+          throw error;
         }
-      });
-      state.financeReportIds.push(financeReport.id);
+      }
+
+      if (hasLegacyTransactionTable && transactionRepo?.create) {
+        const payloadTx = await transactionRepo.create({
+          data: {
+            userId,
+            amount: 0,
+            type: "ROYALTY",
+            status: "PENDING",
+            description: REPORT_PAYLOAD_DESCRIPTION,
+            processedAt: null,
+            metadata: buildStoredUserReportPayload({
+              reportId: persistedReportId,
+              workflowState: "ready_to_confirm",
+              periodStart: aggregate.periodStart,
+              periodEnd: aggregate.periodEnd,
+              amount: Number(aggregate.amount.toFixed(2)),
+              currency: "RUB",
+              quarter: reportQuarter,
+              year: reportYear,
+              fallbackDate: aggregate.periodEnd,
+              adminComment: null,
+              items: reportItems
+            })
+          }
+        });
+        state.transactionIds.push(payloadTx.id);
+      }
     }
 
     await financialImportRepo.update({
@@ -2103,6 +2324,9 @@ export async function applyFinancialImport(params: {
         metadata: state
       }
     });
+  }, {
+    maxWait: 10_000,
+    timeout: 60_000
   });
 
   await createAdminLog(prisma, {
@@ -2161,21 +2385,24 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
     const balanceTransactionsRepo = requireClientRepo<{
       deleteMany: typeof tx.balance_transactions.deleteMany;
     }>(tx, "balance_transactions", "financial import rollback balance transactions");
-    const commissionRepo = requireClientRepo<{
+    const commissionRepo = getTransactionRepo<{
       deleteMany: typeof tx.commission_calculations.deleteMany;
-    }>(tx, "commission_calculations", "financial import rollback commissions");
+    }>(tx, "commission_calculations");
     const royaltyTransactionsRepo = requireClientRepo<{
       deleteMany: typeof tx.royalty_transactions.deleteMany;
     }>(tx, "royalty_transactions", "financial import rollback royalty transactions");
     const transactionRepo = getTransactionRepo<{
       deleteMany?: typeof tx.transaction.deleteMany;
     }>(tx, "transaction");
-    const royaltyRepo = requireClientRepo<{
+    const royaltyRepo = getTransactionRepo<{
       deleteMany: typeof tx.royalty.deleteMany;
-    }>(tx, "royalty", "financial import rollback royalties");
+    }>(tx, "royalty");
     const financeReportRepo = getTransactionRepo<{
       deleteMany: (args: { where: { id: { in: string[] } } }) => Promise<unknown>;
     }>(tx, "financeReport");
+    const hasLegacyTransactionTable = await hasIcecreamTable(tx, "transaction");
+    const hasLegacyRoyaltyTable = await hasIcecreamTable(tx, "royalty");
+    const hasLegacyCommissionTable = await hasIcecreamTable(tx, "commission_calculations");
     const userRepo = requireClientRepo<{
       update: typeof tx.user.update;
     }>(tx, "user", "financial import rollback user balance");
@@ -2191,7 +2418,7 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
         where: { id: { in: metadata.balanceTransactionIds } }
       });
     }
-    if (metadata.commissionIds?.length) {
+    if (hasLegacyCommissionTable && metadata.commissionIds?.length && commissionRepo?.deleteMany) {
       await commissionRepo.deleteMany({
         where: { id: { in: metadata.commissionIds } }
       });
@@ -2201,12 +2428,12 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
         where: { id: { in: metadata.royaltyTransactionIds } }
       });
     }
-    if (metadata.transactionIds?.length && transactionRepo?.deleteMany) {
+    if (hasLegacyTransactionTable && metadata.transactionIds?.length && transactionRepo?.deleteMany) {
       await transactionRepo.deleteMany({
         where: { id: { in: metadata.transactionIds } }
       });
     }
-    if (metadata.royaltyIds?.length) {
+    if (hasLegacyRoyaltyTable && metadata.royaltyIds?.length && royaltyRepo?.deleteMany) {
       await royaltyRepo.deleteMany({
         where: { id: { in: metadata.royaltyIds } }
       });
@@ -2241,6 +2468,9 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
         description: "Financial import rolled back"
       }
     });
+  }, {
+    maxWait: 10_000,
+    timeout: 60_000
   });
 
   return financialImportsRepo.findUniqueOrThrow({

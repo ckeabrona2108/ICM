@@ -22,6 +22,7 @@ import { FaqAccordion } from "@/components/landing/faq-accordion";
 import { HeroCollage } from "@/components/landing/hero-collage";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { IcmHeader } from "@/components/landing/icm-header";
+import { LandingSubscriptionSection } from "@/components/landing/landing-subscription-section";
 import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
 import {
   AppleMusicLogo,
@@ -694,6 +695,8 @@ export default function HomePage() {
           </div>
         </Reveal>
       </section>
+
+      <LandingSubscriptionSection />
 
       <section id="faq" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
         <Reveal className="text-center">

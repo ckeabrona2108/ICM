@@ -106,6 +106,15 @@ function parseEditableAmount(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function resolveQuarterYear(value?: string | null) {
+  const date = value ? new Date(value) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return {
+    quarter: Math.floor(safeDate.getUTCMonth() / 3) + 1,
+    year: safeDate.getUTCFullYear()
+  };
+}
+
 function isLikelyUpc(value?: string | null) {
   if (!value) return false;
   const normalized = value.trim().replace(/\s+/g, "");
@@ -118,7 +127,16 @@ function normalizedText(row: CatalogRow, key: string) {
 }
 
 function rowUserLabel(row: CatalogRow) {
-  return row.user?.name?.trim() || row.user?.email?.trim() || row.user_id || "—";
+  return row.user?.email?.trim() || row.user?.name?.trim() || row.user_id || "—";
+}
+
+function rowUserMetaLabel(row: CatalogRow) {
+  const name = row.user?.name?.trim() || "";
+  const email = row.user?.email?.trim() || "";
+  if (name && email) {
+    return `${name}`;
+  }
+  return "";
 }
 
 function rowReleaseLabel(row: CatalogRow) {
@@ -165,8 +183,10 @@ function rowRuleLabel(row: CatalogRow) {
 type FinancePreviewUserSummary = {
   userId: string;
   label: string;
+  metaLabel: string;
   releases: Set<string>;
   upcs: Set<string>;
+  releaseTotals: Map<string, number>;
   grossAmount: number;
   commissionAmount: number;
   netAmount: number;
@@ -281,6 +301,9 @@ export function AdminCatalogSyncClient() {
   const [actionBusy, setActionBusy] = React.useState<"apply" | "rollback" | null>(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [previewRowLimit, setPreviewRowLimit] = React.useState<number>(500);
+  const defaultQuarterYear = React.useMemo(() => resolveQuarterYear(), []);
+  const [financeReportQuarter, setFinanceReportQuarter] = React.useState<number>(defaultQuarterYear.quarter);
+  const [financeReportYear, setFinanceReportYear] = React.useState<number>(defaultQuarterYear.year);
 
   const imports = activeKind === "catalog" ? catalogImports : financeImports;
   const financeProgress = React.useMemo(() => {
@@ -326,8 +349,10 @@ export function AdminCatalogSyncClient() {
       const summary = userSummaries.get(userId) ?? {
         userId,
         label: rowUserLabel(row),
+        metaLabel: rowUserMetaLabel(row),
         releases: new Set<string>(),
         upcs: new Set<string>(),
+        releaseTotals: new Map<string, number>(),
         grossAmount: 0,
         commissionAmount: 0,
         netAmount: 0
@@ -340,6 +365,10 @@ export function AdminCatalogSyncClient() {
       const upcLabel = rowUpcLabel(row);
       if (releaseLabel !== "—") {
         summary.releases.add(releaseLabel);
+        summary.releaseTotals.set(
+          releaseLabel,
+          Number(((summary.releaseTotals.get(releaseLabel) ?? 0) + effective.netAmount).toFixed(2))
+        );
       }
       if (upcLabel !== "—") {
         summary.upcs.add(upcLabel);
@@ -360,6 +389,10 @@ export function AdminCatalogSyncClient() {
           releaseCount: item.releases.size,
           upcCount: item.upcs.size,
           releases: [...item.releases].slice(0, 3),
+          releaseBreakdown: [...item.releaseTotals.entries()]
+            .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "ru"))
+            .slice(0, 3)
+            .map(([release, amount]) => ({ release, amount: Number(amount.toFixed(2)) })),
           upcs: [...item.upcs].slice(0, 3),
           grossAmount: Number(item.grossAmount.toFixed(2)),
           commissionAmount: Number(item.commissionAmount.toFixed(2)),
@@ -371,6 +404,15 @@ export function AdminCatalogSyncClient() {
   React.useEffect(() => {
     setFinanceNetEdits({});
   }, [selectedImport?.id, selectedKind]);
+
+  React.useEffect(() => {
+    if (selectedKind !== "finance") {
+      return;
+    }
+    const nextQuarterYear = resolveQuarterYear(selectedImport?.created_at);
+    setFinanceReportQuarter(nextQuarterYear.quarter);
+    setFinanceReportYear(nextQuarterYear.year);
+  }, [selectedImport?.id, selectedImport?.created_at, selectedKind]);
 
   const loadImports = React.useCallback(async () => {
     setLoadingImports(true);
@@ -488,7 +530,15 @@ export function AdminCatalogSyncClient() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(action === "apply" && selectedKind === "finance" ? { allocations } : {})
+          body: JSON.stringify(
+            action === "apply" && selectedKind === "finance"
+              ? {
+                  allocations,
+                  reportQuarter: financeReportQuarter,
+                  reportYear: financeReportYear
+                }
+              : {}
+          )
         }
       );
       const payload = await readJson<{ ok?: boolean; item?: ImportItem; error?: string }>(response);
@@ -705,7 +755,30 @@ export function AdminCatalogSyncClient() {
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedKind === "finance" ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                      <span className="text-[12px] font-medium text-white/58">Отчет пользователям</span>
+                      <select
+                        value={financeReportQuarter}
+                        onChange={(event) => setFinanceReportQuarter(Number(event.target.value))}
+                        className="h-9 rounded-xl border border-white/[0.12] bg-[#11131a] px-3 text-[13px] text-white outline-none focus:border-[#7b3df5]/60"
+                      >
+                        <option value={1}>1 квартал</option>
+                        <option value={2}>2 квартал</option>
+                        <option value={3}>3 квартал</option>
+                        <option value={4}>4 квартал</option>
+                      </select>
+                      <input
+                        type="number"
+                        min={2020}
+                        max={3000}
+                        value={financeReportYear}
+                        onChange={(event) => setFinanceReportYear(Number(event.target.value))}
+                        className="h-9 w-[110px] rounded-xl border border-white/[0.12] bg-[#11131a] px-3 text-[13px] text-white outline-none focus:border-[#7b3df5]/60"
+                      />
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
@@ -904,6 +977,13 @@ export function AdminCatalogSyncClient() {
                     и какая сумма будет начислена артистам. До нажатия{" "}
                     <span className="font-semibold text-white">«Применить»</span> баланс пользователей не меняется.
                   </div>
+                  <div className="mt-3 rounded-xl border border-white/[0.08] bg-[#11131a] px-3 py-2 text-[12px] text-white/62">
+                    После применения пользователям сразу будет создан отчет за{" "}
+                    <span className="font-semibold text-white">
+                      {financeReportQuarter} квартал {financeReportYear}
+                    </span>
+                    .
+                  </div>
                   <div className="mt-3 text-[12px] text-white/55">
                     `Сопоставлено` выше показывает строки файла. Блоки по UPC и кодам показывают уникальные найденные и
                     неучтённые идентификаторы без дублей.
@@ -963,7 +1043,21 @@ export function AdminCatalogSyncClient() {
                           <tr key={item.userId} className="border-b border-white/[0.05] align-top">
                             <td className="px-3 py-2">
                               <div className="font-medium text-white">{item.label}</div>
-                              <div className="mt-1 text-[11px] text-white/45">{item.releases.join(" / ") || "—"}</div>
+                              {item.metaLabel ? (
+                                <div className="mt-1 text-[11px] text-white/45">{item.metaLabel}</div>
+                              ) : null}
+                              <div className="mt-2 space-y-1 text-[11px] text-white/55">
+                                {item.releaseBreakdown.length > 0 ? (
+                                  item.releaseBreakdown.map((releaseItem) => (
+                                    <div key={`${item.userId}-${releaseItem.release}`} className="flex items-start justify-between gap-3">
+                                      <span className="min-w-0 flex-1 truncate">{releaseItem.release}</span>
+                                      <span className="shrink-0 text-emerald-300">{formatNumber(releaseItem.amount)}</span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div>—</div>
+                                )}
+                              </div>
                             </td>
                             <td className="px-3 py-2 text-white">{formatNumber(item.releaseCount)}</td>
                             <td className="px-3 py-2 text-white/75">{item.upcs.join(", ") || "—"}</td>

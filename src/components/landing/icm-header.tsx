@@ -11,6 +11,7 @@ const NAV = [
   { label: "Отзывы", href: "#reviews" },
   { label: "Дистрибуция", href: "#how" },
   { label: "Платформы", href: "#platforms" },
+  { label: "Тарифы", href: "#subscriptions" },
   { label: "AI Студия", href: "/dashboard/ai-studio" },
   { label: "FAQ", href: "#faq" }
 ];
@@ -60,7 +61,7 @@ export function IcmHeader() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
+                  className="whitespace-nowrap rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
                 >
                   {link.label}
                 </Link>
@@ -68,7 +69,7 @@ export function IcmHeader() {
                 <a
                   key={link.href}
                   href={link.href}
-                  className="rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
+                  className="whitespace-nowrap rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
                 >
                   {link.label}
                 </a>

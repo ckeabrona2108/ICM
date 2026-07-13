@@ -3,11 +3,13 @@
 import * as React from "react";
 
 import { IcmTariffCard } from "@/components/tariffs/icm-tariff-card";
-import { ICM_TARIFFS } from "@/lib/icm-tariffs";
+import { SubscriptionPeriodToggle } from "@/components/tariffs/subscription-period-toggle";
 import type {
   SubscriptionCheckoutRequest,
   SubscriptionCheckoutResponse
 } from "@/lib/api/contracts";
+import { getIcmTariffs } from "@/lib/icm-tariffs";
+import type { SubscriptionBillingPeriod } from "@/lib/subscription-billing";
 
 type TariffId = "standard" | "pro" | "enterprise";
 
@@ -40,6 +42,9 @@ export function SubscriptionTiersClient({
 }) {
   const [pendingTariffId, setPendingTariffId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [billingPeriod, setBillingPeriod] =
+    React.useState<SubscriptionBillingPeriod>("yearly");
+  const tiers = React.useMemo(() => getIcmTariffs(billingPeriod), [billingPeriod]);
 
   const startCheckout = React.useCallback(async (tariffId: string) => {
     setError(null);
@@ -47,7 +52,8 @@ export function SubscriptionTiersClient({
 
     try {
       const payload: SubscriptionCheckoutRequest = {
-        tariffId: tariffId as "standard" | "pro" | "enterprise"
+        tariffId: tariffId as "standard" | "pro" | "enterprise",
+        billingPeriod
       };
 
       const response = await fetch("/api/subscription/upgrade", {
@@ -73,12 +79,16 @@ export function SubscriptionTiersClient({
     } finally {
       setPendingTariffId(null);
     }
-  }, []);
+  }, [billingPeriod]);
 
   return (
     <>
+      <div className="mb-5 flex justify-center lg:justify-start">
+        <SubscriptionPeriodToggle value={billingPeriod} onChange={setBillingPeriod} />
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-3">
-        {ICM_TARIFFS.map((tier) => {
+        {tiers.map((tier) => {
           const tariffId = tier.id as TariffId;
           const isCurrent = hasActiveSubscription && tariffId === currentTariffId;
           const ctaLabel = resolveCtaLabel({

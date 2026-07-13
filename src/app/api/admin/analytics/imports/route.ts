@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
+import { extractAnalyticsPeriodDaysFromStoragePath } from "@/lib/analytics-period";
 import {
   isAnalyticsImportJobStorageUnavailableError,
   listAnalyticsImportJobs
@@ -38,6 +39,7 @@ export async function GET(request: Request) {
       importedRows: Number(job.imported_rows ?? 0),
       matchedRows: Number(job.matched_rows ?? 0),
       unmatchedRows: Number(job.unmatched_rows ?? 0),
+      periodDays: extractAnalyticsPeriodDaysFromStoragePath(job.stored_file_path),
       affectedUsersCount: Number(job.affected_users_count ?? 0),
       affectedReleasesCount: Number(job.affected_releases_count ?? 0),
       errorMessage: job.error_message ?? null,

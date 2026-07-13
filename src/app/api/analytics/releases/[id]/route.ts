@@ -3,12 +3,13 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import type { AnalyticsReleaseDetailsResponse } from "@/lib/api/contracts";
+import { getAnalyticsReleaseDetails } from "@/lib/analytics-query-service";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
   const session = await getServerSession(authOptions);
@@ -16,25 +17,14 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const release = await prisma.release.findFirst({
-    where: {
-      id: params.id,
-      userId: session.user.id,
-      confirmed: true,
-      status: "approved"
-    },
-    select: {
-      id: true,
-      title: true,
-      upc: true,
-      performer: true,
-      feat: true,
-      user: {
-        select: {
-          name: true
-        }
-      }
-    }
+  const url = new URL(request.url);
+  const daysRaw = Number(url.searchParams.get("days") ?? "30");
+  const days = Number.isFinite(daysRaw) ? daysRaw : 30;
+
+  const release = await getAnalyticsReleaseDetails(prisma, {
+    user_id: session.user.id,
+    release_id: params.id,
+    days
   });
 
   if (!release) {
@@ -42,21 +32,25 @@ export async function GET(
   }
 
   const payload: AnalyticsReleaseDetailsResponse = {
-    release_id: release.id,
+    release_id: release.release_id,
     title: release.title,
-    artist:
-      release.performer?.trim() ||
-      release.feat?.trim() ||
-      release.user.name ||
-      "Unknown Artist",
-    upc: release.upc ?? "",
-    total_streams: 0,
-    total_pay_streams: 0,
-    streams_change_percent: null,
-    pay_streams_change_percent: null,
-    latest_report_date: null,
-    countries_breakdown: [],
-    chart: []
+    artist: release.artist,
+    upc: release.upc,
+    total_streams: release.totalStreams,
+    total_pay_streams: release.totalPayStreams,
+    streams_change_percent: release.streamsChangePercent,
+    pay_streams_change_percent: release.payStreamsChangePercent,
+    latest_report_date: release.latestReportDate,
+    countries_breakdown: release.countriesBreakdown.map((item) => ({
+      country: item.country,
+      streams: item.streams,
+      pay_streams: item.pay_streams
+    })),
+    chart: release.chart.map((item) => ({
+      date: item.date,
+      streams: item.streams,
+      pay_streams: item.pay_streams
+    }))
   };
 
   return NextResponse.json(payload, { status: 200 });

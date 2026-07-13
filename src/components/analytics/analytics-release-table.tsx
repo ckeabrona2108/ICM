@@ -29,13 +29,11 @@ function AnalyticsReleaseTableBase({
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-white/10">
-        <Table>
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Релиз</TableHead>
               <TableHead>UPC</TableHead>
-              <TableHead className="text-right">Streams</TableHead>
-              <TableHead className="text-right">Pay streams</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -49,15 +47,8 @@ function AnalyticsReleaseTableBase({
                 >
                   <TableCell>
                     <div className="font-medium text-white">{release.title}</div>
-                    <div className="text-[12px] text-white/55">{release.artist}</div>
                   </TableCell>
                   <TableCell>{release.upc || "—"}</TableCell>
-                  <TableCell className="text-right">
-                    {release.streams.toLocaleString("ru-RU")}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {release.pay_streams.toLocaleString("ru-RU")}
-                  </TableCell>
                 </TableRow>
               );
             })}

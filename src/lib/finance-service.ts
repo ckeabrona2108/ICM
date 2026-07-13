@@ -33,7 +33,6 @@ export interface UserFinanceView {
     type: TransactionType;
     status: TransactionStatus;
     amount: number;
-    currency: string;
     description: string | null;
     createdAt: string;
     processedAt: string | null;
@@ -55,6 +54,7 @@ const TX_TYPE_PAYOUT = "PAYOUT";
 const TX_TYPE_REFUND = "REFUND";
 const TX_TYPE_FEE = "FEE";
 const FINANCE_TABLE_FALLBACKS = ["FinanceReport", "financeReport", "Transaction", "transaction", "PayoutRequest", "payoutRequest", "payouts"];
+const REPORT_PAYLOAD_DESCRIPTION = "Finance report payload";
 
 function getRepo<T = unknown>(prisma: PrismaClient, key: string): T | null {
   const repo = (prisma as unknown as Record<string, unknown>)[key];
@@ -258,10 +258,10 @@ export async function getUserFinanceView(
         type: string;
         status: string;
         amount: Prisma.Decimal | number;
-        currency: string;
         description: string | null;
         createdAt: Date;
         processedAt: Date | null;
+        metadata?: Prisma.JsonValue | null;
       }>>;
     }
   >(prisma, "transaction");
@@ -307,16 +307,17 @@ export async function getUserFinanceView(
     settlementDelta: totals.settlementDelta,
     availableToWithdraw: totals.availableToWithdraw,
     reportsCount,
-    transactions: transactions.map((item) => ({
-      id: item.id,
-      type: item.type as any,
-      status: item.status as any,
-      amount: toNumber(item.amount),
-      currency: item.currency,
-      description: item.description,
-      createdAt: item.createdAt.toISOString(),
-      processedAt: item.processedAt?.toISOString() ?? null
-    }))
+    transactions: transactions
+      .filter((item) => item.description !== REPORT_PAYLOAD_DESCRIPTION)
+      .map((item) => ({
+        id: item.id,
+        type: item.type as any,
+        status: item.status as any,
+        amount: toNumber(item.amount),
+        description: item.description,
+        createdAt: item.createdAt.toISOString(),
+        processedAt: item.processedAt?.toISOString() ?? null
+      }))
   };
 }
 
@@ -393,19 +394,17 @@ export async function topUpUserBalanceByAdmin(params: {
       }
     });
     try {
-      await tx.transaction.create({
-        data: {
-          id: randomUUID(),
-          userId: params.userId,
-          amount: amountDecimal,
-          currency: "RUB",
-          type: TX_TYPE_ROYALTY,
-          status: TX_STATUS_COMPLETED,
-          description: params.comment?.trim() || "Пополнение баланса администратором",
-          reference: report.id,
-          processedAt: now
-        }
-      });
+        await tx.transaction.create({
+          data: {
+            id: randomUUID(),
+            userId: params.userId,
+            amount: amountDecimal,
+            type: TX_TYPE_ROYALTY,
+            status: TX_STATUS_COMPLETED,
+            description: params.comment?.trim() || "Пополнение баланса администратором",
+            processedAt: now
+          }
+        });
     } catch (error) {
       if (!isPrismaTableMissingError(error, "transaction")) {
         throw error;
@@ -511,11 +510,9 @@ export async function adjustUserBalanceByAdmin(params: {
             id: randomUUID(),
             userId: params.userId,
             amount: amountDecimal,
-            currency: "RUB",
             type: TX_TYPE_ROYALTY,
             status: TX_STATUS_COMPLETED,
             description: normalizedComment,
-            reference: report.id,
             processedAt: now
           }
         });
@@ -531,11 +528,9 @@ export async function adjustUserBalanceByAdmin(params: {
             id: randomUUID(),
             userId: params.userId,
             amount: amountDecimal,
-            currency: "RUB",
             type: TX_TYPE_FEE,
             status: TX_STATUS_COMPLETED,
             description: normalizedComment,
-            reference: `admin-debit:${params.adminId}`,
             processedAt: now
           }
         });

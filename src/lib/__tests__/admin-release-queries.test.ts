@@ -33,3 +33,7 @@ test("toAdminStatus keeps draft releases as draft", () => {
   assert.equal(toAdminStatus("draft"), "draft");
   assert.equal(toAdminStatus("moderating"), "moderation");
 });
+
+test("toAdminStatus prefers lifecycleState draft over legacy moderating status", () => {
+  assert.equal(toAdminStatus("moderating", { lifecycleState: "draft" }), "draft");
+});

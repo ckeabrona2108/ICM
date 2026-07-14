@@ -18,7 +18,9 @@ export function PremiumShell({ children, className }: PremiumShellProps) {
       )}
     >
       <div className="relative z-10">{children}</div>
-      <PwaDebugChip />
+      <React.Suspense fallback={null}>
+        <PwaDebugChip />
+      </React.Suspense>
       <IosInstallPrompt />
     </div>
   );

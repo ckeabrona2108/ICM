@@ -1,6 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { IosInstallPrompt } from "@/components/pwa/ios-install-prompt";
+import { PwaDebugChip } from "@/components/pwa/pwa-debug-chip";
 
 interface PremiumShellProps {
   children: React.ReactNode;
@@ -17,6 +18,7 @@ export function PremiumShell({ children, className }: PremiumShellProps) {
       )}
     >
       <div className="relative z-10">{children}</div>
+      <PwaDebugChip />
       <IosInstallPrompt />
     </div>
   );

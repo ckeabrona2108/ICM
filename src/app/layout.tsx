@@ -42,6 +42,19 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" suppressHydrationWarning>
+      <head>
+        <meta name="application-name" content="ICECREAMMUSIC" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="ICM" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="theme-color" content="#0b0f1a" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+        <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+      </head>
       <body className="font-sans text-[19px] font-[550] antialiased">
         <Providers>
           <PremiumShell>{children}</PremiumShell>

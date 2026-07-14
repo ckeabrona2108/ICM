@@ -1,5 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -23,7 +25,7 @@ import { HeroCollage } from "@/components/landing/hero-collage";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingSubscriptionSection } from "@/components/landing/landing-subscription-section";
-import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
+import { authOptions } from "@/lib/auth";
 import {
   AppleMusicLogo,
   SoundCloudLogo,
@@ -255,11 +257,15 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const session = await getServerSession(authOptions);
+
+  if (session?.user?.id) {
+    redirect(session.user.role === "ADMIN" ? "/admin" : "/dashboard");
+  }
+
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
-      <LandingScrollUnlock />
-
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="blob-a absolute -top-40 left-1/2 h-[600px] w-[1100px] rounded-full bg-[#7b61ff]/15 blur-[160px]" />
         <div className="ambient-orbit-left absolute left-1/2 top-[14%] h-[420px] w-[760px] -translate-x-1/2 rounded-full border border-[#7b61ff]/10 bg-[#7b61ff]/10 blur-[140px]" />

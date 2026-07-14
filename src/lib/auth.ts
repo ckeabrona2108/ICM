@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
 const nextAuthSecret = process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
+const sessionMaxAgeSeconds = Number(process.env.NEXTAUTH_SESSION_MAX_AGE ?? 60 * 60 * 24 * 30);
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
@@ -28,7 +29,12 @@ function resolveUserRole(params: { email: string; isAdmin: boolean | null | unde
 export const authOptions: NextAuthOptions = {
   secret: nextAuthSecret,
   session: {
-    strategy: "jwt"
+    strategy: "jwt",
+    maxAge: sessionMaxAgeSeconds,
+    updateAge: 60 * 60 * 24
+  },
+  jwt: {
+    maxAge: sessionMaxAgeSeconds
   },
   pages: {
     signIn: "/login"

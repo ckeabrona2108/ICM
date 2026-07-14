@@ -15,6 +15,7 @@ import { adjustUserBalanceByAdmin, topUpUserBalanceByAdmin } from "@/lib/finance
 import {
   createUserReportByAdmin,
   listUserReports,
+  resendUserReportToUser,
   updateUserReportByAdmin,
   type UserReportLineItem
 } from "@/lib/report-service";
@@ -192,6 +193,18 @@ export async function adminUpdateUserFinanceReport(params: {
     year: params.year ?? null,
     items: params.items ?? [],
     comment: params.comment
+  });
+}
+
+export async function adminResendUserFinanceReport(params: {
+  prisma: PrismaClient;
+  reportId: string;
+  userId: string;
+}) {
+  return resendUserReportToUser({
+    prisma: params.prisma,
+    reportId: params.reportId,
+    userId: params.userId
   });
 }
 

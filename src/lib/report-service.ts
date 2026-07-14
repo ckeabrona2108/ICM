@@ -1005,3 +1005,104 @@ export async function markUserReportAsAgreed(params: {
 
   return { ok: true as const };
 }
+
+export async function resendUserReportToUser(params: {
+  prisma: PrismaClient;
+  reportId: string;
+  userId: string;
+}) {
+  const existing = await getExistingReportWithPayload(params.prisma, {
+    reportId: params.reportId,
+    userId: params.userId
+  });
+  if (!existing) {
+    return { ok: false as const, error: "Report not found" };
+  }
+
+  const existingLifecycleState = existing.report
+    ? resolveLifecycleState(existing.report.status, existing.payloadRecord?.payload ?? null)
+    : existing.payloadRecord?.payload.workflowState ?? "ready_to_confirm";
+  if (existingLifecycleState !== "changes_requested") {
+    return {
+      ok: false as const,
+      error: "Повторно можно отправить только отчет на доработке."
+    };
+  }
+
+  try {
+    await params.prisma.$transaction(async (tx) => {
+      if (existing.report) {
+        await tx.financeReport.update({
+          where: { id: params.reportId },
+          data: {
+            status: FinanceReportStatus.READY_TO_CONFIRM,
+            agreedAt: null,
+            updatedAt: new Date()
+          }
+        });
+      }
+
+      const payload = buildStoredUserReportPayload({
+        reportId: params.reportId,
+        workflowState: "ready_to_confirm",
+        periodStart: existing.report?.periodStart ?? existing.payloadRecord?.payload.periodStart ?? null,
+        periodEnd: existing.report?.periodEnd ?? existing.payloadRecord?.payload.periodEnd ?? null,
+        amount: existing.report ? toNumber(existing.report.amount) : existing.payloadRecord?.payload.amount ?? 0,
+        currency: existing.report?.currency ?? existing.payloadRecord?.payload.currency ?? "RUB",
+        quarter: existing.payloadRecord?.payload.quarter,
+        year: existing.payloadRecord?.payload.year,
+        fallbackDate:
+          existing.report?.periodEnd ??
+          new Date(
+            existing.payloadRecord?.payload.periodEnd ??
+              existing.payloadRecord?.payload.updatedAt ??
+              new Date()
+          ),
+        adminComment: existing.payloadRecord?.payload.adminComment ?? null,
+        userComment: null,
+        items: existing.payloadRecord?.payload.items ?? []
+      });
+
+      await upsertReportPayloadRecord(tx, {
+        payloadRecordId: existing.payloadRecord?.id ?? null,
+        userId: params.userId,
+        reportId: params.reportId,
+        payload
+      });
+    });
+  } catch (error) {
+    if (!isPrismaTableMissingError(error, "financeReport")) {
+      throw error;
+    }
+
+    await params.prisma.$transaction(async (tx) => {
+      const payload = buildStoredUserReportPayload({
+        reportId: params.reportId,
+        workflowState: "ready_to_confirm",
+        periodStart: existing.payloadRecord?.payload.periodStart ?? null,
+        periodEnd: existing.payloadRecord?.payload.periodEnd ?? null,
+        amount: existing.payloadRecord?.payload.amount ?? 0,
+        currency: existing.payloadRecord?.payload.currency ?? "RUB",
+        quarter: existing.payloadRecord?.payload.quarter,
+        year: existing.payloadRecord?.payload.year,
+        fallbackDate: new Date(
+          existing.payloadRecord?.payload.periodEnd ??
+            existing.payloadRecord?.payload.updatedAt ??
+            new Date()
+        ),
+        adminComment: existing.payloadRecord?.payload.adminComment ?? null,
+        userComment: null,
+        items: existing.payloadRecord?.payload.items ?? []
+      });
+
+      await upsertReportPayloadRecord(tx, {
+        payloadRecordId: existing.payloadRecord?.id ?? null,
+        userId: params.userId,
+        reportId: params.reportId,
+        payload
+      });
+    });
+  }
+
+  return { ok: true as const };
+}

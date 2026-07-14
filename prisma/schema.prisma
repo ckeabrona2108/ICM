@@ -720,6 +720,8 @@ model user {
   ai_token_transactions        ai_token_transactions[]
   ai_user_notifications        ai_user_notifications[]
   ai_uploads                   ai_uploads[]
+  Message                      Message[]
+  SupportTicket                SupportTicket[]
   catalog_imports              catalog_imports[]
   commission_calculations      commission_calculations[]
   contract_commission_rates    contract_commission_rates[]
@@ -944,6 +946,56 @@ model transaction {
   @@schema("icecream")
 }
 
+model SupportTicket {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String              @db.Uuid
+  title        String
+  description  String
+  status       SupportTicketStatus @default(OPEN)
+  priority     String              @default("normal")
+  adminComment String?
+  createdAt    DateTime            @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime            @updatedAt @db.Timestamp(6)
+  closedAt     DateTime?           @db.Timestamp(6)
+  User         user                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  Message      Message[]
+
+  @@schema("icecream")
+}
+
+model Message {
+  id            String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String         @db.Uuid
+  ticketId      String?        @db.Uuid
+  subject       String
+  body          String
+  direction     MessageDirection
+  isRead        Boolean        @default(false)
+  createdAt     DateTime       @default(now()) @db.Timestamp(6)
+  User          user           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  SupportTicket SupportTicket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@schema("icecream")
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_USER
+  RESOLVED
+  CLOSED
+
+  @@schema("icecream")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+
+  @@schema("icecream")
+}
+
 model payoutRequest {
   id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId      String              @db.Uuid
@@ -960,6 +1012,28 @@ model payoutRequest {
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@schema("icecream")
+}
+
+model playlist_placements {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String?   @db.Uuid
+  releaseId   String?   @db.Uuid
+  platform    String
+  upc         String
+  artistName  String?
+  trackTitle  String?
+  position    String?
+  playlistName String
+  playlistUrl String
+  createdAt   DateTime  @default(now()) @db.Timestamp(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamp(6)
+  user        user?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  release     release?  @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+
+  @@unique([platform, upc, playlistUrl])
+  @@index([userId, createdAt])
+  @@index([releaseId, createdAt])
   @@schema("icecream")
 }
 

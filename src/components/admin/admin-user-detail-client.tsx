@@ -117,6 +117,7 @@ export function AdminUserDetailClient({
   const [busy, setBusy] = React.useState<null | "reload" | "topup" | "report" | "subscription">(null);
   const [error, setError] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
+  const [resendingReportId, setResendingReportId] = React.useState<string | null>(null);
 
   const [releaseStatusFilter, setReleaseStatusFilter] = React.useState<"" | ReleaseStatusFilterValue>("");
 
@@ -371,6 +372,32 @@ export function AdminUserDetailClient({
       setError(submitError instanceof Error ? submitError.message : "Не удалось обновить подписку.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function resendReport(reportId: string) {
+    setResendingReportId(reportId);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/users/${profile.id}/reports/${reportId}/resend`, {
+        method: "POST"
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Не удалось отправить отчет повторно.");
+      }
+      setToast(payload?.message ?? "Отчет повторно отправлен пользователю.");
+      await reloadAll();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Не удалось отправить отчет повторно."
+      );
+    } finally {
+      setResendingReportId(null);
     }
   }
 
@@ -761,6 +788,18 @@ export function AdminUserDetailClient({
                         className="rounded-md border border-white/[0.12] bg-white/[0.04] px-2.5 py-1 text-[12px] text-white/85 hover:bg-white/[0.08]"
                       >
                         Редактировать
+                      </button>
+                    ) : null}
+                    {report.lifecycleState === "changes_requested" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void resendReport(report.id);
+                        }}
+                        disabled={resendingReportId === report.id}
+                        className="rounded-md border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[12px] text-emerald-100 hover:bg-emerald-500/15 disabled:opacity-50"
+                      >
+                        {resendingReportId === report.id ? "Отправка..." : "Отправить повторно"}
                       </button>
                     ) : null}
                   </div>

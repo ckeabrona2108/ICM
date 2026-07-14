@@ -9,6 +9,7 @@ import {
   listUserReports,
   markUserReportAsAgreed,
   markUserReportAsRejected,
+  resendUserReportToUser,
   updateUserReportByAdmin
 } from "@/lib/report-service";
 
@@ -214,6 +215,43 @@ test("rejected report can be updated and agreed once with balance credit", async
   assert.equal(state.report.status, FinanceReportStatus.AGREED);
   assert.equal(state.userBalance, 1400);
   assert.equal(state.payloadTx.metadata.workflowState, "agreed");
+});
+
+test("changes requested report can be resent to user without re-crediting balance", async () => {
+  const { prisma, state } = createReportPrismaStub();
+
+  await createUserReportByAdmin({
+    prisma,
+    adminId: "admin_1",
+    userId: "user_1",
+    periodStart: new Date("2026-07-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-09-30T23:59:59.999Z"),
+    amount: 1250,
+    status: FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: 3,
+    year: 2026,
+    items: [],
+    comment: "Initial"
+  });
+
+  await markUserReportAsRejected({
+    prisma,
+    reportId: state.report.id,
+    userId: "user_1",
+    userComment: "Нужна правка по строкам"
+  });
+
+  const resendResult = await resendUserReportToUser({
+    prisma,
+    reportId: state.report.id,
+    userId: "user_1"
+  });
+
+  assert.equal(resendResult.ok, true);
+  assert.equal(state.report.status, FinanceReportStatus.READY_TO_CONFIRM);
+  assert.equal(state.payloadTx.metadata.workflowState, "ready_to_confirm");
+  assert.equal(state.payloadTx.metadata.userComment, null);
+  assert.equal(state.userBalance, 0);
 });
 
 test("creating agreed report credits user balance immediately", async () => {

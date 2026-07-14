@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import { Music2, ExternalLink } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface Placement {
   id: string;
@@ -97,12 +97,15 @@ export default function UserPlaylistsPage() {
                   {placement.artistName} — {placement.trackTitle}
                 </CardDescription>
 
-                <Button variant="outline" className="w-full" asChild>
-                  <a href={placement.playlistUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-2 h-4 w-4" />
-                    Перейти к плейлисту
-                  </a>
-                </Button>
+                <a
+                  href={placement.playlistUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(buttonVariants({ variant: "outline" }), "w-full")}
+                >
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Перейти к плейлисту
+                </a>
               </CardContent>
             </Card>
           ))}

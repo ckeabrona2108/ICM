@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import assert from "node:assert/strict";
+import { rm } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -7,9 +8,12 @@ import {
   addAdminSupportReply,
   createSupportTicket,
   getUserSupportTicket,
+  listUserSupportTickets,
   getUserUnreadSupportTicketCount,
   SupportAccessError
 } from "@/lib/support-service";
+
+const localSupportStorePath = `${process.cwd()}/.tmp/support-tickets.json`;
 
 function makeTicketDetails(overrides?: Partial<{
   id: string;
@@ -74,6 +78,7 @@ test("createSupportTicket sends telegram notification after successful save", as
         }
       });
     },
+    message: {},
     supportTicket: {
       findUnique: async () => details
     }
@@ -117,6 +122,7 @@ test("createSupportTicket does not rollback when telegram notification fails", a
         }
       });
     },
+    message: {},
     supportTicket: {
       findUnique: async () => details
     }
@@ -196,9 +202,18 @@ test("opening user ticket marks admin replies as read for this user", async () =
 
 test("unread count counts tickets, not messages", async () => {
   const prisma = {
+    supportTicket: {},
     message: {
       groupBy: async () => [{ ticketId: "ticket_1" }, { ticketId: "ticket_2" }]
-    }
+    },
+    $queryRawUnsafe: async () => [
+      {
+        hasOrmSupportTicket: true,
+        hasOrmMessage: true,
+        hasLegacySupportTicket: false,
+        hasLegacyMessage: false
+      }
+    ]
   } as any;
 
   const count = await getUserUnreadSupportTicketCount(prisma, "user_1");
@@ -340,4 +355,84 @@ test("addUserSupportMessage moves WAITING_USER to IN_PROGRESS", async () => {
 
   assert.equal(status, "IN_PROGRESS");
   assert.equal(ticket.status, "IN_PROGRESS");
+});
+
+test("tickets persist across reload when supportTicket repo exists but message repo is missing", async () => {
+  await rm(localSupportStorePath, { force: true });
+
+  const prisma = {
+    supportTicket: {
+      findMany: async () => {
+        throw new Error("db list should not be used in local fallback mode");
+      }
+    }
+  } as any;
+
+  const created = await createSupportTicket({
+    prisma,
+    userId: "user_42",
+    userName: "Reload User",
+    userEmail: "reload@example.com",
+    subject: "Тикет не должен пропасть",
+    body: "Проверка сохранения после обновления страницы.",
+    notify: async () => true,
+    logger: {
+      warn: () => undefined,
+      error: () => undefined
+    }
+  });
+
+  const tickets = await listUserSupportTickets(prisma, "user_42");
+
+  assert.equal(tickets.length, 1);
+  assert.equal(tickets[0]?.id, created.id);
+  assert.equal(tickets[0]?.subject, "Тикет не должен пропасть");
+
+  await rm(localSupportStorePath, { force: true });
+});
+
+test("listUserSupportTickets falls back to legacy public support tables when icecream table is missing", async () => {
+  let queryCalls = 0;
+  const prisma = {
+    supportTicket: {
+      findMany: async () => {
+        throw new Error('The table `icecream.SupportTicket` does not exist in the current database.');
+      }
+    },
+    message: {},
+    $queryRawUnsafe: async () => {
+      queryCalls += 1;
+      if (queryCalls === 1) {
+        return [
+          {
+            hasOrmSupportTicket: false,
+            hasOrmMessage: false,
+            hasLegacySupportTicket: true,
+            hasLegacyMessage: true
+          }
+        ];
+      }
+
+      return [
+        {
+          id: "legacy_ticket_1",
+          subject: "Legacy ticket",
+          status: "OPEN",
+          userId: "user_legacy",
+          userName: "Legacy User",
+          userEmail: "legacy@example.com",
+          createdAt: new Date("2026-07-14T18:00:00.000Z"),
+          updatedAt: new Date("2026-07-14T18:05:00.000Z"),
+          lastMessage: "Последнее сообщение"
+        }
+      ];
+    }
+  } as any;
+
+  const tickets = await listUserSupportTickets(prisma, "user_legacy");
+
+  assert.equal(tickets.length, 1);
+  assert.equal(tickets[0]?.id, "legacy_ticket_1");
+  assert.equal(tickets[0]?.userEmail, "legacy@example.com");
+  assert.equal(tickets[0]?.lastMessage, "Последнее сообщение");
 });

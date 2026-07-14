@@ -29,6 +29,9 @@ export function UserAvatar({
   const initials = getInitials(name ?? "");
   const safeAvatarUrl = normalizeNextImageSrc(avatarUrl);
   const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
+  const isInlineAvatarSrc = Boolean(
+    safeAvatarUrl?.startsWith("data:image/") || safeAvatarUrl?.startsWith("blob:")
+  );
 
   React.useEffect(() => {
     setFailedSrc(null);
@@ -45,14 +48,23 @@ export function UserAvatar({
       )}
     >
       {shouldShowImage && safeAvatarUrl ? (
-        <Image
-          src={safeAvatarUrl}
-          alt={name ? `Аватар ${name}` : "Аватар пользователя"}
-          fill
-          sizes="64px"
-          className="object-cover"
-          onError={() => setFailedSrc(safeAvatarUrl)}
-        />
+        isInlineAvatarSrc ? (
+          <img
+            src={safeAvatarUrl}
+            alt={name ? `Аватар ${name}` : "Аватар пользователя"}
+            className="h-full w-full object-cover"
+            onError={() => setFailedSrc(safeAvatarUrl)}
+          />
+        ) : (
+          <Image
+            src={safeAvatarUrl}
+            alt={name ? `Аватар ${name}` : "Аватар пользователя"}
+            fill
+            sizes="64px"
+            className="object-cover"
+            onError={() => setFailedSrc(safeAvatarUrl)}
+          />
+        )
       ) : name ? (
         <span className="text-[12px] font-semibold uppercase tracking-[0.04em] text-white/86">
           {initials}

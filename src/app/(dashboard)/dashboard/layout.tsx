@@ -92,7 +92,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const aiTokenBalanceLabel = aiTokenBalance.toLocaleString("ru-RU");
 
   return (
-    <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[#0a0b0f] text-white [--dashboard-mobile-bottom-nav-height:72px] [--dashboard-mobile-header-height:72px] [--dashboard-mobile-header-offset:104px]">
+    <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[#0a0b0f] text-white [--dashboard-mobile-bottom-nav-height:72px] [--dashboard-mobile-header-height:calc(72px+env(safe-area-inset-top))] [--dashboard-mobile-header-offset:calc(104px+env(safe-area-inset-top))]">
       {/* ambient corner glow (top-right) */}
       <div className="pointer-events-none absolute right-0 top-[-160px] h-[520px] w-[520px] translate-x-1/3 rounded-full bg-[#7b3df5]/[0.12] blur-[96px]" />
       <div className="pointer-events-none absolute right-0 top-40 h-[360px] w-[360px] translate-x-1/4 rounded-full bg-[#3b1d75]/22 blur-[84px]" />

@@ -31,7 +31,7 @@ export function LandingHeader() {
     <header
       className={cn(
         "sticky top-0 z-40 transition-all duration-300",
-        "px-4 pt-4 sm:px-6"
+        "px-4 pt-[max(env(safe-area-inset-top),1rem)] sm:px-6 sm:pt-4"
       )}
     >
       <div

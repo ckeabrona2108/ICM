@@ -32,7 +32,7 @@ export function IcmHeader() {
       initial={{ y: -40, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="fixed inset-x-0 top-0 z-[60] px-4 pt-4 sm:px-6 lg:px-8"
+      className="fixed inset-x-0 top-0 z-[60] px-4 pt-[max(env(safe-area-inset-top),1rem)] sm:px-6 sm:pt-4 lg:px-8"
     >
       <div className="mx-auto max-w-7xl">
         <div

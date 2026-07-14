@@ -257,7 +257,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
 
 export default function HomePage() {
   return (
-    <main className="perf-scroll-shell relative h-[100dvh] overflow-x-hidden overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
+    <main className="relative min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
       <LandingScrollUnlock />
 
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">

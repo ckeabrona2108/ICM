@@ -3,7 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import * as React from "react";
 import {
+  X,
   BarChart3,
   CircleHelp,
   Ticket,
@@ -12,9 +14,11 @@ import {
   Headset,
   LogOut,
   Music2,
+  PanelLeft,
   UserRound,
   Verified
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 
 import { cn } from "@/lib/utils";
 
@@ -38,6 +42,30 @@ const items = [
 export function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  React.useEffect(() => {
+    const onToggleMobileSidebar = () => {
+      setMobileMenuOpen((prev) => !prev);
+    };
+
+    window.addEventListener(
+      "admin:toggle-mobile-sidebar",
+      onToggleMobileSidebar as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        "admin:toggle-mobile-sidebar",
+        onToggleMobileSidebar as EventListener
+      );
+    };
+  }, []);
+
   const handleLogout = async () => {
     try {
       await fetch("/api/admin/logout", { method: "POST" });
@@ -47,8 +75,8 @@ export function AdminSidebar() {
     }
   };
 
-  return (
-    <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 border-r border-white/[0.06] bg-[#08090d]/95 px-4 py-6 backdrop-blur-xl lg:block">
+  const sidebarNavigation = (
+    <>
       <Link href="/admin" className="mb-10 flex items-center gap-2 px-1">
         <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden">
           <Image
@@ -103,6 +131,52 @@ export function AdminSidebar() {
           Выйти
         </button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 border-r border-white/[0.06] bg-[#08090d]/95 px-4 py-6 backdrop-blur-xl lg:block">
+        {sidebarNavigation}
+      </aside>
+
+      <AnimatePresence initial={false}>
+        {mobileMenuOpen ? (
+          <>
+            <motion.button
+              type="button"
+              aria-label="Закрыть меню администратора"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              className="fixed inset-0 z-[84] bg-[#04050a]/88 backdrop-blur-[8px] lg:hidden"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+            <motion.aside
+              initial={{ x: -28, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -20, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="fixed inset-y-0 left-0 z-[85] flex w-[min(86vw,320px)] max-w-[320px] flex-col border-r border-white/[0.12] bg-[#0a0c12] px-4 py-4 shadow-[24px_0_70px_-34px_rgba(0,0,0,0.98)] lg:hidden"
+            >
+              <div className="mb-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] text-white/78 transition-colors hover:bg-white/[0.08]"
+                  aria-label="Закрыть меню администратора"
+                >
+                  <X className="h-4.5 w-4.5" />
+                </button>
+              </div>
+              <div className="overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+24px)]">
+                {sidebarNavigation}
+              </div>
+            </motion.aside>
+          </>
+        ) : null}
+      </AnimatePresence>
+    </>
   );
 }

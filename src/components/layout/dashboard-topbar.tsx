@@ -369,7 +369,7 @@ export function DashboardTopbar({
   }, [activeMenu, updateMenuPositions]);
 
   return (
-    <div className="perf-fixed-layer fixed inset-x-0 top-0 z-50 mb-4 flex min-h-[var(--dashboard-mobile-header-height)] min-w-0 flex-wrap items-center gap-2 overflow-visible border-b border-white/[0.08] bg-[#0d0f16]/96 px-4 py-1.5 backdrop-blur-[6px] sm:px-6 lg:sticky lg:top-0 lg:z-[70] lg:isolate lg:-mx-8 lg:mb-6 lg:min-h-[72px] lg:gap-4 lg:bg-[#0d0f16]/92 lg:px-8 lg:py-0 lg:backdrop-blur-[2px]">
+    <div className="perf-fixed-layer fixed inset-x-0 top-0 z-50 mb-4 flex min-h-[var(--dashboard-mobile-header-height)] min-w-0 flex-wrap items-center gap-2 overflow-visible border-b border-white/[0.08] bg-[#0d0f16]/96 px-4 pb-1.5 pt-[calc(env(safe-area-inset-top)+0.375rem)] backdrop-blur-[6px] sm:px-6 lg:sticky lg:top-0 lg:z-[70] lg:isolate lg:-mx-8 lg:mb-6 lg:min-h-[72px] lg:gap-4 lg:bg-[#0d0f16]/92 lg:px-8 lg:py-0 lg:pt-0 lg:backdrop-blur-[2px]">
       <button
         type="button"
         onClick={() => {

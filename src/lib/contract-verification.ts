@@ -670,6 +670,8 @@ function toContractStatusPayload(item: ContractSignatureListItem | null): Contra
 function isSchemaUnavailableError(error: unknown): boolean {
   return (
     isPrismaTableMissingError(error, "verification") ||
+    isPrismaTableMissingError(error, "icecream.verification") ||
+    isPrismaTableMissingError(error, "Verification") ||
     (error instanceof Error &&
       /verification|cannot read properties of undefined/i.test(
         error.message

@@ -7,6 +7,7 @@ import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
+import { uploadObjectToStorage } from "@/lib/s3";
 import { resolveActiveSubscriptionPlan } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
 import { updateUserAvatarSchema, validateAvatarDataUrl } from "@/lib/user-profile-policy";
@@ -15,6 +16,33 @@ export const dynamic = "force-dynamic";
 
 const uuidV4LikePattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseAvatarDataUrl(dataUrl: string): { mimeType: string; body: Buffer; extension: string } {
+  const match = /^data:([^;]+);base64,([A-Za-z0-9+/=]+)$/u.exec(dataUrl.trim());
+  if (!match) {
+    throw new Error("Некорректный аватар");
+  }
+
+  const mimeType = match[1].toLowerCase();
+  const extension =
+    mimeType === "image/jpeg" || mimeType === "image/jpg"
+      ? "jpg"
+      : mimeType === "image/png"
+        ? "png"
+        : mimeType === "image/webp"
+          ? "webp"
+          : null;
+
+  if (!extension) {
+    throw new Error("Некорректный аватар");
+  }
+
+  return {
+    mimeType,
+    body: Buffer.from(match[2], "base64"),
+    extension
+  };
+}
 
 function getSessionUserId(session: Awaited<ReturnType<typeof getServerSession>>): string | null {
   const user =
@@ -112,10 +140,28 @@ export async function PUT(request: Request) {
   }
 
   try {
+    const avatarAsset = parseAvatarDataUrl(parsed.data.imageDataUrl);
+    const storageKey = `avatars/${userId}.${avatarAsset.extension}`;
+    let avatarValue = parsed.data.imageDataUrl;
+
+    try {
+      const uploaded = await uploadObjectToStorage({
+        key: storageKey,
+        body: avatarAsset.body,
+        contentType: avatarAsset.mimeType
+      });
+      avatarValue = uploaded.key;
+    } catch (storageError) {
+      console.warn("[avatar-upload] storage upload failed, falling back to inline payload", {
+        userId,
+        message: storageError instanceof Error ? storageError.message : String(storageError)
+      });
+    }
+
     await prisma.user.updateMany({
       where: { id: userId },
       data: {
-        avatar: parsed.data.imageDataUrl
+        avatar: avatarValue
       }
     });
 

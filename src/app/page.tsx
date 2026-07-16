@@ -22,6 +22,7 @@ import { HeroCollage } from "@/components/landing/hero-collage";
 import { HowItWorks } from "@/components/landing/how-it-works";
 import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingSubscriptionSection } from "@/components/landing/landing-subscription-section";
+import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
 import { StandaloneSessionRedirect } from "@/components/pwa/standalone-session-redirect";
 import { authOptions } from "@/lib/auth";
 import {
@@ -335,7 +336,8 @@ export default async function HomePage() {
     : null;
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
+    <main className="relative min-h-screen overflow-x-clip bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
+      <LandingScrollUnlock />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(HOME_PAGE_JSON_LD) }}

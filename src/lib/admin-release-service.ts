@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient, verification_status } from "@prisma/client";
 import { z } from "zod";
+import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 
 export const upcSchema = z
@@ -37,8 +38,8 @@ function canApproveReleaseStatus(status: verification_status): boolean {
   return status === "moderating" || status === "rejected" || status === "approved";
 }
 
-function canRejectReleaseStatus(status: verification_status): boolean {
-  return status === "moderating";
+export function canRejectRelease(status: string, roles?: unknown): boolean {
+  return getReleaseLifecycleStatus(status, roles) === "moderation";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -76,6 +77,36 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
   }
 
   return next as Prisma.InputJsonValue;
+}
+
+export function withAdminReleaseChangesRequiredState(
+  roles: unknown,
+  reason: string
+): Record<string, unknown> {
+  const next = withReleaseLifecycleState(roles, "changes_required");
+  next.needsChanges = true;
+  next.moderationStatus = "changes_required";
+  next.rejectReason = reason;
+  next.rejectionReason = reason;
+  next.moderationComment = reason;
+  next.moderatorComment = reason;
+
+  const submission = asRecord(next.submissionData);
+  if (submission) {
+    next.submissionData = {
+      ...submission,
+      lifecycleState: "changes_required",
+      submittedToModeration: false,
+      needsChanges: true,
+      moderationStatus: "changes_required",
+      rejectReason: reason,
+      rejectionReason: reason,
+      moderationComment: reason,
+      moderatorComment: reason
+    };
+  }
+
+  return next;
 }
 
 export async function approveReleaseByAdmin(params: {
@@ -165,6 +196,7 @@ export async function rejectReleaseByAdmin(params: {
       id: true,
       title: true,
       status: true,
+      roles: true,
       user: {
         select: {
           email: true,
@@ -175,7 +207,7 @@ export async function rejectReleaseByAdmin(params: {
   });
 
   if (!release) return { ok: false as const, error: "Release not found" };
-  if (!canRejectReleaseStatus(release.status)) {
+  if (!canRejectRelease(release.status, release.roles)) {
     return { ok: false as const, error: "Отклонение доступно только для релизов на модерации." };
   }
 
@@ -184,7 +216,12 @@ export async function rejectReleaseByAdmin(params: {
     where: { id: params.releaseId },
     data: {
       status: "rejected",
-      rejectReason: reason
+      rejectReason: reason,
+      moderatorComment: reason,
+      roles: withAdminReleaseChangesRequiredState(
+        release.roles,
+        reason
+      ) as Prisma.InputJsonValue
     }
   });
 

@@ -4,6 +4,7 @@ import * as React from "react";
 import "@/app/globals.css";
 import { Providers } from "@/app/providers";
 import { PremiumShell } from "@/components/layout/premium-shell";
+import { ChunkLoadRecovery } from "@/components/pwa/chunk-load-recovery";
 import {
   absoluteSiteUrl,
   SITE_DESCRIPTION,
@@ -112,6 +113,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="icon" href="/favicon.ico" sizes="any" />
       </head>
       <body className="font-sans text-[19px] font-[550] antialiased">
+        <ChunkLoadRecovery />
         <Providers>
           <PremiumShell>{children}</PremiumShell>
         </Providers>

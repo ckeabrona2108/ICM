@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canManageReleases, canManageReleasesSession, rejectReleaseByAdmin } from "@/lib/admin-release-service";
+import { canManageReleasesSession, rejectReleaseByAdmin } from "@/lib/admin-release-service";
 
 export async function POST(
   request: Request,

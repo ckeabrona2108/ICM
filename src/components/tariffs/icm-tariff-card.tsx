@@ -37,9 +37,6 @@ function IcmTariffCardBase({
   const description = cleanLeadingDecor(tier.description);
   const features = tier.features.map(cleanLeadingDecor);
   const footer = cleanLeadingDecor(tier.footer);
-  const aiGiftDescription = tier.aiGiftDescription
-    ? cleanLeadingDecor(tier.aiGiftDescription)
-    : null;
   const handleCtaClick = React.useCallback(() => {
     if (onCtaClick) {
       onCtaClick();
@@ -132,12 +129,6 @@ function IcmTariffCardBase({
       ) : null}
 
       <div className="mt-5 h-px w-full bg-white/[0.08]" />
-
-      {aiGiftDescription ? (
-        <div className="mt-4 rounded-[18px] border border-white/[0.07] bg-white/[0.03] px-4 py-3 text-[13px] leading-relaxed text-white/72">
-          {aiGiftDescription}
-        </div>
-      ) : null}
 
       <ul className="mt-4 space-y-3">
         {features.map((f) => (

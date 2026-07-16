@@ -5,7 +5,11 @@ import type { Prisma } from "@prisma/client";
 
 import type { AdminReleaseDecisionResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
-import { canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
+import {
+  canManageReleasesSession,
+  canRejectRelease,
+  withAdminReleaseChangesRequiredState
+} from "@/lib/admin-release-service";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -118,11 +122,26 @@ export async function POST(request: Request) {
   }
 
   const comment = parsed.data.comment?.trim() || null;
+  if (!canRejectRelease(release.status, release.roles)) {
+    return NextResponse.json(
+      { error: "Отклонение доступно только для релизов на модерации." },
+      { status: 409 }
+    );
+  }
+  if (!comment) {
+    return NextResponse.json({ error: "Причина отклонения обязательна." }, { status: 400 });
+  }
+
   await prisma.release.update({
     where: { id: release.id },
     data: {
       status: "rejected",
-      rejectReason: comment
+      rejectReason: comment,
+      moderatorComment: comment,
+      roles: withAdminReleaseChangesRequiredState(
+        release.roles,
+        comment
+      ) as Prisma.InputJsonValue
     }
   });
 

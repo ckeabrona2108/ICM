@@ -105,6 +105,7 @@ export function FinancePageClient({
   const [reports, setReports] = React.useState(initialReports);
   const [agreedBalance, setAgreedBalance] = React.useState(initialAgreedBalance);
   const [pendingPayout, setPendingPayout] = React.useState<number>(initialPendingPayout);
+  const [accruals, setAccruals] = React.useState(initialAccruals);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
@@ -256,6 +257,7 @@ export function FinancePageClient({
 
       if (decision === "agree") {
         setAgreedBalance((current) => current + selectedReport.amount);
+        setAccruals((current) => Math.max(0, Number((current - selectedReport.amount).toFixed(2))));
       }
 
       setReportNotice(
@@ -310,8 +312,8 @@ export function FinancePageClient({
         <MetricCard
           icon={<Coins className="h-4 w-4" />}
           label="Начисления"
-          value={formatCurrency(initialAccruals, "RUB")}
-          hint="Всего начислено"
+          value={formatCurrency(accruals, "RUB")}
+          hint="Ожидает согласования"
           tone="cyan"
         />
       </motion.div>

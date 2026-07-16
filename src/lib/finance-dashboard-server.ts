@@ -68,6 +68,10 @@ function decimalToNumber(value: unknown): number {
   return Number(value ?? 0);
 }
 
+function roundMoney(value: number): number {
+  return Number(value.toFixed(2));
+}
+
 function monthKey(date: Date): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
@@ -112,8 +116,6 @@ export async function getFinanceDashboardViewData(
 ): Promise<FinanceDashboardViewData> {
   let reportsRaw;
   let balanceTransactionsRaw;
-  let accrualTransactionsRaw;
-  let accrualTotalRaw;
   let commissionTotalRaw;
   let totals;
   const balanceTransactionsRepo = getRepo<{
@@ -131,7 +133,7 @@ export async function getFinanceDashboardViewData(
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
   try {
-    [reportsRaw, balanceTransactionsRaw, accrualTransactionsRaw, accrualTotalRaw, commissionTotalRaw, totals] =
+    [reportsRaw, balanceTransactionsRaw, commissionTotalRaw, totals] =
       await Promise.all([
         listUserReports(prisma, userId),
         balanceTransactionsRepo
@@ -166,30 +168,6 @@ export async function getFinanceDashboardViewData(
               }
             })
           : Promise.resolve([]),
-        balanceTransactionsRepo
-          ? balanceTransactionsRepo.findMany({
-              where: {
-                user_id: userId,
-                direction: "CREDIT",
-                royalty_transaction_id: { not: null },
-                created_at: { gte: accrualWindowStart }
-              },
-              select: {
-                amount: true,
-                created_at: true
-              }
-            })
-          : Promise.resolve([]),
-        balanceTransactionsRepo && typeof balanceTransactionsRepo.aggregate === "function"
-          ? balanceTransactionsRepo.aggregate({
-              where: {
-                user_id: userId,
-                direction: "CREDIT",
-                royalty_transaction_id: { not: null }
-              },
-              _sum: { amount: true }
-            })
-          : Promise.resolve({ _sum: { amount: 0 } }),
         royaltyTransactionsRepo && typeof royaltyTransactionsRepo.aggregate === "function"
           ? royaltyTransactionsRepo.aggregate({
               where: {
@@ -248,6 +226,7 @@ export async function getFinanceDashboardViewData(
   const pendingReportsCount = reports.filter(
     (report) => report.status === "ready_to_confirm"
   ).length;
+  const accrualReports = reports.filter((report) => report.status !== "agreed");
 
   const transactions: FinanceTransactionView[] = balanceTransactionsRaw.map((transaction) => {
     const amount = decimalToNumber(transaction.amount);
@@ -305,19 +284,24 @@ export async function getFinanceDashboardViewData(
     };
   });
 
-  const accruals = Number(decimalToNumber(accrualTotalRaw?._sum?.amount).toFixed(2));
+  const accruals = roundMoney(
+    accrualReports.reduce((sum, report) => sum + decimalToNumber(report.amount), 0)
+  );
 
   const accrualByMonth = new Map<string, number>();
-  for (const transaction of accrualTransactionsRaw) {
-    const date = transaction.created_at;
+  for (const report of accrualReports) {
+    const date = new Date(report.periodEnd || report.periodStart);
+    if (Number.isNaN(date.getTime()) || date < accrualWindowStart) {
+      continue;
+    }
     const key = monthKey(date);
-    const value = Math.max(0, decimalToNumber(transaction.amount));
-    accrualByMonth.set(key, (accrualByMonth.get(key) ?? 0) + value);
+    const value = Math.max(0, decimalToNumber(report.amount));
+    accrualByMonth.set(key, roundMoney((accrualByMonth.get(key) ?? 0) + value));
   }
 
   const accrualSeries = monthBuckets.map((bucket) => ({
     period: bucket.period,
-    amount: Number((accrualByMonth.get(bucket.key) ?? 0).toFixed(2))
+    amount: roundMoney(accrualByMonth.get(bucket.key) ?? 0)
   }));
 
   const deductionsAndCommission = Number(

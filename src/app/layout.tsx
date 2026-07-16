@@ -4,11 +4,67 @@ import * as React from "react";
 import "@/app/globals.css";
 import { Providers } from "@/app/providers";
 import { PremiumShell } from "@/components/layout/premium-shell";
+import {
+  absoluteSiteUrl,
+  SITE_DESCRIPTION,
+  SITE_NAME,
+  SITE_URL
+} from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  applicationName: "ICECREAMMUSIC",
-  title: "ICECREAMMUSIC",
-  description: "Премиум-экосистема для артистов: дистрибуция, продвижение, аналитика и AI-инструменты.",
+  metadataBase: new URL(SITE_URL),
+  applicationName: SITE_NAME,
+  title: {
+    default: "Дистрибуция музыки на 240+ площадок — ICECREAMMUSIC",
+    template: `%s — ${SITE_NAME}`
+  },
+  description: SITE_DESCRIPTION,
+  keywords: [
+    "дистрибуция музыки",
+    "выпустить трек",
+    "музыкальный дистрибьютор",
+    "продвижение музыки",
+    "аналитика для артистов",
+    "Яндекс Музыка",
+    "VK Музыка",
+    "Spotify",
+    "Apple Music"
+  ],
+  authors: [{ name: SITE_NAME, url: SITE_URL }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+  openGraph: {
+    type: "website",
+    locale: "ru_RU",
+    siteName: SITE_NAME,
+    title: "Дистрибуция музыки на 240+ площадок — ICECREAMMUSIC",
+    description: SITE_DESCRIPTION,
+    images: [
+      {
+        url: absoluteSiteUrl("/icon-512.png"),
+        width: 512,
+        height: 512,
+        alt: "Логотип ICECREAMMUSIC"
+      }
+    ]
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Дистрибуция музыки на 240+ площадок — ICECREAMMUSIC",
+    description: SITE_DESCRIPTION,
+    images: [absoluteSiteUrl("/icon-512.png")]
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1
+    }
+  },
   manifest: "/manifest.webmanifest",
   formatDetection: {
     telephone: false

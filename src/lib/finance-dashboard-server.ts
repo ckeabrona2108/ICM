@@ -2,7 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { getUserBalanceTotals } from "@/lib/finance-service";
-import { isPrismaTableMissingError } from "@/lib/prisma-errors";
+import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { listUserReports } from "@/lib/report-service";
 
 export interface FinanceTransactionView {
@@ -114,10 +114,8 @@ export function readMinimumPayoutAmount(): number {
 export async function getFinanceDashboardViewData(
   userId: string
 ): Promise<FinanceDashboardViewData> {
-  let reportsRaw;
   let balanceTransactionsRaw;
   let commissionTotalRaw;
-  let totals;
   const balanceTransactionsRepo = getRepo<{
     findMany: (args: unknown) => Promise<unknown[]>;
     aggregate?: (args: unknown) => Promise<{
@@ -132,78 +130,64 @@ export async function getFinanceDashboardViewData(
   const monthBuckets = buildRecentMonthBuckets(6);
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
+  const reportsRaw = await listUserReports(prisma, userId);
+  const totals = await getUserBalanceTotals(prisma, userId);
+
   try {
-    [reportsRaw, balanceTransactionsRaw, commissionTotalRaw, totals] =
-      await Promise.all([
-        listUserReports(prisma, userId),
-        balanceTransactionsRepo
-          ? balanceTransactionsRepo.findMany({
-              where: { user_id: userId },
-              orderBy: { created_at: "desc" },
-              take: 20
-              ,
-              include: {
-                royalty_transaction: {
+    balanceTransactionsRaw = balanceTransactionsRepo
+      ? await balanceTransactionsRepo.findMany({
+          where: { user_id: userId },
+          orderBy: { created_at: "desc" },
+          take: 20,
+          include: {
+            royalty_transaction: {
+              select: {
+                id: true,
+                gross_amount: true,
+                platform_commission_amount: true,
+                net_amount: true,
+                currency: true,
+                platform_name: true,
+                source_reference: true,
+                release: {
                   select: {
-                    id: true,
-                    gross_amount: true,
-                    platform_commission_amount: true,
-                    net_amount: true,
-                    currency: true,
-                    platform_name: true,
-                    source_reference: true,
-                    release: {
-                      select: {
-                        title: true,
-                        upc: true
-                      }
-                    },
-                    track: {
-                      select: {
-                        title: true
-                      }
-                    }
+                    title: true,
+                    upc: true
+                  }
+                },
+                track: {
+                  select: {
+                    title: true
                   }
                 }
               }
-            })
-          : Promise.resolve([]),
-        royaltyTransactionsRepo && typeof royaltyTransactionsRepo.aggregate === "function"
-          ? royaltyTransactionsRepo.aggregate({
-              where: {
-                user_id: userId,
-                reversed_at: null
-              },
-              _sum: { platform_commission_amount: true }
-            })
-          : Promise.resolve({ _sum: { platform_commission_amount: 0 } }),
-        getUserBalanceTotals(prisma, userId)
-      ]);
+            }
+          }
+        })
+      : [];
   } catch (error) {
-    if (
-      isPrismaTableMissingError(error, "FinanceReport") ||
-      isPrismaTableMissingError(error, "transaction") ||
-      isPrismaTableMissingError(error, "balance_transactions") ||
-      isPrismaTableMissingError(error, "royalty_transactions") ||
-      isPrismaTableMissingError(error, "PayoutRequest") ||
-      isPrismaTableMissingError(error, "payouts")
-    ) {
-      return {
-        reports: [],
-        transactions: [],
-        agreedBalance: 0,
-        pendingPayout: 0,
-        accruals: 0,
-        accrualSeries: monthBuckets.map((bucket) => ({
-          period: bucket.period,
-          amount: 0
-        })),
-        deductionsAndCommission: 0,
-        pendingReportsCount: 0,
-        minimumPayoutAmount: readMinimumPayoutAmount()
-      };
+    if (!isAnyPrismaTableMissingError(error, ["balance_transactions"])) {
+      throw error;
     }
-    throw error;
+    balanceTransactionsRaw = [];
+  }
+
+  try {
+    commissionTotalRaw =
+      royaltyTransactionsRepo && typeof royaltyTransactionsRepo.aggregate === "function"
+        ? await royaltyTransactionsRepo.aggregate({
+            where: {
+              user_id: userId,
+              reversed_at: null
+            },
+            _sum: { platform_commission_amount: true }
+          })
+        : { _sum: { platform_commission_amount: 0 } };
+  } catch (error) {
+    if (!isAnyPrismaTableMissingError(error, ["royalty_transactions"])) {
+      throw error;
+    }
+    commissionTotalRaw = { _sum: { platform_commission_amount: 0 } };
   }
 
   const reports: FinanceReportClientItem[] = reportsRaw.map((report) => ({

@@ -1,4 +1,22 @@
+import type { Metadata } from "next";
+
 import { NewsListClient } from "@/components/news/news-list-client";
+
+export const metadata: Metadata = {
+  title: "Новости музыкальной индустрии и сервиса",
+  description:
+    "Новости ICECREAMMUSIC: обновления дистрибуции, аналитики, продвижения и инструментов для артистов.",
+  alternates: {
+    canonical: "/news"
+  },
+  openGraph: {
+    type: "website",
+    url: "/news",
+    title: "Новости музыкальной индустрии и сервиса",
+    description:
+      "Обновления дистрибуции, аналитики, продвижения и инструментов ICECREAMMUSIC для артистов."
+  }
+};
 
 export default function NewsPage() {
   return (

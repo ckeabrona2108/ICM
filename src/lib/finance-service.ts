@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import { createAdminLog } from "@/lib/admin-log-service";
 import { isAnyPrismaTableMissingError, isPrismaTableMissingError } from "@/lib/prisma-errors";
+import { listUserReports } from "@/lib/report-service";
 
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   return Number(value ?? 0);
@@ -147,7 +148,10 @@ export async function getUserBalanceTotals(
   userId: string
 ): Promise<UserBalanceTotals> {
   const financeReportRepo = getRepo<
-    { aggregate: (args: unknown) => Promise<{ _sum: { amount: Prisma.Decimal | number | null } }> }
+    {
+      aggregate: (args: unknown) => Promise<{ _sum: { amount: Prisma.Decimal | number | null } }>;
+      findMany?: (args: unknown) => Promise<unknown[]>;
+    }
   >(prisma, "financeReport");
   const payoutRequestRepo = getRepo<
     { aggregate: (args: unknown) => Promise<{ _sum: { amount: Prisma.Decimal | number | null } }> }
@@ -159,76 +163,85 @@ export async function getUserBalanceTotals(
     { findMany: (args: unknown) => Promise<Array<{ type: string; amount: Prisma.Decimal | number }>> }
   >(prisma, "transaction");
 
-  let agreedReportsRaw;
-  let pendingReportsRaw;
-  let pendingPayoutRaw;
-  let settlementRows;
+  let agreedReportsBalance = 0;
+  let pendingBalance = 0;
 
-  try {
-    [agreedReportsRaw, pendingReportsRaw, pendingPayoutRaw, settlementRows] = await Promise.all([
-      financeReportRepo
-        ? financeReportRepo.aggregate({
-            where: { userId, status: REPORT_STATUS_AGREED },
-            _sum: { amount: true }
-          })
-        : Promise.resolve({ _sum: { amount: 0 } }),
-      financeReportRepo
-        ? financeReportRepo.aggregate({
-            where: { userId, status: REPORT_STATUS_READY_TO_CONFIRM },
-            _sum: { amount: true }
-          })
-        : Promise.resolve({ _sum: { amount: 0 } }),
-      payoutRequestRepo
-        ? payoutRequestRepo.aggregate({
-            where: {
-              userId,
-              status: {
-                in: [PAYOUT_STATUS_REQUESTED, PAYOUT_STATUS_PROCESSING]
-              }
-            },
-            _sum: { amount: true }
-          })
-        : payoutsRepo
-          ? payoutsRepo.aggregate({
-              where: {
-                userId,
-                confirmed: false
-              },
-              _sum: { amount: true }
-            })
-          : Promise.resolve({ _sum: { amount: 0 } }),
-      transactionRepo
-        ? transactionRepo.findMany({
-            where: {
-              userId,
-              status: TX_STATUS_COMPLETED,
-              type: {
-                in: [TX_TYPE_PAYOUT, TX_TYPE_REFUND, TX_TYPE_FEE]
-              }
-            },
-            select: {
-              type: true,
-              amount: true
-            }
-          })
-        : Promise.resolve([])
-    ]);
-  } catch (error) {
-    if (isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
-      return {
-        agreedReportsBalance: 0,
-        settlementDelta: 0,
-        agreedBalance: 0,
-        pendingBalance: 0,
-        pendingPayout: 0,
-        availableToWithdraw: 0
-      };
+  if (typeof financeReportRepo?.findMany === "function") {
+    const reports = await listUserReports(prisma, userId);
+    for (const report of reports) {
+      if (report.lifecycleState === "agreed") {
+        agreedReportsBalance += toNumber(report.amount);
+      } else {
+        pendingBalance += toNumber(report.amount);
+      }
     }
-    throw error;
+  } else if (financeReportRepo) {
+    const [agreedReportsRaw, pendingReportsRaw] = await Promise.all([
+      financeReportRepo.aggregate({
+        where: { userId, status: REPORT_STATUS_AGREED },
+        _sum: { amount: true }
+      }),
+      financeReportRepo.aggregate({
+        where: { userId, status: REPORT_STATUS_READY_TO_CONFIRM },
+        _sum: { amount: true }
+      })
+    ]);
+    agreedReportsBalance = toNumber(agreedReportsRaw._sum.amount);
+    pendingBalance = toNumber(pendingReportsRaw._sum.amount);
   }
 
-  const agreedReportsBalance = toNumber(agreedReportsRaw._sum.amount);
-  const pendingBalance = toNumber(pendingReportsRaw._sum.amount);
+  let pendingPayoutRaw = { _sum: { amount: 0 as Prisma.Decimal | number | null } };
+  try {
+    pendingPayoutRaw = payoutRequestRepo
+      ? await payoutRequestRepo.aggregate({
+          where: {
+            userId,
+            status: {
+              in: [PAYOUT_STATUS_REQUESTED, PAYOUT_STATUS_PROCESSING]
+            }
+          },
+          _sum: { amount: true }
+        })
+      : payoutsRepo
+        ? await payoutsRepo.aggregate({
+            where: {
+              userId,
+              confirmed: false
+            },
+            _sum: { amount: true }
+          })
+        : pendingPayoutRaw;
+  } catch (error) {
+    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
+      throw error;
+    }
+  }
+
+  let settlementRows: SettlementTransactionEntry[] = [];
+  try {
+    settlementRows = transactionRepo
+      ? await transactionRepo.findMany({
+          where: {
+            userId,
+            status: TX_STATUS_COMPLETED,
+            type: {
+              in: [TX_TYPE_PAYOUT, TX_TYPE_REFUND, TX_TYPE_FEE]
+            }
+          },
+          select: {
+            type: true,
+            amount: true
+          }
+        })
+      : [];
+  } catch (error) {
+    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
+      throw error;
+    }
+  }
+
+  agreedReportsBalance = Number(agreedReportsBalance.toFixed(2));
+  pendingBalance = Number(pendingBalance.toFixed(2));
   const pendingPayout = toNumber(pendingPayoutRaw._sum.amount);
   const settlementDelta = computeSettlementDelta(settlementRows as SettlementTransactionEntry[]);
   const agreedBalance = agreedReportsBalance + settlementDelta;
@@ -266,37 +279,34 @@ export async function getUserFinanceView(
     }
   >(prisma, "transaction");
 
-  let totals;
-  let reportsCount;
-  let transactions;
+  const totals = await getUserBalanceTotals(prisma, userId);
+  let reportsCount = 0;
+  let transactions = [];
 
   try {
-    [totals, reportsCount, transactions] = await Promise.all([
-      getUserBalanceTotals(prisma, userId),
-      financeReportRepo ? financeReportRepo.count({ where: { userId } }) : Promise.resolve(0),
-      transactionRepo
-        ? transactionRepo.findMany({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
-            take: 100
-          })
-        : Promise.resolve([])
-    ]);
+    reportsCount = financeReportRepo
+      ? await financeReportRepo.count({ where: { userId } })
+      : (await listUserReports(prisma, userId)).length;
   } catch (error) {
-    if (isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
-      totals = {
-        agreedReportsBalance: 0,
-        settlementDelta: 0,
-        agreedBalance: 0,
-        pendingBalance: 0,
-        pendingPayout: 0,
-        availableToWithdraw: 0
-      };
-      reportsCount = 0;
-      transactions = [];
-    } else {
+    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
       throw error;
     }
+    reportsCount = (await listUserReports(prisma, userId)).length;
+  }
+
+  try {
+    transactions = transactionRepo
+      ? await transactionRepo.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          take: 100
+        })
+      : [];
+  } catch (error) {
+    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
+      throw error;
+    }
+    transactions = [];
   }
 
   return {

@@ -1,18 +1,16 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
 import {
   ArrowRight,
   ArrowUpRight,
   BadgeCheck,
   BarChart3,
-  CheckCircle2,
   Clock3,
   Globe2,
   Headset,
   Layers3,
-  PlayCircle,
-  Rocket,
   ShieldCheck,
   Sparkles,
   Wallet,
@@ -35,6 +33,20 @@ import {
   YouTubeMusicLogo
 } from "@/components/landing/platform-logos";
 import { Reveal, Stagger, StaggerItem } from "@/components/landing/reveal";
+import {
+  absoluteSiteUrl,
+  serializeJsonLd,
+  SITE_DESCRIPTION,
+  SITE_NAME
+} from "@/lib/site-metadata";
+
+export const metadata: Metadata = {
+  title: "Дистрибуция музыки на 240+ площадок",
+  description: SITE_DESCRIPTION,
+  alternates: {
+    canonical: "/"
+  }
+};
 
 const COMPANY_STATS = [
   {
@@ -208,6 +220,63 @@ const FAQ_ITEMS = [
   }
 ] as const;
 
+const HOME_PAGE_JSON_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": absoluteSiteUrl("/#organization"),
+      name: SITE_NAME,
+      url: absoluteSiteUrl("/"),
+      logo: absoluteSiteUrl("/icon-512.png"),
+      foundingDate: "2023",
+      sameAs: ["https://vk.com/icecreammusicru"],
+      contactPoint: {
+        "@type": "ContactPoint",
+        contactType: "customer support",
+        availableLanguage: ["Russian"]
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": absoluteSiteUrl("/#website"),
+      url: absoluteSiteUrl("/"),
+      name: SITE_NAME,
+      inLanguage: "ru-RU",
+      publisher: {
+        "@id": absoluteSiteUrl("/#organization")
+      }
+    },
+    {
+      "@type": "Service",
+      "@id": absoluteSiteUrl("/#music-distribution"),
+      name: "Дистрибуция музыки ICECREAMMUSIC",
+      description: SITE_DESCRIPTION,
+      serviceType: "Дистрибуция и продвижение музыки",
+      provider: {
+        "@id": absoluteSiteUrl("/#organization")
+      },
+      areaServed: "Worldwide",
+      audience: {
+        "@type": "Audience",
+        audienceType: "Независимые артисты, продюсеры и музыкальные лейблы"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": absoluteSiteUrl("/#faq-schema"),
+      mainEntity: FAQ_ITEMS.map((item) => ({
+        "@type": "Question",
+        name: item.q,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: item.a
+        }
+      }))
+    }
+  ]
+};
+
 const HERO_METRICS = [
   {
     title: "Стримы",
@@ -267,6 +336,10 @@ export default async function HomePage() {
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(HOME_PAGE_JSON_LD) }}
+      />
       <StandaloneSessionRedirect href={standaloneRedirectTarget} />
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="blob-a absolute -top-40 left-1/2 h-[600px] w-[1100px] rounded-full bg-[#7b61ff]/15 blur-[160px]" />

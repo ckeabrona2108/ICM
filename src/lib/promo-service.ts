@@ -661,10 +661,12 @@ export async function getPromoReleasesForUser(prisma: PrismaClient, userId: stri
     })
   );
 
-  return items.sort((left, right) => {
-    if (left.isPromoAvailable !== right.isPromoAvailable) return left.isPromoAvailable ? -1 : 1;
-    return right.releaseDate.localeCompare(left.releaseDate);
-  });
+  return items
+    .filter((item) => item.isPromoAvailable || item.promoSubmissionId !== null)
+    .sort((left, right) => {
+      if (left.isPromoAvailable !== right.isPromoAvailable) return left.isPromoAvailable ? -1 : 1;
+      return right.releaseDate.localeCompare(left.releaseDate);
+    });
 }
 
 export async function listPromoSubmissionsForUser(prisma: PrismaClient, userId: string): Promise<PromoSubmissionListItem[]> {

@@ -7,6 +7,7 @@ import {
   getFocusTrackLimit,
   groupReleaseValidationIssuesByStep,
   mapReleaseValidationStep,
+  releaseSubmissionDataSchema,
   validateReleaseSubmission,
   type ReleaseSubmissionData
 } from "@/lib/release-policy";
@@ -76,10 +77,16 @@ function validSubmission(): ReleaseSubmissionData {
       }
     ],
     moderatorComment: "",
+    earlyRussiaStart: true,
     realTimeDelivery: true,
     yandexPreReleaseDate: "2026-04-24"
   };
 }
+
+test("release submission preserves early Russia start", () => {
+  const parsed = releaseSubmissionDataSchema.parse(validSubmission());
+  assert.equal(parsed.earlyRussiaStart, true);
+});
 
 test("validateReleaseSubmission returns required-field errors", () => {
   const payload = validSubmission();

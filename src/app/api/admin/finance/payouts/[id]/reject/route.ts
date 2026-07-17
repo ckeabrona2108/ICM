@@ -5,6 +5,8 @@ import { authOptions } from "@/lib/auth";
 import type { AdminPayoutStatus } from "@/lib/admin-payouts-service";
 import { mapConfirmedToPayoutStatus } from "@/lib/admin-payouts-service";
 import { prisma } from "@/lib/prisma";
+import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import { formatRubCurrency } from "@/lib/currency-format";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,7 @@ export async function POST(
 
   const payout = await prisma.payouts.findUnique({
     where: { id: params.id },
-    select: { id: true, confirmed: true }
+    select: { id: true, userId: true, amount: true, confirmed: true }
   });
 
   if (!payout) {
@@ -45,6 +47,16 @@ export async function POST(
     where: { id: params.id },
     data: { confirmed: null },
     select: { id: true }
+  });
+
+  await deliverUserNotificationSafely(prisma, {
+    id: `payout-rejected-${payout.id}`,
+    userId: payout.userId,
+    kind: "payout_rejected",
+    title: "Заявка на выплату отклонена",
+    message: `Заявка на ${formatRubCurrency(payout.amount ?? 0)} отклонена администратором.`,
+    href: "/dashboard/finance",
+    resetReadState: true
   });
 
   return NextResponse.json(

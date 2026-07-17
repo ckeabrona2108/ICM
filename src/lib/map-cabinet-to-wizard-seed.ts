@@ -128,7 +128,7 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
           syncedLyrics: []
         }
       })),
-      earlyRussiaStart: false,
+      earlyRussiaStart: Boolean(submission.earlyRussiaStart ?? r.earlyRussiaStart),
       realTimeDelivery: Boolean(submission.realTimeDelivery),
       yandexPreReleaseDate: submission.yandexPreReleaseDate ?? "",
       moderatorComment: submission.moderatorComment ?? "",
@@ -212,7 +212,7 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
         syncedLyrics: []
       }
     })),
-    earlyRussiaStart: false,
+    earlyRussiaStart: Boolean(r.earlyRussiaStart),
     realTimeDelivery: false,
     yandexPreReleaseDate: "",
     moderatorComment: "",

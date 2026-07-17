@@ -73,5 +73,6 @@ export interface CabinetRelease {
   moderationReturnedAt?: string;
   rejectionReason?: string;
   priority?: boolean;
+  earlyRussiaStart?: boolean;
   submissionData?: unknown;
 }

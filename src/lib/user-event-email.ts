@@ -165,6 +165,28 @@ export async function sendVerificationDecisionEmail(params: {
   ).ok;
 }
 
+export async function sendDashboardEventEmail(params: {
+  to: string | null | undefined;
+  userName?: string | null;
+  title: string;
+  message: string;
+  href?: string | null;
+}): Promise<boolean> {
+  const greeting = greetUser(params.userName);
+  const baseUrl = (process.env.NEXTAUTH_URL ?? "https://www.icecreammusic.net").replace(/\/$/u, "");
+  const href = params.href ? `${baseUrl}${params.href.startsWith("/") ? params.href : `/${params.href}`}` : baseUrl;
+  const result = await sendUserEventEmail({
+    to: params.to,
+    subject: params.title,
+    text: `${greeting}.\n\n${params.message}\n\nОткрыть: ${href}`,
+    html:
+      `<p>${escapeHtml(greeting)}.</p>` +
+      `<p>${escapeHtml(params.message)}</p>` +
+      `<p><a href="${escapeHtml(href)}">Открыть ICECREAMMUSIC</a></p>`
+  });
+  return result.ok;
+}
+
 export async function sendAiTokensCreditedEmail(params: {
   to: string | null | undefined;
   userName?: string | null;

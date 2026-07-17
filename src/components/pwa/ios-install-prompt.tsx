@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { PlusSquare, Share, Smartphone, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 const IOS_INSTALL_PROMPT_DISMISSED_KEY = "pwa:ios-install-prompt:dismissed";
 
@@ -72,29 +71,29 @@ export function IosInstallPrompt() {
   return (
     <>
       <div className="fixed inset-x-0 bottom-4 z-[90] px-4 sm:bottom-6 sm:px-6">
-        <div className="mx-auto flex w-full max-w-[560px] items-center gap-3 rounded-[24px] border border-white/[0.08] bg-[#111521]/92 px-4 py-4 shadow-[0_18px_60px_-28px_rgba(0,0,0,0.72)] backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-[560px] flex-col items-center gap-4 rounded-[24px] border border-white/[0.08] bg-[#111521]/92 px-5 py-5 text-center shadow-[0_18px_60px_-28px_rgba(0,0,0,0.72)] backdrop-blur-xl">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-200">
             <Smartphone className="h-5 w-5" />
           </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-semibold text-white">Установите ICM как приложение</div>
-            <div className="mt-1 text-[13px] leading-5 text-white/62">
+          <div className="w-full max-w-[420px]">
+            <div className="text-[16px] font-semibold leading-6 text-white">Установите ICM как приложение</div>
+            <div className="mt-1.5 text-[14px] leading-5 text-white/62">
               Добавьте сайт на экран Домой и открывайте кабинет без адресной строки.
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex w-full items-center justify-center gap-2">
             <Button
               type="button"
               size="sm"
               variant="ghost"
-              className="h-10 px-3 text-white/72 hover:bg-white/[0.06] hover:text-white"
+              className="h-10 min-w-[104px] px-4 text-white/72 hover:bg-white/[0.06] hover:text-white"
               onClick={() => dismissForever(setVisible)}
             >
               Скрыть
             </Button>
-            <Button type="button" size="sm" className="h-10 px-4" onClick={() => setOpen(true)}>
+            <Button type="button" size="sm" className="h-10 min-w-[136px] px-4" onClick={() => setOpen(true)}>
               Как добавить
             </Button>
           </div>

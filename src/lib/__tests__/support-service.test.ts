@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -10,10 +9,9 @@ import {
   getUserSupportTicket,
   listUserSupportTickets,
   getUserUnreadSupportTicketCount,
-  SupportAccessError
+  SupportAccessError,
+  SupportStorageUnavailableError
 } from "@/lib/support-service";
-
-const localSupportStorePath = `${process.cwd()}/.tmp/support-tickets.json`;
 
 function makeTicketDetails(overrides?: Partial<{
   id: string;
@@ -251,6 +249,12 @@ test("addAdminSupportReply saves outbound message and updates status", async () 
     adminLog: {
       create: async () => ({ id: "log_1" })
     },
+    ai_user_notifications: {
+      upsert: async () => ({ id: "support-reply-ticket_1" })
+    },
+    user: {
+      findUnique: async () => null
+    },
     $transaction: async (items: any[]) => {
       for (const item of items) {
         await item;
@@ -357,38 +361,23 @@ test("addUserSupportMessage moves WAITING_USER to IN_PROGRESS", async () => {
   assert.equal(ticket.status, "IN_PROGRESS");
 });
 
-test("tickets persist across reload when supportTicket repo exists but message repo is missing", async () => {
-  await rm(localSupportStorePath, { force: true });
-
+test("support fails explicitly instead of writing a local file when DB repositories are incomplete", async () => {
   const prisma = {
-    supportTicket: {
-      findMany: async () => {
-        throw new Error("db list should not be used in local fallback mode");
-      }
-    }
+    supportTicket: {}
   } as any;
 
-  const created = await createSupportTicket({
-    prisma,
-    userId: "user_42",
-    userName: "Reload User",
-    userEmail: "reload@example.com",
-    subject: "Тикет не должен пропасть",
-    body: "Проверка сохранения после обновления страницы.",
-    notify: async () => true,
-    logger: {
-      warn: () => undefined,
-      error: () => undefined
-    }
-  });
-
-  const tickets = await listUserSupportTickets(prisma, "user_42");
-
-  assert.equal(tickets.length, 1);
-  assert.equal(tickets[0]?.id, created.id);
-  assert.equal(tickets[0]?.subject, "Тикет не должен пропасть");
-
-  await rm(localSupportStorePath, { force: true });
+  await assert.rejects(
+    createSupportTicket({
+      prisma,
+      userId: "user_42",
+      userName: "Reload User",
+      userEmail: "reload@example.com",
+      subject: "Тикет не должен пропасть",
+      body: "Проверка сохранения после обновления страницы.",
+      notify: async () => true
+    }),
+    SupportStorageUnavailableError
+  );
 });
 
 test("listUserSupportTickets falls back to legacy public support tables when icecream table is missing", async () => {

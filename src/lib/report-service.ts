@@ -4,9 +4,37 @@ import { randomUUID } from "node:crypto";
 
 import { createAdminLog } from "@/lib/admin-log-service";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
+import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import { formatRubCurrency } from "@/lib/currency-format";
 
 export const REPORT_PAYLOAD_DESCRIPTION = "Finance report payload";
 export const REPORT_PAYLOAD_KIND = "finance_report_payload";
+
+function reportPeriodLabel(quarter?: number | null, year?: number | null): string {
+  if (quarter && year) return `${quarter} квартал ${year}`;
+  if (year) return `${year} год`;
+  return "Новый период";
+}
+
+async function notifyUserReportReady(params: {
+  prisma: PrismaClient;
+  userId: string;
+  reportId: string;
+  amount: number;
+  quarter?: number | null;
+  year?: number | null;
+  resetReadState?: boolean;
+}) {
+  await deliverUserNotificationSafely(params.prisma, {
+    id: `report-ready-${params.reportId}`,
+    userId: params.userId,
+    kind: "report_ready",
+    title: "Новый финансовый отчёт",
+    message: `${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}`,
+    href: "/dashboard/finance",
+    resetReadState: params.resetReadState
+  });
+}
 
 export type UserReportLifecycleState =
   | "ready_to_confirm"
@@ -610,6 +638,14 @@ export async function createUserReportByAdmin(params: {
       return created;
     });
 
+    await notifyUserReportReady({
+      prisma: params.prisma,
+      userId: params.userId,
+      reportId: report.id,
+      amount: effectiveAmount,
+      quarter: params.quarter,
+      year: params.year
+    });
     return { ok: true as const, reportId: report.id };
   } catch (error) {
     if (!isPrismaTableMissingError(error, "financeReport")) {
@@ -662,6 +698,14 @@ export async function createUserReportByAdmin(params: {
       });
     });
 
+    await notifyUserReportReady({
+      prisma: params.prisma,
+      userId: params.userId,
+      reportId,
+      amount: effectiveAmount,
+      quarter: params.quarter,
+      year: params.year
+    });
     return { ok: true as const, reportId };
   }
 }
@@ -1103,6 +1147,18 @@ export async function resendUserReportToUser(params: {
       });
     });
   }
+
+  await notifyUserReportReady({
+    prisma: params.prisma,
+    userId: params.userId,
+    reportId: params.reportId,
+    amount: existing.report
+      ? toNumber(existing.report.amount)
+      : existing.payloadRecord?.payload.amount ?? 0,
+    quarter: existing.payloadRecord?.payload.quarter,
+    year: existing.payloadRecord?.payload.year,
+    resetReadState: true
+  });
 
   return { ok: true as const };
 }

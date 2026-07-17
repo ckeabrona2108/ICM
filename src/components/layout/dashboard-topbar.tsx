@@ -33,8 +33,6 @@ import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { cn } from "@/lib/utils";
 
-const DASHBOARD_NOTIFICATIONS_LAST_READ_AT_KEY = "dashboard-notifications:last-read-at";
-
 function formatRuCount(count: number, one: string, few: string, many: string): string {
   const mod10 = count % 10;
   const mod100 = count % 100;
@@ -96,36 +94,15 @@ function formatNotificationTimestamp(value: string): string {
   });
 }
 
-function parseNotificationTimestamp(value: string): number {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-}
-
-function readStoredNotificationsLastReadAt(): number {
-  if (typeof window === "undefined") return 0;
-  const raw = window.localStorage.getItem(DASHBOARD_NOTIFICATIONS_LAST_READ_AT_KEY);
-  if (!raw) return 0;
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-}
-
-function applyClientReadState(
-  payload: DashboardNotificationsResponse,
-  lastReadAtMs: number
-): DashboardNotificationsResponse {
-  if (!lastReadAtMs) {
-    return payload;
+function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const bytes = window.atob(base64);
+  const result = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) {
+    result[index] = bytes.charCodeAt(index);
   }
-
-  const items = payload.items.map((item) => ({
-    ...item,
-    isUnread: item.isUnread && parseNotificationTimestamp(item.createdAt) > lastReadAtMs
-  }));
-
-  return {
-    unreadCount: items.filter((item) => item.isUnread).length,
-    items
-  };
+  return result.buffer;
 }
 
 function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
@@ -152,7 +129,6 @@ function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
         toneClassName: "border-sky-400/20 bg-sky-500/10 text-sky-200"
       };
     case "payout_requested":
-    case "payout_paid":
     case "payout_rejected":
       return {
         icon: CircleDollarSign,
@@ -221,16 +197,10 @@ export function DashboardTopbar({
     items: []
   });
   const [notificationsLoading, setNotificationsLoading] = React.useState(true);
-
-  React.useEffect(() => {
-    const sync = () => {
-      const nextLastReadAtMs = readStoredNotificationsLastReadAt();
-      setNotifications((current) => applyClientReadState(current, nextLastReadAtMs));
-    };
-    sync();
-    window.addEventListener("storage", sync);
-    return () => window.removeEventListener("storage", sync);
-  }, []);
+  const [pushState, setPushState] = React.useState<
+    "unsupported" | "idle" | "enabling" | "enabled" | "error"
+  >("unsupported");
+  const [pushPublicKey, setPushPublicKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!hasSubscription || !subscriptionEndsAt) return;
@@ -284,7 +254,7 @@ export function DashboardTopbar({
         }
         const payload = (await response.json()) as DashboardNotificationsResponse;
         if (!cancelled) {
-          setNotifications(applyClientReadState(payload, readStoredNotificationsLastReadAt()));
+          setNotifications(payload);
         }
       } catch {
         if (!cancelled) {
@@ -319,14 +289,69 @@ export function DashboardTopbar({
     };
   }, []);
 
-  const markAllNotificationsAsRead = React.useCallback(() => {
-    const nextLastReadAtMs = Date.now();
-    window.localStorage.setItem(
-      DASHBOARD_NOTIFICATIONS_LAST_READ_AT_KEY,
-      new Date(nextLastReadAtMs).toISOString()
-    );
-    setNotifications((current) => applyClientReadState(current, nextLastReadAtMs));
+  React.useEffect(() => {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetch("/api/dashboard/notifications/push-subscription", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Push status unavailable");
+        return response.json() as Promise<{ enabled: boolean; publicKey: string | null }>;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setPushPublicKey(payload.publicKey);
+        setPushState(payload.enabled ? "enabled" : "idle");
+      })
+      .catch(() => {
+        if (!cancelled) setPushState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const markAllNotificationsAsRead = React.useCallback(async () => {
+    const previous = notifications;
+    setNotifications((current) => ({
+      unreadCount: 0,
+      items: current.items.map((item) => ({ ...item, isUnread: false }))
+    }));
+    try {
+      const response = await fetch("/api/dashboard/notifications", { method: "PATCH" });
+      if (!response.ok) throw new Error("Не удалось сохранить статус уведомлений.");
+    } catch {
+      setNotifications(previous);
+    }
+  }, [notifications]);
+
+  const enablePushNotifications = React.useCallback(async () => {
+    if (!pushPublicKey || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    setPushState("enabling");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Push permission denied");
+
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing ?? await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToArrayBuffer(pushPublicKey)
+      });
+      const response = await fetch("/api/dashboard/notifications/push-subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription.toJSON())
+      });
+      if (!response.ok) throw new Error("Push subscription failed");
+      setPushState("enabled");
+    } catch {
+      setPushState("error");
+    }
+  }, [pushPublicKey]);
 
   const updateMenuPositions = React.useCallback(() => {
     const nextAi = aiButtonRef.current?.getBoundingClientRect();
@@ -501,6 +526,25 @@ export function DashboardTopbar({
                       Прочитать все
                     </button>
                   </div>
+
+                  {pushPublicKey && pushState !== "unsupported" ? (
+                    <div className="mt-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-2.5">
+                      {pushState === "enabled" ? (
+                        <div className="text-[12px] font-medium text-emerald-300">
+                          PWA-уведомления включены
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={enablePushNotifications}
+                          disabled={pushState === "enabling"}
+                          className="text-[12px] font-medium text-white/65 transition-colors hover:text-white disabled:cursor-wait disabled:text-white/35"
+                        >
+                          {pushState === "enabling" ? "Включаем..." : "Включить PWA-уведомления"}
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
 
                   <div className="mt-1.5 max-h-[420px] overflow-y-auto pr-1">
                     {notificationsLoading ? (

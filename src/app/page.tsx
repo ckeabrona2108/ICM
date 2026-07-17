@@ -42,7 +42,9 @@ import {
 } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Дистрибуция музыки на 240+ площадок",
+  title: {
+    absolute: "ICECREAMMUSIC - Дистрибуция музыки"
+  },
   description: SITE_DESCRIPTION,
   alternates: {
     canonical: "/"

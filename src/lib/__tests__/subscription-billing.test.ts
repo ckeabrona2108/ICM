@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { SubscriptionPlan } from "@prisma/client";
+import type { SubscriptionPlan } from "@/lib/legacy-business-enums";
 
 import {
   calculateSubscriptionEndDate,

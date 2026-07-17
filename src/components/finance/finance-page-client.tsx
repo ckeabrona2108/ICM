@@ -138,9 +138,6 @@ export function FinancePageClient({
   const canRequestPayout =
     availableToWithdraw >= minimumPayoutAmount && pendingReportsCount === 0;
 
-  const reportStatuses: FinanceReportStatus[] = reports.map(
-    (report) => report.status
-  );
   const filteredTransactions = initialTransactions.filter((transaction) => {
     if (transactionFilter === "Все") return true;
     if (transactionFilter === "Начисления") return transaction.type === "Royalty";
@@ -165,10 +162,6 @@ export function FinancePageClient({
 
     const payload: PayoutRequestBody = {
       amount: parsedAmount,
-      availableBalance: availableToWithdraw,
-      pendingReportsCount,
-      minimumPayoutAmount,
-      reportStatuses,
       requisites: {
         recipientName,
         payoutMethod: "bank_transfer",

@@ -5,6 +5,7 @@ import { getAiStudioSystemStatus } from "@/lib/ai-studio-activation";
 import { authOptions } from "@/lib/auth";
 import { sendAiChatMessage } from "@/lib/ai-chat-service";
 import { prisma } from "@/lib/prisma";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,12 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = enforceRateLimit({
+    key: `ai:chat:${session.user.id}`,
+    limit: 30,
+    windowMs: 60_000
+  });
+  if (limited) return limited;
 
   let payload: unknown;
   try {

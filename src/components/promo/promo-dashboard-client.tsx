@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Globe2, Lock, Rocket, Send, ShieldAlert } from "lucide-react";
+import { CheckCircle2, Globe2, Lock, Pencil, Rocket, Send, ShieldAlert, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -154,6 +154,7 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
   const [selectedReleaseId, setSelectedReleaseId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<PromoFormPrefill | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [deletingSubmissionId, setDeletingSubmissionId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [successReleaseTitle, setSuccessReleaseTitle] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<PromoFieldErrors>({});
@@ -163,6 +164,15 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
   const selectedRelease = React.useMemo(
     () => releases.find((item) => item.id === selectedReleaseId) ?? null,
     [releases, selectedReleaseId]
+  );
+  const releaseSections = React.useMemo(
+    () => [
+      { key: "available", title: "Доступно для промо", items: releases.filter((item) => item.promoSection === "available" && item.isPromoAvailable) },
+      { key: "sent", title: "Отправленные", items: releases.filter((item) => item.promoSection === "sent") },
+      { key: "changes_required", title: "Требуются изменения", items: releases.filter((item) => item.promoSection === "changes_required") },
+      { key: "history", title: "История", items: releases.filter((item) => item.promoSection === "history") }
+    ].filter((section) => section.items.length > 0),
+    [releases]
   );
 
   React.useEffect(() => {
@@ -175,7 +185,7 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
     setSocialLinks(parseSocialLinks(nextForm.artistSocialLinks));
     setFieldErrors({});
     setError(null);
-  }, [selectedReleaseId]);
+  }, [selectedRelease]);
 
   const handleSelectRelease = React.useCallback((release: PromoReleaseListItem) => {
     if (!release.isPromoAvailable) return;
@@ -185,6 +195,45 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
       formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }, []);
+
+  const handleDeleteSubmission = React.useCallback(async (release: PromoReleaseListItem) => {
+    if (!release.promoSubmissionId || !release.promoDeleteable) return;
+
+    setDeletingSubmissionId(release.promoSubmissionId);
+    setError(null);
+    try {
+      const response = await fetch(`/api/promo/submissions/${release.promoSubmissionId}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(result?.error || "Не удалось удалить промо-заявку.");
+      }
+
+      setReleases((current) => current.map((item) => item.id === release.id
+        ? {
+            ...item,
+            isPromoAvailable: true,
+            unavailableReason: null,
+            alreadySubmitted: false,
+            promoSubmissionId: null,
+            promoSubmissionStatus: null,
+            promoAdminComment: null,
+            promoEditable: false,
+            promoDeleteable: false,
+            promoSection: "available"
+          }
+        : item));
+      if (selectedReleaseId === release.id) {
+        setSelectedReleaseId(null);
+        setForm(null);
+      }
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Не удалось удалить промо-заявку.");
+    } finally {
+      setDeletingSubmissionId(null);
+    }
+  }, [selectedReleaseId]);
 
   const patchField = React.useCallback(
     (field: keyof PromoFormPrefill, value: string | boolean) => {
@@ -252,14 +301,20 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
       };
 
       try {
-        const response = await fetch("/api/promo/submissions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(payload)
-        });
-        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+        const submissionId = selectedRelease.promoSubmissionId;
+        const response = await fetch(
+          submissionId ? `/api/promo/submissions/${submissionId}` : "/api/promo/submissions",
+          {
+            method: submissionId ? "PATCH" : "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          }
+        );
+        const result = (await response.json().catch(() => null)) as
+          | { error?: string; item?: { id?: string } }
+          | null;
 
         if (!response.ok) {
           throw new Error(result?.error || "Не удалось отправить заявку на промо.");
@@ -272,8 +327,12 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
                   ...item,
                   isPromoAvailable: false,
                   alreadySubmitted: true,
-                  unavailableReason: "Недоступно: релиз уже отправлен на промо",
-                  promoSubmissionStatus: "SUBMITTED"
+                  promoSubmissionId: result?.item?.id ?? item.promoSubmissionId,
+                  promoSubmissionStatus: "SUBMITTED",
+                  promoEditable: false,
+                  promoDeleteable: true,
+                  promoSection: "sent",
+                  unavailableReason: "Заявка уже отправлена и находится в работе"
                 }
               : item
           )
@@ -312,8 +371,11 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
         </div>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        {releases.map((release) => {
+      {releaseSections.map((section) => (
+        <section key={section.key} className="space-y-3">
+          <h2 className="text-lg font-semibold text-white">{section.title}</h2>
+          <div className="grid gap-4 xl:grid-cols-2">
+        {section.items.map((release) => {
           const active = selectedReleaseId === release.id;
           const blocked = !release.isPromoAvailable;
           return (
@@ -377,7 +439,21 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
                 </div>
               </div>
 
-              <div className="mt-4 flex justify-end">
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                {release.promoDeleteable ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={deletingSubmissionId === release.promoSubmissionId}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleDeleteSubmission(release);
+                    }}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {deletingSubmissionId === release.promoSubmissionId ? "Удаляем..." : "Удалить"}
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   variant={blocked ? "outline" : "default"}
@@ -388,7 +464,12 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
                     handleSelectRelease(release);
                   }}
                 >
-                  {blocked ? (
+                  {release.promoEditable ? (
+                    <>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Исправить заявку
+                    </>
+                  ) : blocked ? (
                     <>
                       <Lock className="mr-2 h-4 w-4" />
                       Отправка недоступна
@@ -401,12 +482,21 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
             </div>
           );
         })}
-      </div>
+          </div>
+        </section>
+      ))}
 
       {selectedRelease && form && !successReleaseTitle ? (
         <div ref={formRef} className="rounded-2xl border border-white/[0.08] bg-[#13151d]/92 p-5 sm:p-6">
           <div className="mb-5">
-            <h2 className="text-2xl font-semibold text-white">Приоритетный релиз</h2>
+            <h2 className="text-2xl font-semibold text-white">
+              {selectedRelease.promoEditable ? "Исправление промо-заявки" : "Приоритетный релиз"}
+            </h2>
+            {selectedRelease.promoAdminComment ? (
+              <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                Комментарий администратора: {selectedRelease.promoAdminComment}
+              </div>
+            ) : null}
             <p className="mt-2 max-w-3xl text-[14px] text-white/68">
               Заполните форму для предоставления информации о вашем приоритетном релизе. Форма должна быть заполнена заранее. Релизы, отправленные слишком поздно, могут быть не рассмотрены.
             </p>
@@ -563,7 +653,9 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
             {error ? <div className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</div> : null}
 
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="submit" className="min-w-[230px] px-6" disabled={isSubmitting}>{isSubmitting ? "Отправляем..." : "Отправить на промо"}</Button>
+              <Button type="submit" className="min-w-[230px] px-6" disabled={isSubmitting}>
+                {isSubmitting ? "Отправляем..." : selectedRelease.promoEditable ? "Отправить повторно" : "Отправить на промо"}
+              </Button>
               <button
                 type="button"
                 className="text-sm font-semibold text-white/62 transition hover:text-white"

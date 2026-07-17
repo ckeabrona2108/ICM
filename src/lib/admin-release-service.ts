@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient, verification_status } from "@prisma/client";
 import { z } from "zod";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
+import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 
 export const upcSchema = z
   .string()
@@ -127,6 +128,7 @@ export async function approveReleaseByAdmin(params: {
       title: true,
       status: true,
       roles: true,
+      userId: true,
       user: {
         select: {
           email: true,
@@ -176,6 +178,17 @@ export async function approveReleaseByAdmin(params: {
     });
   }
 
+  await deliverUserNotificationSafely(params.prisma, {
+    id: `release-approved-${release.id}`,
+    userId: release.userId,
+    kind: "release_approved",
+    title: "Релиз принят",
+    message: `Релиз «${release.title ?? "Без названия"}» принят и доступен в каталоге.`,
+    href: "/dashboard/releases",
+    sendEmail: false,
+    resetReadState: true
+  });
+
   return { releaseId: params.releaseId } as const;
 }
 
@@ -197,6 +210,7 @@ export async function rejectReleaseByAdmin(params: {
       title: true,
       status: true,
       roles: true,
+      userId: true,
       user: {
         select: {
           email: true,
@@ -239,6 +253,17 @@ export async function rejectReleaseByAdmin(params: {
       error
     });
   }
+
+  await deliverUserNotificationSafely(params.prisma, {
+    id: `release-rejected-${release.id}`,
+    userId: release.userId,
+    kind: "release_rejected",
+    title: "Релиз отправлен на доработку",
+    message: reason,
+    href: "/dashboard/changes-required",
+    sendEmail: false,
+    resetReadState: true
+  });
 
   return { ok: true as const, reason };
 }

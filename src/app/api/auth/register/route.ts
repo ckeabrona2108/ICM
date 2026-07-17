@@ -5,6 +5,7 @@ import { z } from "zod";
 import { hashPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
+import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,13 @@ const registerSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const limited = enforceRateLimit({
+    key: `auth:register:${getRequestIp(request)}`,
+    limit: 5,
+    windowMs: 60 * 60_000
+  });
+  if (limited) return limited;
+
   let payload: unknown;
   try {
     payload = await request.json();

@@ -10,7 +10,8 @@ import type {
 import {
   addAdminSupportReply,
   supportMessageSchema,
-  SupportNotFoundError
+  SupportNotFoundError,
+  SupportStorageUnavailableError
 } from "@/lib/support-service";
 
 export async function POST(
@@ -56,6 +57,9 @@ export async function POST(
   } catch (error) {
     if (error instanceof SupportNotFoundError) {
       return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
+    }
+    if (error instanceof SupportStorageUnavailableError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
     }
     throw error;
   }

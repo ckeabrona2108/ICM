@@ -60,15 +60,43 @@ test("dashboard notifications merge support, reports, payouts and lifecycle-base
           createdAt: new Date("2026-07-11T10:00:00.000Z")
         }
       ]
+    },
+    supportTicket: {
+      findMany: async () => []
+    },
+    message: {
+      groupBy: async () => []
+    },
+    ai_user_notifications: {
+      createMany: async () => ({ count: 4 }),
+      findMany: async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.map((id) => ({ id, read_at: null }))
     }
   } as any;
 
   const result = await listDashboardNotifications(prisma, "user_1");
 
-  assert.equal(result.unreadCount, 2);
+  assert.equal(result.unreadCount, 4);
   assert.equal(result.items[0]?.kind, "report_ready");
   assert.ok(result.items.some((item) => item.kind === "report_ready"));
   assert.ok(result.items.some((item) => item.kind === "release_changes_required"));
   assert.ok(result.items.some((item) => item.kind === "release_approved"));
   assert.ok(result.items.some((item) => item.kind === "payout_paid"));
+});
+
+test("dashboard notifications expose storage failures instead of returning a false empty state", async () => {
+  const storageError = new Error("relation icecream.payouts does not exist");
+  const prisma = {
+    release: { findMany: async () => [] },
+    financeReport: { findMany: async () => [] },
+    transaction: { findMany: async () => [] },
+    payouts: { findMany: async () => { throw storageError; } },
+    supportTicket: { findMany: async () => [] },
+    message: { groupBy: async () => [] }
+  } as any;
+
+  await assert.rejects(
+    () => listDashboardNotifications(prisma, "user_1"),
+    (error) => error === storageError
+  );
 });

@@ -27,6 +27,7 @@ export interface CabinetReleaseSource {
   performer: string | null;
   roles: unknown;
   priority?: boolean | null;
+  earlyStartInRussia?: boolean | null;
   track: Array<{
     id: string;
     index: number;
@@ -308,6 +309,7 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
     tracks: mappedTracks,
     moderationStarted: cabinetStatus === "moderation" && Boolean(release.confirmed),
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),
+    earlyRussiaStart: Boolean(release.earlyStartInRussia),
     submissionData
   };
 }

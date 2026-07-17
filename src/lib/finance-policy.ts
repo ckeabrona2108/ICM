@@ -14,10 +14,6 @@ export interface PayoutValidationIssue {
 
 export const payoutRequestSchema = z.object({
   amount: z.number(),
-  availableBalance: z.number(),
-  pendingReportsCount: z.number().int().min(0),
-  minimumPayoutAmount: z.number().min(0).optional().default(0),
-  reportStatuses: z.array(financeReportStatusSchema).optional().default([]),
   requisites: z.object({
     recipientName: z.string().trim(),
     payoutMethod: payoutMethodSchema,
@@ -30,6 +26,13 @@ export const payoutRequestSchema = z.object({
 
 export type PayoutRequestInput = z.infer<typeof payoutRequestSchema>;
 
+export interface PayoutServerContext {
+  availableBalance: number;
+  pendingReportsCount: number;
+  minimumPayoutAmount: number;
+  reportStatuses: FinanceReportStatus[];
+}
+
 function pushIssue(
   issues: PayoutValidationIssue[],
   code: string,
@@ -39,7 +42,10 @@ function pushIssue(
   issues.push({ code, field, message });
 }
 
-export function validatePayoutRequest(input: PayoutRequestInput): PayoutValidationIssue[] {
+export function validatePayoutRequest(
+  input: PayoutRequestInput,
+  context: PayoutServerContext
+): PayoutValidationIssue[] {
   const issues: PayoutValidationIssue[] = [];
 
   if (!Number.isFinite(input.amount) || input.amount <= 0) {
@@ -51,7 +57,7 @@ export function validatePayoutRequest(input: PayoutRequestInput): PayoutValidati
     );
   }
 
-  if (!Number.isFinite(input.availableBalance) || input.availableBalance <= 0) {
+  if (!Number.isFinite(context.availableBalance) || context.availableBalance <= 0) {
     pushIssue(
       issues,
       "invalid",
@@ -60,7 +66,7 @@ export function validatePayoutRequest(input: PayoutRequestInput): PayoutValidati
     );
   }
 
-  if (input.amount > input.availableBalance) {
+  if (input.amount > context.availableBalance) {
     pushIssue(
       issues,
       "invalid",
@@ -69,16 +75,16 @@ export function validatePayoutRequest(input: PayoutRequestInput): PayoutValidati
     );
   }
 
-  if (input.minimumPayoutAmount > 0 && input.amount < input.minimumPayoutAmount) {
+  if (context.minimumPayoutAmount > 0 && input.amount < context.minimumPayoutAmount) {
     pushIssue(
       issues,
       "invalid",
       "amount",
-      `Минимальная сумма выплаты — ${input.minimumPayoutAmount.toFixed(2)}.`
+      `Минимальная сумма выплаты — ${context.minimumPayoutAmount.toFixed(2)}.`
     );
   }
 
-  if (input.pendingReportsCount > 0) {
+  if (context.pendingReportsCount > 0) {
     pushIssue(
       issues,
       "forbidden",
@@ -87,7 +93,7 @@ export function validatePayoutRequest(input: PayoutRequestInput): PayoutValidati
     );
   }
 
-  if (input.reportStatuses.some((status) => status === "ready_to_confirm")) {
+  if (context.reportStatuses.some((status) => status === "ready_to_confirm")) {
     pushIssue(
       issues,
       "forbidden",

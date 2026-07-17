@@ -1,6 +1,5 @@
-// @ts-nocheck
 import { addMonths } from "date-fns";
-import type { SubscriptionPlan } from "@prisma/client";
+import type { SubscriptionPlan } from "@/lib/legacy-business-enums";
 
 export type SubscriptionTariffId = "standard" | "pro" | "enterprise";
 export type SubscriptionBillingPeriod = "monthly" | "yearly";

@@ -216,7 +216,10 @@ export async function POST(request: Request) {
     date: releaseDate,
     startDate,
     preorderDate,
-    type: readReleaseTypeFromSubmissionData(data)
+    type: readReleaseTypeFromSubmissionData(data),
+    earlyStartInRussia: submissionData.earlyRussiaStart,
+    realTimeDelivery: submissionData.realTimeDelivery,
+    yandexSoonNewRelease: parseDate(submissionData.yandexPreReleaseDate, releaseDate)
   };
   const trackRows = buildTrackCreateManyInput({
     releaseId: existing.id,

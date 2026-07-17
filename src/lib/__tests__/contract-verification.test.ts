@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-import { ReleaseStatus } from "@prisma/client";
+import { ReleaseStatus } from "@/lib/legacy-business-enums";
 
 import {
   approveContractSignatureByAdmin,

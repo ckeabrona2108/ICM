@@ -1,7 +1,5 @@
 // @ts-nocheck
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 
 import type { PrismaClient } from "@prisma/client";
 
@@ -255,8 +253,6 @@ async function notifyMovedReleasesNowOnModeration(params: {
   }
 }
 
-const storeDir = path.join(process.cwd(), ".tmp");
-const storeFile = path.join(storeDir, "user-contract-signatures.json");
 const LEGACY_SIGNATURE_PLACEHOLDER_PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9KobjigAAAABJRU5ErkJggg==";
 const LEGACY_SIGNATURE_PLACEHOLDER_DATA_URL = `data:image/png;base64,${LEGACY_SIGNATURE_PLACEHOLDER_PNG}`;
@@ -265,17 +261,9 @@ const fullNameWordsPattern = /^\S+\s+\S+/u;
 const passportNumberPattern = /^\d{4}\s\d{6}$/u;
 const innPattern = /^(\d{10}|\d{12})$/u;
 const snilsPattern = /^\d{3}-\d{3}-\d{3}\s\d{2}$/u;
-const isProductionRuntime = process.env.NODE_ENV === "production";
-const allowLocalVerificationStore = process.env.VERIFICATION_ALLOW_LOCAL_STORE === "true";
-
-function shouldUseLocalVerificationStore(): boolean {
-  return !isProductionRuntime || allowLocalVerificationStore;
-}
-
-function assertLocalVerificationStoreAvailable(): void {
-  if (shouldUseLocalVerificationStore()) return;
-  throw new Error(
-    "Верификация подписи временно недоступна: локальное хранилище отключено в production. Настройте S3/MinIO и таблицу verification."
+function verificationStorageUnavailable(): Error {
+  return new Error(
+    "Верификация подписи временно недоступна. Настройте S3/MinIO и таблицу verification."
   );
 }
 
@@ -481,21 +469,11 @@ function chooseLatestVerificationRow(rows: ContractSignatureRecordLike[]): Contr
 }
 
 async function readStore(): Promise<ContractSignatureListItem[]> {
-  assertLocalVerificationStoreAvailable();
-  try {
-    const raw = await readFile(storeFile, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as ContractSignatureListItem[]) : [];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
+  throw verificationStorageUnavailable();
 }
 
-async function writeStore(records: ContractSignatureListItem[]): Promise<void> {
-  assertLocalVerificationStoreAvailable();
-  await mkdir(storeDir, { recursive: true });
-  await writeFile(storeFile, JSON.stringify(records, null, 2), "utf8");
+async function writeStore(_records: ContractSignatureListItem[]): Promise<void> {
+  throw verificationStorageUnavailable();
 }
 
 async function uploadSignaturePng(params: {

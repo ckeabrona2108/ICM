@@ -1054,7 +1054,7 @@ export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsRe
         lyricsAuthors: sanitizedReleaseLyricsAuthors
       },
       settings: {
-        early_russia_start: Boolean(submissionData?.priorityRelease ?? release.earlyStartInRussia),
+        early_russia_start: Boolean(submissionData?.earlyRussiaStart ?? release.earlyStartInRussia),
         real_time_delivery: Boolean(submissionData?.realTimeDelivery ?? release.realTimeDelivery),
         yandex_pre_release_date: toDate(submissionData?.yandexPreReleaseDate as string | undefined ?? (release.yandexSoonNewRelease as Date | undefined))
       }

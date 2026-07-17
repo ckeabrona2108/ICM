@@ -11,8 +11,10 @@ import {
   addUserSupportMessage,
   supportMessageSchema,
   SupportAccessError,
-  SupportNotFoundError
+  SupportNotFoundError,
+  SupportStorageUnavailableError
 } from "@/lib/support-service";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export async function POST(
   request: Request,
@@ -22,6 +24,12 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = enforceRateLimit({
+    key: `support:message:${session.user.id}`,
+    limit: 30,
+    windowMs: 60 * 60_000
+  });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -57,6 +65,9 @@ export async function POST(
     }
     if (error instanceof SupportAccessError) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (error instanceof SupportStorageUnavailableError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
     }
     throw error;
   }

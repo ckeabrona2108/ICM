@@ -6,8 +6,6 @@ import {
   type PrismaClient
 } from "@prisma/client";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { z } from "zod";
 
 import {
@@ -15,6 +13,7 @@ import {
   type TelegramNewTicketNotificationPayload
 } from "@/lib/telegram-notifier";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
+import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 
 export const createSupportTicketSchema = z.object({
   subject: z.string().trim().min(3, "Укажите тему тикета.").max(160, "Тема слишком длинная."),
@@ -84,61 +83,6 @@ const MESSAGE_DIRECTION = MessageDirection ?? {
   OUTBOUND: "OUTBOUND"
 };
 
-interface LocalSupportTicketRecord {
-  id: string;
-  subject: string;
-  status: ApiSupportTicketStatus;
-  userId: string;
-  userName: string;
-  userEmail: string;
-  createdAt: string;
-  updatedAt: string;
-  messages: SupportTicketMessageDto[];
-}
-
-const localSupportStoreDir = path.join(process.cwd(), ".tmp");
-const localSupportStoreFile = path.join(localSupportStoreDir, "support-tickets.json");
-
-async function readLocalSupportTickets(): Promise<LocalSupportTicketRecord[]> {
-  try {
-    const raw = await readFile(localSupportStoreFile, "utf8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is LocalSupportTicketRecord => {
-      return Boolean(item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string");
-    });
-  } catch {
-    return [];
-  }
-}
-
-async function writeLocalSupportTickets(tickets: LocalSupportTicketRecord[]): Promise<void> {
-  await mkdir(localSupportStoreDir, { recursive: true });
-  await writeFile(localSupportStoreFile, JSON.stringify(tickets, null, 2), "utf8");
-}
-
-function localToDto(ticket: LocalSupportTicketRecord, withMessages = false): SupportTicketDto {
-  return {
-    id: ticket.id,
-    subject: ticket.subject,
-    status: ticket.status,
-    userId: ticket.userId,
-    userName: ticket.userName,
-    userEmail: ticket.userEmail,
-    createdAt: ticket.createdAt,
-    updatedAt: ticket.updatedAt,
-    lastMessage: ticket.messages.at(-1)?.body,
-    messages: withMessages ? ticket.messages : undefined
-  };
-}
-
-async function findLocalTicket(ticketId: string): Promise<LocalSupportTicketRecord> {
-  const tickets = await readLocalSupportTickets();
-  const ticket = tickets.find((item) => item.id === ticketId);
-  if (!ticket) throw new SupportNotFoundError();
-  return ticket;
-}
-
 function hasSupportTicketRepo(prisma: PrismaClient): boolean {
   const repo = (prisma as unknown as { supportTicket?: unknown }).supportTicket;
   return Boolean(repo && typeof repo === "object");
@@ -149,7 +93,7 @@ function hasMessageRepo(prisma: PrismaClient): boolean {
   return Boolean(repo && typeof repo === "object");
 }
 
-type SupportBackend = "orm" | "legacy" | "local";
+type SupportBackend = "orm" | "legacy";
 
 const supportBackendCache = new WeakMap<PrismaClient, Promise<SupportBackend>>();
 
@@ -164,7 +108,7 @@ function isSupportTablesMissingError(error: unknown): boolean {
 
 async function detectSupportBackend(prisma: PrismaClient): Promise<SupportBackend> {
   if (!hasSupportTicketRepo(prisma) || !hasMessageRepo(prisma)) {
-    return "local";
+    throw new SupportStorageUnavailableError();
   }
 
   try {
@@ -210,18 +154,28 @@ async function detectSupportBackend(prisma: PrismaClient): Promise<SupportBacken
     return "orm";
   }
 
-  return "local";
+  throw new SupportStorageUnavailableError();
 }
 
 async function resolveSupportBackend(prisma: PrismaClient): Promise<SupportBackend> {
   const cached = supportBackendCache.get(prisma);
   if (cached) {
-    return cached;
+    try {
+      return await cached;
+    } catch (error) {
+      supportBackendCache.delete(prisma);
+      throw error;
+    }
   }
 
   const pending = detectSupportBackend(prisma);
   supportBackendCache.set(prisma, pending);
-  return pending;
+  try {
+    return await pending;
+  } catch (error) {
+    supportBackendCache.delete(prisma);
+    throw error;
+  }
 }
 
 function normalizeLegacyStatus(status: unknown): ApiSupportTicketStatus {
@@ -656,204 +610,6 @@ async function legacyUpdateAdminSupportTicketStatus(params: {
   return legacyGetSupportTicketDetails(params.prisma, params.ticketId);
 }
 
-async function createLocalSupportTicket(params: {
-  userId: string;
-  userName: string;
-  userEmail: string;
-  subject: string;
-  body: string;
-  notify?: (payload: TelegramNewTicketNotificationPayload) => Promise<boolean>;
-  logger?: LoggerLike;
-}): Promise<SupportTicketDto> {
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const ticket: LocalSupportTicketRecord = {
-    id: randomUUID(),
-    subject: params.subject.trim(),
-    status: "OPEN",
-    userId: params.userId,
-    userName: params.userName,
-    userEmail: params.userEmail,
-    createdAt: nowIso,
-    updatedAt: nowIso,
-    messages: [
-      {
-        id: randomUUID(),
-        ticketId: "",
-        senderType: "USER",
-        body: params.body.trim(),
-        createdAt: nowIso
-      }
-    ]
-  };
-  ticket.messages[0].ticketId = ticket.id;
-
-  const tickets = await readLocalSupportTickets();
-  await writeLocalSupportTickets([ticket, ...tickets]);
-
-  try {
-    await (params.notify ?? notifyAdminNewSupportTicket)({
-      ticketId: ticket.id,
-      subject: ticket.subject,
-      userName: params.userName,
-      userEmail: params.userEmail,
-      createdAt: now,
-      firstMessage: params.body.trim()
-    });
-  } catch (error) {
-    (params.logger ?? defaultLogger).error("[support] telegram notification failed", error);
-  }
-
-  return localToDto(ticket, true);
-}
-
-async function listLocalSupportTicketsForUser(userId: string) {
-  const tickets = await readLocalSupportTickets();
-  return tickets
-    .filter((ticket) => ticket.userId === userId)
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .map((ticket) => localToDto(ticket));
-}
-
-async function markLocalUserSupportTicketsRead(userId: string): Promise<void> {
-  const tickets = await readLocalSupportTickets();
-  let changed = false;
-  const nextTickets = tickets.map((ticket) => {
-    if (ticket.userId !== userId) return ticket;
-    let ticketChanged = false;
-    const nextMessages = ticket.messages.map((message) => {
-      const withRead = message as SupportTicketMessageDto & { isRead?: boolean };
-      if (message.senderType !== "ADMIN" || withRead.isRead !== false) return message;
-      ticketChanged = true;
-      changed = true;
-      return {
-        ...message,
-        isRead: true
-      } as SupportTicketMessageDto & { isRead: boolean };
-    });
-    return ticketChanged ? { ...ticket, messages: nextMessages } : ticket;
-  });
-
-  if (changed) {
-    await writeLocalSupportTickets(nextTickets);
-  }
-}
-
-async function getLocalUserSupportTicket(userId: string, ticketId: string) {
-  const ticket = await findLocalTicket(ticketId);
-  if (ticket.userId !== userId) {
-    throw new SupportAccessError();
-  }
-  let changed = false;
-  for (const message of ticket.messages) {
-    if (message.senderType === "ADMIN" && !(message as SupportTicketMessageDto & { isRead?: boolean }).isRead) {
-      (message as SupportTicketMessageDto & { isRead?: boolean }).isRead = true;
-      changed = true;
-    }
-  }
-  if (changed) {
-    const tickets = await readLocalSupportTickets();
-    await writeLocalSupportTickets(tickets.map((item) => (item.id === ticket.id ? ticket : item)));
-  }
-  return localToDto(ticket, true);
-}
-
-async function addLocalUserSupportMessage(params: {
-  userId: string;
-  ticketId: string;
-  body: string;
-}) {
-  const tickets = await readLocalSupportTickets();
-  const ticket = tickets.find((item) => item.id === params.ticketId);
-  if (!ticket) throw new SupportNotFoundError();
-  if (ticket.userId !== params.userId) throw new SupportAccessError();
-  if (ticket.status === "CLOSED") return localToDto(ticket, true);
-
-  const nowIso = new Date().toISOString();
-  const nextTicket: LocalSupportTicketRecord = {
-    ...ticket,
-    status: ticket.status === "WAITING_USER" ? "IN_PROGRESS" : ticket.status,
-    updatedAt: nowIso,
-    messages: [
-      ...ticket.messages,
-      {
-        id: randomUUID(),
-        ticketId: ticket.id,
-        senderType: "USER",
-        body: params.body.trim(),
-        createdAt: nowIso
-      }
-    ]
-  };
-  await writeLocalSupportTickets(tickets.map((item) => (item.id === ticket.id ? nextTicket : item)));
-  return localToDto(nextTicket, true);
-}
-
-async function listLocalAdminSupportTickets() {
-  const tickets = await readLocalSupportTickets();
-  return tickets
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .map((ticket) => localToDto(ticket));
-}
-
-async function getLocalAdminSupportTicket(ticketId: string) {
-  const ticket = await findLocalTicket(ticketId);
-  return localToDto(ticket, true);
-}
-
-async function addLocalAdminSupportReply(params: { ticketId: string; body: string }) {
-  const tickets = await readLocalSupportTickets();
-  const ticket = tickets.find((item) => item.id === params.ticketId);
-  if (!ticket) throw new SupportNotFoundError();
-
-  const nowIso = new Date().toISOString();
-  const nextTicket: LocalSupportTicketRecord = {
-    ...ticket,
-    status: "WAITING_USER",
-    updatedAt: nowIso,
-    messages: [
-      ...ticket.messages,
-      {
-        id: randomUUID(),
-        ticketId: ticket.id,
-        senderType: "ADMIN",
-        body: params.body.trim(),
-        createdAt: nowIso,
-        isRead: false
-      } as SupportTicketMessageDto & { isRead: boolean }
-    ]
-  };
-  await writeLocalSupportTickets(tickets.map((item) => (item.id === ticket.id ? nextTicket : item)));
-  return localToDto(nextTicket, true);
-}
-
-async function countLocalUnreadSupportTickets(userId: string): Promise<number> {
-  const tickets = await readLocalSupportTickets();
-  return tickets.filter((ticket) => {
-    if (ticket.userId !== userId) return false;
-    return ticket.messages.some((message) => {
-      const withRead = message as SupportTicketMessageDto & { isRead?: boolean };
-      return message.senderType === "ADMIN" && withRead.isRead === false;
-    });
-  }).length;
-}
-
-async function updateLocalAdminSupportTicketStatus(params: {
-  ticketId: string;
-  status: ApiSupportTicketStatus;
-}) {
-  const tickets = await readLocalSupportTickets();
-  const ticket = tickets.find((item) => item.id === params.ticketId);
-  if (!ticket) throw new SupportNotFoundError();
-  const nextTicket: LocalSupportTicketRecord = {
-    ...ticket,
-    status: params.status,
-    updatedAt: new Date().toISOString()
-  };
-  await writeLocalSupportTickets(tickets.map((item) => (item.id === ticket.id ? nextTicket : item)));
-  return localToDto(nextTicket, true);
-}
-
 const ticketListInclude = {
   User: {
     select: {
@@ -982,6 +738,37 @@ export class SupportNotFoundError extends Error {
   }
 }
 
+export class SupportStorageUnavailableError extends Error {
+  constructor(message = "Хранилище поддержки недоступно. Проверьте таблицы SupportTicket и Message.") {
+    super(message);
+    this.name = "SupportStorageUnavailableError";
+  }
+}
+
+async function notifyUserAboutSupportReply(
+  prisma: PrismaClient,
+  ticket: Pick<SupportTicketDto, "id" | "userId">,
+  body: string
+): Promise<void> {
+  await deliverUserNotificationSafely(prisma, {
+    id: `support-reply-${ticket.id}`,
+    userId: ticket.userId,
+    kind: "support_reply",
+    title: "Новый ответ поддержки",
+    message: body.trim().slice(0, 240),
+    href: `/dashboard/support?ticket=${ticket.id}`,
+    resetReadState: true
+  });
+}
+
+function supportStorageUnavailable(cause?: unknown): SupportStorageUnavailableError {
+  const error = new SupportStorageUnavailableError();
+  if (cause !== undefined) {
+    (error as Error & { cause?: unknown }).cause = cause;
+  }
+  return error;
+}
+
 export async function createSupportTicket(params: {
   prisma: PrismaClient;
   userId: string;
@@ -993,10 +780,6 @@ export async function createSupportTicket(params: {
   logger?: LoggerLike;
 }): Promise<SupportTicketDto> {
   const backend = await resolveSupportBackend(params.prisma);
-
-  if (backend === "local") {
-    return createLocalSupportTicket(params);
-  }
 
   if (backend === "legacy") {
     return legacyCreateSupportTicket(params);
@@ -1062,17 +845,13 @@ export async function createSupportTicket(params: {
     try {
       return await legacyCreateSupportTicket(params);
     } catch (legacyError) {
-      return createLocalSupportTicket(params);
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
 
 export async function listUserSupportTickets(prisma: PrismaClient, userId: string) {
   const backend = await resolveSupportBackend(prisma);
-
-  if (backend === "local") {
-    return listLocalSupportTicketsForUser(userId);
-  }
 
   if (backend === "legacy") {
     return legacyListUserSupportTickets(prisma, userId);
@@ -1091,8 +870,8 @@ export async function listUserSupportTickets(prisma: PrismaClient, userId: strin
     }
     try {
       return await legacyListUserSupportTickets(prisma, userId);
-    } catch {
-      return listLocalSupportTicketsForUser(userId);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
@@ -1102,11 +881,6 @@ export async function markUserSupportTicketsRead(
   userId: string
 ): Promise<void> {
   const backend = await resolveSupportBackend(prisma);
-
-  if (backend === "local") {
-    await markLocalUserSupportTicketsRead(userId);
-    return;
-  }
 
   if (backend === "legacy") {
     await legacyMarkUserSupportTicketsRead(prisma, userId);
@@ -1133,8 +907,8 @@ export async function markUserSupportTicketsRead(
     }
     try {
       await legacyMarkUserSupportTicketsRead(prisma, userId);
-    } catch {
-      await markLocalUserSupportTicketsRead(userId);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
@@ -1145,10 +919,6 @@ export async function getUserSupportTicket(
   ticketId: string
 ) {
   const backend = await resolveSupportBackend(prisma);
-
-  if (backend === "local") {
-    return getLocalUserSupportTicket(userId, ticketId);
-  }
 
   if (backend === "legacy") {
     return legacyGetUserSupportTicket(prisma, userId, ticketId);
@@ -1196,8 +966,8 @@ export async function getUserSupportTicket(
     }
     try {
       return await legacyGetUserSupportTicket(prisma, userId, ticketId);
-    } catch {
-      return getLocalUserSupportTicket(userId, ticketId);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
@@ -1209,10 +979,6 @@ export async function addUserSupportMessage(params: {
   body: string;
 }) {
   const backend = await resolveSupportBackend(params.prisma);
-
-  if (backend === "local") {
-    return addLocalUserSupportMessage(params);
-  }
 
   if (backend === "legacy") {
     return legacyAddUserSupportMessage(params);
@@ -1272,18 +1038,14 @@ export async function addUserSupportMessage(params: {
     }
     try {
       return await legacyAddUserSupportMessage(params);
-    } catch {
-      return addLocalUserSupportMessage(params);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
 
 export async function listAdminSupportTickets(prisma: PrismaClient) {
   const backend = await resolveSupportBackend(prisma);
-
-  if (backend === "local") {
-    return listLocalAdminSupportTickets();
-  }
 
   if (backend === "legacy") {
     return legacyListAdminSupportTickets(prisma);
@@ -1301,18 +1063,14 @@ export async function listAdminSupportTickets(prisma: PrismaClient) {
     }
     try {
       return await legacyListAdminSupportTickets(prisma);
-    } catch {
-      return listLocalAdminSupportTickets();
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
 
 export async function getAdminSupportTicket(prisma: PrismaClient, ticketId: string) {
   const backend = await resolveSupportBackend(prisma);
-
-  if (backend === "local") {
-    return getLocalAdminSupportTicket(ticketId);
-  }
 
   if (backend === "legacy") {
     return legacyGetSupportTicketDetails(prisma, ticketId);
@@ -1335,8 +1093,8 @@ export async function getAdminSupportTicket(prisma: PrismaClient, ticketId: stri
     }
     try {
       return await legacyGetSupportTicketDetails(prisma, ticketId);
-    } catch {
-      return getLocalAdminSupportTicket(ticketId);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
@@ -1349,12 +1107,10 @@ export async function addAdminSupportReply(params: {
 }) {
   const backend = await resolveSupportBackend(params.prisma);
 
-  if (backend === "local") {
-    return addLocalAdminSupportReply(params);
-  }
-
   if (backend === "legacy") {
-    return legacyAddAdminSupportReply(params);
+    const result = await legacyAddAdminSupportReply(params);
+    await notifyUserAboutSupportReply(params.prisma, result, params.body);
+    return result;
   }
 
   try {
@@ -1400,15 +1156,19 @@ export async function addAdminSupportReply(params: {
       })
     ]);
 
+    await notifyUserAboutSupportReply(params.prisma, ticket, params.body);
+
     return getAdminSupportTicket(params.prisma, ticket.id);
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;
     }
     try {
-      return await legacyAddAdminSupportReply(params);
-    } catch {
-      return addLocalAdminSupportReply(params);
+      const result = await legacyAddAdminSupportReply(params);
+      await notifyUserAboutSupportReply(params.prisma, result, params.body);
+      return result;
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
@@ -1418,10 +1178,6 @@ export async function getUserUnreadSupportTicketCount(
   userId: string
 ): Promise<number> {
   const backend = await resolveSupportBackend(prisma);
-
-  if (backend === "local") {
-    return countLocalUnreadSupportTickets(userId);
-  }
 
   if (backend === "legacy") {
     return legacyCountUnreadSupportTickets(prisma, userId);
@@ -1447,8 +1203,8 @@ export async function getUserUnreadSupportTicketCount(
     }
     try {
       return await legacyCountUnreadSupportTickets(prisma, userId);
-    } catch {
-      return countLocalUnreadSupportTickets(userId);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }
@@ -1460,10 +1216,6 @@ export async function updateAdminSupportTicketStatus(params: {
   status: ApiSupportTicketStatus;
 }) {
   const backend = await resolveSupportBackend(params.prisma);
-
-  if (backend === "local") {
-    return updateLocalAdminSupportTicketStatus(params);
-  }
 
   if (backend === "legacy") {
     return legacyUpdateAdminSupportTicketStatus(params);
@@ -1515,8 +1267,8 @@ export async function updateAdminSupportTicketStatus(params: {
     }
     try {
       return await legacyUpdateAdminSupportTicketStatus(params);
-    } catch {
-      return updateLocalAdminSupportTicketStatus(params);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
     }
   }
 }

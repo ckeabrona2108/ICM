@@ -9,7 +9,6 @@ import type {
   DashboardNotificationItemResponse,
   DashboardNotificationsResponse
 } from "@/lib/api/contracts";
-import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { listUserReports } from "@/lib/report-service";
 import {
   getUserUnreadSupportTicketCount,
@@ -72,7 +71,7 @@ function buildReleaseNotifications(
         message: `Релиз «${title}» принят и доступен в каталоге.`,
         href: buildReleaseHref("release_approved"),
         createdAt,
-        isUnread: false
+        isUnread: true
       });
       continue;
     }
@@ -139,18 +138,7 @@ async function listReportNotifications(
   prisma: PrismaClient,
   userId: string
 ): Promise<DashboardNotificationItemResponse[]> {
-  let reports;
-  try {
-    reports = await listUserReports(prisma, userId);
-  } catch (error) {
-    if (
-      isPrismaTableMissingError(error, "financeReport") ||
-      isPrismaTableMissingError(error, "transaction")
-    ) {
-      return [];
-    }
-    throw error;
-  }
+  const reports = await listUserReports(prisma, userId);
 
   return reports.slice(0, MAX_REPORT_ITEMS).map((report) => {
     const amountLabel = formatRubCurrency(report.amount);
@@ -162,7 +150,7 @@ async function listReportNotifications(
         message: `${report.quarterLabel} · ${amountLabel}`,
         href: "/dashboard/finance",
         createdAt: toIsoString(report.agreedAt ?? report.createdAt),
-        isUnread: false
+        isUnread: true
       };
     }
 
@@ -196,93 +184,76 @@ async function listPayoutNotifications(
   prisma: PrismaClient,
   userId: string
 ): Promise<DashboardNotificationItemResponse[]> {
-  try {
-    const payouts = await prisma.payouts.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: MAX_PAYOUT_ITEMS,
-      select: {
-        id: true,
-        amount: true,
-        confirmed: true,
-        createdAt: true
-      }
-    });
+  const payouts = await prisma.payouts.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: MAX_PAYOUT_ITEMS,
+    select: {
+      id: true,
+      amount: true,
+      confirmed: true,
+      createdAt: true
+    }
+  });
 
-    return payouts.map((payout) => {
-      const amountLabel = formatRubCurrency(Number(payout.amount ?? 0));
-      if (payout.confirmed === true) {
-        return {
-          id: `payout-paid-${payout.id}`,
-          kind: "payout_paid",
-          title: "Вывод средств одобрен",
-          message: `Заявка на ${amountLabel} одобрена администратором.`,
-          href: "/dashboard/finance",
-          createdAt: toIsoString(payout.createdAt),
-          isUnread: false
-        };
-      }
-
-      if (payout.confirmed === null) {
-        return {
-          id: `payout-rejected-${payout.id}`,
-          kind: "payout_rejected",
-          title: "Вывод средств отклонён",
-          message: `Заявка на ${amountLabel} была отклонена.`,
-          href: "/dashboard/finance",
-          createdAt: toIsoString(payout.createdAt),
-          isUnread: true
-        };
-      }
-
+  return payouts.map((payout) => {
+    const amountLabel = formatRubCurrency(Number(payout.amount ?? 0));
+    if (payout.confirmed === true) {
       return {
-        id: `payout-requested-${payout.id}`,
-        kind: "payout_requested",
-        title: "Заявка на вывод отправлена",
-        message: `Заявка на ${amountLabel} ожидает обработки.`,
+        id: `payout-paid-${payout.id}`,
+        kind: "payout_paid",
+        title: "Вывод средств одобрен",
+        message: `Заявка на ${amountLabel} одобрена администратором.`,
         href: "/dashboard/finance",
         createdAt: toIsoString(payout.createdAt),
-        isUnread: false
+        isUnread: true
       };
-    });
-  } catch (error) {
-    if (isPrismaTableMissingError(error, "payouts")) {
-      return [];
     }
-    throw error;
-  }
+
+    if (payout.confirmed === null) {
+      return {
+        id: `payout-rejected-${payout.id}`,
+        kind: "payout_rejected",
+        title: "Вывод средств отклонён",
+        message: `Заявка на ${amountLabel} была отклонена.`,
+        href: "/dashboard/finance",
+        createdAt: toIsoString(payout.createdAt),
+        isUnread: true
+      };
+    }
+
+    return {
+      id: `payout-requested-${payout.id}`,
+      kind: "payout_requested",
+      title: "Заявка на вывод отправлена",
+      message: `Заявка на ${amountLabel} ожидает обработки.`,
+      href: "/dashboard/finance",
+      createdAt: toIsoString(payout.createdAt),
+      isUnread: true
+    };
+  });
 }
 
 async function listSupportNotifications(
   prisma: PrismaClient,
   userId: string
 ): Promise<DashboardNotificationItemResponse[]> {
-  try {
-    const [tickets, unreadCount] = await Promise.all([
-      listUserSupportTickets(prisma, userId),
-      getUserUnreadSupportTicketCount(prisma, userId)
-    ]);
+  const [tickets, unreadCount] = await Promise.all([
+    listUserSupportTickets(prisma, userId),
+    getUserUnreadSupportTicketCount(prisma, userId)
+  ]);
 
-    return tickets
-      .slice(0, Math.min(unreadCount, MAX_SUPPORT_ITEMS))
-      .map((ticket: Awaited<ReturnType<typeof listUserSupportTickets>>[number]) => ({
-        id: `support-reply-${ticket.id}`,
-        kind: "support_reply",
-        title: "Новый ответ от поддержки",
-        message: ticket.subject,
-        href: "/dashboard/support",
-        createdAt: toIsoString(ticket.updatedAt),
-        isUnread: true
-      }));
-  } catch (error) {
-    if (
-      isPrismaTableMissingError(error, "supportTicket") ||
-      isPrismaTableMissingError(error, "message")
-    ) {
-      return [];
-    }
-    throw error;
-  }
+  return tickets
+    .slice(0, Math.min(unreadCount, MAX_SUPPORT_ITEMS))
+    .map((ticket: Awaited<ReturnType<typeof listUserSupportTickets>>[number]) => ({
+      id: `support-reply-${ticket.id}`,
+      kind: "support_reply",
+      title: "Новый ответ от поддержки",
+      message: ticket.subject,
+      href: "/dashboard/support",
+      createdAt: toIsoString(ticket.updatedAt),
+      isUnread: true
+    }));
 }
 
 export async function listDashboardNotifications(
@@ -302,8 +273,51 @@ export async function listDashboardNotifications(
     })
     .slice(0, MAX_ITEMS);
 
+  if (items.length > 0) {
+    await prisma.ai_user_notifications.createMany({
+      data: items.map((item) => ({
+        id: item.id,
+        user_id: userId,
+        kind: item.kind,
+        title: item.title,
+        message: item.message,
+        cta_label: "Открыть",
+        cta_href: item.href,
+        created_at: new Date(item.createdAt),
+        read_at: item.isUnread ? null : new Date(item.createdAt)
+      })),
+      skipDuplicates: true
+    });
+
+    const persisted = await prisma.ai_user_notifications.findMany({
+      where: {
+        user_id: userId,
+        id: { in: items.map((item) => item.id) }
+      },
+      select: { id: true, read_at: true }
+    });
+    const readAtById = new Map(persisted.map((item) => [item.id, item.read_at]));
+    for (const item of items) {
+      item.isUnread = readAtById.get(item.id) === null;
+    }
+  }
+
   return {
     unreadCount: items.filter((item) => item.isUnread).length,
     items
   };
+}
+
+export async function markAllDashboardNotificationsRead(
+  prisma: PrismaClient,
+  userId: string
+): Promise<number> {
+  const result = await prisma.ai_user_notifications.updateMany({
+    where: {
+      user_id: userId,
+      read_at: null
+    },
+    data: { read_at: new Date() }
+  });
+  return result.count;
 }

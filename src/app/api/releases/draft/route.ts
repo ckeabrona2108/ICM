@@ -150,6 +150,9 @@ export async function POST(request: Request) {
       startDate,
       preorderDate,
       type: readReleaseTypeFromSubmissionData(data),
+      earlyStartInRussia: data.earlyRussiaStart === true,
+      realTimeDelivery: data.realTimeDelivery === true,
+      yandexSoonNewRelease: parseDate(data.yandexPreReleaseDate, releaseDate),
       confirmed: false,
       status: "moderating",
       roles: withReleaseLifecycleState(
@@ -243,6 +246,9 @@ export async function PATCH(request: Request) {
       startDate,
       preorderDate,
       type: readReleaseTypeFromSubmissionData(data),
+      earlyStartInRussia: data.earlyRussiaStart === true,
+      realTimeDelivery: data.realTimeDelivery === true,
+      yandexSoonNewRelease: parseDate(data.yandexPreReleaseDate, releaseDate),
       confirmed: existing.confirmed,
       status: existing.status,
       roles: withReleaseLifecycleState(

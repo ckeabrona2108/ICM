@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { hashPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,13 @@ const resetSchema = z
   });
 
 export async function POST(request: Request) {
+  const limited = enforceRateLimit({
+    key: `auth:reset:${getRequestIp(request)}`,
+    limit: 10,
+    windowMs: 15 * 60_000
+  });
+  if (limited) return limited;
+
   let payload: unknown;
   try {
     payload = await request.json();

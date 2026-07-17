@@ -11,6 +11,7 @@ import {
   withAdminReleaseChangesRequiredState
 } from "@/lib/admin-release-service";
 import { prisma } from "@/lib/prisma";
+import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export async function POST(request: Request) {
 
   const release = await prisma.release.findUnique({
     where: { id: parsed.data.releaseId },
-    select: { id: true, status: true, roles: true, upc: true }
+    select: { id: true, userId: true, title: true, status: true, roles: true, upc: true }
   });
   if (!release) {
     return NextResponse.json({ error: "Release not found" }, { status: 404 });
@@ -112,6 +113,16 @@ export async function POST(request: Request) {
       }
     });
 
+    await deliverUserNotificationSafely(prisma, {
+      id: `release-approved-${release.id}`,
+      userId: release.userId,
+      kind: "release_approved",
+      title: "Релиз принят",
+      message: `Релиз «${release.title ?? "Без названия"}» принят и доступен в каталоге.`,
+      href: "/dashboard/releases",
+      resetReadState: true
+    });
+
     const response: AdminReleaseDecisionResponse = {
       ok: true,
       releaseId: release.id,
@@ -143,6 +154,18 @@ export async function POST(request: Request) {
         comment
       ) as Prisma.InputJsonValue
     }
+  });
+
+  await deliverUserNotificationSafely(prisma, {
+    id: parsed.data.action === "reject"
+      ? `release-rejected-${release.id}`
+      : `release-changes-${release.id}`,
+    userId: release.userId,
+    kind: parsed.data.action === "reject" ? "release_rejected" : "release_changes_required",
+    title: parsed.data.action === "reject" ? "Релиз отклонён" : "Релиз отправлен на доработку",
+    message: comment,
+    href: "/dashboard/changes-required",
+    resetReadState: true
   });
 
   const response: AdminReleaseDecisionResponse = {

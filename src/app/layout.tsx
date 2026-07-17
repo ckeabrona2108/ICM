@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   applicationName: SITE_NAME,
   title: {
-    default: "Дистрибуция музыки на 240+ площадок — ICECREAMMUSIC",
+    default: "ICECREAMMUSIC - Дистрибуция музыки",
     template: `%s — ${SITE_NAME}`
   },
   description: SITE_DESCRIPTION,
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "ru_RU",
     siteName: SITE_NAME,
-    title: "Дистрибуция музыки на 240+ площадок — ICECREAMMUSIC",
+    title: "ICECREAMMUSIC - Дистрибуция музыки",
     description: SITE_DESCRIPTION,
     images: [
       {
@@ -51,7 +51,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Дистрибуция музыки на 240+ площадок — ICECREAMMUSIC",
+    title: "ICECREAMMUSIC - Дистрибуция музыки",
     description: SITE_DESCRIPTION,
     images: [absoluteSiteUrl("/icon-512.png")]
   },

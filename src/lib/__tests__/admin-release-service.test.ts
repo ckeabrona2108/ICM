@@ -12,7 +12,7 @@ import {
   isReleaseInAdminTab,
   rejectReleaseByAdmin
 } from "@/lib/admin-release-service";
-import { ReleaseStatus } from "@prisma/client";
+import { ReleaseStatus } from "@/lib/legacy-business-enums";
 
 test("non-admin cannot manage releases", () => {
   assert.equal(canManageReleases("USER"), false);

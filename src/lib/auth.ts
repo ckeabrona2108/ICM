@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { consumeRateLimit } from "@/lib/rate-limit";
 
 const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
 const nextAuthSecret = process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
@@ -51,6 +52,12 @@ export const authOptions: NextAuthOptions = {
         if (!parsed.success) return null;
 
         const email = parsed.data.email;
+        const rateLimit = consumeRateLimit({
+          key: `auth:login:${email}`,
+          limit: 10,
+          windowMs: 15 * 60_000
+        });
+        if (!rateLimit.allowed) return null;
         const users = await prisma.user.findMany({
           where: {
             email: {

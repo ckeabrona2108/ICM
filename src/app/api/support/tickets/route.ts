@@ -12,19 +12,27 @@ import {
   createSupportTicket,
   createSupportTicketSchema,
   listUserSupportTickets,
-  markUserSupportTicketsRead
+  markUserSupportTicketsRead,
+  SupportStorageUnavailableError
 } from "@/lib/support-service";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  await markUserSupportTicketsRead(prisma, session.user.id);
-  const tickets = await listUserSupportTickets(prisma, session.user.id);
-  const response: SupportTicketListResponse = { tickets };
-  return NextResponse.json(response, { status: 200 });
+  try {
+    await markUserSupportTicketsRead(prisma, session.user.id);
+    const tickets = await listUserSupportTickets(prisma, session.user.id);
+    const response: SupportTicketListResponse = { tickets };
+    return NextResponse.json(response, { status: 200 });
+  } catch (error) {
+    if (error instanceof SupportStorageUnavailableError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
@@ -32,6 +40,12 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = enforceRateLimit({
+    key: `support:create:${session.user.id}`,
+    limit: 10,
+    windowMs: 60 * 60_000
+  });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -60,14 +74,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
-  const ticket = await createSupportTicket({
-    prisma,
-    userId: user.id,
-    userName: user.name,
-    userEmail: user.email,
-    subject: body.subject,
-    body: body.body
-  });
+  let ticket;
+  try {
+    ticket = await createSupportTicket({
+      prisma,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      subject: body.subject,
+      body: body.body
+    });
+  } catch (error) {
+    if (error instanceof SupportStorageUnavailableError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+    throw error;
+  }
 
   const response: SupportTicketMutationResponse = {
     ok: true,

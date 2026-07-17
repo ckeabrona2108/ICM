@@ -146,6 +146,7 @@ export const releaseSubmissionDataSchema = z.object({
   tracks: z.array(trackSchema),
   paymentSnapshot: paymentSnapshotSchema.optional(),
   moderatorComment: z.string().trim().optional(),
+  earlyRussiaStart: z.boolean().optional(),
   realTimeDelivery: z.boolean().optional(),
   yandexPreReleaseDate: z.string().trim().optional(),
   priorityRelease: z.boolean().optional()

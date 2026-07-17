@@ -27,7 +27,7 @@ export default async function AdminVerificationPage() {
       </p>
 
       <div className="mt-6 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d0f16]">
-        <div className="grid grid-cols-12 gap-2 border-b border-white/[0.08] px-5 py-3 text-[12px] uppercase tracking-wide text-white/45">
+        <div className="hidden grid-cols-12 gap-2 border-b border-white/[0.08] px-5 py-3 text-[12px] uppercase tracking-wide text-white/45 md:grid">
           <div className="col-span-3">Пользователь</div>
           <div className="col-span-3">Email</div>
           <div className="col-span-2">Дата</div>
@@ -48,28 +48,69 @@ export default async function AdminVerificationPage() {
                   : item.status;
 
               return (
-                <div key={item.id} className="grid grid-cols-12 items-center gap-2 px-5 py-4">
-                  <div className="col-span-3">
-                    <p className="text-[14px] font-medium text-white">{item.userName || item.fullName || "—"}</p>
-                    <p className="mt-1 text-[12px] text-white/45">id: {item.userId}</p>
-                  </div>
-                  <div className="col-span-3 text-[13px] text-white/70">{item.userEmail}</div>
-                  <div className="col-span-2 text-[13px] text-white/70">
-                    {new Date(item.signedAt).toLocaleString("ru-RU")}
-                  </div>
-                  <div className="col-span-2">
-                    <span className={`inline-flex rounded-full border px-2.5 py-1 text-[12px] font-semibold ${statusView(effectiveStatus).className}`}>
-                      {statusView(effectiveStatus).label}
-                    </span>
-                  </div>
-                  <div className="col-span-2 text-[13px] text-white/70">{item.contractVersion}</div>
-                  <div className="col-span-2 flex justify-end gap-2">
+                <div key={item.id}>
+                  <div className="p-4 md:hidden">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[16px] font-semibold text-white">
+                          {item.userName || item.fullName || "—"}
+                        </p>
+                        <p className="mt-1 break-all text-[12px] leading-5 text-white/[0.42]">ID: {item.userId}</p>
+                      </div>
+                      <span className={`inline-flex shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusView(effectiveStatus).className}`}>
+                        {statusView(effectiveStatus).label}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 border-t border-white/[0.06] pt-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/[0.38]">Email</p>
+                      <p className="mt-1 break-all text-[14px] leading-5 text-white/[0.78]">{item.userEmail}</p>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/[0.38]">Дата</p>
+                        <p className="mt-1 text-[13px] leading-5 text-white/[0.72]">
+                          {new Date(item.signedAt).toLocaleString("ru-RU")}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/[0.38]">Версия</p>
+                        <p className="mt-1 text-[13px] leading-5 text-white/[0.72]">{item.contractVersion}</p>
+                      </div>
+                    </div>
+
                     <Link
                       href={`/admin/verification/${item.id}`}
-                      className="rounded-lg border border-white/[0.14] bg-white/[0.03] px-2.5 py-1.5 text-[12.5px] text-white/80 hover:bg-white/[0.06]"
+                      className="mt-5 flex h-11 w-full items-center justify-center rounded-xl border border-white/[0.14] bg-white/[0.04] text-[13px] font-semibold text-white/[0.86] transition hover:bg-white/[0.08]"
                     >
                       Открыть
                     </Link>
+                  </div>
+
+                  <div className="hidden grid-cols-12 items-center gap-2 px-5 py-4 md:grid">
+                    <div className="col-span-3">
+                      <p className="text-[14px] font-medium text-white">{item.userName || item.fullName || "—"}</p>
+                      <p className="mt-1 text-[12px] text-white/45">id: {item.userId}</p>
+                    </div>
+                    <div className="col-span-3 text-[13px] text-white/70">{item.userEmail}</div>
+                    <div className="col-span-2 text-[13px] text-white/70">
+                      {new Date(item.signedAt).toLocaleString("ru-RU")}
+                    </div>
+                    <div className="col-span-2">
+                      <span className={`inline-flex rounded-full border px-2.5 py-1 text-[12px] font-semibold ${statusView(effectiveStatus).className}`}>
+                        {statusView(effectiveStatus).label}
+                      </span>
+                    </div>
+                    <div className="col-span-2 text-[13px] text-white/70">{item.contractVersion}</div>
+                    <div className="col-span-2 flex justify-end gap-2">
+                      <Link
+                        href={`/admin/verification/${item.id}`}
+                        className="rounded-lg border border-white/[0.14] bg-white/[0.03] px-2.5 py-1.5 text-[12.5px] text-white/80 hover:bg-white/[0.06]"
+                      >
+                        Открыть
+                      </Link>
+                    </div>
                   </div>
                 </div>
               );

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { uploadObjectToStorage } from "@/lib/s3";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 function sanitizeStorageKey(rawValue: string | null): string | null {
   const value = (rawValue ?? "").trim().replace(/^\/+/u, "");
@@ -29,6 +30,12 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = enforceRateLimit({
+    key: `upload:relay:${session.user.id}`,
+    limit: 30,
+    windowMs: 10 * 60_000
+  });
+  if (limited) return limited;
 
   const url = new URL(request.url);
   const key = sanitizeStorageKey(url.searchParams.get("key"));

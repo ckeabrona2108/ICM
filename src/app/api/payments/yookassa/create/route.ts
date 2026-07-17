@@ -9,6 +9,7 @@ import {
   normalizeSubscriptionBillingPeriod
 } from "@/lib/subscription-billing";
 import { createYooKassaPayment } from "@/lib/yookassa";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,12 @@ function getAppBaseUrl(request: Request): string {
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = enforceRateLimit({
+    key: `payment:create:${session.user.id}`,
+    limit: 10,
+    windowMs: 10 * 60_000
+  });
+  if (limited) return limited;
 
   const payload = (await request.json().catch(() => ({}))) as {
     kind?: "release" | "subscription";

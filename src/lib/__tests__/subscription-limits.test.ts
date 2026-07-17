@@ -1,7 +1,12 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
+import {
+  SubscriptionPlan,
+  SubscriptionStatus,
+  type SubscriptionPlan as SubscriptionPlanValue,
+  type SubscriptionStatus as SubscriptionStatusValue
+} from "@/lib/legacy-business-enums";
 import { addMonths } from "date-fns";
 
 import {
@@ -14,8 +19,8 @@ function createMockPrisma(params: {
   subscription:
     | {
         id: string;
-        plan: SubscriptionPlan;
-        status: SubscriptionStatus;
+        plan: SubscriptionPlanValue;
+        status: SubscriptionStatusValue;
         startedAt: Date;
         renewalAt: Date | null;
       }

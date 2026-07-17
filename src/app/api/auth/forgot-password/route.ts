@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getSmtpBzTransporter, getSmtpFromAddress } from "@/lib/smtp-bz";
 import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
+import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,13 @@ function resolveBaseUrl(request: Request): string {
 }
 
 export async function POST(request: Request) {
+  const limited = enforceRateLimit({
+    key: `auth:forgot:${getRequestIp(request)}`,
+    limit: 5,
+    windowMs: 15 * 60_000
+  });
+  if (limited) return limited;
+
   let payload: unknown;
   try {
     payload = await request.json();

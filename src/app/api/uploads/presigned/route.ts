@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
 import { createPresignedUpload, getStorageBucketHint, resolveStoredFileUrl } from "@/lib/s3";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   fileName: z.string().min(1),
@@ -17,6 +18,12 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const limited = enforceRateLimit({
+    key: `upload:presigned:${session.user.id}`,
+    limit: 60,
+    windowMs: 10 * 60_000
+  });
+  if (limited) return limited;
 
   const body = await request.json();
   const parsed = bodySchema.safeParse(body);

@@ -90,6 +90,7 @@ export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionD
       videoShotFile: normalizeUploadedFileRef(track.meta.videoFile) ?? undefined
     })),
     moderatorComment: data.moderatorComment,
+    earlyRussiaStart: data.earlyRussiaStart,
     realTimeDelivery: data.realTimeDelivery,
     yandexPreReleaseDate: data.yandexPreReleaseDate,
     priorityRelease: data.priorityRelease

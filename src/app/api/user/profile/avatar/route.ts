@@ -11,6 +11,7 @@ import { uploadObjectToStorage } from "@/lib/s3";
 import { resolveActiveSubscriptionPlan } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
 import { updateUserAvatarSchema, validateAvatarDataUrl } from "@/lib/user-profile-policy";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -121,6 +122,12 @@ export async function PUT(request: Request) {
   const session = await getServerSession(authOptions);
   const userId = getSessionUserId(session);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = enforceRateLimit({
+    key: `profile:avatar:${userId}`,
+    limit: 10,
+    windowMs: 60 * 60_000
+  });
+  if (limited) return limited;
 
   let payload: unknown;
   try {
@@ -142,8 +149,7 @@ export async function PUT(request: Request) {
   try {
     const avatarAsset = parseAvatarDataUrl(parsed.data.imageDataUrl);
     const storageKey = `avatars/${userId}.${avatarAsset.extension}`;
-    let avatarValue = parsed.data.imageDataUrl;
-
+    let avatarValue: string;
     try {
       const uploaded = await uploadObjectToStorage({
         key: storageKey,
@@ -152,10 +158,14 @@ export async function PUT(request: Request) {
       });
       avatarValue = uploaded.key;
     } catch (storageError) {
-      console.warn("[avatar-upload] storage upload failed, falling back to inline payload", {
+      console.error("[avatar-upload] storage upload failed", {
         userId,
         message: storageError instanceof Error ? storageError.message : String(storageError)
       });
+      return NextResponse.json(
+        { error: "Хранилище изображений временно недоступно. Повторите загрузку позже." },
+        { status: 503 }
+      );
     }
 
     await prisma.user.updateMany({

@@ -4,14 +4,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  FinanceReportStatus
+} from "@prisma/client";
+import {
   BalanceAdminAdjustmentType,
-  FinanceReportStatus,
   ReleaseStatus,
   Role,
   SubscriptionPlan,
   SubscriptionSource,
   SubscriptionStatus
-} from "@prisma/client";
+} from "@/lib/legacy-business-enums";
 
 import {
   adminBalanceAdjustSchema,

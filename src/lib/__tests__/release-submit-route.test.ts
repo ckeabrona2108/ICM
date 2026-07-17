@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ReleaseStatus } from "@prisma/client";
+import { ReleaseStatus } from "@/lib/legacy-business-enums";
 
 import { isInitialReleaseSubmission } from "@/lib/release-submission-state";
 

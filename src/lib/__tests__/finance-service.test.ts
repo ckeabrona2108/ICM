@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { TransactionStatus, TransactionType } from "@prisma/client";
 
-import { getUserBalanceTotals, topUpUserBalanceByAdmin } from "@/lib/finance-service";
+import { getUserBalanceTotals, getUserFinanceView, topUpUserBalanceByAdmin } from "@/lib/finance-service";
 
 test("top up increases balance", async () => {
   const prisma = {
@@ -350,4 +350,66 @@ test("top-up transaction rollback propagates error", async () => {
     /TX_CREATE_FAIL/
   );
   assert.equal(adminLogCalled, false);
+});
+
+test("finance view selects only legacy transaction columns", async () => {
+  const now = new Date("2026-09-09T10:00:00.000Z");
+  let transactionListArgs: any;
+  const prisma = {
+    financeReport: {
+      count: async () => 1,
+      findMany: async () => [
+        {
+          id: "report_1",
+          userId: "u1",
+          periodStart: now,
+          periodEnd: now,
+          amount: 100,
+          currency: "RUB",
+          status: "AGREED",
+          createdAt: now,
+          agreedAt: now
+        }
+      ]
+    },
+    payouts: {
+      aggregate: async () => ({ _sum: { amount: 0 } })
+    },
+    transaction: {
+      findMany: async (args: any) => {
+        if (!args.select && args.where?.userId === "u1") {
+          throw new Error("The column `transaction.payoutId` does not exist in the current database.");
+        }
+        if (args.select?.id) {
+          transactionListArgs = args;
+          return [
+            {
+              id: "tx_1",
+              type: TransactionType.ROYALTY,
+              status: TransactionStatus.COMPLETED,
+              amount: 100,
+              description: "Начисление",
+              createdAt: now,
+              processedAt: now
+            }
+          ];
+        }
+        return [];
+      }
+    }
+  } as any;
+
+  const view = await getUserFinanceView(prisma, "u1");
+
+  assert.deepEqual(Object.keys(transactionListArgs.select), [
+    "id",
+    "type",
+    "status",
+    "amount",
+    "description",
+    "createdAt",
+    "processedAt"
+  ]);
+  assert.equal(view.transactions.length, 1);
+  assert.equal(view.transactions[0].id, "tx_1");
 });

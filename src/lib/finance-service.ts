@@ -371,7 +371,20 @@ export async function getUserFinanceView(
 
   if (!transactionRepo) throw new Error("Финансовые данные временно недоступны.");
   transactions = await transactionRepo.findMany({
-    where: { userId }, orderBy: { createdAt: "desc" }, take: 100
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+    // Keep this query compatible with older databases that do not have newer
+    // optional columns such as transaction.payoutId yet.
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      amount: true,
+      description: true,
+      createdAt: true,
+      processedAt: true
+    }
   });
 
   return {

@@ -7,6 +7,26 @@ import { formatRubCurrency } from "@/lib/currency-format";
 
 type TargetStatus = Exclude<AdminPayoutStatus, "REQUESTED">;
 
+async function createPayoutDebitTransaction(tx: any, params: {
+  userId: string;
+  payoutId: string;
+  amount: number;
+  processedAt: Date;
+}) {
+  const data: any = {
+    id: randomUUID(),
+    userId: params.userId,
+    amount: -Math.abs(params.amount),
+    type: "PAYOUT",
+    status: "COMPLETED",
+    description: `Payout request ${params.payoutId}`,
+    processedAt: params.processedAt,
+    metadata: { payoutRequestId: params.payoutId }
+  };
+
+  await tx.transaction.create({ data, select: { id: true } });
+}
+
 export async function handlePayoutTransition(params: {
   session: { user: { role?: string } } | null;
   prisma: PrismaClient;
@@ -36,15 +56,15 @@ export async function handlePayoutTransition(params: {
       select: { id: true, userId: true, amount: true, status: true }
     });
     if (changed.count && payout && params.status === "PAID") {
-      if (!Number.isFinite(payout.amount) || (payout.amount ?? 0) <= 0) {
+      const payoutAmount = Number(payout.amount ?? 0);
+      if (!Number.isFinite(payoutAmount) || payoutAmount <= 0) {
         throw new Error("Invalid payout amount");
       }
-      await tx.transaction.create({
-        data: {
-          id: randomUUID(), userId: payout.userId, amount: -Math.abs(payout.amount!),
-          type: "PAYOUT", status: "COMPLETED", description: `Payout request ${payout.id}`,
-          payoutId: payout.id, processedAt: now, metadata: { payoutRequestId: payout.id }
-        }
+      await createPayoutDebitTransaction(tx, {
+        userId: payout.userId,
+        payoutId: payout.id,
+        amount: payoutAmount,
+        processedAt: now
       });
     }
     return { payout, changed: changed.count > 0 };

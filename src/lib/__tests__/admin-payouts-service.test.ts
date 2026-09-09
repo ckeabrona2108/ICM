@@ -65,3 +65,40 @@ test("listAdminPayoutRequests returns all payout details for admin card", async 
   assert.equal(items[0].bankName, "Сбербанк");
   assert.equal(items[0].taxId, "1234567890");
 });
+
+test("listAdminPayoutRequests falls back when modern payout columns are missing", async () => {
+  let calls = 0;
+  const prisma = {
+    payouts: {
+      findMany: async () => {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error("The column `payouts.updatedAt` does not exist in the current database.");
+        }
+        return [
+          {
+            id: "legacy-p1",
+            amount: 1500,
+            confirmed: false,
+            createdAt: new Date("2026-04-02T00:00:00.000Z"),
+            recieverName: "Legacy User",
+            accountNumber: "40817810000000000001",
+            user: {
+              id: "u2",
+              name: "User 2",
+              email: "u2@example.com"
+            }
+          }
+        ];
+      }
+    }
+  } as any;
+
+  const items = await listAdminPayoutRequests(prisma, 50);
+  assert.equal(calls, 2);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, "legacy-p1");
+  assert.equal(items[0].status, "REQUESTED");
+  assert.equal(items[0].updatedAt, "2026-04-02T00:00:00.000Z");
+  assert.equal(items[0].accountDetails, "40817810000000000001");
+});

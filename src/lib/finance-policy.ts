@@ -31,6 +31,9 @@ export interface PayoutServerContext {
   pendingReportsCount: number;
   minimumPayoutAmount: number;
   reportStatuses: FinanceReportStatus[];
+  payoutWindowOpen?: boolean;
+  payoutWindowMessage?: string;
+  activePayoutRequestsCount?: number;
 }
 
 function pushIssue(
@@ -99,6 +102,24 @@ export function validatePayoutRequest(
       "forbidden",
       "reportStatuses",
       "Выплата недоступна: есть отчеты со статусом «Согласовать»."
+    );
+  }
+
+  if (context.payoutWindowOpen === false) {
+    pushIssue(
+      issues,
+      "forbidden",
+      "payoutWindow",
+      context.payoutWindowMessage || "Заявку на выплату можно создать только в период выплат."
+    );
+  }
+
+  if ((context.activePayoutRequestsCount ?? 0) > 0) {
+    pushIssue(
+      issues,
+      "forbidden",
+      "activePayoutRequests",
+      "У вас уже есть активная заявка на выплату."
     );
   }
 

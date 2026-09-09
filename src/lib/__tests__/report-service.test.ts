@@ -6,6 +6,7 @@ import { FinanceReportStatus } from "@prisma/client";
 
 import {
   createUserReportByAdmin,
+  deleteUserReportByAdmin,
   listUserReports,
   markUserReportAsAgreed,
   markUserReportAsRejected,
@@ -45,6 +46,14 @@ function createReportPrismaStub() {
       };
       return state.report;
     },
+    delete: async ({ where }: any) => {
+      if (state.report?.id !== where.id) {
+        throw new Error("Report not found");
+      }
+      const deleted = state.report;
+      state.report = null;
+      return deleted;
+    },
     findUnique: async ({ where }: any) => {
       if (state.report?.id === where.id) return state.report;
       return null;
@@ -56,7 +65,10 @@ function createReportPrismaStub() {
   };
 
   const transaction = {
-    create: async ({ data }: any) => {
+    create: async ({ data, select }: any) => {
+      if (!select?.id) {
+        throw new Error("The column `transaction.payoutId` does not exist in the current database.");
+      }
       state.payloadTx = {
         id: data.id,
         userId: data.userId,
@@ -68,7 +80,10 @@ function createReportPrismaStub() {
       };
       return state.payloadTx;
     },
-    update: async ({ data }: any) => {
+    update: async ({ data, select }: any) => {
+      if (!select?.id) {
+        throw new Error("The column `transaction.payoutId` does not exist in the current database.");
+      }
       state.payloadTx = {
         ...state.payloadTx,
         ...data,
@@ -152,6 +167,57 @@ test("pending report stores quarter details and line items in payload", async ()
   assert.equal(reports[0].quarterLabel, "3 квартал 2026");
   assert.equal(reports[0].platformTotals[0].platformName, "Яндекс.Музыка");
   assert.equal(reports[0].platformTotals[0].amount, 856);
+});
+
+test("report platform totals use exact line item amounts per platform", async () => {
+  const { prisma } = createReportPrismaStub();
+
+  await createUserReportByAdmin({
+    prisma,
+    adminId: "admin_1",
+    userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 0,
+    status: FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: 2,
+    year: 2026,
+    items: [
+      {
+        id: "row-1",
+        platformName: "Netease Cloud Music",
+        upc: "5063635044004",
+        releaseTitle: "NOT AFRAID",
+        amount: 12678.02
+      },
+      {
+        id: "row-2",
+        platformName: "Apple",
+        upc: "5063635044004",
+        releaseTitle: "NOT AFRAID",
+        amount: 678.02
+      },
+      {
+        id: "row-3",
+        platformName: "Яндекс",
+        upc: "5063635044004",
+        releaseTitle: "NOT AFRAID",
+        amount: 198678.01
+      }
+    ],
+    comment: "Q2 report"
+  });
+
+  const reports = await listUserReports(prisma, "user_1");
+  assert.deepEqual(reports[0].platformTotals, [
+    { platformName: "Яндекс", amount: 198678.01 },
+    { platformName: "Netease Cloud Music", amount: 12678.02 },
+    { platformName: "Apple", amount: 678.02 }
+  ]);
+  assert.equal(
+    reports[0].platformTotals.reduce((sum, item) => Number((sum + item.amount).toFixed(2)), 0),
+    212034.05
+  );
 });
 
 test("rejected report can be updated and agreed once with balance credit", async () => {
@@ -385,4 +451,52 @@ test("payload-only fallback still lists and agrees reports when financeReport ta
   assert.equal(agreed.ok, true);
   assert.equal(state.userBalance, 856);
   assert.equal(state.payloadTx.metadata.workflowState, "agreed");
+});
+
+test("admin delete hides agreed report from user and reverses credited balance", async () => {
+  const { prisma, state } = createReportPrismaStub();
+
+  const created = await createUserReportByAdmin({
+    prisma,
+    adminId: "admin_1",
+    userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 0,
+    status: FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: 2,
+    year: 2026,
+    items: [
+      {
+        id: "row-1",
+        platformName: "Apple",
+        upc: "5063635044004",
+        releaseTitle: "NOT AFRAID",
+        amount: 678.02
+      }
+    ]
+  });
+  assert.equal(created.ok, true);
+
+  const agreed = await markUserReportAsAgreed({
+    prisma,
+    reportId: state.report.id,
+    userId: "user_1"
+  });
+  assert.equal(agreed.ok, true);
+  assert.equal(state.userBalance, 678.02);
+
+  const deleted = await deleteUserReportByAdmin({
+    prisma,
+    adminId: "admin_1",
+    reportId: state.payloadTx.metadata.reportId,
+    userId: "user_1"
+  });
+  assert.equal(deleted.ok, true);
+  assert.equal(state.userBalance, 0);
+
+  const reports = await listUserReports(prisma, "user_1");
+  assert.equal(reports.length, 0);
+  assert.equal(state.payloadTx.description, "Finance report payload deleted");
+  assert.equal(state.payloadTx.metadata.kind, "finance_report_payload_deleted");
 });

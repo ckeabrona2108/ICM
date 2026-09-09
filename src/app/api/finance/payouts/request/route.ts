@@ -19,9 +19,34 @@ import { listUserReports } from "@/lib/report-service";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { retryPrismaSerializationConflict } from "@/lib/prisma-errors";
+import {
+  isPrismaColumnMissingError,
+  retryPrismaSerializationConflict
+} from "@/lib/prisma-errors";
+import { getCurrentPayoutWindowState } from "@/lib/payout-schedule";
 
 export const dynamic = "force-dynamic";
+
+async function countActivePayoutRequests(tx: typeof prisma, userId: string): Promise<number> {
+  try {
+    return await tx.payouts.count({
+      where: {
+        userId,
+        status: { in: ["REQUESTED", "PROCESSING"] }
+      }
+    });
+  } catch (error) {
+    if (isPrismaColumnMissingError(error, "payouts.status") || isPrismaColumnMissingError(error, "status")) {
+      return tx.payouts.count({
+        where: {
+          userId,
+          confirmed: false
+        }
+      });
+    }
+    throw error;
+  }
+}
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
@@ -54,9 +79,11 @@ export async function POST(request: Request) {
 
   const result = await retryPrismaSerializationConflict(() => prisma.$transaction(
     async (tx) => {
-      const [totals, reports] = await Promise.all([
+      const [totals, reports, payoutWindow, activePayoutRequestsCount] = await Promise.all([
         getUserBalanceTotals(tx as typeof prisma, session.user.id),
-        listUserReports(tx as typeof prisma, session.user.id)
+        listUserReports(tx as typeof prisma, session.user.id),
+        getCurrentPayoutWindowState(tx as typeof prisma),
+        countActivePayoutRequests(tx as typeof prisma, session.user.id)
       ]);
       const reportStatuses = reports.map((report) =>
         report.lifecycleState === "agreed"
@@ -69,7 +96,10 @@ export async function POST(request: Request) {
         availableBalance: totals.availableToWithdraw,
         pendingReportsCount: reportStatuses.filter((status) => status === "ready_to_confirm").length,
         minimumPayoutAmount: readMinimumPayoutAmount(),
-        reportStatuses
+        reportStatuses,
+        payoutWindowOpen: payoutWindow.isOpen,
+        payoutWindowMessage: payoutWindow.message,
+        activePayoutRequestsCount
       });
       if (issues.length > 0) return { issues, payoutId: null };
 
@@ -92,7 +122,15 @@ export async function POST(request: Request) {
             accountNumber: requisites.accountNumber,
             bankName: requisites.bankName,
             paypalEmail: requisites.paypalEmail,
-            taxId: requisites.taxId
+            taxId: requisites.taxId,
+            payoutWindow: payoutWindow.currentWindow
+              ? {
+                  label: payoutWindow.currentWindow.label,
+                  periodLabel: payoutWindow.currentWindow.periodLabel,
+                  startsAt: payoutWindow.currentWindow.startsAt,
+                  endsAt: payoutWindow.currentWindow.endsAt
+                }
+              : null
           },
           recieverName: requisites.recipientName,
           accountNumber: requisites.accountNumber || requisites.paypalEmail || "",

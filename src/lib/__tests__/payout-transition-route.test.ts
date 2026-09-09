@@ -7,6 +7,8 @@ function harness(initial: Status | null = "REQUESTED", failDebit = false) {
   let row = initial ? { id: "p1", userId: "u1", amount: 3000, status: initial } : null;
   let debits = 0;
   let notices = 0;
+  let debitAttempts = 0;
+  let lastDebitData: any = null;
   let queue = Promise.resolve();
   const prisma = { $transaction: async (callback: (tx: unknown) => Promise<unknown>) => {
     const run = queue.then(async () => {
@@ -20,7 +22,12 @@ function harness(initial: Status | null = "REQUESTED", failDebit = false) {
             },
             findUnique: async () => row
           },
-          transaction: { create: async () => { if (failDebit) throw new Error("ledger unavailable"); debits++; } }
+          transaction: { create: async ({ data }: any) => {
+            debitAttempts++;
+            if (failDebit) throw new Error("ledger unavailable");
+            lastDebitData = data;
+            debits++;
+          } }
         });
       } catch (error) { row = before; throw error; }
     });
@@ -31,7 +38,7 @@ function harness(initial: Status | null = "REQUESTED", failDebit = false) {
     run: (status: Exclude<Status, "REQUESTED">, session: any = { user: { role: "ADMIN" } }) => handlePayoutTransition({
       prisma: prisma as never, id: "p1", status, session, notify: (async () => { notices++; }) as never
     }),
-    state: () => ({ status: row?.status, debits, notices })
+    state: () => ({ status: row?.status, debits, notices, debitAttempts, lastDebitData })
   };
 }
 
@@ -44,14 +51,23 @@ test("payout routes enforce authentication, role, and existence", async () => {
 test("simultaneous PAID calls debit and notify exactly once", async () => {
   const h = harness();
   assert.deepEqual((await Promise.all([h.run("PAID"), h.run("PAID")])).map(r => r.status), [200, 200]);
-  assert.deepEqual(h.state(), { status: "PAID", debits: 1, notices: 1 });
+  const state = h.state();
+  assert.equal(state.status, "PAID");
+  assert.equal(state.debits, 1);
+  assert.equal(state.notices, 1);
+  assert.equal(state.debitAttempts, 1);
+  assert.equal("payoutId" in state.lastDebitData, false);
 });
 test("paid versus reject preserves whichever terminal transition wins", async () => {
   for (const first of ["PAID", "REJECTED"] as const) {
     const h = harness();
     const second = first === "PAID" ? "REJECTED" : "PAID";
     assert.deepEqual((await Promise.all([h.run(first), h.run(second)])).map(r => r.status), [200, 409]);
-    assert.deepEqual(h.state(), { status: first, debits: first === "PAID" ? 1 : 0, notices: 1 });
+    const state = h.state();
+    assert.equal(state.status, first);
+    assert.equal(state.debits, first === "PAID" ? 1 : 0);
+    assert.equal(state.notices, 1);
+    assert.equal(state.debitAttempts, first === "PAID" ? 1 : 0);
     assert.equal((await h.run("PROCESSING")).status, 409);
   }
 });
@@ -61,5 +77,9 @@ test("processing followed by paid completes; ledger failure rolls back status", 
   assert.equal((await h.run("PAID")).status, 200);
   const failing = harness("REQUESTED", true);
   await assert.rejects(failing.run("PAID"), /ledger unavailable/);
-  assert.deepEqual(failing.state(), { status: "REQUESTED", debits: 0, notices: 0 });
+  const state = failing.state();
+  assert.equal(state.status, "REQUESTED");
+  assert.equal(state.debits, 0);
+  assert.equal(state.notices, 0);
+  assert.equal(state.debitAttempts, 1);
 });

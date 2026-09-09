@@ -150,6 +150,14 @@ export function AdminPayoutsClient({ initialPayouts }: { initialPayouts: AdminPa
                   {new Date(payout.createdAt).toLocaleDateString("ru-RU")}
                 </span>
               </p>
+              {payout.payoutWindowLabel || payout.payoutPeriodLabel ? (
+                <p className="sm:col-span-2">
+                  Период выплат:{" "}
+                  <span className="text-white/85">
+                    {[payout.payoutPeriodLabel, payout.payoutWindowLabel].filter(Boolean).join(" · ")}
+                  </span>
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">

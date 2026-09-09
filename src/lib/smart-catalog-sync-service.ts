@@ -75,7 +75,7 @@ type PreviewRow = {
   row_number: number;
   action: MatchOutcome["action"];
   confidence_score: number;
-  raw_data: Record<string, string>;
+  raw_data: Record<string, unknown>;
   normalized_data: Record<string, unknown>;
   detected_match_rule?: string | null;
   error_message?: string | null;
@@ -565,6 +565,26 @@ function requireClientRepo<T = unknown>(client: unknown, key: string, context: s
     throw new Error(`Finance module is unavailable in current schema/client: missing ${key} for ${context}.`);
   }
   return repo;
+}
+
+function parseFinancialSourceRowsData(input: unknown): GroupedFinancialSourceRow[] {
+  if (!Array.isArray(input)) return [];
+
+  return input
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const source = item as Record<string, unknown>;
+      const amount = Number(numberFromLoose(source.amount as string | number | null | undefined).toFixed(2));
+      if (!amount) return null;
+
+      return {
+        rowNumber: Math.max(1, Math.trunc(numberFromLoose(source.rowNumber as string | number | null | undefined))),
+        platformName: String(source.platformName ?? "").trim() || "Без площадки",
+        title: String(source.title ?? "").trim() || null,
+        amount
+      } satisfies GroupedFinancialSourceRow;
+    })
+    .filter((item): item is GroupedFinancialSourceRow => Boolean(item));
 }
 
 async function mapWithConcurrency<TInput, TOutput>(
@@ -1408,9 +1428,29 @@ export async function previewCatalogImport(params: {
 }
 
 type GroupedFinancialPreviewInput = {
-  raw: Record<string, string>;
+  raw: Record<string, unknown>;
   normalized: NormalizedRow;
 };
+
+type GroupedFinancialSourceRow = {
+  rowNumber: number;
+  platformName: string;
+  title: string | null;
+  amount: number;
+};
+
+function buildGroupedFinancialSourceRow(
+  rowNumber: number,
+  normalized: NormalizedRow,
+  amount: number
+): GroupedFinancialSourceRow {
+  return {
+    rowNumber,
+    platformName: normalized.platform?.trim() || "Без площадки",
+    title: normalized.title?.trim() || null,
+    amount: Number(amount.toFixed(2))
+  };
+}
 
 function buildGroupedFinancialPreviewInputs(
   rows: Array<Record<string, string>>,
@@ -1428,6 +1468,7 @@ function buildGroupedFinancialPreviewInputs(
       platforms: string[];
       releaseDates: Date[];
       endDates: Date[];
+      sourceRows: GroupedFinancialSourceRow[];
       sample: NormalizedRow;
     }
   >();
@@ -1437,10 +1478,17 @@ function buildGroupedFinancialPreviewInputs(
     const raw = rows[index];
     const normalized = normalizeRow(raw, detectedColumns, index + 1);
     const grossAmount = resolveFinancialNetAmount(normalized as Record<string, unknown>);
+    const sourceRow = buildGroupedFinancialSourceRow(index + 1, normalized, grossAmount);
     const upc = normalizeAnalyticsUpc(normalized.upc ?? "");
 
     if (!upc) {
-      previewInputs.push({ raw, normalized });
+      previewInputs.push({
+        raw: {
+          ...raw,
+          SourceRowsData: [sourceRow]
+        },
+        normalized
+      });
       continue;
     }
 
@@ -1449,6 +1497,7 @@ function buildGroupedFinancialPreviewInputs(
       existing.rowNumbers.push(index + 1);
       existing.rowsCount += 1;
       existing.grossAmount = Number((existing.grossAmount + grossAmount).toFixed(2));
+      existing.sourceRows.push(sourceRow);
       if (normalized.title?.trim()) existing.titles.push(normalized.title.trim());
       if (normalized.platform?.trim()) existing.platforms.push(normalized.platform.trim());
       const releaseDate = parseDateLoose(normalized.release_date ?? null);
@@ -1471,6 +1520,7 @@ function buildGroupedFinancialPreviewInputs(
       platforms: normalized.platform?.trim() ? [normalized.platform.trim()] : [],
       releaseDates: releaseDate ? [releaseDate] : [],
       endDates: endDate ? [endDate] : [],
+      sourceRows: [sourceRow],
       sample: normalized
     });
   }
@@ -1509,6 +1559,7 @@ function buildGroupedFinancialPreviewInputs(
           UPC: group.upc,
           Rows: String(group.rowsCount),
           SourceRows: group.rowNumbers.join(", "),
+          SourceRowsData: group.sourceRows,
           Title: uniqueTitles.join(" / ") || normalized.title || "",
           Platform: normalized.platform || ""
         },
@@ -1965,6 +2016,7 @@ export async function applyFinancialImport(params: {
       commissionRate: number;
       netAmount: number;
       sourceRowsCount: number;
+      sourceRows: GroupedFinancialSourceRow[];
     }>;
   } = {
     previousBalances: {},
@@ -2101,7 +2153,9 @@ export async function applyFinancialImport(params: {
       applyContext.currentBalances.set(row.user_id, nextBalance);
 
       const upc = typeof normalized.upc === "string" ? normalized.upc : null;
-      const sourceRowsCount = Math.max(1, Math.trunc(numberFromLoose((row.raw_data as Record<string, unknown> | null)?.Rows)));
+      const rawData = row.raw_data as Record<string, unknown> | null;
+      const sourceRows = parseFinancialSourceRowsData(rawData?.SourceRowsData);
+      const sourceRowsCount = Math.max(1, Math.trunc(numberFromLoose(rawData?.Rows as string | number | null | undefined)));
 
       const royaltyTransaction = await royaltyTransactionsRepo.create({
         data: {
@@ -2121,7 +2175,8 @@ export async function applyFinancialImport(params: {
             quantity: numberFromLoose(normalized.quantity),
             upc,
             sourceRowsCount,
-            sourceRows: (row.raw_data as Record<string, unknown> | null)?.SourceRows ?? null
+            sourceRows: rawData?.SourceRows ?? null,
+            sourceRowsData: sourceRows
           }
         }
       });
@@ -2167,7 +2222,8 @@ export async function applyFinancialImport(params: {
               commissionRate,
               netAmount
             }
-          }
+          },
+          select: { id: true }
         });
         state.transactionIds.push(txRecord.id);
       }
@@ -2225,7 +2281,8 @@ export async function applyFinancialImport(params: {
         commissionAmount,
         commissionRate,
         netAmount,
-        sourceRowsCount
+        sourceRowsCount,
+        sourceRows
       });
 
       const aggregate = userAggregates.get(row.user_id);
@@ -2249,13 +2306,38 @@ export async function applyFinancialImport(params: {
 
       const reportItems: UserReportLineItem[] = state.allocations
         .filter((allocation) => allocation.userId === userId)
-        .map((allocation, index) => ({
-          id: `${allocation.rowId}:${index + 1}`,
-          platformName: allocation.platformName?.trim() || "Без площадки",
-          upc: allocation.upc?.trim() || "",
-          releaseTitle: allocation.releaseTitle?.trim() || "Без названия",
-          amount: Number(allocation.netAmount.toFixed(2))
-        }));
+        .flatMap((allocation, index) => {
+          if (allocation.sourceRows.length === 0) {
+            return [{
+              id: `${allocation.rowId}:${index + 1}`,
+              platformName: allocation.platformName?.trim() || "Без площадки",
+              upc: allocation.upc?.trim() || "",
+              releaseTitle: allocation.releaseTitle?.trim() || "Без названия",
+              amount: Number(allocation.netAmount.toFixed(2))
+            }];
+          }
+
+          const sourceGrossTotal = allocation.sourceRows.reduce((sum, sourceRow) => sum + sourceRow.amount, 0);
+          const netRatio = sourceGrossTotal > 0 ? allocation.netAmount / sourceGrossTotal : 0;
+          let allocatedNet = 0;
+
+          return allocation.sourceRows
+            .map((sourceRow, sourceIndex) => {
+              const amount = sourceIndex === allocation.sourceRows.length - 1
+                ? Number((allocation.netAmount - allocatedNet).toFixed(2))
+                : Number((sourceRow.amount * netRatio).toFixed(2));
+              allocatedNet = Number((allocatedNet + amount).toFixed(2));
+
+              return {
+                id: `${allocation.rowId}:${sourceRow.rowNumber || sourceIndex + 1}`,
+                platformName: sourceRow.platformName,
+                upc: allocation.upc?.trim() || "",
+                releaseTitle: allocation.releaseTitle?.trim() || sourceRow.title || "Без названия",
+                amount
+              };
+            })
+            .filter((item) => item.amount !== 0);
+        });
 
       const reportId = randomUUID();
       let persistedReportId = reportId;
@@ -2302,7 +2384,8 @@ export async function applyFinancialImport(params: {
               adminComment: null,
               items: reportItems
             })
-          }
+          },
+          select: { id: true }
         });
         state.transactionIds.push(payloadTx.id);
       }

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { listUserReports } from "@/lib/report-service";
+import { getCurrentPayoutWindowState, type PayoutWindowState } from "@/lib/payout-schedule";
 
 export interface FinanceTransactionView {
   id: string;
@@ -27,6 +28,7 @@ export interface FinanceDashboardViewData {
   deductionsAndCommission: number;
   pendingReportsCount: number;
   minimumPayoutAmount: number;
+  payoutWindow: PayoutWindowState;
 }
 
 function getRepo<T = Record<string, unknown>>(client: unknown, name: string): T | null {
@@ -106,8 +108,9 @@ function buildRecentMonthBuckets(months: number): Array<{
 }
 
 export function readMinimumPayoutAmount(): number {
-  const fromEnv = Number(process.env.FINANCE_MIN_PAYOUT_AMOUNT ?? "100");
-  return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : 100;
+  const fallback = 10000;
+  const fromEnv = Number(process.env.FINANCE_MIN_PAYOUT_AMOUNT ?? fallback);
+  return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : fallback;
 }
 
 export async function getFinanceDashboardViewData(
@@ -130,7 +133,10 @@ export async function getFinanceDashboardViewData(
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
   const reportsRaw = await listUserReports(prisma, userId, { strict: true });
-  const totals = await getUserBalanceTotals(prisma, userId);
+  const [totals, payoutWindow] = await Promise.all([
+    getUserBalanceTotals(prisma, userId),
+    getCurrentPayoutWindowState(prisma)
+  ]);
 
   if (!balanceTransactionsRepo || !royaltyTransactionsRepo?.aggregate) {
     throw new Error("Финансовые данные временно недоступны.");
@@ -280,6 +286,7 @@ export async function getFinanceDashboardViewData(
     accrualSeries,
     deductionsAndCommission,
     pendingReportsCount,
-    minimumPayoutAmount: readMinimumPayoutAmount()
+    minimumPayoutAmount: readMinimumPayoutAmount(),
+    payoutWindow
   };
 }

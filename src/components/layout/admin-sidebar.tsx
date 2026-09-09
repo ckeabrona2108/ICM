@@ -37,6 +37,7 @@ const items = [
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
   { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard },
+  { href: "/admin/payout-schedule", label: "Периоды выплат", icon: CreditCard },
   { href: "/admin/playlists", label: "Плейлисты", icon: Music2 }
 ];
 

@@ -49,6 +49,26 @@ test("validatePayoutRequest blocks payout when report is not agreed", () => {
   assert.ok(issues.some((issue) => issue.field === "reportStatuses"));
 });
 
+test("validatePayoutRequest blocks payout outside payout window", () => {
+  const issues = validatePayoutRequest(validRequest(), {
+    ...validContext(),
+    payoutWindowOpen: false,
+    payoutWindowMessage: "Следующее окно выплат: 1-7 октября 2026."
+  });
+
+  assert.ok(issues.some((issue) => issue.field === "payoutWindow"));
+});
+
+test("validatePayoutRequest blocks duplicate active payout request", () => {
+  const issues = validatePayoutRequest(validRequest(), {
+    ...validContext(),
+    payoutWindowOpen: true,
+    activePayoutRequestsCount: 1
+  });
+
+  assert.ok(issues.some((issue) => issue.field === "activePayoutRequests"));
+});
+
 test("validatePayoutRequest validates minimum amount", () => {
   const payload = validRequest();
   payload.amount = 50;

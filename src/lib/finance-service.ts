@@ -491,7 +491,8 @@ export async function topUpUserBalanceByAdmin(params: {
             status: TX_STATUS_COMPLETED,
             description: params.comment?.trim() || "Пополнение баланса администратором",
             processedAt: now
-          }
+          },
+          select: { id: true }
         });
     } catch (error) {
       if (!isPrismaTableMissingError(error, "transaction")) {
@@ -602,7 +603,8 @@ export async function adjustUserBalanceByAdmin(params: {
             status: TX_STATUS_COMPLETED,
             description: normalizedComment,
             processedAt: now
-          }
+          },
+          select: { id: true }
         });
       } catch (error) {
         if (!isPrismaTableMissingError(error, "transaction")) {
@@ -620,7 +622,8 @@ export async function adjustUserBalanceByAdmin(params: {
             status: TX_STATUS_COMPLETED,
             description: normalizedComment,
             processedAt: now
-          }
+          },
+          select: { id: true }
         });
       } catch (error) {
         if (!isPrismaTableMissingError(error, "transaction")) {

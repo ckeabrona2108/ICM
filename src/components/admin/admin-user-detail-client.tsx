@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import * as React from "react";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 
 import { StatusBadge } from "@/components/releases/status-badge";
 import { UserAvatar } from "@/components/user/user-avatar";
@@ -123,6 +123,7 @@ export function AdminUserDetailClient({
   const [error, setError] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
   const [resendingReportId, setResendingReportId] = React.useState<string | null>(null);
+  const [deletingReportId, setDeletingReportId] = React.useState<string | null>(null);
 
   const [releaseStatusFilter, setReleaseStatusFilter] = React.useState<"" | ReleaseStatusFilterValue>("");
 
@@ -432,6 +433,40 @@ export function AdminUserDetailClient({
       );
     } finally {
       setResendingReportId(null);
+    }
+  }
+
+  async function deleteReport(report: UserReportItem) {
+    const confirmed = window.confirm(
+      `Удалить отчет "${report.quarterLabel}" у пользователя? Если отчет уже согласован, сумма ${formatRubCurrency(report.amount)} будет списана с баланса.`
+    );
+    if (!confirmed) return;
+
+    setDeletingReportId(report.id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/users/${profile.id}/reports/${report.id}`, {
+        method: "DELETE"
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Не удалось удалить отчет.");
+      }
+      if (editingReportId === report.id) {
+        resetReportForm();
+      }
+      setToast(payload?.message ?? "Отчет удален у пользователя.");
+      await reloadAll();
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : "Не удалось удалить отчет."
+      );
+    } finally {
+      setDeletingReportId(null);
     }
   }
 
@@ -875,6 +910,21 @@ export function AdminUserDetailClient({
                         {resendingReportId === report.id ? "Отправка..." : "Отправить повторно"}
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void deleteReport(report);
+                      }}
+                      disabled={deletingReportId === report.id}
+                      className="inline-flex items-center gap-1 rounded-md border border-rose-400/25 bg-rose-500/10 px-2.5 py-1 text-[12px] text-rose-100 hover:bg-rose-500/15 disabled:opacity-50"
+                    >
+                      {deletingReportId === report.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                      Удалить
+                    </button>
                   </div>
                 </div>
                 {report.userComment ? (

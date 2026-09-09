@@ -14,6 +14,7 @@ import {
 import { adjustUserBalanceByAdmin, topUpUserBalanceByAdmin } from "@/lib/finance-service";
 import {
   createUserReportByAdmin,
+  deleteUserReportByAdmin,
   listUserReports,
   resendUserReportToUser,
   updateUserReportByAdmin,
@@ -206,6 +207,15 @@ export async function adminResendUserFinanceReport(params: {
     reportId: params.reportId,
     userId: params.userId
   });
+}
+
+export async function adminDeleteUserFinanceReport(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  reportId: string;
+  userId: string;
+}) {
+  return deleteUserReportByAdmin(params);
 }
 
 export async function adminUpdateUserSubscription(params: {

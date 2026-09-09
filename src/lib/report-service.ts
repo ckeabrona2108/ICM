@@ -166,8 +166,8 @@ function sumLineItems(items: UserReportLineItem[]): number {
 function buildPlatformTotals(items: UserReportLineItem[]): UserReportPlatformTotal[] {
   const totals = new Map<string, number>();
   for (const item of items) {
-    const key = item.platformName || "Без площадки";
-    totals.set(key, roundAmount((totals.get(key) ?? 0) + item.amount));
+    const platformName = normalizeText(item.platformName, "Без площадки") || "Без площадки";
+    totals.set(platformName, roundAmount((totals.get(platformName) ?? 0) + item.amount));
   }
 
   return Array.from(totals.entries())
@@ -360,7 +360,8 @@ async function upsertReportPayloadRecord(
     try {
       await transactionRepo.update({
         where: { id: params.payloadRecordId },
-        data: transactionData
+        data: transactionData,
+        select: { id: true }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : "";
@@ -379,7 +380,8 @@ async function upsertReportPayloadRecord(
           id: randomUUID(),
           userId: params.userId,
           ...transactionData
-        }
+        },
+        select: { id: true }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : "";
@@ -388,6 +390,38 @@ async function upsertReportPayloadRecord(
       }
       throw error;
     }
+  }
+}
+
+async function hideReportPayloadRecord(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  payloadRecordId: string | null | undefined
+) {
+  if (!payloadRecordId) return;
+
+  const transactionRepo = getRepo<{
+    update?: (args: unknown) => Promise<unknown>;
+  }>(prisma, "transaction");
+  if (!transactionRepo?.update) return;
+
+  try {
+    await transactionRepo.update({
+      where: { id: payloadRecordId },
+      data: {
+        description: `${REPORT_PAYLOAD_DESCRIPTION} deleted`,
+        metadata: {
+          kind: `${REPORT_PAYLOAD_KIND}_deleted`,
+          deletedAt: new Date().toISOString()
+        }
+      },
+      select: { id: true }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (message.includes("transaction") || message.includes("does not exist") || message.includes("unknown")) {
+      return;
+    }
+    throw error;
   }
 }
 
@@ -774,7 +808,8 @@ export async function updateUserReportByAdmin(params: {
           status: params.status,
           agreedAt,
           updatedAt: new Date()
-        }
+        },
+        select: { id: true }
       });
 
       const payload = buildStoredUserReportPayload({
@@ -879,6 +914,87 @@ export async function updateUserReportByAdmin(params: {
   return { ok: true as const };
 }
 
+export async function deleteUserReportByAdmin(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  reportId: string;
+  userId: string;
+}) {
+  const existing = await getExistingReportWithPayload(params.prisma, {
+    reportId: params.reportId,
+    userId: params.userId
+  });
+  if (!existing) {
+    return { ok: false as const, error: "Report not found" };
+  }
+
+  const amount = existing.report ? toNumber(existing.report.amount) : roundAmount(existing.payloadRecord?.payload.amount ?? 0);
+  const lifecycleState = existing.report
+    ? resolveLifecycleState(existing.report.status, existing.payloadRecord?.payload ?? null)
+    : existing.payloadRecord?.payload.workflowState ?? "ready_to_confirm";
+  const balanceDelta = lifecycleState === "agreed" ? -amount : 0;
+
+  try {
+    await params.prisma.$transaction(async (tx) => {
+      if (existing.report) {
+        await tx.financeReport.delete({
+          where: { id: params.reportId },
+          select: { id: true }
+        });
+      }
+
+      await hideReportPayloadRecord(tx, existing.payloadRecord?.id ?? null);
+      await applyUserBalanceDelta(tx, params.userId, balanceDelta);
+
+      await createAdminLog(tx, {
+        adminId: params.adminId,
+        action: "USER_FINANCE_REPORT_DELETED",
+        targetType: "FinanceReport",
+        targetId: params.reportId,
+        oldValue: {
+          amount,
+          lifecycleState,
+          userId: params.userId
+        },
+        newValue: {
+          hiddenFromUser: true,
+          balanceDelta
+        },
+        comment: null
+      });
+    });
+  } catch (error) {
+    if (!isPrismaTableMissingError(error, "financeReport")) {
+      throw error;
+    }
+
+    await params.prisma.$transaction(async (tx) => {
+      await hideReportPayloadRecord(tx, existing.payloadRecord?.id ?? null);
+      await applyUserBalanceDelta(tx, params.userId, balanceDelta);
+
+      await createAdminLog(tx, {
+        adminId: params.adminId,
+        action: "USER_FINANCE_REPORT_DELETED",
+        targetType: "FinanceReport",
+        targetId: params.reportId,
+        oldValue: {
+          amount,
+          lifecycleState,
+          userId: params.userId,
+          storage: "payload_only"
+        },
+        newValue: {
+          hiddenFromUser: true,
+          balanceDelta
+        },
+        comment: null
+      });
+    });
+  }
+
+  return { ok: true as const };
+}
+
 export async function markUserReportAsRejected(params: {
   prisma: PrismaClient;
   reportId: string;
@@ -920,7 +1036,8 @@ export async function markUserReportAsRejected(params: {
         where: { id: params.reportId },
         data: {
           updatedAt: new Date()
-        }
+        },
+        select: { id: true }
       });
 
       await upsertReportPayloadRecord(tx, {
@@ -993,7 +1110,8 @@ export async function markUserReportAsAgreed(params: {
           status: FinanceReportStatus.AGREED,
           agreedAt: now,
           updatedAt: now
-        }
+        },
+        select: { id: true }
       });
 
       const payload = buildStoredUserReportPayload({
@@ -1087,7 +1205,8 @@ export async function resendUserReportToUser(params: {
             status: FinanceReportStatus.READY_TO_CONFIRM,
             agreedAt: null,
             updatedAt: new Date()
-          }
+          },
+          select: { id: true }
         });
       }
 

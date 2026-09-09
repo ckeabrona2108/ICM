@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Coins, Percent, Send, Wallet } from "lucide-react";
 
@@ -19,6 +20,7 @@ import type {
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { FinanceReportStatus } from "@/lib/finance-policy";
 import type { FinanceTransactionView } from "@/lib/finance-dashboard-server";
+import type { PayoutWindowState } from "@/lib/payout-schedule";
 import { computeAvailableToWithdraw } from "@/lib/payouts";
 
 const RevenueChart = dynamic(
@@ -35,20 +37,6 @@ const financeTabs = ["Отчеты", "Запрос выплаты", "Начис�
 type FinanceTab = (typeof financeTabs)[number];
 const transactionFilters = ["Все", "Начисления", "Списания", "Выплаты"] as const;
 type TransactionFilter = (typeof transactionFilters)[number];
-
-function formatReportPeriod(periodStart: string, periodEnd: string): string {
-  const start = new Date(periodStart);
-  const end = new Date(periodEnd);
-  const startMonth = start.toLocaleString("ru-RU", { month: "short", timeZone: "UTC" }).replace(".", "");
-  const endMonth = end.toLocaleString("ru-RU", { month: "short", timeZone: "UTC" }).replace(".", "");
-  const year = end.getUTCFullYear();
-
-  if (startMonth === endMonth) {
-    return `${startMonth} ${year}`;
-  }
-
-  return `${startMonth}–${endMonth} ${year}`;
-}
 
 function reportStatusLabel(status: FinanceReportStatus): string {
   if (status === "agreed") return "Согласован";
@@ -80,7 +68,8 @@ export function FinancePageClient({
   initialPendingPayout,
   initialAccruals,
   initialAccrualSeries,
-  minimumPayoutAmount
+  minimumPayoutAmount,
+  payoutWindow
 }: {
   initialReports: FinanceReportClientItem[];
   initialTransactions: FinanceTransactionView[];
@@ -89,6 +78,7 @@ export function FinancePageClient({
   initialAccruals: number;
   initialAccrualSeries: Array<{ period: string; amount: number }>;
   minimumPayoutAmount: number;
+  payoutWindow: PayoutWindowState;
 }) {
   type PayoutMethodUi = "bank_transfer" | "paypal_soon" | "usdt_soon" | "btc_soon";
   const fieldClass =
@@ -136,7 +126,7 @@ export function FinancePageClient({
   });
 
   const canRequestPayout =
-    availableToWithdraw >= minimumPayoutAmount && pendingReportsCount === 0;
+    availableToWithdraw >= minimumPayoutAmount && pendingReportsCount === 0 && payoutWindow.isOpen;
 
   const filteredTransactions = initialTransactions.filter((transaction) => {
     if (transactionFilter === "Все") return true;
@@ -323,8 +313,8 @@ export function FinancePageClient({
             <div className="mt-2 space-y-2 text-[15px] font-medium leading-relaxed text-white/75">
               <p>Выплата доступна только по согласованным отчетам.</p>
               <p>
-                Минимальная сумма выплаты: RUB 2.000. Проверьте инструкцию менеджера по реквизитам
-                и способу перечисления.
+                Минимальная сумма выплаты: {formatCurrency(minimumPayoutAmount, "RUB")}. Проверьте
+                инструкцию менеджера по реквизитам и способу перечисления.
               </p>
               {pendingReportsCount > 0 ? (
                 <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-amber-100/95">
@@ -332,6 +322,16 @@ export function FinancePageClient({
                   временно недоступна.
                 </p>
               ) : null}
+              <p
+                className={cn(
+                  "rounded-xl border px-3.5 py-2.5",
+                  payoutWindow.isOpen
+                    ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100/95"
+                    : "border-sky-400/25 bg-sky-400/10 text-sky-100/95"
+                )}
+              >
+                {payoutWindow.message}
+              </p>
             </div>
           </div>
         </div>
@@ -405,11 +405,6 @@ export function FinancePageClient({
                               {reportStatusLabel(report.status)}
                             </span>
                           </div>
-                          <p className="mt-2 text-[14px] text-white/62">
-                            {formatReportPeriod(report.periodStart, report.periodEnd)} ·{" "}
-                            {new Date(report.periodStart).toLocaleDateString("ru-RU")} -{" "}
-                            {new Date(report.periodEnd).toLocaleDateString("ru-RU")}
-                          </p>
                           <p className="mt-3 text-[22px] font-semibold text-white">
                             {formatCurrency(report.amount, "RUB")}
                           </p>
@@ -523,6 +518,11 @@ export function FinancePageClient({
                 {payoutMethod !== "bank_transfer" ? (
                   <p className="text-[13px] font-semibold text-white/60">
                     Выбранный способ пока недоступен.
+                  </p>
+                ) : null}
+                {!payoutWindow.isOpen ? (
+                  <p className="text-[13px] font-semibold text-sky-200">
+                    {payoutWindow.message}
                   </p>
                 ) : null}
 
@@ -798,10 +798,13 @@ function ReportDetailsModal({
   busy: null | "agree" | "reject";
 }) {
   const visibleAdminComment = getVisibleReportComment(report.adminComment);
+  if (typeof document === "undefined") {
+    return null;
+  }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#05060b]/80 px-4 py-6 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[28px] border border-white/10 bg-[#11131a] p-5 shadow-[0_30px_90px_-42px_rgba(0,0,0,0.95)] sm:p-6">
+  return createPortal(
+    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-[#05060b]/80 px-4 py-4 backdrop-blur-sm">
+      <div className="max-h-[calc(100dvh-32px)] w-full max-w-4xl overflow-y-auto rounded-[28px] border border-white/10 bg-[#11131a] p-5 shadow-[0_30px_90px_-42px_rgba(0,0,0,0.95)] sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -819,11 +822,6 @@ function ReportDetailsModal({
                 {reportStatusLabel(report.status)}
               </span>
             </div>
-            <p className="mt-2 text-[14px] text-white/58">
-              {formatReportPeriod(report.periodStart, report.periodEnd)} ·{" "}
-              {new Date(report.periodStart).toLocaleDateString("ru-RU")} -{" "}
-              {new Date(report.periodEnd).toLocaleDateString("ru-RU")}
-            </p>
           </div>
           <button
             type="button"
@@ -933,6 +931,7 @@ function ReportDetailsModal({
           </div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -1,3 +1,5 @@
+import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
+
 export interface AdminPayoutUserInfo {
   id: string;
   name: string;
@@ -23,6 +25,8 @@ export interface AdminPayoutDetails {
   taxId: string;
   paypalEmail: string;
   comment: string | null;
+  payoutWindowLabel: string | null;
+  payoutPeriodLabel: string | null;
 }
 
 export interface ParsedPayoutRequisites {
@@ -31,6 +35,8 @@ export interface ParsedPayoutRequisites {
   bankName: string;
   taxId: string;
   paypalEmail: string;
+  payoutWindowLabel: string | null;
+  payoutPeriodLabel: string | null;
 }
 
 export function parsePayoutRequisites(
@@ -42,13 +48,18 @@ export function parsePayoutRequisites(
   const bankName = String(source.bankName ?? "").trim();
   const taxId = String(source.taxId ?? "").trim();
   const paypalEmail = String(source.paypalEmail ?? "").trim();
+  const payoutWindow = source.payoutWindow && typeof source.payoutWindow === "object"
+    ? source.payoutWindow as Record<string, unknown>
+    : null;
 
   return {
     recipientName,
     accountDetails,
     bankName,
     taxId,
-    paypalEmail
+    paypalEmail,
+    payoutWindowLabel: payoutWindow ? String(payoutWindow.label ?? "").trim() || null : null,
+    payoutPeriodLabel: payoutWindow ? String(payoutWindow.periodLabel ?? "").trim() || null : null
   };
 }
 
@@ -68,20 +79,74 @@ export function normalizePayoutStatus(
   return mapConfirmedToPayoutStatus(confirmed);
 }
 
-export async function listAdminPayoutRequests(prisma: any, limit = 200): Promise<AdminPayoutDetails[]> {
-  const payouts = await prisma.payouts.findMany({
-    orderBy: { createdAt: "desc" },
-    take: limit,
-    include: {
-      user: {
-        select: {
-          id: true,
-          name: true,
-          email: true
+const MODERN_PAYOUT_COLUMNS = [
+  "payouts.updatedAt",
+  "updatedAt",
+  "payouts.processedAt",
+  "processedAt",
+  "payouts.status",
+  "status",
+  "payouts.method",
+  "method",
+  "payouts.requisites",
+  "requisites"
+];
+
+async function findAdminPayouts(prisma: any, limit: number) {
+  try {
+    return await prisma.payouts.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        confirmed: true,
+        createdAt: true,
+        updatedAt: true,
+        processedAt: true,
+        method: true,
+        requisites: true,
+        recieverName: true,
+        accountNumber: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
         }
       }
+    });
+  } catch (error) {
+    if (!isAnyPrismaColumnMissingError(error, MODERN_PAYOUT_COLUMNS)) {
+      throw error;
     }
-  });
+
+    return prisma.payouts.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: {
+        id: true,
+        amount: true,
+        confirmed: true,
+        createdAt: true,
+        recieverName: true,
+        accountNumber: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+  }
+}
+
+export async function listAdminPayoutRequests(prisma: any, limit = 200): Promise<AdminPayoutDetails[]> {
+  const payouts = await findAdminPayouts(prisma, limit);
 
   return payouts.map((payout: any) => ({
     ...parsePayoutRequisites(

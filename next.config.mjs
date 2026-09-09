@@ -29,6 +29,7 @@ if (configuredDistDir && (
 
 const nextConfig = {
   distDir: configuredDistDir || ".next",
+  output: "standalone",
   async headers() {
     return [
       {

@@ -1,7 +1,7 @@
-ALTER TABLE "icecream"."user"
+ALTER TABLE "icecream"."User"
   ADD COLUMN IF NOT EXISTS "aiPendingTokenBalance" INTEGER NOT NULL DEFAULT 0;
 
-ALTER TABLE "icecream"."orders"
+ALTER TABLE IF EXISTS "icecream"."orders"
   ADD COLUMN IF NOT EXISTS "payment_status" TEXT NOT NULL DEFAULT 'pending_payment',
   ADD COLUMN IF NOT EXISTS "completed_at" TIMESTAMP(6);
 
@@ -21,7 +21,7 @@ ON CONFLICT ("id") DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS "icecream"."ai_user_notifications" (
   "id" TEXT NOT NULL,
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "kind" TEXT NOT NULL DEFAULT 'info',
   "title" TEXT NOT NULL,
   "message" TEXT NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ai_user_notifications" (
   "read_at" TIMESTAMP(6),
   CONSTRAINT "ai_user_notifications_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "ai_user_notifications_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 

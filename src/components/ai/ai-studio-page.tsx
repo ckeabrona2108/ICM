@@ -36,6 +36,7 @@ import type { AiChatThreadPayload as AiStudioChatThreadPayload } from "@/lib/ai-
 import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { DashboardEmptyState } from "@/components/layout/dashboard-shell";
+import { TripledIdentity } from "@/components/ui/tripled-social";
 import { useCurrentUser } from "@/components/user/user-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1212,8 +1213,6 @@ export function AiStudioPage({
             />
           ) : null}
 
-          {notifications.length > 0 ? <AiStudioNotificationsSection notifications={notifications} /> : null}
-
           {activeTab === "chat" ? (
             shouldShowPreparingState ? (
               <AiStudioPreparingState pendingTokens={pendingAiTokenBalanceValue} onRefresh={() => router.refresh()} />
@@ -2187,8 +2186,8 @@ function AiStudioSidebar({
   onSelectChatThread: (threadId: string) => void;
 }) {
   return (
-    <aside className="perf-paint-contain h-fit rounded-[28px] border border-white/[0.08] bg-[#10131a]/96 p-4 shadow-[0_14px_40px_-30px_rgba(11,14,24,0.82)] xl:sticky xl:top-4">
-      <div className="mb-5 rounded-[24px] border border-white/[0.08] bg-white/[0.03] px-4 py-4">
+    <aside className="perf-paint-contain h-fit rounded-[32px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(16,19,26,0.98),rgba(10,13,18,0.98))] p-4 shadow-[0_26px_80px_-46px_rgba(0,0,0,0.82)] xl:sticky xl:top-4">
+      <div className="mb-5 rounded-[26px] border border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(194,160,255,0.16),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-4 py-4">
         <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/38">AI Studio</div>
         <div className="mt-1 text-[18px] font-semibold text-white">Инструменты</div>
         <div className="mt-1 text-[13px] text-white/50">Чаты, изображения, видео, аудио и архив.</div>
@@ -2203,9 +2202,9 @@ function AiStudioSidebar({
               key={tab.id}
               href={`/dashboard/ai-studio/${tab.id}`}
               className={cn(
-                "flex items-center gap-3 rounded-[20px] border px-4 py-3 transition-[background-color,border-color,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+                "flex items-center gap-3 rounded-[22px] border px-4 py-3 transition-[background-color,border-color,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
                 isActive
-                  ? "border-[#7b3df5]/35 bg-[#171b26] text-white shadow-[0_18px_32px_-24px_rgba(123,61,245,0.34)]"
+                  ? "border-[#d8c5ff]/24 bg-[radial-gradient(circle_at_top_left,rgba(201,171,255,0.16),transparent_40%),linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] text-white shadow-[0_22px_36px_-24px_rgba(123,61,245,0.34)]"
                   : "border-white/[0.08] bg-white/[0.03] text-white/72 hover:-translate-y-0.5 hover:border-white/[0.14] hover:bg-white/[0.05]"
               )}
             >
@@ -2224,7 +2223,7 @@ function AiStudioSidebar({
       </div>
 
       {activeTab === "chat" ? (
-        <div className="mt-5 rounded-[24px] border border-white/[0.08] bg-white/[0.03] p-3">
+        <div className="mt-5 rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-3">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/38">Диалоги</div>
@@ -2254,7 +2253,7 @@ function AiStudioSidebar({
                 >
                   <div className="text-[13px] font-medium text-white line-clamp-2">{thread.title}</div>
                   <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/44">
-                    <span>{thread.modelCode}</span>
+                    <span className="rounded-full border border-white/8 bg-white/[0.04] px-2 py-1">{thread.modelCode}</span>
                     <span>{thread.lastMessageAt ? formatDate(thread.lastMessageAt) : formatDate(thread.createdAt)}</span>
                   </div>
                 </button>
@@ -2303,8 +2302,8 @@ function ChatWorkspace({
   disabledHint?: string | null;
 }) {
   return (
-    <section className="perf-content-auto perf-paint-contain flex min-h-[calc(100vh-260px)] flex-col rounded-[28px] border border-white/[0.08] bg-[#10131a]/96 shadow-[0_14px_40px_-30px_rgba(11,14,24,0.82)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
+    <section className="perf-content-auto perf-paint-contain flex min-h-[calc(100vh-260px)] flex-col overflow-hidden rounded-[32px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(16,19,26,0.98),rgba(10,13,18,0.98))] shadow-[0_26px_80px_-46px_rgba(0,0,0,0.82)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(194,160,255,0.14),transparent_34%)] px-5 py-4">
         <div>
           <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/38">Чаты</div>
           <h2 className="mt-1 text-[20px] font-semibold text-white">{title}</h2>
@@ -2325,20 +2324,23 @@ function ChatWorkspace({
         </div>
       </div>
 
-      <div className="perf-scroll-shell flex-1 overflow-y-auto px-5 py-5">
+      <div className="perf-scroll-shell flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_25%)] px-5 py-5">
         {messages.length > 0 ? (
           <div className="space-y-4">
             {messages.map((message) => (
               <div key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
-                <div
-                  className={cn(
-                    "max-w-[82%] rounded-[24px] border px-4 py-3 text-[14px] leading-6 shadow-[0_20px_50px_-38px_rgba(0,0,0,0.85)]",
-                    message.role === "user"
-                      ? "border-[#7b3df5]/25 bg-[#7b3df5]/14 text-white"
-                      : "border-white/[0.08] bg-white/[0.04] text-white/88"
-                  )}
-                >
-                  {message.content}
+                <div className={cn("max-w-[84%] space-y-2", message.role === "user" ? "items-end" : "items-start")}>
+                  {message.role === "assistant" ? <TripledIdentity name="AI Studio" avatarUrl={null} meta={modelLabel} compact /> : null}
+                  <div
+                    className={cn(
+                      "rounded-[26px] border px-4 py-3 text-[14px] leading-6 shadow-[0_20px_50px_-38px_rgba(0,0,0,0.85)]",
+                      message.role === "user"
+                        ? "border-[#d8c5ff]/24 bg-[linear-gradient(180deg,rgba(201,171,255,0.18),rgba(131,84,255,0.1))] text-white"
+                        : "border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] text-white/88"
+                    )}
+                  >
+                    {message.content}
+                  </div>
                 </div>
               </div>
             ))}
@@ -2359,7 +2361,7 @@ function ChatWorkspace({
       </div>
 
       <div className="border-t border-white/[0.08] p-4">
-        <div className="space-y-3 rounded-[24px] border border-white/[0.08] bg-white/[0.03] p-4">
+        <div className="space-y-3 rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="text-[13px] font-medium text-white/54">Выбранная модель: {modelLabel}</div>
             <div className="text-[13px] text-white/54">

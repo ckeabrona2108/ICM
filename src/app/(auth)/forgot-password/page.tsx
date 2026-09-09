@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const inputClassName =
+  "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -72,7 +75,7 @@ export default function ForgotPasswordPage() {
         Укажите email аккаунта. Мы отправим ссылку для сброса пароля.
       </p>
 
-      <form className="mt-10 space-y-5" onSubmit={onSubmit}>
+      <form className="mt-10 space-y-5" onSubmit={onSubmit} noValidate>
         <div className="space-y-2">
           <Label
             htmlFor="email"
@@ -83,10 +86,11 @@ export default function ForgotPasswordPage() {
           <Input
             id="email"
             type="email"
+            autoComplete="email"
             placeholder="you@domain.com"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+            className={inputClassName}
           />
         </div>
 
@@ -127,7 +131,7 @@ export default function ForgotPasswordPage() {
       </form>
 
       <p className="mt-8 text-center text-[14px] text-white/55">
-        Вспомнили пароль?{" "}
+        Вспомнили пароль?{' '}
         <Link
           href="/login"
           className="font-medium text-white underline-offset-4 transition-colors hover:underline"

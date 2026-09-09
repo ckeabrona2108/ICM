@@ -50,3 +50,50 @@ test("resolveTrackAudioAsset keeps normalized audio url when probes cannot confi
     fetchMock.mock.restore();
   }
 });
+
+test("resolveTrackAudioAsset can require a confirmed file for public playback", async () => {
+  const fetchMock = mock.method(globalThis, "fetch", async () => new Response("", { status: 404 }));
+
+  try {
+    const asset = await resolveTrackAudioAsset({
+      trackId: "track-3",
+      track: "wav",
+      audioUrl: null,
+      audioFile: null,
+      audioUpload: null,
+      audio: null,
+      releaseId: "rel_3",
+      requireReachable: true
+    });
+
+    assert.equal(asset.url, null);
+    assert.equal(asset.source, "not_found");
+  } finally {
+    fetchMock.mock.restore();
+  }
+});
+
+test("resolveTrackAudioAsset preserves an external audio URL before its proxy fallback", async () => {
+  const externalUrl = "https://media.example.com/tracks/track-4.mp3";
+  const fetchMock = mock.method(globalThis, "fetch", async (input: RequestInfo | URL) =>
+    new Response("", { status: String(input) === externalUrl ? 200 : 404 })
+  );
+
+  try {
+    const asset = await resolveTrackAudioAsset({
+      trackId: "track-4",
+      track: null,
+      audioUrl: { url: externalUrl },
+      audioFile: null,
+      audioUpload: null,
+      audio: null,
+      releaseId: "rel_4"
+    });
+
+    assert.equal(asset.url, externalUrl);
+    assert.equal(asset.candidateUrls[0], externalUrl);
+    assert.ok(asset.candidateUrls.includes("/api/uploads/object/tracks/track-4.mp3"));
+  } finally {
+    fetchMock.mock.restore();
+  }
+});

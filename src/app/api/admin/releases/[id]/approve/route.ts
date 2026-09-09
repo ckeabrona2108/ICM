@@ -62,6 +62,9 @@ export async function POST(
     );
   }
 
+  // Approval means the internal review is complete. Public release posts and
+  // follower notices are created only by a future trusted DSP confirmation.
+
   return NextResponse.json(
     {
       ok: true,

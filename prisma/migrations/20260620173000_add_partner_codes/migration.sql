@@ -7,12 +7,12 @@ CREATE TABLE "icecream"."partner_codes" (
   "maxUses" INTEGER,
   "usedCount" INTEGER NOT NULL DEFAULT 0,
   "expiresAt" TIMESTAMP(6),
-  "allowedUserId" UUID,
+  "allowedUserId" TEXT,
   "allowedEmailDomain" TEXT,
   "notes" TEXT,
   "createdAt" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "createdByAdminId" UUID,
+  "createdByAdminId" TEXT,
 
   CONSTRAINT "partner_codes_pkey" PRIMARY KEY ("id")
 );
@@ -20,8 +20,8 @@ CREATE TABLE "icecream"."partner_codes" (
 CREATE TABLE "icecream"."partner_code_usages" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "partnerCodeId" UUID NOT NULL,
-  "userId" UUID NOT NULL,
-  "releaseId" UUID NOT NULL,
+  "userId" TEXT NOT NULL,
+  "releaseId" TEXT NOT NULL,
   "codeSnapshot" TEXT NOT NULL,
   "createdAt" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -35,14 +35,14 @@ CREATE UNIQUE INDEX "partner_code_usages_partnerCodeId_releaseId_key"
 ALTER TABLE "icecream"."partner_codes"
   ADD CONSTRAINT "partner_codes_allowedUserId_user_id_fk"
   FOREIGN KEY ("allowedUserId")
-  REFERENCES "icecream"."user"("id")
+  REFERENCES "icecream"."User"("id")
   ON DELETE SET NULL
   ON UPDATE CASCADE;
 
 ALTER TABLE "icecream"."partner_codes"
   ADD CONSTRAINT "partner_codes_createdByAdminId_user_id_fk"
   FOREIGN KEY ("createdByAdminId")
-  REFERENCES "icecream"."user"("id")
+  REFERENCES "icecream"."User"("id")
   ON DELETE SET NULL
   ON UPDATE CASCADE;
 
@@ -56,13 +56,13 @@ ALTER TABLE "icecream"."partner_code_usages"
 ALTER TABLE "icecream"."partner_code_usages"
   ADD CONSTRAINT "partner_code_usages_releaseId_release_id_fk"
   FOREIGN KEY ("releaseId")
-  REFERENCES "icecream"."release"("id")
+  REFERENCES "icecream"."Release"("id")
   ON DELETE CASCADE
   ON UPDATE CASCADE;
 
 ALTER TABLE "icecream"."partner_code_usages"
   ADD CONSTRAINT "partner_code_usages_userId_user_id_fk"
   FOREIGN KEY ("userId")
-  REFERENCES "icecream"."user"("id")
+  REFERENCES "icecream"."User"("id")
   ON DELETE CASCADE
   ON UPDATE CASCADE;

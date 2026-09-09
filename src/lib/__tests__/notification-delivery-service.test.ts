@@ -27,5 +27,10 @@ test("notification delivery persists the event and can reset read state", async 
   });
 
   const update = (upsertArgs as { update?: { read_at?: Date | null } } | null)?.update;
+  const whereId = (upsertArgs as { where?: { id?: string } } | null)?.where?.id;
   assert.equal(update?.read_at, null);
+  assert.match(
+    whereId ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+  );
 });

@@ -24,6 +24,16 @@ function makePrismaStub() {
         if (!user) throw new Error("User not found");
         user.passwordHash = data.passwordHash;
         return user;
+      },
+      updateMany: async ({ where, data }: any) => {
+        let count = 0;
+        for (const user of users) {
+          if (user.id === where.id) {
+            user.passwordHash = data.passwordHash;
+            count += 1;
+          }
+        }
+        return { count };
       }
     },
     verificationToken: {
@@ -72,7 +82,9 @@ function makePrismaStub() {
     prisma: {
       user: {
         findUnique: async ({ where }: any) =>
-          users.find((item) => item.email === where.email) ?? null
+          users.find((item) => item.email === where.email) ?? null,
+        findFirst: async ({ where }: any) =>
+          users.find((item) => item.email.toLowerCase() === where.email.equals.toLowerCase()) ?? null
       },
       verificationToken: {
         findUnique: async ({ where }: any) =>

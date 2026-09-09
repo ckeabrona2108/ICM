@@ -5,11 +5,13 @@ import { authOptions } from "@/lib/auth";
 import { hasAiStudioAccess } from "@/lib/ai-studio";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { getUserContractStatus } from "@/lib/contract-verification";
-import { isPrismaConnectionError } from "@/lib/prisma-errors";
+import { getUserBalanceTotals } from "@/lib/finance-service";
+import { isAnyPrismaTableMissingError, isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
 import { uploadObjectToStorage } from "@/lib/s3";
 import { resolveActiveSubscriptionPlan } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
+import { buildStoredFileRouteUrl } from "@/lib/file-resolver";
 import { updateUserAvatarSchema, validateAvatarDataUrl } from "@/lib/user-profile-policy";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
@@ -58,7 +60,7 @@ function getSessionUserId(session: Awaited<ReturnType<typeof getServerSession>>)
 
 async function mapCurrentUserProfile(userId: string) {
   const hasAiTokenBalanceColumn = await hasUserAiTokenBalanceColumn(prisma);
-  const [user, verification] = await Promise.all([
+  const [user, verification, balanceTotals] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: hasAiTokenBalanceColumn
@@ -84,7 +86,19 @@ async function mapCurrentUserProfile(userId: string) {
             expiresAt: true
           }
     }),
-    getUserContractStatus({ prisma, userId })
+    getUserContractStatus({ prisma, userId }),
+    getUserBalanceTotals(prisma, userId).catch((error) => {
+      if (
+        isAnyPrismaTableMissingError(error, [
+          "FinanceReport",
+          "PayoutRequest",
+          "Transaction"
+        ])
+      ) {
+        return null;
+      }
+      throw error;
+    })
   ]);
 
   if (!user) return null;
@@ -99,8 +113,8 @@ async function mapCurrentUserProfile(userId: string) {
     id: user.id,
     name: user.name,
     email: user.email,
-    avatarUrl: user.avatar,
-    royaltyBalance: user.balance,
+    avatarUrl: buildStoredFileRouteUrl(user.avatar),
+    royaltyBalance: balanceTotals?.availableToWithdraw ?? Number(user.balance ?? 0),
     aiTokenBalance,
     currentPlan:
       resolveActiveSubscriptionPlan({

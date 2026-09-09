@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   getAnalyticsPeriodVariantHour,
@@ -11,6 +10,7 @@ import {
   isPrismaTableMissingError
 } from "@/lib/prisma-errors";
 import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 
 type AnalyticsDailySummaryRepo = {
   findMany: (args: unknown) => Promise<
@@ -457,6 +457,14 @@ export interface AnalyticsOverviewParams {
   days?: number;
 }
 
+type AnalyticsReleaseTotalsRow = {
+  release_id: string;
+  _sum: {
+    streams: number | null;
+    pay_streams: number | null;
+  };
+};
+
 function clampDays(value: number | undefined): number {
   return normalizeAnalyticsPeriodDays(value);
 }
@@ -496,6 +504,7 @@ export async function listAnalyticsAccessibleReleaseIds(
 
   const approvedReleaseIds = releases
     .filter((release) =>
+      !isReleaseHiddenFromCabinet(release.roles) &&
       shouldTreatReleaseAsApproved({
         status: release.status,
         confirmed: release.confirmed,
@@ -506,6 +515,7 @@ export async function listAnalyticsAccessibleReleaseIds(
     .map((release) => release.id);
 
   const hiddenReleaseIds = releases
+    .filter((release) => !isReleaseHiddenFromCabinet(release.roles))
     .map((release) => release.id)
     .filter((releaseId) => !approvedReleaseIds.includes(releaseId));
 
@@ -1384,19 +1394,11 @@ export async function listAnalyticsReleases(
     }
   }
 
-  let totalsRows:
-    | Array<{
-        release_id: string;
-        _sum: {
-          streams: number | null;
-          pay_streams: number | null;
-        };
-      }>
-    | [] = [];
+  let totalsRows: AnalyticsReleaseTotalsRow[] = [];
 
   try {
-    totalsRows = await prisma.analytics_report_snapshots.groupBy({
-      by: ["release_id"],
+    const groupedRows = await prisma.analytics_report_snapshots.groupBy({
+      by: ["release_id"] as const,
       where: {
         user_id: params.user_id,
         release_id: { in: approvedReleaseIds },
@@ -1410,6 +1412,13 @@ export async function listAnalyticsReleases(
         pay_streams: true
       }
     });
+    totalsRows = groupedRows.map((row) => ({
+      release_id: row.release_id,
+      _sum: {
+        streams: row._sum.streams ?? 0,
+        pay_streams: row._sum.pay_streams ?? 0
+      }
+    }));
   } catch {
     totalsRows = [];
   }
@@ -1500,30 +1509,20 @@ export async function listAnalyticsReleases(
         GROUP BY "upc"
       `);
 
-      effectiveTotalsRows = upcTotalsRows
-        .map((row) => {
-          const meta = metaByUpc.get(normalizeUpc(row.upc) ?? "");
-          if (!meta) return null;
+      const nextTotalsRows: AnalyticsReleaseTotalsRow[] = [];
+      for (const row of upcTotalsRows) {
+        const meta = metaByUpc.get(normalizeUpc(row.upc) ?? "");
+        if (!meta) continue;
 
-          return {
-            release_id: meta.id,
-            _sum: {
-              streams: toNumber(row._sum_streams),
-              pay_streams: toNumber(row._sum_pay_streams)
-            }
-          };
-        })
-        .filter(
-          (
-            row
-          ): row is {
-            release_id: string;
-            _sum: {
-              streams: number | null;
-              pay_streams: number | null;
-            };
-          } => Boolean(row)
-        );
+        nextTotalsRows.push({
+          release_id: meta.id,
+          _sum: {
+            streams: toNumber(row._sum_streams),
+            pay_streams: toNumber(row._sum_pay_streams)
+          }
+        });
+      }
+      effectiveTotalsRows = nextTotalsRows;
     }
   }
 
@@ -1588,6 +1587,7 @@ export async function getAnalyticsReleaseDetails(
 
   if (
     !release ||
+    isReleaseHiddenFromCabinet(release.roles) ||
     !shouldTreatReleaseAsApproved({
       status: release.status,
       confirmed: release.confirmed,

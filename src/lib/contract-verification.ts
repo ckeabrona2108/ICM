@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { createHash, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import type { PrismaClient } from "@prisma/client";
 
@@ -267,6 +269,15 @@ function verificationStorageUnavailable(): Error {
   );
 }
 
+function isVerificationStorageUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /Верификация подписи временно недоступна|S3\/MinIO|таблицу verification|upload is not configured/iu.test(
+      error.message
+    )
+  );
+}
+
 function normalizeNullable(value: string | null | undefined): string | null {
   const trimmed = (value ?? "").trim();
   return trimmed ? trimmed : null;
@@ -333,8 +344,11 @@ function toDbStatus(value: ContractSignatureStatus): "moderating" | "approved" |
 }
 
 function getModel(prisma: PrismaClient): ModelLike | null {
-  const model = (prisma as unknown as { verification?: ModelLike }).verification;
-  return model ?? null;
+  const delegates = prisma as unknown as {
+    verification?: ModelLike;
+    userContractSignature?: ModelLike;
+  };
+  return delegates.verification ?? delegates.userContractSignature ?? null;
 }
 
 function safeParseContractMeta(rawValue: string | null | undefined): VerificationContractMeta {
@@ -493,16 +507,30 @@ async function uploadSignaturePng(params: {
 
   const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
   const key = `contracts/signatures/${params.userId}/${Date.now()}-${hash}.png`;
-  const uploaded = await uploadObjectToStorage({
-    key,
-    contentType: "image/png",
-    body: bytes
-  });
-  return { signatureImageUrl: uploaded.url.trim() };
+  try {
+    const uploaded = await uploadObjectToStorage({
+      key,
+      contentType: "image/png",
+      body: bytes
+    });
+    return { signatureImageUrl: uploaded.url.trim() };
+  } catch (error) {
+    if (isVerificationStorageUnavailableError(error)) {
+      return { signatureImageUrl: dataUrl };
+    }
+    throw error;
+  }
 }
 
 function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem {
   const contractMeta = safeParseContractMeta(row.contract);
+  const legacy = row as unknown as Record<string, unknown>;
+  const legacyString = (key: string): string | null =>
+    typeof legacy[key] === "string" && legacy[key].trim() ? legacy[key].trim() : null;
+  const legacyDate = (key: string): string | null => {
+    const value = legacy[key];
+    return value instanceof Date ? value.toISOString() : legacyString(key);
+  };
   const fallbackBirthDate = toIsoString(row.birthDate);
   const fallbackPassportNumber = `${row.passSeries ?? ""} ${row.passNum ?? ""}`.trim();
   const fullName =
@@ -510,12 +538,12 @@ function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem
     [row.lastName, row.firstName, row.middleName].filter(Boolean).join(" ").trim() ||
     "—";
   const signatureImageUrl =
-    contractMeta.signatureImageUrl?.trim() || LEGACY_SIGNATURE_PLACEHOLDER_DATA_URL;
+    contractMeta.signatureImageUrl?.trim() || legacyString("signatureImageUrl") || LEGACY_SIGNATURE_PLACEHOLDER_DATA_URL;
   const signedAt =
     contractMeta.signedAt ??
     contractMeta.updatedAt ??
     contractMeta.createdAt ??
-    toIsoString(row.getDate) ??
+    legacyDate("signedAt") ?? toIsoString(row.getDate) ??
     new Date(0).toISOString();
   const status = normalizeContractStatusValue(row.status);
   const rejectionReason = normalizeNullable(row.rejectReason ?? contractMeta.rejectionReason);
@@ -534,14 +562,14 @@ function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem
     userAgent: normalizeNullable(contractMeta.userAgent),
     status,
     rejectionReason,
-    approvedAt: normalizeNullable(contractMeta.approvedAt),
-    approvedByAdminId: normalizeNullable(contractMeta.approvedByAdminId),
-    rejectedAt: normalizeNullable(contractMeta.rejectedAt),
-    rejectedByAdminId: normalizeNullable(contractMeta.rejectedByAdminId),
-    createdAt: contractMeta.createdAt ?? signedAt,
-    updatedAt: contractMeta.updatedAt ?? signedAt,
-    fullName,
-    birthDate: contractMeta.birthDate ?? fallbackBirthDate,
+    approvedAt: normalizeNullable(contractMeta.approvedAt ?? legacyDate("approvedAt")),
+    approvedByAdminId: normalizeNullable(contractMeta.approvedByAdminId ?? legacyString("approvedByAdminId")),
+    rejectedAt: normalizeNullable(contractMeta.rejectedAt ?? legacyDate("rejectedAt")),
+    rejectedByAdminId: normalizeNullable(contractMeta.rejectedByAdminId ?? legacyString("rejectedByAdminId")),
+    createdAt: contractMeta.createdAt ?? legacyDate("createdAt") ?? signedAt,
+    updatedAt: contractMeta.updatedAt ?? legacyDate("updatedAt") ?? signedAt,
+    fullName: fullName === "—" ? legacyString("fullName") ?? fullName : fullName,
+    birthDate: contractMeta.birthDate ?? legacyString("birthDate") ?? fallbackBirthDate,
     passportNumber: contractMeta.passportNumber ?? fallbackPassportNumber,
     passportIssuedBy: contractMeta.passportIssuedBy ?? normalizeNullable(row.givenBy),
     passportCode: contractMeta.passportCode ?? normalizeNullable(row.subunitCode),
@@ -643,6 +671,66 @@ function toContractStatusPayload(item: ContractSignatureListItem | null): Contra
     rejectionKind,
     verificationId: item.id
   };
+}
+
+export function buildVerificationUnavailableStatus(): ContractStatusPayload {
+  return {
+    status: "unavailable",
+    signed: false,
+    isVerified: false,
+    canSubmitReleases: false,
+    canCreateRelease: false,
+    signedAt: null,
+    contractVersion: null,
+    reason: "Верификация подписи временно недоступна. Попробуйте позже.",
+    rejectionReason: null,
+    rejectionKind: null,
+    verificationId: null
+  };
+}
+
+async function listVerificationStoreItemsOrEmpty(): Promise<ContractSignatureListItem[]> {
+  try {
+    return await readStore();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /Верификация подписи временно недоступна|S3\/MinIO|таблицу verification/iu.test(error.message)
+    ) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function updateVerificationStoreOrUnavailable(
+  updater: (records: ContractSignatureListItem[]) => Promise<ContractSignatureListItem[]>
+): Promise<{ ok: true; records: ContractSignatureListItem[] } | { ok: false; error: string }> {
+  try {
+    const records = await readStore();
+    const next = await updater(records);
+    await writeStore(next);
+    return { ok: true, records: next };
+  } catch (error) {
+    if (isVerificationStorageUnavailableError(error)) {
+      return {
+        ok: false,
+        error: "Верификация подписи временно недоступна. Попробуйте позже."
+      };
+    }
+    throw error;
+  }
+}
+
+function canUseRawVerificationQueries(prisma: PrismaClient): boolean {
+  const candidate = prisma as unknown as {
+    $queryRawUnsafe?: unknown;
+    $executeRawUnsafe?: unknown;
+  };
+  return (
+    typeof candidate.$queryRawUnsafe === "function" &&
+    typeof candidate.$executeRawUnsafe === "function"
+  );
 }
 
 function isSchemaUnavailableError(error: unknown): boolean {
@@ -769,8 +857,7 @@ export async function getUserContractStatus(params: {
 }): Promise<ContractStatusPayload> {
   const model = getModel(params.prisma);
   if (!model) {
-    const records = await readStore();
-    return toContractStatusPayload(findLatestUserVerification(records, params.userId));
+    return buildVerificationUnavailableStatus();
   }
 
   try {
@@ -790,9 +877,11 @@ export async function getUserContractStatus(params: {
 
     return toContractStatusPayload(row ? toListItem(row) : null);
   } catch (error) {
+    if (isVerificationStorageUnavailableError(error)) {
+      return buildVerificationUnavailableStatus();
+    }
     if (isSchemaUnavailableError(error)) {
-      const records = await readStore();
-      return toContractStatusPayload(findLatestUserVerification(records, params.userId));
+      return buildVerificationUnavailableStatus();
     }
     throw error;
   }
@@ -821,6 +910,9 @@ export async function createContractSignature(
     prisma: params.prisma,
     userId: params.userId
   });
+  if (current.status === "unavailable") {
+    throw new Error(current.reason);
+  }
   if (current.status === "approved" || current.status === "pending") {
     return current;
   }
@@ -1040,7 +1132,7 @@ export async function listContractSignaturesForAdmin(params: {
 
   const model = getModel(params.prisma);
   if (!model) {
-    const records = await readStore();
+    const records = await listVerificationStoreItemsOrEmpty();
     return dedupeLatestPerUser(records);
   }
 
@@ -1058,7 +1150,7 @@ export async function listContractSignaturesForAdmin(params: {
     return dedupeLatestPerUser(rows.map(toListItem));
   } catch (error) {
     if (isSchemaUnavailableError(error)) {
-      const records = await readStore();
+      const records = await listVerificationStoreItemsOrEmpty();
       return dedupeLatestPerUser(records);
     }
     throw error;
@@ -1071,7 +1163,7 @@ export async function getContractSignatureById(params: {
 }): Promise<ContractSignatureListItem | null> {
   const model = getModel(params.prisma);
   if (!model) {
-    const records = await readStore();
+    const records = await listVerificationStoreItemsOrEmpty();
     return records.find((item) => item.id === params.id) ?? null;
   }
 
@@ -1090,7 +1182,7 @@ export async function getContractSignatureById(params: {
     return row ? toListItem(row) : null;
   } catch (error) {
     if (isSchemaUnavailableError(error)) {
-      const records = await readStore();
+      const records = await listVerificationStoreItemsOrEmpty();
       return records.find((item) => item.id === params.id) ?? null;
     }
     throw error;
@@ -1164,34 +1256,40 @@ async function approveContractSignatureWithStoreFallback(params: {
   adminId: string;
   now: Date;
 }): Promise<VerificationReviewResult> {
-  const records = await readStore();
-  const index = records.findIndex((item) => item.id === params.verificationId);
-  if (index < 0) {
-    return { ok: false, error: "Verification not found" };
-  }
+  let current: ContractSignatureListItem | null = null;
+  let movedReleaseIds: string[] = [];
+  const update = await updateVerificationStoreOrUnavailable(async (records) => {
+    const index = records.findIndex((item) => item.id === params.verificationId);
+    if (index < 0) {
+      throw new Error("VERIFICATION_NOT_FOUND");
+    }
 
-  const current = records[index]!;
-  if (current.status !== "pending") {
-    return { ok: false, error: "STATUS_TRANSITION_NOT_ALLOWED" };
-  }
+    current = records[index]!;
+    if (current.status !== "pending") {
+      throw new Error("STATUS_TRANSITION_NOT_ALLOWED");
+    }
 
-  const movedReleaseIds = await movePendingVerificationReleasesToModeration({
-    prismaLike: params.prisma,
-    userId: current.userId,
-    now: params.now
+    movedReleaseIds = await movePendingVerificationReleasesToModeration({
+      prismaLike: params.prisma,
+      userId: current.userId,
+      now: params.now
+    });
+
+    const next = [...records];
+    next[index] = {
+      ...current,
+      status: "approved",
+      rejectionReason: null,
+      approvedAt: params.now.toISOString(),
+      approvedByAdminId: params.adminId,
+      rejectedAt: null,
+      rejectedByAdminId: null,
+      updatedAt: params.now.toISOString()
+    };
+    return next;
   });
-
-  records[index] = {
-    ...current,
-    status: "approved",
-    rejectionReason: null,
-    approvedAt: params.now.toISOString(),
-    approvedByAdminId: params.adminId,
-    rejectedAt: null,
-    rejectedByAdminId: null,
-    updatedAt: params.now.toISOString()
-  };
-  await writeStore(records);
+  if (!update.ok) return { ok: false, error: update.error };
+  if (!current) return { ok: false, error: "Verification not found" };
 
   try {
     await notifyMovedReleasesNowOnModeration({
@@ -1221,6 +1319,9 @@ async function getVerificationRowByIdRaw(params: {
   prisma: PrismaClient;
   verificationId: string;
 }): Promise<VerificationAdminRow | null> {
+  if (!canUseRawVerificationQueries(params.prisma)) {
+    return null;
+  }
   const rows = (await params.prisma.$queryRawUnsafe(
     `SELECT id, "userId", status::text AS status, contract, "rejectReason"
        FROM icecream.verification
@@ -1237,6 +1338,9 @@ async function approveContractSignatureWithVerificationTableFallback(params: {
   adminId: string;
   now: Date;
 }): Promise<VerificationReviewResult> {
+  if (!canUseRawVerificationQueries(params.prisma)) {
+    return approveContractSignatureWithStoreFallback(params);
+  }
   return params.prisma.$transaction(async (tx) => {
     const current = await getVerificationRowByIdRaw({
       prisma: tx as unknown as PrismaClient,
@@ -1310,7 +1414,7 @@ export async function approveContractSignatureByAdmin(params: {
   const model = getModel(params.prisma);
 
   if (!model) {
-    return approveContractSignatureWithVerificationTableFallback({
+    return approveContractSignatureWithStoreFallback({
       ...params,
       now
     });
@@ -1318,7 +1422,9 @@ export async function approveContractSignatureByAdmin(params: {
 
   try {
     const result = await params.prisma.$transaction(async (tx) => {
-      const current = (await tx.verification.findUnique({
+      const verificationModel = getModel(tx as PrismaClient);
+      if (!verificationModel) return { ok: false, error: "Verification storage unavailable" } as VerificationReviewResult;
+      const current = (await verificationModel.findUnique({
         where: { id: params.verificationId },
         include: {
           user: {
@@ -1338,7 +1444,7 @@ export async function approveContractSignatureByAdmin(params: {
       }
 
       const currentMeta = safeParseContractMeta(current.contract);
-      await tx.verification.update({
+      await verificationModel.update({
         where: { id: params.verificationId },
         data: {
           status: toDbStatus("approved"),
@@ -1412,10 +1518,15 @@ export async function approveContractSignatureByAdmin(params: {
       error: error instanceof Error ? error.message : String(error)
     });
     if (isSchemaUnavailableError(error)) {
-      return approveContractSignatureWithVerificationTableFallback({
-        ...params,
-        now
-      });
+      return canUseRawVerificationQueries(params.prisma)
+        ? approveContractSignatureWithVerificationTableFallback({
+            ...params,
+            now
+          })
+        : approveContractSignatureWithStoreFallback({
+            ...params,
+            now
+          });
     }
     throw error;
   }
@@ -1428,36 +1539,42 @@ async function rejectContractSignatureWithStoreFallback(params: {
   reason: string;
   now: Date;
 }): Promise<VerificationReviewResult> {
-  const records = await readStore();
-  const index = records.findIndex((item) => item.id === params.verificationId);
-  if (index < 0) {
-    return { ok: false, error: "Verification not found" };
-  }
+  let current: ContractSignatureListItem | null = null;
+  let movedReleaseIds: string[] = [];
+  const update = await updateVerificationStoreOrUnavailable(async (records) => {
+    const index = records.findIndex((item) => item.id === params.verificationId);
+    if (index < 0) {
+      throw new Error("VERIFICATION_NOT_FOUND");
+    }
 
-  const current = records[index]!;
-  if (current.status !== "pending" && current.status !== "approved") {
-    return { ok: false, error: "STATUS_TRANSITION_NOT_ALLOWED" };
-  }
+    current = records[index]!;
+    if (current.status !== "pending" && current.status !== "approved") {
+      throw new Error("STATUS_TRANSITION_NOT_ALLOWED");
+    }
 
-  const movedReleaseIds = await movePendingVerificationReleasesToChangesRequired({
-    prismaLike: params.prisma,
-    userId: current.userId,
-    adminId: params.adminId,
-    reason: params.reason,
-    now: params.now
+    movedReleaseIds = await movePendingVerificationReleasesToChangesRequired({
+      prismaLike: params.prisma,
+      userId: current.userId,
+      adminId: params.adminId,
+      reason: params.reason,
+      now: params.now
+    });
+
+    const next = [...records];
+    next[index] = {
+      ...current,
+      status: "rejected",
+      rejectionReason: params.reason,
+      approvedAt: current.approvedAt,
+      approvedByAdminId: current.approvedByAdminId,
+      rejectedAt: params.now.toISOString(),
+      rejectedByAdminId: params.adminId,
+      updatedAt: params.now.toISOString()
+    };
+    return next;
   });
-
-  records[index] = {
-    ...current,
-    status: "rejected",
-    rejectionReason: params.reason,
-    approvedAt: current.approvedAt,
-    approvedByAdminId: current.approvedByAdminId,
-    rejectedAt: params.now.toISOString(),
-    rejectedByAdminId: params.adminId,
-    updatedAt: params.now.toISOString()
-  };
-  await writeStore(records);
+  if (!update.ok) return { ok: false, error: update.error };
+  if (!current) return { ok: false, error: "Verification not found" };
 
   return {
     ok: true,
@@ -1473,6 +1590,9 @@ async function rejectContractSignatureWithVerificationTableFallback(params: {
   reason: string;
   now: Date;
 }): Promise<VerificationReviewResult> {
+  if (!canUseRawVerificationQueries(params.prisma)) {
+    return rejectContractSignatureWithStoreFallback(params);
+  }
   return params.prisma.$transaction(async (tx) => {
     const current = await getVerificationRowByIdRaw({
       prisma: tx as unknown as PrismaClient,
@@ -1566,7 +1686,7 @@ export async function rejectContractSignatureByAdmin(params: {
   const model = getModel(params.prisma);
 
   if (!model) {
-    return rejectContractSignatureWithVerificationTableFallback({
+    return rejectContractSignatureWithStoreFallback({
       ...params,
       reason,
       now
@@ -1575,7 +1695,9 @@ export async function rejectContractSignatureByAdmin(params: {
 
   try {
     const result = await params.prisma.$transaction(async (tx) => {
-      const current = (await tx.verification.findUnique({
+      const verificationModel = getModel(tx as PrismaClient);
+      if (!verificationModel) return { ok: false, error: "Verification storage unavailable" } as VerificationReviewResult;
+      const current = (await verificationModel.findUnique({
         where: { id: params.verificationId },
         include: {
           user: {
@@ -1596,7 +1718,7 @@ export async function rejectContractSignatureByAdmin(params: {
       }
 
       const currentMeta = safeParseContractMeta(current.contract);
-      await tx.verification.update({
+      await verificationModel.update({
         where: { id: params.verificationId },
         data: {
           status: toDbStatus("rejected"),
@@ -1674,11 +1796,17 @@ export async function rejectContractSignatureByAdmin(params: {
       error: error instanceof Error ? error.message : String(error)
     });
     if (isSchemaUnavailableError(error)) {
-      return rejectContractSignatureWithVerificationTableFallback({
-        ...params,
-        reason,
-        now
-      });
+      return canUseRawVerificationQueries(params.prisma)
+        ? rejectContractSignatureWithVerificationTableFallback({
+            ...params,
+            reason,
+            now
+          })
+        : rejectContractSignatureWithStoreFallback({
+            ...params,
+            reason,
+            now
+          });
     }
     throw error;
   }
@@ -1708,18 +1836,22 @@ export async function getContractSignatureDownloadAsset(params: {
   const storageLocation = extractStorageLocationFromUrl(item.signatureImageUrl);
   if (storageLocation.key) {
     const disposition = `${params.inline ? "inline" : "attachment"}; filename="${buildSignatureFileName(item)}"`;
-    const signed = await createPresignedDownload({
-      key: storageLocation.key,
-      bucket: storageLocation.bucket ?? undefined,
-      expiresIn: 600,
-      responseContentDisposition: disposition,
-      responseContentType: "image/png"
-    });
-    return {
-      contentType: "image/png",
-      fileName: buildSignatureFileName(item),
-      redirectUrl: signed.url
-    };
+    try {
+      const signed = await createPresignedDownload({
+        key: storageLocation.key,
+        bucket: storageLocation.bucket ?? undefined,
+        expiresIn: 600,
+        responseContentDisposition: disposition,
+        responseContentType: "image/png"
+      });
+      return {
+        contentType: "image/png",
+        fileName: buildSignatureFileName(item),
+        redirectUrl: signed.url
+      };
+    } catch (error) {
+      if (!isVerificationStorageUnavailableError(error)) throw error;
+    }
   }
 
   if (/^https?:\/\//u.test(item.signatureImageUrl)) {
@@ -1740,13 +1872,25 @@ export async function getContractDocumentDownloadAsset(params: {
   const item = await getContractSignatureById(params);
   if (!item) return null;
 
-  const filePath = path.join(process.cwd(), "public", "docs", path.basename(item.contractFileName));
-  const body = await readFile(filePath);
-  return {
-    contentType: "application/pdf",
-    fileName: buildContractFileName(item),
-    body
-  };
+  try {
+    const filePath = path.join(process.cwd(), "public", "docs", path.basename(item.contractFileName));
+    const body = await readFile(filePath);
+    return {
+      contentType: "application/pdf",
+      fileName: buildContractFileName(item),
+      body
+    };
+  } catch {
+    const fallbackUrl = item.contractFileUrl?.trim() || CONTRACT_FILE_URL;
+    if (/^https?:\/\//u.test(fallbackUrl)) {
+      return {
+        contentType: "application/pdf",
+        fileName: buildContractFileName(item),
+        redirectUrl: fallbackUrl
+      };
+    }
+    return null;
+  }
 }
 
 export async function getAdminVerificationCounts(params: {
@@ -1758,6 +1902,7 @@ export async function getAdminVerificationCounts(params: {
 }> {
   const countReleaseStates = async () => {
     const releases = await params.prisma.release.findMany({
+      where: {},
       select: {
         status: true,
         confirmed: true,
@@ -1787,7 +1932,7 @@ export async function getAdminVerificationCounts(params: {
 
   const model = getModel(params.prisma);
   if (!model) {
-    const records = await readStore();
+    const records = await listVerificationStoreItemsOrEmpty();
     const verificationPending = records.filter((item) => item.status === "pending").length;
     const { releasesModeration, releasesPendingVerification } = await countReleaseStates();
     return {
@@ -1813,7 +1958,7 @@ export async function getAdminVerificationCounts(params: {
   } catch (error) {
     if (!isSchemaUnavailableError(error)) throw error;
 
-    const records = await readStore();
+    const records = await listVerificationStoreItemsOrEmpty();
     const verificationPending = records.filter((item) => item.status === "pending").length;
     const { releasesModeration, releasesPendingVerification } = await countReleaseStates();
     return {

@@ -1,15 +1,22 @@
 import type { verification_status } from "@prisma/client";
 
-import type { CabinetRelease, CabinetReleaseStatus, CabinetTrack, CabinetTrackPerson } from "@/lib/cabinet-types";
+import type {
+  CabinetRelease,
+  CabinetReleaseStatus,
+  CabinetTrack,
+  CabinetTrackPerson,
+  ModerationRemark
+} from "@/lib/cabinet-types";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import { getReleasePaymentDisplayFromRoles } from "@/lib/release-quota";
 import {
-  getExplicitReleaseLifecycleStatus,
   getReleaseLifecycleStatus,
   shouldTreatReleaseAsApproved
 } from "@/lib/release-counts";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
 import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
+import { getSceneShowcaseState } from "@/lib/scene-showcase-state";
+import { getReleaseDeletionState } from "@/lib/release-deletion-state";
 
 export interface CabinetReleaseSource {
   id: string;
@@ -26,6 +33,11 @@ export interface CabinetReleaseSource {
   preview: string;
   performer: string | null;
   roles: unknown;
+  rejectReason?: string | null;
+  moderatorComment?: string | null;
+  moderationRemarks?: unknown;
+  moderationReturnedAt?: Date | null;
+  moderationStartedAt?: Date | null;
   priority?: boolean | null;
   earlyStartInRussia?: boolean | null;
   track: Array<{
@@ -47,6 +59,7 @@ export interface CabinetReleaseSource {
 }
 
 interface SubmissionTrackLike {
+  id?: string;
   fileName?: string;
   title?: string;
   subtitle?: string;
@@ -60,6 +73,11 @@ interface SubmissionTrackLike {
   focusTrack?: boolean;
   versionExplicit?: boolean;
   metadataLanguage?: string;
+  audioFile?: unknown;
+  audioUpload?: unknown;
+  audioUrl?: unknown;
+  audio?: unknown;
+  track?: unknown;
 }
 
 function inflateTrackData(value: { roles: unknown } & Record<string, unknown>): Record<string, unknown> {
@@ -73,6 +91,8 @@ function toCabinetStatus(
   roles: unknown,
   upc: string | null
 ): CabinetReleaseStatus {
+  const lifecycle = getReleaseLifecycleStatus(status, roles);
+  if (lifecycle === "dsp_confirmed") return "dsp_confirmed";
   if (
     shouldTreatReleaseAsApproved({
       status,
@@ -83,9 +103,6 @@ function toCabinetStatus(
   ) {
     return "approved";
   }
-
-  const explicitLifecycle = getExplicitReleaseLifecycleStatus(roles);
-  const lifecycle = getReleaseLifecycleStatus(status, roles);
 
   if (lifecycle === "approved") return "approved";
   if (lifecycle === "changes_required") return "changes_required";
@@ -99,6 +116,15 @@ function toCabinetStatus(
 
 function formatDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function formatDateTime(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
 }
 
 function normalizeDuration(value: string | null | undefined): string {
@@ -206,16 +232,16 @@ async function mapTracks(
       .sort((a, b) => a.index - b.index)
       .map(async (track, index) => {
       const trackData = inflateTrackData(track as typeof track & Record<string, unknown>);
+      const submissionTrack = submissionTracks.find((item) => item.id === track.id) ?? submissionTracks[index];
       const resolvedAudio = await resolveTrackAudioAsset({
         trackId: track.id,
         trackTitle: track.title,
-        audioFile: trackData.audioFile,
-        audioUpload: trackData.audioUpload,
-        audioUrl: trackData.audioUrl,
-        audio: trackData.audio,
-        track: track.track
+        audioFile: submissionTrack?.audioFile ?? trackData.audioFile,
+        audioUpload: submissionTrack?.audioUpload ?? trackData.audioUpload,
+        audioUrl: submissionTrack?.audioUrl ?? trackData.audioUrl,
+        audio: submissionTrack?.audio ?? trackData.audio,
+        track: submissionTrack?.track ?? track.track
       });
-      const submissionTrack = submissionTracks[index];
       const resolvedDurationSec = typeof submissionTrack?.durationSec === "number" ? submissionTrack.durationSec : null;
 
       return {
@@ -250,6 +276,61 @@ function asString(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
+function normalizeModerationRemarks(value: unknown): ModerationRemark[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .filter(Boolean)
+    .map<ModerationRemark | null>((item) => {
+      const field = asString(item?.field);
+      const message = asString(item?.message);
+      const section = asString(item?.section) ?? undefined;
+      if (!field || !message) return null;
+      return { field, message, section };
+    })
+    .filter((item): item is ModerationRemark => item !== null);
+}
+
+function extractModerationRemarks(roles: unknown): ModerationRemark[] {
+  const root = asRecord(roles);
+  const submission = root ? asRecord(root.submissionData) : null;
+  const rootRemarks = normalizeModerationRemarks(root?.moderationRemarks);
+  if (rootRemarks.length > 0) return rootRemarks;
+  return normalizeModerationRemarks(submission?.moderationRemarks);
+}
+
+function resolveRejectionReason(release: CabinetReleaseSource): string | undefined {
+  const root = asRecord(release.roles);
+  const submission = root ? asRecord(root.submissionData) : null;
+  return (
+    asString(release.rejectReason) ??
+    asString(release.moderatorComment) ??
+    asString(root?.rejectReason) ??
+    asString(root?.rejectionReason) ??
+    asString(root?.moderatorComment) ??
+    asString(root?.moderationComment) ??
+    asString(submission?.rejectReason) ??
+    asString(submission?.rejectionReason) ??
+    asString(submission?.moderatorComment) ??
+    asString(submission?.moderationComment) ??
+    undefined
+  );
+}
+
+function resolveModerationReturnedAt(release: CabinetReleaseSource): string | undefined {
+  if (release.moderationReturnedAt) {
+    return formatDateTime(release.moderationReturnedAt);
+  }
+
+  const root = asRecord(release.roles);
+  const submission = root ? asRecord(root.submissionData) : null;
+  return (
+    asString(root?.moderationReturnedAt) ??
+    asString(submission?.moderationReturnedAt) ??
+    undefined
+  );
+}
+
 export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number: number): Promise<CabinetRelease> {
   const submissionTracks = parseSubmissionTracks(release.roles);
   const mappedTracks = await mapTracks(release.track, submissionTracks);
@@ -282,6 +363,10 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
     release.roles,
     resolvedUpc
   );
+  const releaseRemarks = normalizeModerationRemarks(release.moderationRemarks);
+  const moderationRemarks = releaseRemarks.length > 0 ? releaseRemarks : extractModerationRemarks(release.roles);
+  const rejectionReason = resolveRejectionReason(release);
+  const deletionState = getReleaseDeletionState(release.roles);
   return {
     id: release.id,
     number,
@@ -307,9 +392,17 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
     paymentLabel: release.confirmed ? paymentDisplay?.label ?? "Оплачен" : "Не оплачен",
     paymentPlan: paymentDisplay?.usage?.plan ?? null,
     tracks: mappedTracks,
-    moderationStarted: cabinetStatus === "moderation" && Boolean(release.confirmed),
+    moderationStarted:
+      cabinetStatus === "moderation" &&
+      (Boolean(release.moderationStartedAt) || Boolean(release.confirmed)),
+    moderationRemarks: moderationRemarks.length > 0 ? moderationRemarks : undefined,
+    moderationReturnedAt: resolveModerationReturnedAt(release),
+    rejectionReason,
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),
+    deletionStatus: deletionState?.status,
+    deletionRequestedAt: deletionState?.requestedAt,
     earlyRussiaStart: Boolean(release.earlyStartInRussia),
-    submissionData
+    submissionData,
+    sceneShowcase: getSceneShowcaseState(release.roles)
   };
 }

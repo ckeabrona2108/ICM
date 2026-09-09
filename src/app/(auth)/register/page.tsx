@@ -1,30 +1,30 @@
 "use client";
 
 import * as React from "react";
-import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, CheckCircle2, Loader2, X } from "lucide-react";
-import { getSession, signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const inputClassName =
+  "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
+
 export default function RegisterPage() {
-  const router = useRouter();
-  const [created, setCreated] = useState(false);
-  const [agree, setAgree] = useState(false);
-  const [policyOpen, setPolicyOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    stageName: "",
-    email: "",
-    password: ""
-  });
+  const [created, setCreated] = React.useState(false);
+  const [agree, setAgree] = React.useState(false);
+  const [policyOpen, setPolicyOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+	  const [form, setForm] = React.useState({
+	    name: "",
+	    stageName: "",
+	    email: "",
+	    password: ""
+	  });
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -58,22 +58,26 @@ export default function RegisterPage() {
 
       setCreated(true);
 
+      const fallbackTarget = "/dashboard";
       const loginResult = await signIn("credentials", {
         email: form.email,
         password: form.password,
+        callbackUrl: fallbackTarget,
         redirect: false
       });
 
       if (loginResult?.error) {
-        router.push("/login");
-        router.refresh();
+        window.location.assign("/login");
         return;
       }
 
-      const session = await getSession();
-      const target = session?.user?.role === "ADMIN" ? "/admin" : "/dashboard";
-      router.push(target);
-      router.refresh();
+      if (!loginResult?.url) {
+        setError("Аккаунт создан, но автоматический вход не завершился. Войдите вручную.");
+        window.location.assign("/login");
+        return;
+      }
+
+      window.location.assign(loginResult.url);
     } catch {
       setError("Ошибка сети. Попробуйте снова");
     } finally {
@@ -84,197 +88,197 @@ export default function RegisterPage() {
   React.useEffect(() => {
     if (!policyOpen) return;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
     const onEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setPolicyOpen(false);
     };
 
     window.addEventListener("keydown", onEscape);
     return () => {
-      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onEscape);
     };
   }, [policyOpen]);
 
   return (
-    <div className="w-full max-w-[560px]">
-      <div className="mb-12 flex justify-center">
-        <Link href="/" className="flex items-center">
-          <Image
-            src="/brand/logo.png"
-            alt="ICECREAMMUSIC"
-            width={317}
-            height={400}
-            priority
-            className="h-12 w-auto object-contain"
-          />
-        </Link>
-      </div>
+    <>
+      <div className="w-full max-w-[560px]">
+        <div className="mb-12 flex justify-center">
+          <Link href="/" className="flex items-center">
+            <Image
+              src="/brand/logo.png"
+              alt="ICECREAMMUSIC"
+              width={317}
+              height={400}
+              priority
+              className="h-12 w-auto object-contain"
+            />
+          </Link>
+        </div>
 
-      <h1 className="text-center text-[40px] font-semibold leading-[1.05] tracking-tight text-white sm:text-[48px]">
-        Создать аккаунт
-      </h1>
-      <p className="mx-auto mt-4 max-w-[440px] text-center text-[15px] leading-relaxed text-white/55">
-        Дистрибуция, продвижение и аналитика - всё в одном месте за пару минут
-      </p>
+        <h1 className="text-center text-[40px] font-semibold leading-[1.05] tracking-tight text-white sm:text-[48px]">
+          Создать аккаунт
+        </h1>
+        <p className="mx-auto mt-4 max-w-[440px] text-center text-[15px] leading-relaxed text-white/55">
+          Дистрибуция, продвижение и аналитика - всё в одном месте за пару минут
+        </p>
 
-      <form className="mt-10 space-y-5" onSubmit={onSubmit}>
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <form className="mt-10 space-y-5" onSubmit={onSubmit} noValidate>
+	          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label
+                htmlFor="name"
+                className="text-[12px] font-medium uppercase tracking-[0.16em] text-white/45"
+              >
+                Имя
+              </Label>
+              <Input
+                id="name"
+                value={form.name}
+                onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="Valeria Torres"
+                className={inputClassName}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="stageName"
+                className="text-[12px] font-medium uppercase tracking-[0.16em] text-white/45"
+              >
+	                Артист
+              </Label>
+              <Input
+                id="stageName"
+                value={form.stageName}
+                onChange={(event) => setForm((prev) => ({ ...prev, stageName: event.target.value }))}
+	                placeholder="Nova Echo"
+                className={inputClassName}
+              />
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label
-              htmlFor="name"
+              htmlFor="email"
               className="text-[12px] font-medium uppercase tracking-[0.16em] text-white/45"
             >
-              Имя
+              Email
             </Label>
             <Input
-              id="name"
-              value={form.name}
-              onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Valeria Torres"
-              className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={form.email}
+              onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+              placeholder="you@domain.com"
+              className={inputClassName}
             />
           </div>
+
           <div className="space-y-2">
             <Label
-              htmlFor="stageName"
+              htmlFor="password"
               className="text-[12px] font-medium uppercase tracking-[0.16em] text-white/45"
             >
-              Артист / лейбл
+              Пароль
             </Label>
             <Input
-              id="stageName"
-              value={form.stageName}
-              onChange={(event) => setForm((prev) => ({ ...prev, stageName: event.target.value }))}
-              placeholder="Nova Echo"
-              className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              value={form.password}
+              onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+              placeholder="Минимум 8 символов"
+              className={inputClassName}
             />
           </div>
-        </div>
 
-        <div className="space-y-2">
-          <Label
-            htmlFor="email"
-            className="text-[12px] font-medium uppercase tracking-[0.16em] text-white/45"
+          <label className="flex cursor-pointer items-start gap-2.5 pt-1 text-[13px] leading-relaxed text-white/65 select-none">
+            <span className="relative mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center">
+              <input
+                type="checkbox"
+                checked={agree}
+                onChange={(event) => setAgree(event.target.checked)}
+                className="peer absolute inset-0 cursor-pointer appearance-none rounded-md border border-white/20 bg-white/[0.04] transition-colors checked:border-white checked:bg-white"
+              />
+              <svg
+                className="pointer-events-none h-3 w-3 text-black opacity-0 peer-checked:opacity-100"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </span>
+            <span>
+              Я принимаю{' '}
+              <span className="text-white">условия использования</span> и{' '}
+              <button
+                type="button"
+                onClick={() => setPolicyOpen(true)}
+                className="text-white underline-offset-4 hover:underline"
+              >
+                политику конфиденциальности
+              </button>
+            </span>
+          </label>
+
+          {error ? (
+            <p className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
+              {error}
+            </p>
+          ) : null}
+
+          <Button
+            type="submit"
+            disabled={!agree || loading}
+            className="group mt-2 h-14 w-full rounded-2xl bg-white text-[15px] font-semibold text-black shadow-[0_8px_24px_-8px_rgba(255,255,255,0.4)] transition-all hover:bg-white/95 disabled:opacity-50"
           >
-            Email
-          </Label>
-          <Input
-            id="email"
-            type="email"
-            value={form.email}
-            onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-            placeholder="you@domain.com"
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
-          />
-        </div>
+            <span className="inline-flex items-center justify-center gap-2">
+              {loading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Создаём аккаунт...
+                </>
+              ) : (
+                <>
+                  Создать аккаунт
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                </>
+              )}
+            </span>
+          </Button>
+        </form>
 
-        <div className="space-y-2">
-          <Label
-            htmlFor="password"
-            className="text-[12px] font-medium uppercase tracking-[0.16em] text-white/45"
-          >
-            Пароль
-          </Label>
-          <Input
-            id="password"
-            type="password"
-            value={form.password}
-            onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-            placeholder="Минимум 8 символов"
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
-          />
-        </div>
-
-        <label className="flex cursor-pointer items-start gap-2.5 pt-1 text-[13px] leading-relaxed text-white/65 select-none">
-          <span className="relative mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center">
-            <input
-              type="checkbox"
-              checked={agree}
-              onChange={(e) => setAgree(e.target.checked)}
-              className="peer absolute inset-0 cursor-pointer appearance-none rounded-md border border-white/20 bg-white/[0.04] transition-colors checked:border-white checked:bg-white"
-            />
-            <svg
-              className="pointer-events-none h-3 w-3 text-black opacity-0 peer-checked:opacity-100"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </span>
-          <span>
-            Я принимаю{" "}
-            <Link href="#" className="text-white underline-offset-4 hover:underline">
-              условия использования
-            </Link>{" "}
-            и{" "}
-            <button
-              type="button"
-              onClick={() => setPolicyOpen(true)}
-              className="text-white underline-offset-4 hover:underline"
-            >
-              политику конфиденциальности
-            </button>
-          </span>
-        </label>
-
-        {error ? (
-          <p className="rounded-xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-[13px] text-red-200">
-            {error}
-          </p>
+        {created ? (
+          <div className="mt-5 flex items-start gap-2.5 rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.08] px-4 py-3.5 text-[13px] text-emerald-100">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>Аккаунт создан. Выполняем вход...</span>
+          </div>
         ) : null}
 
-        <Button
-          type="submit"
-          disabled={!agree || loading}
-          className="group mt-2 h-14 w-full rounded-2xl bg-white text-[15px] font-semibold text-black shadow-[0_8px_24px_-8px_rgba(255,255,255,0.4)] transition-all hover:bg-white/95 disabled:opacity-50"
-        >
-          <span className="inline-flex items-center justify-center gap-2">
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Создаем аккаунт...
-              </>
-            ) : (
-              <>
-                Создать аккаунт
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-              </>
-            )}
-          </span>
-        </Button>
-      </form>
-
-      {created ? (
-        <div className="mt-5 flex items-start gap-2.5 rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.08] px-4 py-3.5 text-[13px] text-emerald-100">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Аккаунт создан. Выполняем вход...</span>
-        </div>
-      ) : null}
-
-      <p className="mt-8 text-center text-[14px] text-white/55">
-        Уже есть аккаунт?{" "}
-        <Link
-          href="/login"
-          className="font-medium text-white underline-offset-4 transition-colors hover:underline"
-        >
-          Войти
-        </Link>
-      </p>
+        <p className="mt-8 text-center text-[14px] text-white/55">
+          Уже есть аккаунт?{' '}
+          <Link
+            href="/login"
+            className="font-medium text-white underline-offset-4 transition-colors hover:underline"
+          >
+            Войти
+          </Link>
+        </p>
+      </div>
 
       {policyOpen ? (
         <div
-          className="fixed inset-0 z-[140] flex items-center justify-center bg-[#04050b]/82 p-3 backdrop-blur-md"
+          className="fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto bg-[#04050b]/82 p-3 py-6 backdrop-blur-md sm:items-center"
           onClick={() => setPolicyOpen(false)}
         >
           <div
-            className="flex h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/12 bg-[#11131b] shadow-[0_40px_120px_-60px_rgba(0,0,0,0.95)]"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Политика конфиденциальности"
+            className="flex max-h-[calc(100dvh-48px)] min-h-[420px] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/12 bg-[#11131b] shadow-[0_40px_120px_-60px_rgba(0,0,0,0.95)]"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 sm:px-5">
@@ -296,11 +300,11 @@ export default function RegisterPage() {
             <iframe
               src="/docs/%D0%9F%D0%BE%D0%BB%D0%B8%D1%82%D0%B8%D0%BA%D0%B0.pdf#toolbar=0&navpanes=0"
               title="Политика конфиденциальности"
-              className="h-full w-full bg-white"
+              className="min-h-0 flex-1 bg-white"
             />
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

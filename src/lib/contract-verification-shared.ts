@@ -3,6 +3,7 @@ export const CONTRACT_FILE_NAME = "contract-2026-01.pdf";
 export const CONTRACT_FILE_URL = "/docs/contract-2026-01.pdf";
 
 export type ContractSignatureStatus =
+  | "unavailable"
   | "not_signed"
   | "pending"
   | "approved"

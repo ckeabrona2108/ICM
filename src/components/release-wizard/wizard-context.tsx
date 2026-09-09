@@ -202,7 +202,16 @@ const initial: WizardData = {
   priorityRelease: false
 };
 
-export type StepId = "info" | "tracks" | "extras" | "review" | "upload";
+export type StepId =
+  | "intro"
+  | "info"
+  | "persons"
+  | "codes"
+  | "stores"
+  | "tracks"
+  | "extras"
+  | "review"
+  | "upload";
 
 export type WizardSubmissionMode = "new" | "edit";
 
@@ -248,7 +257,7 @@ export function WizardProvider({
 }) {
   const seedSignature = React.useMemo(() => JSON.stringify(seed ?? {}), [seed]);
   const [data, setData] = React.useState<WizardData>(() => normalizeWizardSeed(seed));
-  const [step, setStep] = React.useState<StepId>("info");
+  const [step, setStep] = React.useState<StepId>("intro");
 
   const set = React.useCallback(
     <K extends keyof WizardData>(key: K, value: WizardData[K]) => {
@@ -266,7 +275,7 @@ export function WizardProvider({
       for (const t of prev.tracks) revokeBlobUrl(t.audioUrl);
       return normalizeWizardSeed(seed);
     });
-    setStep("info");
+    setStep("intro");
   }, [seed]);
 
   React.useEffect(() => {
@@ -274,7 +283,7 @@ export function WizardProvider({
       for (const t of prev.tracks) revokeBlobUrl(t.audioUrl);
       return normalizeWizardSeed(seed);
     });
-    setStep("info");
+    setStep("intro");
   }, [seedSignature, submissionMode]);
 
   return (

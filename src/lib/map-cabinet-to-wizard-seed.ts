@@ -38,6 +38,8 @@ function formatDuration(seconds?: number | null): string | undefined {
 
 /** Данные релиза из кабинета → черновик в мастере «Новый релиз» */
 export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<WizardData> {
+  // Accepted releases are edited as new moderation copies with a fresh product identity.
+  const createsCopy = r.status === "approved" || r.status === "distributed";
   const dash = (s: string) => (s === "—" ? "" : s);
   const releaseYear = String(new Date().getUTCFullYear());
   const parsedSubmission = releaseSubmissionDataSchema.safeParse(r.submissionData);
@@ -63,7 +65,7 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
         name: person.name,
         role: person.role
       })),
-      upc: submission.upc?.trim() || "",
+      upc: createsCopy ? "" : submission.upc?.trim() || "",
       partnerCode: submission.partnerCode?.trim() || "",
       rightsYear: submission.rightsYear?.trim() || releaseYear,
       preorderDate: submission.preorderDate,
@@ -157,7 +159,7 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
     persons: r.artist
       ? [{ id: "seed-artist", name: r.artist, role: "Исполнитель" }]
       : [],
-    upc: r.upc?.trim() ? r.upc : "",
+    upc: createsCopy ? "" : r.upc?.trim() || "",
     partnerCode: "",
     rightsYear: releaseYear,
     preorderDate: dash(r.preorderDate),

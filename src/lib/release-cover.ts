@@ -220,6 +220,11 @@ function buildPreviewCandidateUrls(value: unknown, releaseId: string | null): st
 function buildExactCandidateUrls(...values: unknown[]): string[] {
   const candidates = new Set<string>();
   for (const value of values) {
+    const normalized = normalizeStoredFileLike(value);
+    const rawUrl = asString(normalized?.url);
+    if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+      candidates.add(rawUrl);
+    }
     const url = buildStoredFileRouteUrl(value);
     if (url) candidates.add(url);
   }
@@ -408,13 +413,18 @@ function collectReleaseCoverSources(input: ReleaseCoverSource): CoverSourceEntry
 
 function buildCandidatesForCoverSource(entry: CoverSourceEntry, releaseId: string | null): string[] {
   return unique([
-    ...buildPreviewCandidateUrls(entry.value, releaseId),
-    ...buildExactCandidateUrls(entry.value)
+    ...buildExactCandidateUrls(entry.value),
+    ...buildPreviewCandidateUrls(entry.value, releaseId)
   ]);
 }
 
 function isPreviewLikeSourceField(field: string): boolean {
   return /(^|\.)(preview|previewUrl)$/u.test(field);
+}
+
+function isLocalStorageObjectRoute(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return /(^https?:\/\/[^/]+)?\/api\/uploads\/object\//iu.test(url);
 }
 
 export function normalizeReleaseCoverStorageKey(
@@ -425,13 +435,17 @@ export function normalizeReleaseCoverStorageKey(
 }
 
 export function normalizeReleaseCoverUrl(value: unknown, releaseId?: string | null): string | null {
+  const normalized = normalizeStoredFileLike(value);
+  const rawUrl = asString(normalized?.url);
+  if (rawUrl && (rawUrl.startsWith("http://") || rawUrl.startsWith("https://"))) {
+    return rawUrl;
+  }
+
   const storageKey = normalizeReleaseCoverStorageKey(value, releaseId);
   if (storageKey) {
     return buildStoredFileRouteUrl(storageKey);
   }
 
-  const normalized = normalizeStoredFileLike(value);
-  const rawUrl = asString(normalized?.url);
   if (!rawUrl) return null;
 
   if (
@@ -541,7 +555,7 @@ export async function getReleaseCoverAsset(input: ReleaseCoverSource): Promise<R
     return asset;
   };
 
-  if (previewKey) {
+  if (previewKey && !hasStructuredCoverSource) {
     resolvedPreviewKey = await resolveExistingImageStorageKeyWithFallback(previewKey);
     const previewExists = resolvedPreviewKey ? await imageObjectExistsWithPublicFallback(resolvedPreviewKey) : false;
     logAttempt({
@@ -572,14 +586,15 @@ export async function getReleaseCoverAsset(input: ReleaseCoverSource): Promise<R
     const resolved = await resolveFirstReachableStoredFileCandidateFromCandidates(group.candidates);
     const storageKey = normalizeStoredFileKey(resolved.url);
     const existsInS3 = storageKey ? await imageObjectExistsWithPublicFallback(storageKey) : null;
+    const routeReachable = !isPreviewLikeSourceField(group.field) && isLocalStorageObjectRoute(resolved.url);
     logAttempt({
       source: "candidate",
       sourceField: group.field,
       candidates: group.candidates,
       selectedKey: storageKey,
-      existsInS3
+      existsInS3: routeReachable ? true : existsInS3
     });
-    if (!resolved.url || !storageKey || existsInS3 !== true) {
+    if (!resolved.url || !storageKey || (existsInS3 !== true && !routeReachable)) {
       continue;
     }
 
@@ -591,7 +606,7 @@ export async function getReleaseCoverAsset(input: ReleaseCoverSource): Promise<R
       source: "exact",
       sourceField: group.field,
       savedCoverValue: group.savedValue,
-      existsInS3
+      existsInS3: routeReachable ? true : existsInS3
     };
     return finalize(asset);
   }

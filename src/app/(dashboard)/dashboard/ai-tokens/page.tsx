@@ -113,7 +113,7 @@ function StatCard({
   hint: string;
 }) {
   return (
-    <div className="rounded-[24px] border border-white/[0.08] bg-[#13161f]/88 p-5 shadow-[0_20px_60px_-42px_rgba(0,0,0,0.78)]">
+    <div className="ux-surface-soft rounded-[24px] p-5">
       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/42">{label}</div>
       <div className="mt-3 text-[28px] font-semibold text-white">{value}</div>
       <div className="mt-2 text-[13px] leading-6 text-white/58">{hint}</div>
@@ -153,13 +153,13 @@ export default async function AiTokensHistoryPage({
           <div className="flex flex-wrap items-center gap-2">
             <Link
               href="/dashboard/ai-studio/image?buyTokens=1"
-              className="inline-flex h-11 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] px-4 text-[14px] font-medium text-white/88 transition hover:bg-white/[0.07]"
+              className="ux-control-compact inline-flex h-11 items-center justify-center rounded-[18px] px-4 text-[14px] font-medium text-white/88 transition hover:text-white"
             >
               Купить токены
             </Link>
             <Link
               href="/dashboard/ai-studio/image"
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-[#7b3df5] px-4 text-[14px] font-semibold text-white transition hover:opacity-95"
+              className="ux-button-primary inline-flex h-11 items-center justify-center rounded-[18px] px-4 text-[14px] font-semibold text-white"
             >
               Перейти в AI Studio
             </Link>
@@ -185,7 +185,7 @@ export default async function AiTokensHistoryPage({
         />
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-[28px] border border-white/[0.08] bg-[#12151d]/92 shadow-[0_24px_70px_-44px_rgba(0,0,0,0.82)]">
+      <div className="ux-surface mt-6 overflow-hidden rounded-[28px]">
         <div className="flex items-center justify-between border-b border-white/[0.08] px-5 py-4 sm:px-6">
           <div>
             <div className="text-[18px] font-semibold text-white">Операции</div>
@@ -205,8 +205,8 @@ export default async function AiTokensHistoryPage({
                 className={cn(
                   "inline-flex h-10 items-center justify-center rounded-full border px-4 text-[13px] font-medium transition",
                   isActive
-                    ? "border-[#7b3df5]/40 bg-[#7b3df5]/12 text-white"
-                    : "border-white/[0.10] bg-white/[0.03] text-white/68 hover:border-white/[0.18] hover:bg-white/[0.05] hover:text-white"
+                    ? "ux-pill-active border-[#7b61ff]/40 text-white"
+                    : "ux-pill text-white/68 hover:border-white/[0.18] hover:bg-white/[0.05] hover:text-white"
                 )}
               >
                 {option.label}
@@ -217,7 +217,7 @@ export default async function AiTokensHistoryPage({
 
         {transactions.length === 0 ? (
           <div className="grid place-items-center px-6 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.04]">
+            <div className="ux-surface-soft flex h-14 w-14 items-center justify-center rounded-2xl">
               <Coins className="h-7 w-7 text-white/48" />
             </div>
             <div className="mt-5 text-[20px] font-semibold text-white">История токенов пока пуста</div>
@@ -227,14 +227,14 @@ export default async function AiTokensHistoryPage({
             </div>
             <Link
               href="/dashboard/ai-studio/image"
-              className="mt-6 inline-flex h-11 items-center justify-center rounded-xl bg-[#7b3df5] px-5 text-[14px] font-semibold text-white transition hover:opacity-95"
+              className="ux-button-primary mt-6 inline-flex h-11 items-center justify-center rounded-[18px] px-5 text-[14px] font-semibold text-white"
             >
               Открыть AI Studio
             </Link>
           </div>
         ) : filteredTransactions.length === 0 ? (
           <div className="grid place-items-center px-6 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/[0.08] bg-white/[0.04]">
+            <div className="ux-surface-soft flex h-14 w-14 items-center justify-center rounded-2xl">
               <Coins className="h-7 w-7 text-white/48" />
             </div>
             <div className="mt-5 text-[20px] font-semibold text-white">По этому фильтру операций нет</div>
@@ -244,7 +244,7 @@ export default async function AiTokensHistoryPage({
             </div>
             <Link
               href="/dashboard/ai-tokens"
-              className="mt-6 inline-flex h-11 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] px-5 text-[14px] font-semibold text-white transition hover:bg-white/[0.07]"
+              className="ux-control-compact mt-6 inline-flex h-11 items-center justify-center rounded-[18px] px-5 text-[14px] font-semibold text-white transition hover:text-white"
             >
               Сбросить фильтр
             </Link>
@@ -305,7 +305,7 @@ export default async function AiTokensHistoryPage({
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3 rounded-[20px] border border-white/[0.06] bg-black/20 p-3">
+                      <div className="ux-surface-soft grid grid-cols-2 gap-3 rounded-[20px] p-3">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.12em] text-white/40">Сумма</div>
                           <div className={cn("mt-1 text-[15px] font-semibold", item.amountTokens > 0 ? "text-emerald-200" : "text-rose-200")}>

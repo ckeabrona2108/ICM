@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { mapCabinetReleaseToWizardSeed } from "@/lib/map-cabinet-to-wizard-seed";
 
-test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", () => {
+for (const status of ["changes_required", "approved", "distributed"] as const) {
+test(`mapCabinetReleaseToWizardSeed restores submissionData for ${status} with correct UPC identity`, () => {
   const seed = mapCabinetReleaseToWizardSeed({
     id: "rel_1",
     number: 1,
@@ -18,7 +19,7 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
     territories: "Все страны",
     platforms: "Все площадки",
     genre: "Pop",
-    status: "changes_required",
+    status,
     paid: false,
     tracks: [],
     submissionData: {
@@ -92,6 +93,8 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
     }
   });
 
+  assert.equal(seed.upc, status === "changes_required" ? "123456789012" : "");
+  assert.equal(seed.tracks?.[0]?.meta.isrc, "USRC17607839");
   assert.equal(seed.title, "Submission Title");
   assert.equal(seed.releaseKind, "standard");
   assert.equal(seed.tracks?.length, 1);
@@ -108,6 +111,9 @@ test("mapCabinetReleaseToWizardSeed restores wizard data from submissionData", (
   assert.equal(seed.tracks?.[0]?.meta.aiProcessedTrackOnly, true);
 });
 
+}
+
+for (const status of ["changes_required", "approved", "distributed"] as const) {
 test("mapCabinetReleaseToWizardSeed restores track audio from cabinet tracks when submissionData is missing", () => {
   const seed = mapCabinetReleaseToWizardSeed({
     id: "rel_2",
@@ -123,7 +129,7 @@ test("mapCabinetReleaseToWizardSeed restores track audio from cabinet tracks whe
     territories: "Все страны",
     platforms: "Все площадки",
     genre: "Pop",
-    status: "approved",
+    status,
     paid: true,
     tracks: [
       {
@@ -140,7 +146,11 @@ test("mapCabinetReleaseToWizardSeed restores track audio from cabinet tracks whe
     ]
   });
 
+  assert.equal(seed.upc, status === "changes_required" ? "123456789012" : "");
+  assert.equal(seed.tracks?.[0]?.meta.isrc, "USRC17607839");
   assert.equal(seed.tracks?.length, 1);
   assert.equal(seed.tracks?.[0]?.audioUrl, "/api/uploads/object/uploads/release-2/track.wav");
   assert.equal(seed.tracks?.[0]?.meta.title, "Track 1");
 });
+
+}

@@ -1,6 +1,9 @@
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapReleaseToCabinetRelease } from "@/lib/cabinet-release-server";
+import { isReleaseDraftExpired } from "@/lib/draft-retention";
 import { prisma } from "@/lib/prisma";
+import { isReleaseVisibleOnScene } from "@/lib/scene-policy";
+import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 
 const cabinetReleaseSelect = {
   id: true,
@@ -16,6 +19,8 @@ const cabinetReleaseSelect = {
   preview: true,
   performer: true,
   roles: true,
+  rejectReason: true,
+  moderatorComment: true,
   track: {
     select: {
       id: true,
@@ -36,39 +41,71 @@ const cabinetReleaseSelect = {
   userId: true
 } as const;
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
+async function deleteExpiredDraftsForUser(userId: string, now = new Date()) {
+  const releases = await prisma.release.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      status: true,
+      confirmed: true,
+      upc: true,
+      roles: true
+    }
+  });
+  const expiredIds = releases
+    .filter((release) => isReleaseDraftExpired(release, now))
+    .map((release) => release.id);
 
-function asString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed || null;
-}
-
-function extractRawCover(source: {
-  preview: string;
-  roles: unknown;
-}): { preview: string | null; submissionCover: string | null; submissionCoverUploadUrl: string | null } {
-  const root = asRecord(source.roles);
-  const submission = asRecord(root?.submissionData);
-  const submissionCoverUpload = asRecord(submission?.coverUpload);
-  return {
-    preview: asString(source.preview),
-    submissionCover: asString(submission?.cover),
-    submissionCoverUploadUrl: asString(submissionCoverUpload?.url)
-  };
+  if (expiredIds.length === 0) return;
+  await prisma.release.deleteMany({
+    where: {
+      id: { in: expiredIds },
+      userId
+    }
+  });
 }
 
 export async function getCabinetReleasesByUser(userId: string): Promise<CabinetRelease[]> {
+  await deleteExpiredDraftsForUser(userId);
+
   const releases = await prisma.release.findMany({
     where: { userId },
     orderBy: { date: "desc" },
     select: cabinetReleaseSelect
   });
 
-  return Promise.all(releases.map((release, index) => mapReleaseToCabinetRelease(release, index + 1)));
+  const visible = releases.filter((release) => !isReleaseHiddenFromCabinet(release.roles));
+  return Promise.all(visible.map((release, index) => mapReleaseToCabinetRelease(release, index + 1)));
+}
+
+export async function getSceneEligibleCabinetReleasesByUser(
+  userId: string,
+  now = new Date()
+): Promise<CabinetRelease[]> {
+  await deleteExpiredDraftsForUser(userId, now);
+
+  const releases = await prisma.release.findMany({
+    where: { userId },
+    orderBy: { date: "desc" },
+    select: cabinetReleaseSelect
+  });
+  const eligible = releases.filter((release) =>
+    !isReleaseHiddenFromCabinet(release.roles) &&
+    isReleaseVisibleOnScene(
+      {
+        status: release.status,
+        confirmed: release.confirmed,
+        upc: release.upc,
+        roles: release.roles,
+        releaseDate: release.date
+      },
+      now
+    )
+  );
+
+  return Promise.all(
+    eligible.map((release, index) => mapReleaseToCabinetRelease(release, index + 1))
+  );
 }
 
 export async function getCabinetDraftReleasesByUser(userId: string): Promise<CabinetRelease[]> {
@@ -85,5 +122,11 @@ export async function getCabinetReleaseByIdForUser(userId: string, releaseId: st
     select: cabinetReleaseSelect
   });
   if (!release) return null;
+  if (isReleaseDraftExpired(release)) {
+    await prisma.release.delete({
+      where: { id: release.id }
+    });
+    return null;
+  }
   return mapReleaseToCabinetRelease(release, 1);
 }

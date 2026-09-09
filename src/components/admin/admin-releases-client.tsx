@@ -13,6 +13,7 @@ import { ReleaseCoverUploadButton } from "@/components/admin/release-cover-uploa
 type AdminReleaseTab =
   | "moderation"
   | "pending_verification"
+  | "deletion_requests"
   | "all"
   | "approved"
   | "rejected";
@@ -20,6 +21,7 @@ type AdminReleaseTab =
 const TAB_LABELS: Record<AdminReleaseTab, string> = {
   moderation: "На модерации",
   pending_verification: "Ожидает верификацию",
+  deletion_requests: "Запросы на удаление",
   all: "Все",
   approved: "Принятые",
   rejected: "Отклонённые"
@@ -211,6 +213,44 @@ export function AdminReleasesClient({
     }
   }
 
+  async function submitDeletionRequestAction(
+    release: AdminReleaseDetails,
+    action: "approve" | "restore"
+  ) {
+    setBusyId(release.id);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/admin/releases/${release.id}/delete-request/${action === "approve" ? "approve" : "restore"}`,
+        { method: "POST" }
+      );
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+      if (!response.ok) {
+        throw new Error(
+          payload?.error ??
+            (action === "approve"
+              ? "Не удалось подтвердить удаление релиза."
+              : "Не удалось восстановить релиз.")
+        );
+      }
+
+      setToast(action === "approve" ? "Удаление релиза подтверждено." : "Релиз восстановлен.");
+      await loadReleases(tab);
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? actionError.message
+          : action === "approve"
+            ? "Не удалось подтвердить удаление релиза."
+            : "Не удалось восстановить релиз."
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   const handleCoverUploaded = React.useCallback(
     (releaseId: string, payload: { previewUrl: string }) => {
       setReleases((prev) =>
@@ -232,7 +272,7 @@ export function AdminReleasesClient({
     <div className="pb-10">
       <h1 className="text-[24px] font-semibold tracking-tight text-white sm:text-[26px]">Релизы</h1>
       <p className="mt-2 max-w-3xl text-[14px] text-white/65">
-        Управление релизами: принятие, отклонение с причиной и полное удаление.
+        Управление релизами: модерация, заявки на удаление и служебные действия.
       </p>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -271,10 +311,12 @@ export function AdminReleasesClient({
       ) : (
         <div className="mt-6 space-y-4">
           {releases.map((release) => {
-            const canApprove = ["moderation", "rejected", "approved", "changes_required"].includes(
-              release.status
-            );
-            const canReject = release.status === "moderation";
+            const hasDeletionWorkflow =
+              release.deletionStatus === "requested" || release.deletionStatus === "deleted";
+            const canApprove =
+              !hasDeletionWorkflow &&
+              ["moderation", "rejected", "approved", "changes_required"].includes(release.status);
+            const canReject = !hasDeletionWorkflow && release.status === "moderation";
             const isBusy = busyId === release.id;
             const safeCoverUrl = resolveRenderableStoredFileUrl({ url: release.coverUrl || "", storageKey: null });
             const failedCoverUrl = coverBrokenById[release.id] ?? null;
@@ -342,6 +384,16 @@ export function AdminReleasesClient({
                           Приоритетный
                         </span>
                       ) : null}
+                      {release.deletionStatus === "requested" ? (
+                        <span className="inline-flex items-center rounded-full border border-violet-300/30 bg-violet-500/15 px-2 py-0.5 text-[11px] font-semibold text-violet-100">
+                          Запрошено удаление
+                        </span>
+                      ) : null}
+                      {release.deletionStatus === "deleted" ? (
+                        <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 text-[11px] font-semibold text-white/70">
+                          Удален у пользователя
+                        </span>
+                      ) : null}
                       {release.rejectedAt ? (
                         <span className="text-[12px] text-white/55">Отклонён: {release.rejectedAt}</span>
                       ) : null}
@@ -367,6 +419,22 @@ export function AdminReleasesClient({
                     {release.status === "pending_verification" ? (
                       <div className="mt-3 rounded-lg border border-cyan-300/20 bg-cyan-500/10 px-3 py-2 text-[13px] text-cyan-100">
                         Релиз будет доступен для модерации после подтверждения верификации пользователя.
+                      </div>
+                    ) : null}
+                    {release.deletionStatus === "requested" ? (
+                      <div className="mt-3 rounded-lg border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-[13px] text-violet-100">
+                        <p>Пользователь запросил удаление релиза с площадок. Срок выполнения: до 72 часов.</p>
+                        <p className="mt-1 text-violet-50">
+                          Комментарий: {release.deletionComment || "Не указан"}
+                        </p>
+                      </div>
+                    ) : null}
+                    {release.deletionStatus === "deleted" ? (
+                      <div className="mt-3 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 py-2 text-[13px] text-white/70">
+                        <p>Релиз скрыт у пользователя и помечен как удалённый. Его можно восстановить без потери данных.</p>
+                        <p className="mt-1 text-white/82">
+                          Комментарий: {release.deletionComment || "Не указан"}
+                        </p>
                       </div>
                     ) : null}
                   </div>
@@ -404,17 +472,44 @@ export function AdminReleasesClient({
                       <X className="h-4 w-4" />
                       Отклонить
                     </button>
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() => {
-                        setDeleteModal({ open: true, release, error: null });
-                      }}
-                      className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-white/[0.14] bg-white/[0.04] px-3 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Удалить
-                    </button>
+                    {release.deletionStatus === "requested" ? (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          void submitDeletionRequestAction(release, "approve");
+                        }}
+                        className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-violet-300/35 bg-violet-500/20 px-3 text-[13px] font-semibold text-violet-50 transition hover:bg-violet-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Check className="h-4 w-4" />
+                        Подтвердить удаление
+                      </button>
+                    ) : null}
+                    {release.deletionStatus === "requested" || release.deletionStatus === "deleted" ? (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          void submitDeletionRequestAction(release, "restore");
+                        }}
+                        className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-white/[0.14] bg-white/[0.04] px-3 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Восстановить релиз
+                      </button>
+                    ) : null}
+                    {!hasDeletionWorkflow ? (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          setDeleteModal({ open: true, release, error: null });
+                        }}
+                        className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-white/[0.14] bg-white/[0.04] px-3 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Удалить
+                      </button>
+                    ) : null}
                     <ReleaseCoverUploadButton
                       releaseId={release.id}
                       label={release.coverUrl ? "Заменить обложку" : "Загрузить обложку"}

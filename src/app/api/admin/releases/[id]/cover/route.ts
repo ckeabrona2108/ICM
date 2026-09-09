@@ -4,16 +4,11 @@ import type { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
+import { canManageReleasesSession } from "@/lib/admin-release-service";
 import {
   uploadAdminReleaseCover,
-  validateAdminReleaseCoverFile,
-  verifyAdminReleaseCoverUrl
+  validateAdminReleaseCoverFile
 } from "@/lib/admin-release-cover-upload";
-
-function getBaseUrl(request: Request): string {
-  return new URL(request.url).origin;
-}
 
 export async function POST(
   request: Request,
@@ -72,16 +67,6 @@ export async function POST(
       file: fileValue
     });
 
-    const httpStatus = await verifyAdminReleaseCoverUrl(uploaded.previewUrl, getBaseUrl(request));
-    if (httpStatus !== 200 && httpStatus !== 206) {
-      return NextResponse.json(
-        {
-          error: `Upload verification failed: ${httpStatus ?? "no response"}`
-        },
-        { status: 502 }
-      );
-    }
-
     const nextRoles = release.roles && typeof release.roles === "object" && !Array.isArray(release.roles)
       ? structuredClone(release.roles as Record<string, unknown>)
       : {};
@@ -113,8 +98,7 @@ export async function POST(
         releaseId: release.id,
         title: release.title,
         previewUrl: uploaded.previewUrl,
-        storageKey: uploaded.key,
-        httpStatus
+        storageKey: uploaded.key
       },
       { status: 200 }
     );

@@ -71,6 +71,46 @@ export interface SupportUnreadCountResponse {
   count: number;
 }
 
+export interface DirectMessageResponse {
+  id: string;
+  conversationId: string;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+  isOwn: boolean;
+  deletedForEveryone: boolean;
+}
+
+export interface DirectConversationParticipantResponse {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  profileType: "artist" | "producer" | "group" | "label";
+}
+
+export interface DirectConversationResponse {
+  id: string;
+  participant: DirectConversationParticipantResponse;
+  updatedAt: string;
+  unreadCount: number;
+  lastMessage: string | null;
+  messages: DirectMessageResponse[];
+}
+
+export interface DirectConversationListResponse {
+  conversations: DirectConversationResponse[];
+}
+
+export interface SendDirectMessageRequest {
+  recipientSlug: string;
+  body: string;
+}
+
+export interface SendDirectMessageResponse {
+  ok: true;
+  conversation: DirectConversationResponse;
+}
+
 export type DashboardNotificationKind =
   | "release_approved"
   | "release_rejected"
@@ -81,7 +121,18 @@ export type DashboardNotificationKind =
   | "payout_requested"
   | "payout_paid"
   | "payout_rejected"
-  | "support_reply";
+  | "support_reply"
+  | "direct_message"
+  | "artist_release_published"
+  | "artist_post_published"
+  | "artist_post_liked"
+  | "artist_post_commented"
+  | "collaboration_response_received"
+  | "artist_post_comment_reacted"
+  | "artist_release_liked"
+  | "artist_release_commented"
+  | "artist_release_comment_reacted"
+  | "artist_profile_followed";
 
 export interface DashboardNotificationItemResponse {
   id: string;
@@ -178,6 +229,7 @@ export interface CurrentUserProfileResponse {
   name: string;
   email: string;
   avatarUrl: string | null;
+  artistProfileType: import("@/lib/artist-profile-type").ArtistProfileType;
   royaltyBalance: number;
   aiTokenBalance: number;
   currentPlan: "FREE" | "STANDARD" | "PRO" | "ENTERPRISE";
@@ -310,6 +362,7 @@ export interface AiStudioChatSendResponse {
 export interface UpdateCurrentUserProfileRequest {
   name: string;
   email?: string;
+  artistProfileType?: import("@/lib/artist-profile-type").ArtistProfileType;
 }
 
 export interface UpdateCurrentUserAvatarRequest {
@@ -372,10 +425,25 @@ export interface AdminReleaseDetailsResponse {
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
+  media_health?: {
+    broken_cover: boolean;
+    broken_audio_tracks: number;
+  };
   cover: {
     url: string;
+    storage_key?: string | null;
     download_url: string | null;
     candidate_urls?: string[];
+    diagnosis?: {
+      status: "ok" | "missing_file" | "broken_db_path" | "access_denied" | "no_preview";
+      label: string;
+      message: string;
+      storage_key: string | null;
+      resolved_url: string | null;
+      suggested_storage_key: string | null;
+      suggested_source: "root_filename" | "sibling_folder" | null;
+      suggested_ambiguous: boolean;
+    };
   };
   release: {
     metadata_language: string;
@@ -458,6 +526,16 @@ export interface AdminReleaseDetailsResponse {
         file_name: string | null;
         url: string | null;
         download_url: string | null;
+        diagnosis?: {
+          status: "ok" | "missing_file" | "broken_db_path" | "access_denied" | "no_preview";
+          label: string;
+          message: string;
+          storage_key: string | null;
+          resolved_url: string | null;
+          suggested_storage_key: string | null;
+          suggested_source: "root_filename" | "sibling_folder" | null;
+          suggested_ambiguous: boolean;
+        };
       };
       text: {
         file_name: string | null;

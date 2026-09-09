@@ -1,9 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { CalendarDays, Info } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Info } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+
+const CONTROL_BASE =
+  "w-full rounded-[18px] border border-white/[0.12] bg-black/25 text-[15px] font-medium text-[var(--ux-text)] placeholder:text-white/35 outline-none transition-[border-color,background-color,box-shadow,color,transform] focus:border-[var(--ux-accent)]/60 focus:bg-white/[0.055] focus:shadow-[0_0_0_3px_rgba(123,97,255,0.14)]";
 
 export function WizardCard({
   title,
@@ -17,12 +22,17 @@ export function WizardCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("rounded-2xl border border-white/[0.08] bg-[#13151d]/85 p-5 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)] backdrop-blur-xl sm:p-6", className)}>
+    <div
+      className={cn(
+        "rounded-[28px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.86),rgba(13,16,30,0.82))] p-5 shadow-[var(--ux-shadow-soft)] backdrop-blur-xl sm:p-7",
+        className
+      )}
+    >
       {title ? (
-        <div className="mb-4">
-          <h3 className="text-[20px] font-semibold text-white">{title}</h3>
+        <div className="mb-5 space-y-1.5">
+          <h3 className="text-[20px] font-semibold tracking-[-0.03em] text-white">{title}</h3>
           {description ? (
-            <p className="mt-1 text-[15px] font-medium text-white/65">{description}</p>
+            <p className="max-w-2xl text-[13px] leading-6 text-[var(--ux-text-secondary)]">{description}</p>
           ) : null}
         </div>
       ) : null}
@@ -34,22 +44,158 @@ export function WizardCard({
 export function FieldLabel({
   children,
   hint,
-  required
+  required,
+  tooltip,
+  tooltipLabel
 }: {
   children: React.ReactNode;
   hint?: string;
   required?: boolean;
+  tooltip?: string;
+  tooltipLabel?: string;
 }) {
   return (
-    <label className="mb-1.5 flex items-center gap-1 text-[14px] font-medium text-white/72">
-      <span>{children}</span>
-      {required ? <span className="text-[#ff5d6d]">*</span> : null}
-      {hint ? (
-        <span title={hint} className="cursor-help text-white/30">
-          <Info className="h-3 w-3" />
+    <label className="mb-2.5 inline-flex min-h-6 w-fit max-w-full items-center gap-2 align-middle text-[11px] font-semibold uppercase tracking-[0.1em] text-white/50 sm:whitespace-nowrap">
+      <span className="inline">
+        {children}
+        {required ? <span className="ml-1.5 whitespace-nowrap text-[var(--ux-accent)]">*</span> : null}
+      </span>
+      {tooltip ? (
+        <InfoTooltip
+          content={tooltip}
+          ariaLabel={tooltipLabel ?? "Подробнее о поле"}
+          className="mb-[1px]"
+        />
+      ) : hint ? (
+        <span title={hint} className="cursor-help text-white/28">
+          <Info className="h-3.5 w-3.5" />
         </span>
       ) : null}
     </label>
+  );
+}
+
+export function InfoTooltip({
+  content,
+  ariaLabel,
+  className
+}: {
+  content: React.ReactNode;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [mounted, setMounted] = React.useState(false);
+  const [placement, setPlacement] = React.useState<"top" | "bottom">("top");
+  const [position, setPosition] = React.useState({ top: 0, left: 0, arrowLeft: 24 });
+  const triggerRef = React.useRef<HTMLButtonElement | null>(null);
+  const panelId = React.useId();
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const updatePosition = React.useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger || typeof window === "undefined") return;
+
+    const rect = trigger.getBoundingClientRect();
+    const tooltipWidth = Math.min(380, window.innerWidth - 24);
+    const estimatedHeight = 104;
+    const sideOffset = 8;
+    const nextPlacement =
+      rect.top >= estimatedHeight + sideOffset + 12 ? "top" : "bottom";
+    const unclampedLeft = rect.left + rect.width / 2 - tooltipWidth / 2;
+    const left = Math.max(12, Math.min(unclampedLeft, window.innerWidth - tooltipWidth - 12));
+    const top =
+      nextPlacement === "top"
+        ? rect.top - estimatedHeight - sideOffset
+        : rect.bottom + sideOffset;
+    const arrowLeft = Math.max(18, Math.min(rect.left + rect.width / 2 - left, tooltipWidth - 18));
+
+    setPlacement(nextPlacement);
+    setPosition({
+      top: Math.max(12, top),
+      left,
+      arrowLeft
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const onViewportChange = () => updatePosition();
+    const onPointerDown = (event: PointerEvent) => {
+      const trigger = triggerRef.current;
+      if (trigger && event.target instanceof Node && !trigger.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, updatePosition]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={ariaLabel}
+        aria-describedby={open ? panelId : undefined}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen((prev) => !prev);
+        }}
+        className={cn(
+          "inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full text-white/28 transition-colors hover:text-white/62 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ux-accent)]/45",
+          className
+        )}
+      >
+        <Info className="h-4 w-4" />
+      </button>
+      {mounted && open
+        ? createPortal(
+            <div
+              id={panelId}
+              role="tooltip"
+              className="pointer-events-none fixed z-[120] max-w-[min(380px,calc(100vw-24px))] rounded-[14px] border border-white/[0.1] bg-[#15192a] px-4 py-3 text-[12px] font-medium leading-5 text-white shadow-[0_18px_48px_-24px_rgba(0,0,0,0.85)]"
+              style={{ top: position.top, left: position.left }}
+            >
+              <span
+                aria-hidden
+                className="absolute h-3 w-3 rotate-45 border-white/[0.1] bg-[#15192a]"
+                style={{
+                  left: position.arrowLeft - 6,
+                  top: placement === "top" ? "100%" : -6,
+                  borderLeftWidth: placement === "top" ? 0 : 1,
+                  borderTopWidth: placement === "top" ? 0 : 1,
+                  borderRightWidth: placement === "top" ? 1 : 0,
+                  borderBottomWidth: placement === "top" ? 1 : 0
+                }}
+              />
+              {content}
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
 
@@ -58,7 +204,8 @@ export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        "h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3.5 text-[15px] font-medium text-white placeholder:text-white/45 outline-none transition-colors focus:border-[#7b3df5]/60 focus:bg-white/[0.05]",
+        CONTROL_BASE,
+        "h-[52px] px-4",
         props.className
       )}
     />
@@ -80,6 +227,14 @@ function normalizeDateValue(value: string): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function formatDateDisplay(value: string): string {
+  const normalized = normalizeDateValue(value);
+  if (!normalized) return "";
+  const [year, month, day] = normalized.split("-");
+  if (!year || !month || !day) return "";
+  return `${day}.${month}.${year}`;
+}
+
 export function DateInput({
   value,
   onChange,
@@ -90,6 +245,8 @@ export function DateInput({
   onChange: (value: string) => void;
 }) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const normalizedValue = normalizeDateValue(value);
+  const hasValue = normalizedValue.length > 0;
 
   const openPicker = React.useCallback(() => {
     const input = inputRef.current;
@@ -100,28 +257,40 @@ export function DateInput({
       return;
     }
     input.focus();
+    input.click();
   }, []);
 
   return (
-    <div className="relative">
+    <div className="min-w-0">
       <input
         {...rest}
         ref={inputRef}
         type="date"
-        value={normalizeDateValue(value)}
+        tabIndex={-1}
+        aria-hidden="true"
+        value={normalizedValue}
         onChange={(event) => onChange(event.target.value)}
-        className={cn(
-          "icm-date-input h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3.5 pr-10 text-[15px] font-medium text-white placeholder:text-white/45 outline-none transition-colors focus:border-[#7b3df5]/60 focus:bg-white/[0.05]",
-          className
-        )}
+        className="sr-only"
       />
       <button
         type="button"
         onClick={openPicker}
-        aria-label="Открыть календарь"
-        className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
+        className={cn(
+          CONTROL_BASE,
+          "flex h-[52px] w-full min-w-0 items-center justify-center overflow-hidden px-4 text-[14px] tabular-nums",
+          className
+        )}
       >
-        <CalendarDays className="h-4 w-4" />
+        {hasValue ? (
+          <span className="block min-w-0 whitespace-nowrap text-center">
+            {formatDateDisplay(normalizedValue)}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-3 whitespace-nowrap text-white/40">
+            <span className="text-white/38">Выбрать дату</span>
+            <CalendarDays className="h-[18px] w-[18px] shrink-0 text-white/40" />
+          </span>
+        )}
       </button>
     </div>
   );
@@ -132,7 +301,8 @@ export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement
     <textarea
       {...props}
       className={cn(
-        "min-h-[88px] w-full resize-y rounded-xl border border-white/[0.12] bg-black/25 px-3.5 py-2.5 text-[15px] font-medium text-white placeholder:text-white/45 outline-none transition-colors focus:border-[#7b3df5]/60 focus:bg-white/[0.05]",
+        CONTROL_BASE,
+        "min-h-[132px] resize-y px-4 py-3.5",
         props.className
       )}
     />
@@ -161,8 +331,9 @@ export function Select({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className={cn(
-          "h-11 w-full appearance-none rounded-xl border border-white/[0.12] bg-black/25 px-3.5 pr-9 text-[15px] font-medium text-white outline-none transition-colors focus:border-[#7b3df5]/60 focus:bg-white/[0.05]",
-          !value && "text-white/45"
+          CONTROL_BASE,
+          "h-[52px] appearance-none px-4 pr-11",
+          !value && "text-[#8e8377]"
         )}
       >
         <option value="" disabled>
@@ -178,7 +349,7 @@ export function Select({
         })}
       </select>
       <svg
-        className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/40"
+        className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[#8e8377]"
         viewBox="0 0 16 16"
         fill="none"
       >
@@ -202,14 +373,14 @@ export function Checkbox({
   size?: "sm" | "md";
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-2.5">
+    <label className="flex cursor-pointer items-start gap-3">
       <span
         className={cn(
-          "mt-0.5 grid shrink-0 place-items-center rounded border transition-all",
+          "mt-0.5 grid shrink-0 place-items-center rounded-[6px] border transition-all",
           size === "sm" ? "h-4 w-4" : "h-[18px] w-[18px]",
           checked
-            ? "border-[#7b3df5] bg-[#7b3df5]"
-            : "border-white/15 bg-white/[0.03] hover:border-white/30"
+            ? "border-[var(--ux-accent)] bg-[var(--ux-accent)]"
+            : "border-white/[0.14] bg-white/[0.03] hover:border-white/[0.24]"
         )}
       >
         {checked ? (
@@ -219,9 +390,9 @@ export function Checkbox({
         ) : null}
       </span>
       <span className="leading-tight">
-        <span className="block text-[13px] text-white/85">{label}</span>
+        <span className="block text-[13px] text-white/88">{label}</span>
         {description ? (
-          <span className="mt-1 block text-[12px] text-white/45">{description}</span>
+          <span className="mt-1 block text-[12px] leading-5 text-white/52">{description}</span>
         ) : null}
       </span>
       <input
@@ -237,32 +408,44 @@ export function Checkbox({
 export function RadioPill({
   checked,
   onClick,
-  children
+  className,
+  children,
+  trailing
 }: {
   checked: boolean;
   onClick: () => void;
+  className?: string;
   children: React.ReactNode;
+  trailing?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
-        "flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition-colors",
-        checked
-          ? "border-[#7b3df5]/50 bg-[#7b3df5]/[0.12] text-white"
-          : "border-white/[0.06] bg-white/[0.02] text-white/65 hover:border-white/[0.14] hover:text-white"
+        "inline-flex items-stretch gap-2 rounded-[12px]",
+        className
       )}
     >
-      <span
+      <button
+        type="button"
+        onClick={onClick}
         className={cn(
-          "grid h-4 w-4 place-items-center rounded-full border transition-colors",
-          checked ? "border-[#7b3df5] bg-[#7b3df5]" : "border-white/25"
+          "inline-flex min-w-0 flex-1 items-center gap-2 rounded-[12px] border px-3 py-2 text-left text-[12.5px] font-medium transition-colors",
+          checked
+            ? "border-[var(--ux-accent)]/55 bg-[var(--ux-accent)]/12 text-white"
+            : "border-white/[0.1] bg-white/[0.03] text-white/68 hover:border-[var(--ux-accent)]/35 hover:bg-white/[0.05] hover:text-white"
         )}
       >
-        {checked ? <span className="h-1.5 w-1.5 rounded-full bg-white" /> : null}
-      </span>
-      <span>{children}</span>
-    </button>
+        <span
+          className={cn(
+            "grid h-4 w-4 shrink-0 place-items-center rounded-full border transition-colors",
+            checked ? "border-[var(--ux-accent)] bg-[var(--ux-accent)]" : "border-white/25"
+          )}
+        >
+          {checked ? <span className="h-1.5 w-1.5 rounded-full bg-[#f5f1ea]" /> : null}
+        </span>
+        <span className="min-w-0">{children}</span>
+      </button>
+      {trailing ? <span className="flex shrink-0 items-center">{trailing}</span> : null}
+    </div>
   );
 }

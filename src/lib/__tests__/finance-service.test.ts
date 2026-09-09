@@ -1,5 +1,5 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-explicit-any */
 // @ts-nocheck
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -184,8 +184,9 @@ test("effective report lifecycle moves money between accruals and available bala
   assert.equal(totals.availableToWithdraw, 100);
 });
 
-test("missing payout table does not erase report balances", async () => {
+test("missing canonical payout table is an explicit loading error", async () => {
   const prisma = {
+    $queryRaw: async () => [{ exists: false }],
     financeReport: {
       aggregate: async ({ where }: { where: { status: string } }) => ({
         _sum: { amount: where.status === "AGREED" ? 700 : 250 }
@@ -201,11 +202,105 @@ test("missing payout table does not erase report balances", async () => {
     }
   } as any;
 
+  await assert.rejects(
+    getUserBalanceTotals(prisma, "u1"),
+    /Финансовые данные временно недоступны/u
+  );
+});
+
+test("missing payoutRequest table is skipped before Prisma aggregate", async () => {
+  let payoutRequestAggregateCalled = false;
+  const prisma = {
+    $queryRaw: async (query: { values?: unknown[] }) => {
+      const tableName = String(query.values?.[0] ?? "");
+      return [{ exists: tableName === "payouts" }];
+    },
+    financeReport: {
+      aggregate: async ({ where }: { where: { status: string } }) => ({
+        _sum: { amount: where.status === "AGREED" ? 700 : 250 }
+      })
+    },
+    payoutRequest: {
+      aggregate: async () => {
+        payoutRequestAggregateCalled = true;
+        throw new Error("payoutRequest aggregate must not be called");
+      }
+    },
+    payouts: {
+      aggregate: async () => ({ _sum: { amount: 125 } })
+    },
+    transaction: {
+      findMany: async () => []
+    }
+  } as any;
+
   const totals = await getUserBalanceTotals(prisma, "u1");
 
-  assert.equal(totals.agreedBalance, 700);
-  assert.equal(totals.pendingBalance, 250);
-  assert.equal(totals.pendingPayout, 0);
+  assert.equal(payoutRequestAggregateCalled, false);
+  assert.equal(totals.pendingPayout, 125);
+  assert.equal(totals.availableToWithdraw, 575);
+});
+
+test("canonical payout requests reserve the balance by lifecycle status", async () => {
+  let payoutFilter: unknown;
+  const prisma = {
+    financeReport: {
+      aggregate: async ({ where }: { where: { status: string } }) => ({
+        _sum: { amount: where.status === "AGREED" ? 1000 : 0 }
+      })
+    },
+    payouts: {
+      aggregate: async ({ where }: { where: unknown }) => {
+        payoutFilter = where;
+        return { _sum: { amount: 250 } };
+      }
+    },
+    transaction: { findMany: async () => [] }
+  } as any;
+
+  const totals = await getUserBalanceTotals(prisma, "u1");
+
+  assert.deepEqual(payoutFilter, {
+    userId: "u1",
+    status: { in: ["REQUESTED", "PROCESSING"] }
+  });
+  assert.equal(totals.pendingPayout, 250);
+  assert.equal(totals.availableToWithdraw, 750);
+});
+
+test("legacy payouts without status column reserve balance by confirmed flag", async () => {
+  let payoutFilter: unknown;
+  const prisma = {
+    $queryRaw: async (query: { strings?: string[]; values?: unknown[] }) => {
+      const sql = String(query.strings?.join(" ") ?? "");
+      if (sql.includes("information_schema.columns")) {
+        return [{ exists: false }];
+      }
+      const tableName = String(query.values?.[0] ?? "");
+      return [{ exists: tableName === "payouts" }];
+    },
+    financeReport: {
+      aggregate: async ({ where }: { where: { status: string } }) => ({
+        _sum: { amount: where.status === "AGREED" ? 1000 : 0 }
+      })
+    },
+    payouts: {
+      aggregate: async ({ where }: { where: unknown }) => {
+        payoutFilter = where;
+        return { _sum: { amount: 300 } };
+      }
+    },
+    transaction: { findMany: async () => [] }
+  } as any;
+
+  const totals = await getUserBalanceTotals(prisma, "u1");
+
+  assert.deepEqual(payoutFilter, {
+    userId: "u1",
+    confirmed: false
+  });
+  assert.equal(totals.pendingPayout, 300);
+  assert.equal(totals.availableToWithdraw, 700);
 });
 
 test("top-up transaction rollback propagates error", async () => {

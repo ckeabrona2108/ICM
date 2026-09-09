@@ -53,12 +53,12 @@ CREATE TABLE IF NOT EXISTS "icecream"."catalog_imports" (
   "confirmed_at" TIMESTAMP(6),
   "rolled_back_at" TIMESTAMP(6),
   "error_message" TEXT,
-  "created_by_admin_id" UUID NOT NULL,
+  "created_by_admin_id" TEXT NOT NULL,
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "catalog_imports_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "catalog_imports_created_by_admin_id_fkey"
-    FOREIGN KEY ("created_by_admin_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("created_by_admin_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -72,10 +72,10 @@ CREATE TABLE IF NOT EXISTS "icecream"."catalog_import_rows" (
   "normalized_data" JSONB,
   "detected_match_rule" TEXT,
   "error_message" TEXT,
-  "matched_release_id" UUID,
-  "matched_track_id" UUID,
-  "created_release_id" UUID,
-  "created_track_id" UUID,
+  "matched_release_id" TEXT,
+  "matched_track_id" TEXT,
+  "created_release_id" TEXT,
+  "created_track_id" TEXT,
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "catalog_import_rows_pkey" PRIMARY KEY ("id"),
@@ -83,16 +83,16 @@ CREATE TABLE IF NOT EXISTS "icecream"."catalog_import_rows" (
     FOREIGN KEY ("import_id") REFERENCES "icecream"."catalog_imports"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "catalog_import_rows_matched_release_id_fkey"
-    FOREIGN KEY ("matched_release_id") REFERENCES "icecream"."release"("id")
+    FOREIGN KEY ("matched_release_id") REFERENCES "icecream"."Release"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "catalog_import_rows_matched_track_id_fkey"
-    FOREIGN KEY ("matched_track_id") REFERENCES "icecream"."track"("id")
+    FOREIGN KEY ("matched_track_id") REFERENCES "icecream"."Track"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "catalog_import_rows_created_release_id_fkey"
-    FOREIGN KEY ("created_release_id") REFERENCES "icecream"."release"("id")
+    FOREIGN KEY ("created_release_id") REFERENCES "icecream"."Release"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "catalog_import_rows_created_track_id_fkey"
-    FOREIGN KEY ("created_track_id") REFERENCES "icecream"."track"("id")
+    FOREIGN KEY ("created_track_id") REFERENCES "icecream"."Track"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -117,8 +117,8 @@ CREATE TABLE IF NOT EXISTS "icecream"."catalog_conflicts" (
   "existing_value" TEXT,
   "incoming_value" TEXT,
   "resolution_status" "icecream"."SmartConflictStatus" NOT NULL DEFAULT 'PENDING',
-  "matched_release_id" UUID,
-  "matched_track_id" UUID,
+  "matched_release_id" TEXT,
+  "matched_track_id" TEXT,
   "notes" TEXT,
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -130,10 +130,10 @@ CREATE TABLE IF NOT EXISTS "icecream"."catalog_conflicts" (
     FOREIGN KEY ("row_id") REFERENCES "icecream"."catalog_import_rows"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "catalog_conflicts_matched_release_id_fkey"
-    FOREIGN KEY ("matched_release_id") REFERENCES "icecream"."release"("id")
+    FOREIGN KEY ("matched_release_id") REFERENCES "icecream"."Release"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "catalog_conflicts_matched_track_id_fkey"
-    FOREIGN KEY ("matched_track_id") REFERENCES "icecream"."track"("id")
+    FOREIGN KEY ("matched_track_id") REFERENCES "icecream"."Track"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -193,12 +193,12 @@ CREATE TABLE IF NOT EXISTS "icecream"."financial_imports" (
   "confirmed_at" TIMESTAMP(6),
   "rolled_back_at" TIMESTAMP(6),
   "error_message" TEXT,
-  "created_by_admin_id" UUID NOT NULL,
+  "created_by_admin_id" TEXT NOT NULL,
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "financial_imports_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "financial_imports_created_by_admin_id_fkey"
-    FOREIGN KEY ("created_by_admin_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("created_by_admin_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -212,9 +212,9 @@ CREATE TABLE IF NOT EXISTS "icecream"."financial_import_rows" (
   "normalized_data" JSONB,
   "detected_match_rule" TEXT,
   "error_message" TEXT,
-  "matched_release_id" UUID,
-  "matched_track_id" UUID,
-  "user_id" UUID,
+  "matched_release_id" TEXT,
+  "matched_track_id" TEXT,
+  "user_id" TEXT,
   "gross_amount" DECIMAL(14,2),
   "net_amount" DECIMAL(14,2),
   "commission_amount" DECIMAL(14,2),
@@ -226,13 +226,13 @@ CREATE TABLE IF NOT EXISTS "icecream"."financial_import_rows" (
     FOREIGN KEY ("import_id") REFERENCES "icecream"."financial_imports"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "financial_import_rows_matched_release_id_fkey"
-    FOREIGN KEY ("matched_release_id") REFERENCES "icecream"."release"("id")
+    FOREIGN KEY ("matched_release_id") REFERENCES "icecream"."Release"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "financial_import_rows_matched_track_id_fkey"
-    FOREIGN KEY ("matched_track_id") REFERENCES "icecream"."track"("id")
+    FOREIGN KEY ("matched_track_id") REFERENCES "icecream"."Track"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "financial_import_rows_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -240,9 +240,9 @@ CREATE TABLE IF NOT EXISTS "icecream"."royalty_transactions" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "financial_import_id" UUID,
   "financial_import_row_id" UUID,
-  "user_id" UUID NOT NULL,
-  "release_id" UUID,
-  "track_id" UUID,
+  "user_id" TEXT NOT NULL,
+  "release_id" TEXT,
+  "track_id" TEXT,
   "gross_amount" DECIMAL(14,2) NOT NULL,
   "platform_commission_amount" DECIMAL(14,2) NOT NULL,
   "commission_rate" DECIMAL(7,4) NOT NULL,
@@ -261,13 +261,13 @@ CREATE TABLE IF NOT EXISTS "icecream"."royalty_transactions" (
     FOREIGN KEY ("financial_import_row_id") REFERENCES "icecream"."financial_import_rows"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "royalty_transactions_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "royalty_transactions_release_id_fkey"
-    FOREIGN KEY ("release_id") REFERENCES "icecream"."release"("id")
+    FOREIGN KEY ("release_id") REFERENCES "icecream"."Release"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "royalty_transactions_track_id_fkey"
-    FOREIGN KEY ("track_id") REFERENCES "icecream"."track"("id")
+    FOREIGN KEY ("track_id") REFERENCES "icecream"."Track"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -293,7 +293,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."commission_calculations" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "financial_import_id" UUID,
   "row_id" UUID,
-  "user_id" UUID,
+  "user_id" TEXT,
   "source_type" TEXT NOT NULL,
   "source_reference" TEXT,
   "gross_amount" DECIMAL(14,2) NOT NULL,
@@ -309,13 +309,13 @@ CREATE TABLE IF NOT EXISTS "icecream"."commission_calculations" (
     FOREIGN KEY ("row_id") REFERENCES "icecream"."financial_import_rows"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "commission_calculations_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS "icecream"."balance_transactions" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "royalty_transaction_id" UUID,
   "amount" DECIMAL(14,2) NOT NULL,
   "direction" "icecream"."SmartBalanceDirection" NOT NULL,
@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."balance_transactions" (
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "balance_transactions_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "balance_transactions_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "balance_transactions_royalty_transaction_id_fkey"
     FOREIGN KEY ("royalty_transaction_id") REFERENCES "icecream"."royalty_transactions"("id")
@@ -335,7 +335,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."balance_transactions" (
 
 CREATE TABLE IF NOT EXISTS "icecream"."user_commission_rates" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "commission_rate" DECIMAL(7,4) NOT NULL,
   "active" BOOLEAN NOT NULL DEFAULT true,
   "notes" TEXT,
@@ -345,7 +345,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."user_commission_rates" (
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "user_commission_rates_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "user_commission_rates_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -364,7 +364,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."label_commission_rates" (
 
 CREATE TABLE IF NOT EXISTS "icecream"."contract_commission_rates" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "contract_reference" TEXT,
   "commission_rate" DECIMAL(7,4) NOT NULL,
   "active" BOOLEAN NOT NULL DEFAULT true,
@@ -375,7 +375,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."contract_commission_rates" (
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "contract_commission_rates_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "contract_commission_rates_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 

@@ -17,18 +17,18 @@ export async function GET() {
       prisma,
       userId: session.user.id
     }),
-    new Promise((resolve) =>
+    new Promise<ContractStatusPayload>((resolve) =>
       setTimeout(
         () =>
           resolve({
-            status: "not_signed",
+            status: "unavailable",
             signed: false,
             isVerified: false,
             canSubmitReleases: false,
             canCreateRelease: false,
             signedAt: null,
             contractVersion: null,
-            reason: "Для выпуска релизов необходимо пройти верификацию и подписать договор.",
+            reason: "Статус верификации временно недоступен. Попробуйте позже.",
             rejectionReason: null,
             rejectionKind: null,
             verificationId: null
@@ -38,5 +38,6 @@ export async function GET() {
     )
   ]);
 
-  return NextResponse.json(status);
+  const statusCode = status.status === "unavailable" ? 503 : 200;
+  return NextResponse.json(status, { status: statusCode });
 }

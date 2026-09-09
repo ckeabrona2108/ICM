@@ -28,13 +28,14 @@ test("parsePayoutRequisites reads modern and legacy account fields", () => {
 
 test("listAdminPayoutRequests returns all payout details for admin card", async () => {
   const prisma = {
-    payoutRequest: {
+    payouts: {
       findMany: async () => [
         {
           id: "p1",
           amount: 3000,
           currency: "RUB",
           status: PayoutRequestStatus.REQUESTED,
+          confirmed: false,
           createdAt: new Date("2026-04-01T00:00:00.000Z"),
           updatedAt: new Date("2026-04-01T10:00:00.000Z"),
           processedAt: null,

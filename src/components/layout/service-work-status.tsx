@@ -50,9 +50,16 @@ export function ServiceWorkStatus({
         )}
       </span>
       <span className="text-[13px] font-medium text-white/86 sm:whitespace-nowrap sm:text-[14px]">
-        {status.label}
+        {/*
+          This text is time-dependent and can cross a minute boundary between SSR and hydration.
+          Keep the server-rendered value, then let the mounted effect refresh it.
+        */}
+        <span suppressHydrationWarning>{status.label}</span>
       </span>
-      <span className="hidden whitespace-nowrap text-[13px] font-medium text-white/65 sm:inline">
+      <span
+        suppressHydrationWarning
+        className="hidden whitespace-nowrap text-[13px] font-medium text-white/65 sm:inline"
+      >
         · {status.description}
       </span>
     </div>

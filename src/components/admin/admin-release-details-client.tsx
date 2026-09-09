@@ -31,10 +31,16 @@ interface AdminReleaseDetailsResponse {
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
+  media_health?: {
+    broken_cover: boolean;
+    broken_audio_tracks: number;
+  };
   cover: {
     url: string;
+    storage_key?: string | null;
     download_url: string | null;
     candidate_urls: string[];
+    diagnosis?: MediaDiagnosisSummary;
   };
   release: {
     metadata_language: string;
@@ -145,9 +151,43 @@ interface FileItem {
   available: boolean;
   file_name: string | null;
   download_url: string | null;
+  diagnosis?: MediaDiagnosisSummary;
 }
 
-type ActionKind = "approve" | "reject" | "delete" | "payment";
+type ActionKind = "approve" | "reject" | "delete" | "payment" | "edit";
+type RepairTarget = "cover" | "track_audio";
+
+interface MediaDiagnosisSummary {
+  status: "ok" | "missing_file" | "broken_db_path" | "access_denied" | "no_preview";
+  label: string;
+  message: string;
+  storage_key: string | null;
+  resolved_url: string | null;
+  suggested_storage_key: string | null;
+  suggested_source: "root_filename" | "sibling_folder" | null;
+  suggested_ambiguous: boolean;
+}
+
+interface AdminReleaseMediaDiagnosticsResponse {
+  media_health: {
+    broken_cover: boolean;
+    broken_audio_tracks: number;
+  };
+  cover_diagnosis: MediaDiagnosisSummary | null;
+  track_audio_diagnoses: Record<string, MediaDiagnosisSummary>;
+}
+
+type AdminTrackEditDraft = {
+  title: string;
+  subtitle: string;
+  performers: string;
+  feats: string;
+  remixers: string;
+  coPerformers: string;
+  producers: string;
+  musicAuthors: string;
+  lyricsAuthors: string;
+};
 
 const boolView = (value: boolean) =>
   value ? (
@@ -170,6 +210,35 @@ function toDash(value: string | null | undefined): string {
 function toList(value: string[]): string {
   if (!value || value.length === 0) return "-";
   return value.join(", ");
+}
+
+function listToInput(value: string[]): string {
+  return value.join(", ");
+}
+
+function inputToList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildTrackDraft(track: AdminReleaseDetailsResponse["tracks"][number]): AdminTrackEditDraft {
+  return {
+    title: track.title,
+    subtitle: track.subtitle,
+    performers: listToInput(track.track_roles.performers),
+    feats: listToInput(track.track_roles.feats),
+    remixers: listToInput(track.track_roles.remixers),
+    coPerformers: listToInput(track.track_roles.coPerformers),
+    producers: listToInput(track.track_roles.producers),
+    musicAuthors: listToInput(track.track_roles.musicAuthors),
+    lyricsAuthors: listToInput(track.track_roles.lyricsAuthors)
+  };
+}
+
+function buildTrackDraftMap(tracks: AdminReleaseDetailsResponse["tracks"]): Record<string, AdminTrackEditDraft> {
+  return Object.fromEntries(tracks.map((track) => [track.id, buildTrackDraft(track)]));
 }
 
 function fileActions(files: Array<{ label: string; file: FileItem }>) {
@@ -200,21 +269,109 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [approveOpen, setApproveOpen] = React.useState(false);
   const [rejectOpen, setRejectOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [editOpen, setEditOpen] = React.useState(false);
   const [upc, setUpc] = React.useState(details.release.upc && details.release.upc !== "-" ? details.release.upc : "");
   const [reason, setReason] = React.useState("");
+  const [releaseTitle, setReleaseTitle] = React.useState(details.release.title);
+  const [releaseSubtitle, setReleaseSubtitle] = React.useState(
+    details.release.subtitle === "-" ? "" : details.release.subtitle
+  );
+  const [releaseLabel, setReleaseLabel] = React.useState(
+    details.release.label === "-" ? "" : details.release.label
+  );
+  const [preorderDate, setPreorderDate] = React.useState(
+    details.release.dates.preorder_date === "-" ? "" : details.release.dates.preorder_date
+  );
+  const [startDate, setStartDate] = React.useState(
+    details.release.dates.start_date === "-" ? "" : details.release.dates.start_date
+  );
+  const [releaseDate, setReleaseDate] = React.useState(
+    details.release.dates.release_date === "-" ? "" : details.release.dates.release_date
+  );
+  const [performers, setPerformers] = React.useState(listToInput(details.release.roles.performers));
+  const [feats, setFeats] = React.useState(listToInput(details.release.roles.feats));
+  const [remixers, setRemixers] = React.useState(listToInput(details.release.roles.remixers));
+  const [coPerformers, setCoPerformers] = React.useState(listToInput(details.release.roles.coPerformers));
+  const [producers, setProducers] = React.useState(listToInput(details.release.roles.producers));
+  const [musicAuthors, setMusicAuthors] = React.useState(listToInput(details.release.roles.musicAuthors));
+  const [lyricsAuthors, setLyricsAuthors] = React.useState(listToInput(details.release.roles.lyricsAuthors));
+  const [editingTrackId, setEditingTrackId] = React.useState<string | null>(null);
+  const [trackDrafts, setTrackDrafts] = React.useState<Record<string, AdminTrackEditDraft>>(
+    buildTrackDraftMap(details.tracks)
+  );
   const [platformsOpen, setPlatformsOpen] = React.useState(false);
   const [lyricsModal, setLyricsModal] = React.useState<{ title: string; lyrics: string } | null>(null);
   const [coverOverrideUrl, setCoverOverrideUrl] = React.useState<string | null>(null);
+  const [repairBusyKey, setRepairBusyKey] = React.useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = React.useState<AdminReleaseMediaDiagnosticsResponse | null>(
+    null
+  );
+  const [diagnosticsLoading, setDiagnosticsLoading] = React.useState(false);
   const coverSourceUrl = coverOverrideUrl ?? details.cover.url;
   const coverDownloadUrl = details.cover.download_url;
   const [coverBroken, setCoverBroken] = React.useState(false);
   const activeCoverUrl = coverBroken
     ? null
     : resolveRenderableStoredFileUrl({ url: coverSourceUrl, storageKey: null });
+  const coverDiagnosis = diagnostics?.cover_diagnosis ?? details.cover.diagnosis ?? null;
+  const mediaHealth = diagnostics?.media_health ?? details.media_health;
+  const getTrackDiagnosis = React.useCallback(
+    (trackId: string, fallback?: MediaDiagnosisSummary) =>
+      diagnostics?.track_audio_diagnoses?.[trackId] ?? fallback ?? null,
+    [diagnostics]
+  );
 
   React.useEffect(() => {
     setCoverBroken(false);
     setCoverOverrideUrl(null);
+    setDiagnostics(null);
+    setReleaseTitle(details.release.title);
+    setReleaseSubtitle(details.release.subtitle === "-" ? "" : details.release.subtitle);
+    setReleaseLabel(details.release.label === "-" ? "" : details.release.label);
+    setPreorderDate(details.release.dates.preorder_date === "-" ? "" : details.release.dates.preorder_date);
+    setStartDate(details.release.dates.start_date === "-" ? "" : details.release.dates.start_date);
+    setReleaseDate(details.release.dates.release_date === "-" ? "" : details.release.dates.release_date);
+    setPerformers(listToInput(details.release.roles.performers));
+    setFeats(listToInput(details.release.roles.feats));
+    setRemixers(listToInput(details.release.roles.remixers));
+    setCoPerformers(listToInput(details.release.roles.coPerformers));
+    setProducers(listToInput(details.release.roles.producers));
+    setMusicAuthors(listToInput(details.release.roles.musicAuthors));
+    setLyricsAuthors(listToInput(details.release.roles.lyricsAuthors));
+    setTrackDrafts(buildTrackDraftMap(details.tracks));
+    setEditingTrackId(null);
+    setEditOpen(false);
+  }, [details.id]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const loadDiagnostics = async () => {
+      setDiagnosticsLoading(true);
+      try {
+        const response = await fetch(`/api/admin/releases/${details.id}/diagnostics`, {
+          cache: "no-store"
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | AdminReleaseMediaDiagnosticsResponse
+          | { error?: string }
+          | null;
+        if (!response.ok || !payload || "error" in payload) return;
+        if (!cancelled) {
+          setDiagnostics(payload as AdminReleaseMediaDiagnosticsResponse);
+        }
+      } finally {
+        if (!cancelled) {
+          setDiagnosticsLoading(false);
+        }
+      }
+    };
+
+    void loadDiagnostics();
+
+    return () => {
+      cancelled = true;
+    };
   }, [details.id]);
 
   const approve = async () => {
@@ -288,6 +445,84 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
     }
   };
 
+  const saveReleaseMeta = async () => {
+    const normalizedTitle = releaseTitle.trim();
+    if (!normalizedTitle) {
+      setError("Название релиза обязательно.");
+      return;
+    }
+    setBusy("edit");
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${details.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: normalizedTitle,
+          subtitle: releaseSubtitle.trim(),
+          label: releaseLabel.trim(),
+          dates: {
+            preorder_date: preorderDate.trim(),
+            start_date: startDate.trim(),
+            release_date: releaseDate.trim()
+          },
+          roles: {
+            performers: inputToList(performers),
+            feats: inputToList(feats),
+            remixers: inputToList(remixers),
+            coPerformers: inputToList(coPerformers),
+            producers: inputToList(producers),
+            musicAuthors: inputToList(musicAuthors),
+            lyricsAuthors: inputToList(lyricsAuthors)
+          },
+          tracks: details.tracks.map((track) => {
+            const draft = trackDrafts[track.id] ?? buildTrackDraft(track);
+            return {
+              id: track.id,
+              title: draft.title.trim(),
+              subtitle: draft.subtitle.trim(),
+              roles: {
+                performers: inputToList(draft.performers),
+                feats: inputToList(draft.feats),
+                remixers: inputToList(draft.remixers),
+                coPerformers: inputToList(draft.coPerformers),
+                producers: inputToList(draft.producers),
+                musicAuthors: inputToList(draft.musicAuthors),
+                lyricsAuthors: inputToList(draft.lyricsAuthors)
+              }
+            };
+          })
+        })
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Не удалось обновить релиз.");
+      setEditOpen(false);
+      router.refresh();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Не удалось обновить релиз.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const resetEditForm = () => {
+    setReleaseTitle(details.release.title);
+    setReleaseSubtitle(details.release.subtitle === "-" ? "" : details.release.subtitle);
+    setReleaseLabel(details.release.label === "-" ? "" : details.release.label);
+    setPreorderDate(details.release.dates.preorder_date === "-" ? "" : details.release.dates.preorder_date);
+    setStartDate(details.release.dates.start_date === "-" ? "" : details.release.dates.start_date);
+    setReleaseDate(details.release.dates.release_date === "-" ? "" : details.release.dates.release_date);
+    setPerformers(listToInput(details.release.roles.performers));
+    setFeats(listToInput(details.release.roles.feats));
+    setRemixers(listToInput(details.release.roles.remixers));
+    setCoPerformers(listToInput(details.release.roles.coPerformers));
+    setProducers(listToInput(details.release.roles.producers));
+    setMusicAuthors(listToInput(details.release.roles.musicAuthors));
+    setLyricsAuthors(listToInput(details.release.roles.lyricsAuthors));
+    setTrackDrafts(buildTrackDraftMap(details.tracks));
+    setEditingTrackId(null);
+  };
+
   const togglePaymentStatus = async (paid: boolean) => {
     setBusy("payment");
     setError(null);
@@ -308,6 +543,34 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
       );
     } finally {
       setBusy(null);
+    }
+  };
+
+  const repairMediaBinding = async (input: {
+    key: string;
+    target: RepairTarget;
+    trackId?: string;
+    storageKey: string;
+  }) => {
+    setRepairBusyKey(input.key);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${details.id}/repair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target: input.target,
+          trackId: input.trackId,
+          storageKey: input.storageKey
+        })
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Не удалось перепривязать файл.");
+      router.refresh();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Не удалось перепривязать файл.");
+    } finally {
+      setRepairBusyKey(null);
     }
   };
 
@@ -341,6 +604,24 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 setCoverBroken(false);
               }}
             />
+            {coverDiagnosis ? (
+              <MediaDiagnosisCard
+                className="mt-3"
+                diagnosis={coverDiagnosis}
+                actionLabel="Перепривязать обложку"
+                actionBusy={repairBusyKey === "cover"}
+                onAction={
+                  coverDiagnosis.suggested_storage_key
+                    ? () =>
+                        void repairMediaBinding({
+                          key: "cover",
+                          target: "cover",
+                          storageKey: coverDiagnosis.suggested_storage_key!
+                        })
+                    : undefined
+                }
+              />
+            ) : null}
             {activeCoverUrl ? (
               <a
                 href={coverDownloadUrl ?? ""}
@@ -376,6 +657,135 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 </span>
               ) : null}
             </div>
+            <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-white/42">Редактирование релиза</p>
+                  <p className="mt-1 text-[12px] text-white/55">
+                    Обложка и аудио заменяются ниже по карточке.
+                  </p>
+                </div>
+                {!editOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditOpen(true);
+                      setError(null);
+                    }}
+                    disabled={busy !== null}
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Редактировать
+                  </button>
+                ) : null}
+              </div>
+
+              {editOpen ? (
+                <>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] text-white/60">Название релиза</span>
+                      <input
+                        value={releaseTitle}
+                        onChange={(event) => setReleaseTitle(event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] text-white/60">Подзаголовок</span>
+                      <input
+                        value={releaseSubtitle}
+                        onChange={(event) => setReleaseSubtitle(event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <label className="block md:col-span-2">
+                      <span className="mb-1 block text-[12px] text-white/60">Лейбл</span>
+                      <input
+                        value={releaseLabel}
+                        onChange={(event) => setReleaseLabel(event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] text-white/60">Дата предзаказа</span>
+                      <input
+                        type="date"
+                        value={preorderDate}
+                        onChange={(event) => setPreorderDate(event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] text-white/60">Дата старта</span>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(event) => setStartDate(event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <label className="block md:col-span-2">
+                      <span className="mb-1 block text-[12px] text-white/60">Дата релиза</span>
+                      <input
+                        type="date"
+                        value={releaseDate}
+                        onChange={(event) => setReleaseDate(event.target.value)}
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <RoleInput label="Исполнитель(и)" value={performers} onChange={setPerformers} />
+                    <RoleInput label="feat(s)" value={feats} onChange={setFeats} />
+                    <RoleInput label="remixer" value={remixers} onChange={setRemixers} />
+                    <RoleInput label="соисполнитель" value={coPerformers} onChange={setCoPerformers} />
+                    <RoleInput label="продюсер" value={producers} onChange={setProducers} />
+                    <RoleInput label="автор(ы) музыки" value={musicAuthors} onChange={setMusicAuthors} />
+                    <RoleInput label="автор(ы) слов" value={lyricsAuthors} onChange={setLyricsAuthors} />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void saveReleaseMeta();
+                      }}
+                      disabled={busy !== null}
+                      className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#7b3df5] px-4 text-[13px] font-semibold text-white transition hover:bg-[#8f5bf7] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {busy === "edit" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      Сохранить изменения
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetEditForm();
+                        setEditOpen(false);
+                        setError(null);
+                      }}
+                      disabled={busy !== null}
+                      className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+            {mediaHealth && (mediaHealth.broken_cover || mediaHealth.broken_audio_tracks > 0) ? (
+              <div className="rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-[13px] text-amber-100/90">
+                <p className="font-semibold text-amber-50">Найдены проблемы с файлами релиза</p>
+                <p className="mt-1">
+                  {mediaHealth.broken_cover ? "Обложка требует проверки." : "Обложка в порядке."}{" "}
+                  {mediaHealth.broken_audio_tracks > 0
+                    ? `Проблемных аудиотреков: ${mediaHealth.broken_audio_tracks}.`
+                    : "Все аудиотреки читаются корректно."}
+                </p>
+              </div>
+            ) : null}
+            {diagnosticsLoading ? (
+              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[12px] text-white/55">
+                Проверяем файлы релиза в storage...
+              </div>
+            ) : null}
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <InfoSection
@@ -537,6 +947,8 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
       <section className="space-y-4">
         <h2 className="text-[20px] font-semibold text-white">Список треков</h2>
         {details.tracks.map((track, index) => {
+          const trackDraft = trackDrafts[track.id] ?? buildTrackDraft(track);
+          const trackEditing = editingTrackId === track.id;
           const hasAudioDownload = Boolean(track.files.audio.download_url);
           const audioUploadLabel = track.files.audio.available ? "Заменить аудио" : "Загрузить аудио";
           const lyricsText = track.raw_commentary.lyrics.trim();
@@ -629,12 +1041,86 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                       router.refresh();
                     }}
                   />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrackDrafts((current) => ({ ...current, [track.id]: current[track.id] ?? buildTrackDraft(track) }));
+                      setEditingTrackId((current) => (current === track.id ? null : track.id));
+                      setError(null);
+                    }}
+                    disabled={busy !== null}
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 text-[12px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {trackEditing ? "Скрыть редактор" : "Редактировать трек"}
+                  </button>
                 </div>
               </div>
+              {getTrackDiagnosis(track.id, track.files.audio.diagnosis ?? undefined) ? (
+                <MediaDiagnosisCard
+                  className="mb-4"
+                  diagnosis={getTrackDiagnosis(track.id, track.files.audio.diagnosis ?? undefined)!}
+                  actionLabel="Перепривязать аудио"
+                  actionBusy={repairBusyKey === `track:${track.id}`}
+                  onAction={
+                    getTrackDiagnosis(track.id, track.files.audio.diagnosis ?? undefined)
+                      ?.suggested_storage_key
+                      ? () =>
+                          void repairMediaBinding({
+                            key: `track:${track.id}`,
+                            target: "track_audio",
+                            trackId: track.id,
+                            storageKey:
+                              getTrackDiagnosis(track.id, track.files.audio.diagnosis ?? undefined)!
+                                .suggested_storage_key!
+                          })
+                      : undefined
+                  }
+                />
+              ) : null}
               {!hasAudioDownload ? (
                 <p className="mb-4 rounded-lg border border-amber-300/25 bg-amber-400/10 px-3 py-2 text-[12px] font-medium text-amber-100/95">
                   Аудиофайл не загружен в хранилище. Скачивание недоступно.
                 </p>
+              ) : null}
+
+              {trackEditing ? (
+                <div className="mb-4 rounded-2xl border border-white/[0.08] bg-black/20 p-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] text-white/60">Название трека</span>
+                      <input
+                        value={trackDraft.title}
+                        onChange={(event) =>
+                          setTrackDrafts((current) => ({
+                            ...current,
+                            [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), title: event.target.value }
+                          }))
+                        }
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[12px] text-white/60">Подзаголовок трека</span>
+                      <input
+                        value={trackDraft.subtitle}
+                        onChange={(event) =>
+                          setTrackDrafts((current) => ({
+                            ...current,
+                            [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), subtitle: event.target.value }
+                          }))
+                        }
+                        className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 text-[14px] text-white outline-none transition focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+                      />
+                    </label>
+                    <RoleInput label="Исполнитель(и)" value={trackDraft.performers} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), performers: value } }))} />
+                    <RoleInput label="feat(s)" value={trackDraft.feats} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), feats: value } }))} />
+                    <RoleInput label="remixer" value={trackDraft.remixers} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), remixers: value } }))} />
+                    <RoleInput label="соисполнитель" value={trackDraft.coPerformers} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), coPerformers: value } }))} />
+                    <RoleInput label="продюсер" value={trackDraft.producers} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), producers: value } }))} />
+                    <RoleInput label="автор(ы) музыки" value={trackDraft.musicAuthors} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), musicAuthors: value } }))} />
+                    <RoleInput label="автор(ы) слов" value={trackDraft.lyricsAuthors} onChange={(value) => setTrackDrafts((current) => ({ ...current, [track.id]: { ...(current[track.id] ?? buildTrackDraft(track)), lyricsAuthors: value } }))} />
+                  </div>
+                </div>
               ) : null}
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -854,6 +1340,77 @@ function InfoSection({
         ))}
       </div>
     </section>
+  );
+}
+
+function MediaDiagnosisCard({
+  diagnosis,
+  onAction,
+  actionLabel,
+  actionBusy,
+  className
+}: {
+  diagnosis: MediaDiagnosisSummary;
+  onAction?: () => void;
+  actionLabel?: string;
+  actionBusy?: boolean;
+  className?: string;
+}) {
+  const tone =
+    diagnosis.status === "ok"
+      ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+      : diagnosis.suggested_storage_key
+        ? "border-sky-400/25 bg-sky-500/10 text-sky-100"
+        : "border-amber-300/25 bg-amber-400/10 text-amber-100";
+
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-[12px] ${tone} ${className ?? ""}`}>
+      <p className="font-semibold">{diagnosis.label}</p>
+      <p className="mt-1 opacity-90">{diagnosis.message}</p>
+      {diagnosis.storage_key ? (
+        <p className="mt-2 break-all opacity-75">Текущий key: {diagnosis.storage_key}</p>
+      ) : null}
+      {diagnosis.suggested_storage_key ? (
+        <p className="mt-1 break-all opacity-75">Найденный key: {diagnosis.suggested_storage_key}</p>
+      ) : null}
+      {diagnosis.suggested_ambiguous && !diagnosis.suggested_storage_key ? (
+        <p className="mt-1 opacity-75">Найдено несколько кандидатов. Нужна ручная проверка.</p>
+      ) : null}
+      {onAction && diagnosis.suggested_storage_key ? (
+        <button
+          type="button"
+          onClick={onAction}
+          disabled={actionBusy}
+          className="mt-3 inline-flex h-9 items-center gap-2 rounded-lg border border-white/15 bg-white/10 px-3 font-semibold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {actionBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+          {actionBusy ? "Перепривязываем..." : (actionLabel ?? "Перепривязать")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function RoleInput({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[12px] text-white/60">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={3}
+        placeholder="Введите через запятую"
+        className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-[14px] text-white outline-none transition placeholder:text-white/28 focus:border-[#7b3df5]/60 focus:bg-white/[0.06]"
+      />
+    </label>
   );
 }
 

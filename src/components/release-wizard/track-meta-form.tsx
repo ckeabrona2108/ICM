@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Info, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import { LANGUAGES } from "@/lib/countries";
 import { trackPersonRoleOptions } from "@/lib/person-roles";
@@ -11,7 +11,7 @@ import {
 } from "@/lib/release-policy";
 
 import { useWizard, type PersonRole, type TrackMeta } from "./wizard-context";
-import { Checkbox, FieldLabel, Select, TextArea, TextInput } from "./wizard-ui";
+import { Checkbox, FieldLabel, InfoTooltip, Select, TextArea, TextInput } from "./wizard-ui";
 
 const TRACK_LANGUAGE_OPTIONS = [...LANGUAGES, "Без слов"];
 type TrackAssetKind = "syncedLyrics" | "ringtone" | "video";
@@ -35,7 +35,6 @@ function normalizePercentInput(raw: string): string {
 
 export function TrackMetaForm({
   meta,
-  fileName,
   hasAudio,
   onPatch,
   uploadingAssetKind,
@@ -43,7 +42,6 @@ export function TrackMetaForm({
   onRemoveAsset
 }: {
   meta: TrackMeta;
-  fileName: string;
   hasAudio: boolean;
   onPatch: (patch: Partial<TrackMeta>) => void;
   uploadingAssetKind: TrackAssetKind | null;
@@ -130,22 +128,22 @@ export function TrackMetaForm({
   const focusDisabled = !meta.focusTrack && (focusLimit === 0 || focusSelectedCount >= focusLimit);
 
   return (
-    <div className="space-y-4 border-t border-white/[0.06] pt-4">
-      <p className="text-[11px] text-white/40">
-        Файл: <span className="text-white/70">{fileName}</span>
-      </p>
-
+    <div className="space-y-4 border-t border-white/[0.08] pt-4">
       {!hasAudio ? (
-        <p className="rounded-lg border border-indigo-400/25 bg-indigo-500/10 px-3 py-2 text-[12px] text-indigo-100/95">
+        <p className="rounded-lg border border-[#d8933d]/25 bg-[#d8933d]/10 px-3 py-2 text-[12px] text-[#f5ddbc]">
           Трек создан без аудиофайла. Для отправки релиза уберите стриминговые площадки или загрузите аудио.
         </p>
       ) : null}
 
       <div className="space-y-5">
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-4">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <FieldLabel required hint="Как трек будет отображаться на площадках">
+                    <FieldLabel
+                      required
+                      tooltip="Наименования на языках, использующих кириллицу, не должны быть представлены на транслите, если вы планируете отгрузку в Apple Music"
+                      tooltipLabel="Подробнее о поле Название трека"
+                    >
                       Название трека
                     </FieldLabel>
                     <TextInput
@@ -165,9 +163,9 @@ export function TrackMetaForm({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Идентификация</h4>
-                <p className="text-[11px] text-white/40">
+                <p className="text-[11px] text-white/38">
                   Если ISRC отсутствует, система присвоит код после модерации.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -182,9 +180,9 @@ export function TrackMetaForm({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Персоны и роли</h4>
-                <p className="text-[11px] text-white/45">
+                <p className="text-[11px] text-white/42">
                   Для Исполнителей, Соисполнителей (feat.), Remixer указывайте псевдоним артиста. Для ролей «Автор музыки» и «Автор слов» — фактические имя и фамилию.
                 </p>
                 <div className="space-y-2">
@@ -204,7 +202,7 @@ export function TrackMetaForm({
                       <button
                         type="button"
                         onClick={() => removePerson(p.id)}
-                        className="grid h-10 w-10 place-items-center rounded-lg border border-white/[0.08] text-white/55 transition-colors hover:border-[#ff5d6d]/40 hover:text-[#ff5d6d]"
+                        className="grid h-10 w-10 place-items-center rounded-lg border border-white/[0.08] text-white/42 transition-colors hover:border-[#ff5d6d]/40 hover:text-[#ff5d6d]"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -217,8 +215,8 @@ export function TrackMetaForm({
                   disabled={!canAddPerson}
                   className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition-colors ${
                     canAddPerson
-                      ? "border-white/[0.08] bg-white/[0.03] text-white/85 hover:border-white/[0.16] hover:bg-white/[0.06]"
-                      : "cursor-not-allowed border-white/[0.05] bg-white/[0.02] text-white/35"
+                      ? "border-white/[0.08] bg-white/[0.03] text-white hover:border-[var(--ux-accent)]/35 hover:bg-white/[0.05]"
+                      : "cursor-not-allowed border-white/[0.06] bg-white/[0.02] text-white/28"
                   }`}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -231,14 +229,20 @@ export function TrackMetaForm({
                 ) : null}
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Права</h4>
-                <p className="text-[11px] text-white/40">
+                <p className="text-[11px] text-white/38">
                   Значение доли должно быть в диапазоне от 0 до 100.
                 </p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
-                    <FieldLabel required hint="Авторские права (©)">© Доля, %</FieldLabel>
+                    <FieldLabel
+                      required
+                      tooltip="Укажите долю. Если авторов несколько, укажите сумму долей"
+                      tooltipLabel="Подробнее о поле Авторские права"
+                    >
+                      © Доля, %
+                    </FieldLabel>
                     <TextInput
                       inputMode="decimal"
                       value={meta.copyrightPct}
@@ -247,7 +251,13 @@ export function TrackMetaForm({
                     />
                   </div>
                   <div>
-                    <FieldLabel required hint="Смежные права (℗)">℗ Доля, %</FieldLabel>
+                    <FieldLabel
+                      required
+                      tooltip="Релиз может быть доставлен на площадки только при наличии 100%"
+                      tooltipLabel="Подробнее о поле Смежные права"
+                    >
+                      ℗ Доля, %
+                    </FieldLabel>
                     <TextInput
                       inputMode="decimal"
                       value={meta.relatedRightsPct}
@@ -261,7 +271,7 @@ export function TrackMetaForm({
                 ) : null}
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Дополнительные параметры</h4>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
@@ -317,7 +327,7 @@ export function TrackMetaForm({
                 ) : null}
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Использование ИИ</h4>
                 <Checkbox
                   checked={meta.aiAssistanceUsed}
@@ -354,7 +364,7 @@ export function TrackMetaForm({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Версия трека</h4>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   <Checkbox
@@ -393,7 +403,10 @@ export function TrackMetaForm({
                     label={
                       <span className="inline-flex items-center gap-1.5">
                         <span>Упоминание наркотических/психотропных веществ</span>
-                        <InlineTooltip text="Отметка поставлена в целях информирования и соблюдения норм закона. В соответствии с требованиями Федерального закона от 08.08.2024 № 224-ФЗ, если трек содержит упоминания, которые могут быть интерпретированы как связанные с наркотическими средствами или психотропными веществами, отметьте этот пункт." />
+                        <InfoTooltip
+                          content="Отметка поставлена в целях информирования и соблюдения норм закона. В соответствии с требованиями Федерального закона от 08.08.2024 № 224-ФЗ, если трек содержит упоминания, которые могут быть интерпретированы как связанные с наркотическими средствами или психотропными веществами, отметьте этот пункт."
+                          ariaLabel="Подробнее о поле Упоминание наркотических или психотропных веществ"
+                        />
                       </span>
                     }
                     size="sm"
@@ -401,7 +414,7 @@ export function TrackMetaForm({
                 </div>
               </div>
 
-              <div className="rounded-xl border border-white/[0.06] bg-black/20 p-4 space-y-3">
+              <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4 space-y-3">
                 <h4 className="text-[13px] font-semibold text-white">Виды использования</h4>
                 <div>
                   <FieldLabel required>Язык трека</FieldLabel>
@@ -460,19 +473,6 @@ export function TrackMetaForm({
   );
 }
 
-function InlineTooltip({ text }: { text: string }) {
-  return (
-    <span className="group/tooltip relative inline-flex items-center">
-      <span className="cursor-help text-white/35 transition-colors group-hover/tooltip:text-[#7b3df5]">
-        <Info className="h-3.5 w-3.5" />
-      </span>
-      <span className="pointer-events-none absolute bottom-full right-0 z-20 mb-2 hidden w-[min(280px,calc(100vw-3rem))] rounded-xl border border-white/[0.08] bg-[#384154] px-3 py-2 text-[11px] font-medium leading-5 text-white shadow-[0_18px_48px_-24px_rgba(0,0,0,0.85)] group-hover/tooltip:block">
-        {text}
-      </span>
-    </span>
-  );
-}
-
 function TrackAssetUploadCard({
   title,
   hint,
@@ -500,14 +500,14 @@ function TrackAssetUploadCard({
         : ".mov,.mp4,.avi,video/quicktime,video/mp4,video/x-msvideo";
 
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.02] p-3">
-      <p className="text-[12px] font-semibold text-white/85">{title}</p>
-      <p className="mt-1 text-[11px] text-white/45">{hint}</p>
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3">
+      <p className="text-[12px] font-semibold text-white">{title}</p>
+      <p className="mt-1 text-[11px] text-white/42">{hint}</p>
 
       {fileName ? (
         <p className="mt-2 truncate text-[11px] text-emerald-200/85">{fileName}</p>
       ) : (
-        <p className="mt-2 text-[11px] text-white/35">Файл не загружен</p>
+        <p className="mt-2 text-[11px] text-white/30">Файл не загружен</p>
       )}
 
       <div className="mt-3 flex items-center gap-2">
@@ -515,7 +515,7 @@ function TrackAssetUploadCard({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white/85 transition hover:border-white/[0.2] hover:bg-white/[0.08] disabled:opacity-50"
+          className="rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:border-[var(--ux-accent)]/35 hover:bg-white/[0.06] disabled:opacity-50"
         >
           {uploading ? "Загружаем..." : "Загрузить файл"}
         </button>

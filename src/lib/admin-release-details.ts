@@ -5,7 +5,9 @@ import {
   shouldTreatReleaseAsApproved
 } from "@/lib/release-counts";
 import {
-  ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES,
+  discoverStorageKeyByRootFilename,
+  discoverStorageKeyBySiblingFolder,
+  probeStorageKeyDiagnostics,
   resolveRenderableStoredFileUrl
 } from "@/lib/s3";
 import {
@@ -22,11 +24,16 @@ interface AdminReleaseDetailsResponse {
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
+  media_health?: {
+    broken_cover: boolean;
+    broken_audio_tracks: number;
+  };
   cover: {
     url: string;
     storage_key?: string | null;
     download_url: string | null;
     candidate_urls: string[];
+    diagnosis?: MediaDiagnosisSummary;
   };
   release: {
     metadata_language: string;
@@ -133,10 +140,43 @@ interface AdminReleaseDetailsResponse {
   };
 }
 
+export interface AdminReleaseMediaIssueSummary {
+  id: string;
+  title: string;
+  artists: string[];
+  status: AdminReleaseDetailsResponse["status"];
+  release_date: string | null;
+  cover_url: string | null;
+  broken_cover: boolean;
+  broken_audio_tracks: number;
+  repairable_cover: boolean;
+  repairable_audio_tracks: number;
+  total_tracks: number;
+}
+
+export interface AdminReleaseMediaCandidateSummary {
+  id: string;
+  title: string;
+  artists: string[];
+  release_date: string | null;
+  cover_url: string | null;
+  total_tracks: number;
+}
+
+export interface AdminReleaseMediaDiagnosticsResponse {
+  media_health: {
+    broken_cover: boolean;
+    broken_audio_tracks: number;
+  };
+  cover_diagnosis: MediaDiagnosisSummary | null;
+  track_audio_diagnoses: Record<string, MediaDiagnosisSummary>;
+}
+
 interface FileItem {
   available: boolean;
   file_name: string | null;
   download_url: string | null;
+  diagnosis?: MediaDiagnosisSummary;
 }
 
 interface FileTarget {
@@ -160,40 +200,17 @@ interface PersonGroups {
   lyricsAuthors: string[];
 }
 
-const COVER_EXTENSIONS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "jpng",
-  "PNG",
-  "JPG",
-  "JPEG",
-  "WEBP",
-  "GIF",
-  "JPNG"
-] as const;
+type MediaDiagnosisStatus = "ok" | "missing_file" | "broken_db_path" | "access_denied" | "no_preview";
 
-function getExtensionHint(rawPreview: string | null): string | null {
-  if (!rawPreview) return null;
-  if (looksLikeOnlyExtension(rawPreview)) {
-    return normalizeExtension(rawPreview);
-  }
-  const withoutQuery = rawPreview.split("?")[0]?.split("#")[0] ?? rawPreview;
-  const fileName = withoutQuery.split("/").filter(Boolean).at(-1) ?? "";
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex <= 0 || dotIndex >= fileName.length - 1) return null;
-  return normalizeExtension(fileName.slice(dotIndex + 1));
-}
-
-function getCoverExtensionsByPriority(rawPreview: string | null): string[] {
-  const hint = getExtensionHint(rawPreview);
-  const ordered = [...COVER_EXTENSIONS];
-  if (!hint) return ordered;
-  const exacts = ordered.filter((ext) => ext === hint || ext.toLowerCase() === hint);
-  const rest = ordered.filter((ext) => !exacts.includes(ext));
-  return [...exacts, ...rest];
+interface MediaDiagnosisSummary {
+  status: MediaDiagnosisStatus;
+  label: string;
+  message: string;
+  storage_key: string | null;
+  resolved_url: string | null;
+  suggested_storage_key: string | null;
+  suggested_source: "root_filename" | "sibling_folder" | null;
+  suggested_ambiguous: boolean;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -389,6 +406,108 @@ function toFileItem(input: {
     available: Boolean(downloadUrl),
     file_name: fileName ?? null,
     download_url: downloadUrl
+  };
+}
+
+function mediaDiagnosisLabel(status: MediaDiagnosisStatus): string {
+  switch (status) {
+    case "ok":
+      return "Файл доступен";
+    case "missing_file":
+      return "Файл отсутствует в storage";
+    case "broken_db_path":
+      return "Некорректная привязка в базе";
+    case "access_denied":
+      return "Storage недоступен";
+    case "no_preview":
+      return "Файл не привязан";
+    default:
+      return "Статус неизвестен";
+  }
+}
+
+function mediaDiagnosisMessage(input: {
+  kind: "cover" | "audio";
+  status: MediaDiagnosisStatus;
+  suggestedStorageKey: string | null;
+  suggestedSource: "root_filename" | "sibling_folder" | null;
+  suggestedAmbiguous: boolean;
+}): string {
+  const noun = input.kind === "cover" ? "обложка" : "аудио";
+  if (input.status === "ok") return `${noun} доступна и читается корректно.`;
+  if (input.suggestedStorageKey) {
+    const sourceLabel = input.suggestedSource === "sibling_folder" ? "соседней папке" : "по имени файла";
+    return `Найден возможный файл в ${sourceLabel}. Можно перепривязать без повторной загрузки.`;
+  }
+  if (input.suggestedAmbiguous) {
+    return `Найдено несколько кандидатов для ${noun}. Нужна ручная проверка и выбор правильного файла.`;
+  }
+  switch (input.status) {
+    case "missing_file":
+      return `Файл ${noun === "обложка" ? "обложки" : "аудио"} отсутствует в storage. Нужна повторная загрузка.`;
+    case "broken_db_path":
+      return `В базе хранится путь, который не ведёт к рабочему ${noun === "обложка" ? "файлу обложки" : "аудио"}.`;
+    case "access_denied":
+      return `Storage не даёт прочитать ${noun}. Проверьте доступы или bucket.`;
+    case "no_preview":
+      return `Для ${noun === "обложка" ? "обложки" : "аудио"} пока нет сохранённой привязки.`;
+    default:
+      return `Не удалось подтвердить доступность ${noun}.`;
+  }
+}
+
+async function diagnoseMediaAsset(input: {
+  kind: "cover" | "audio";
+  storageKey: string | null;
+  resolvedUrl: string | null;
+  fileName: string | null;
+  discoveryNames?: Array<unknown>;
+  discoveryCandidates?: Array<unknown>;
+}): Promise<MediaDiagnosisSummary> {
+  const initialStatus: MediaDiagnosisStatus = input.storageKey ? "broken_db_path" : "no_preview";
+  const probe = input.storageKey
+    ? await probeStorageKeyDiagnostics({
+        storageKey: input.storageKey,
+        publicUrl: input.resolvedUrl
+      })
+    : null;
+  const status = (probe?.finalDiagnosis ?? initialStatus) as MediaDiagnosisStatus;
+
+  const rootFilenameMatch =
+    status === "ok"
+      ? { key: null, ambiguous: false as const }
+      : await discoverStorageKeyByRootFilename({
+          kind: input.kind,
+          filenames: [input.fileName, ...(input.discoveryNames ?? [])]
+        });
+  const siblingMatch =
+    status === "ok" || rootFilenameMatch.key
+      ? { key: null, ambiguous: false as const }
+      : await discoverStorageKeyBySiblingFolder({
+          kind: input.kind,
+          candidates: [input.storageKey, ...(input.discoveryCandidates ?? [])]
+        });
+
+  const suggestedStorageKey = rootFilenameMatch.key ?? siblingMatch.key ?? null;
+  const suggestedSource =
+    rootFilenameMatch.key ? "root_filename" : siblingMatch.key ? "sibling_folder" : null;
+  const suggestedAmbiguous = Boolean(rootFilenameMatch.ambiguous || siblingMatch.ambiguous);
+
+  return {
+    status,
+    label: mediaDiagnosisLabel(status),
+    message: mediaDiagnosisMessage({
+      kind: input.kind,
+      status,
+      suggestedStorageKey,
+      suggestedSource,
+      suggestedAmbiguous
+    }),
+    storage_key: input.storageKey,
+    resolved_url: input.resolvedUrl,
+    suggested_storage_key: suggestedStorageKey,
+    suggested_source: suggestedSource,
+    suggested_ambiguous: suggestedAmbiguous
   };
 }
 
@@ -727,6 +846,7 @@ function resolveReleaseStatus(input: {
   const lifecycle = getReleaseLifecycleStatus(asString(input.status), input.roles);
   if (lifecycle === "changes_required") return "changes_required";
   if (lifecycle === "approved" || lifecycle === "archived") return "approved";
+  if (lifecycle === "dsp_confirmed") return "dsp_confirmed";
   if (lifecycle === "draft") return "draft";
   if (lifecycle === "pending_verification") return "pending_verification";
   if (lifecycle === "moderation") return "moderation";
@@ -790,43 +910,7 @@ function getTrackFileByType(trackData: Record<string, unknown>, type: "audio" | 
   if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
   return pickLegacyFileRef(asString(trackData.video));
 }
-function buildTrackAudioCandidateUrls(trackData: Record<string, unknown>): string[] {
-  const candidates = new Set<string>();
-  const addCandidate = (value: unknown) => {
-    if (typeof value === "string") {
-      const resolved = resolveRenderableStoredFileUrl({ url: value, storageKey: null });
-      if (resolved) candidates.add(resolved);
-      return;
-    }
-    const ref = pickStoredFileRef(value);
-    if (ref.url) candidates.add(ref.url);
-    if (ref.storageKey) candidates.add(resolveRenderableStoredFileUrl({ storageKey: ref.storageKey }) ?? ref.storageKey);
-  };
-
-  addCandidate(trackData.audioFile);
-  addCandidate(trackData.audioUpload);
-  addCandidate(trackData.audioUrl);
-  addCandidate(trackData.audio);
-
-  const trackId = asString(trackData.id);
-  const extHint = normalizeExtension(asString(trackData.track));
-  const fileName = asString(trackData.fileName);
-  const fileNames = new Set<string>();
-  if (fileName) fileNames.add(fileName);
-  if (trackId && extHint) fileNames.add(`${trackId}.${extHint}`);
-
-  const prefixes = [...ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES];
-  for (const name of fileNames) {
-    candidates.add(name);
-    for (const prefix of prefixes) {
-      candidates.add(`${prefix}${name}`);
-    }
-  }
-
-  return Array.from(candidates).filter(Boolean);
-}
-
-export function mapAdminReleaseDetails(releaseInput: any): AdminReleaseDetailsResponse {
+export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetailsResponse {
   const release = (releaseInput ?? {}) as Record<string, unknown>;
   const submissionData = parseSubmissionData(release);
   const submissionTracks = asArray(submissionData?.tracks);
@@ -1116,8 +1200,8 @@ function resolveTrackIndex(release: Record<string, unknown>, submissionData: Rec
 
 export function resolveAdminReleaseFileTargetFromRelease(
   input:
-    | { release: any; fileId: string }
-    | any,
+    | { release: unknown; fileId: string }
+    | unknown,
   maybeFileId?: string
 ): FileTarget | null {
   const maybeObject = asRecord(input);
@@ -1197,16 +1281,12 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
 
   if (!release) return null;
   const details = mapAdminReleaseDetails(release);
-  const submissionData = parseSubmissionData(release);
-  const submissionTracks = asArray(submissionData?.tracks);
-  const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
-  const coverImage = (release as Record<string, unknown>).coverImage;
   const cover = await resolveAdminDetailCoverAsset({
     id: release.id,
     preview: asString(release.preview),
-    submissionData,
+    submissionData: parseSubmissionData(release),
     roles: release.roles,
-    coverImage,
+    coverImage: (release as Record<string, unknown>).coverImage,
     userId: asString((release as Record<string, unknown>).userId),
     title: asString(release.title)
   });
@@ -1218,45 +1298,6 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
     download_url:
       releaseId && cover.url ? buildAdminReleaseFileDownloadUrl(releaseId, "cover") : null
   };
-
-  for (let index = 0; index < details.tracks.length; index += 1) {
-    const currentTrack = details.tracks[index];
-    if (!currentTrack) continue;
-    const dbTrack = inflateTrackRow(dbTracks[index]);
-    const submissionTrack = asRecord(submissionTracks[index]) ?? {};
-    const trackId = currentTrack.id || asString(dbTrack.id) || asString(submissionTrack.id) || `track-${index + 1}`;
-    const resolvedAudio = await resolveTrackAudioAsset({
-      releaseId: release.id,
-      userId: asString((release as Record<string, unknown>).userId),
-      releaseTitle: asString(submissionData?.title) ?? asString(release.title),
-      trackId,
-      trackTitle: asString(submissionTrack.title) ?? asString(dbTrack.title),
-      audioFile: submissionTrack.audioFile ?? dbTrack.audioFile,
-      audioUpload: submissionTrack.audioUpload ?? dbTrack.audioUpload,
-      audioUrl: submissionTrack.audioUrl ?? dbTrack.audioUrl,
-      audio: submissionTrack.audio ?? dbTrack.audio,
-      track: submissionTrack.track ?? dbTrack.track
-    });
-
-    if (resolvedAudio.url) {
-      details.tracks[index] = {
-        ...currentTrack,
-        files: {
-          ...currentTrack.files,
-          audio: toFileItem({
-            storageKey: resolvedAudio.storageKey,
-            url: resolvedAudio.url,
-            fallbackName:
-              asString(submissionTrack.fileName) ??
-              asString(dbTrack.fileName) ??
-              currentTrack.files.audio.file_name,
-            downloadUrl: resolvedAudio.downloadUrl ?? resolvedAudio.url
-          })
-        }
-      };
-    }
-  }
-
   if (process.env.ADMIN_RELEASE_ROLES_DEBUG === "1") {
     console.log("[admin-release-roles-debug]", {
       releaseId,
@@ -1278,6 +1319,300 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
   }
 
   return details;
+}
+
+async function computeAdminReleaseMediaDiagnostics(params: {
+  release: Record<string, unknown>;
+  details: AdminReleaseDetailsResponse;
+}): Promise<AdminReleaseMediaDiagnosticsResponse> {
+  const { release, details } = params;
+  const submissionData = parseSubmissionData(release);
+  const submissionTracks = asArray(submissionData?.tracks);
+  const dbTracks = asArray((release as Record<string, unknown>).tracks ?? (release as Record<string, unknown>).track);
+  const coverImage = (release as Record<string, unknown>).coverImage;
+  const releaseId = asString((release as Record<string, unknown>).id) ?? "";
+  const cover = await resolveAdminDetailCoverAsset({
+    id: releaseId,
+    preview: asString((release as Record<string, unknown>).preview),
+    submissionData,
+    roles: (release as Record<string, unknown>).roles,
+    coverImage,
+    userId: asString((release as Record<string, unknown>).userId),
+    title: asString((release as Record<string, unknown>).title)
+  });
+
+  const coverDiagnosis = await diagnoseMediaAsset({
+    kind: "cover",
+    storageKey: cover.storageKey ?? null,
+    resolvedUrl: cover.url ?? null,
+    fileName: fileNameFromUrl(cover.storageKey ?? cover.url ?? null),
+    discoveryNames: [asString((release as Record<string, unknown>).preview), cover.url, cover.storageKey],
+    discoveryCandidates: [cover.storageKey, ...cover.candidateUrls]
+  });
+
+  let brokenAudioTracks = 0;
+  const trackAudioDiagnoses: Record<string, MediaDiagnosisSummary> = {};
+
+  for (let index = 0; index < details.tracks.length; index += 1) {
+    const currentTrack = details.tracks[index];
+    if (!currentTrack) continue;
+    const dbTrack = inflateTrackRow(dbTracks[index]);
+    const submissionTrack = asRecord(submissionTracks[index]) ?? {};
+    const trackId = currentTrack.id || asString(dbTrack.id) || asString(submissionTrack.id) || `track-${index + 1}`;
+    const resolvedAudio = await resolveTrackAudioAsset({
+      releaseId,
+      userId: asString((release as Record<string, unknown>).userId),
+      releaseTitle: asString(submissionData?.title) ?? asString((release as Record<string, unknown>).title),
+      trackId,
+      trackTitle: asString(submissionTrack.title) ?? asString(dbTrack.title),
+      audioFile: submissionTrack.audioFile ?? dbTrack.audioFile,
+      audioUpload: submissionTrack.audioUpload ?? dbTrack.audioUpload,
+      audioUrl: submissionTrack.audioUrl ?? dbTrack.audioUrl,
+      audio: submissionTrack.audio ?? dbTrack.audio,
+      track: submissionTrack.track ?? dbTrack.track
+    });
+
+    const diagnosis = await diagnoseMediaAsset({
+      kind: "audio",
+      storageKey: resolvedAudio.storageKey ?? null,
+      resolvedUrl: resolvedAudio.url ?? null,
+      fileName:
+        asString(submissionTrack.fileName) ??
+        asString(dbTrack.fileName) ??
+        currentTrack.files.audio.file_name,
+      discoveryNames: resolvedAudio.url
+        ? [
+            asString(submissionTrack.fileName),
+            asString(dbTrack.fileName),
+            resolvedAudio.storageKey,
+            resolvedAudio.url
+          ]
+        : [
+            asString(submissionTrack.fileName),
+            asString(dbTrack.fileName),
+            asString(submissionTrack.audioUrl),
+            asString(dbTrack.audioUrl)
+          ],
+      discoveryCandidates: resolvedAudio.url
+        ? [resolvedAudio.storageKey, ...resolvedAudio.candidateUrls]
+        : [
+            asString(submissionTrack.audioUrl),
+            asString(dbTrack.audioUrl),
+            asString(submissionTrack.track),
+            asString(dbTrack.track)
+          ]
+    });
+
+    trackAudioDiagnoses[trackId] = diagnosis;
+    if (diagnosis.status !== "ok") brokenAudioTracks += 1;
+  }
+
+  return {
+    media_health: {
+      broken_cover: coverDiagnosis.status !== "ok",
+      broken_audio_tracks: brokenAudioTracks
+    },
+    cover_diagnosis: coverDiagnosis,
+    track_audio_diagnoses: trackAudioDiagnoses
+  };
+}
+
+export async function getAdminReleaseMediaDiagnosticsById(releaseId: string) {
+  const release = await prisma.release.findUnique({
+    where: { id: releaseId },
+    include: {
+      user: {
+        select: {
+          name: true
+        }
+      },
+      track: {
+        orderBy: { index: "asc" }
+      }
+    }
+  });
+
+  if (!release) return null;
+  const details = mapAdminReleaseDetails(release);
+  return computeAdminReleaseMediaDiagnostics({ release, details });
+}
+
+export async function listAdminReleaseMediaCandidates(): Promise<AdminReleaseMediaCandidateSummary[]> {
+  const releases = await prisma.release.findMany({
+    select: {
+      id: true,
+      title: true,
+      date: true,
+      preview: true,
+      performer: true,
+      feat: true,
+      roles: true,
+      track: {
+        select: {
+          id: true
+        },
+        orderBy: { index: "asc" }
+      }
+    },
+    orderBy: { date: "desc" }
+  });
+
+  return releases.map((release) => {
+    const submissionData = parseSubmissionData(release);
+    const releasePersons = mergePersonGroups(
+      parsePersons(release.roles),
+      parsePersons(submissionData?.persons)
+    );
+    const artists = unique([
+      ...releasePersons.performers,
+      ...releasePersons.feats,
+      ...splitNames(asString(release.performer)),
+      ...splitNames(asString(release.feat))
+    ]).filter(Boolean);
+
+    return {
+      id: release.id,
+      title: asString(submissionData?.title) ?? asString(release.title) ?? "Без названия",
+      artists,
+      release_date: toDate(asString(submissionData?.releaseDate) ?? (release.date as Date | undefined)),
+      cover_url: resolveRenderableStoredFileUrl({ url: asString(release.preview), storageKey: null }) ?? null,
+      total_tracks: Array.isArray(release.track) ? release.track.length : 0
+    } satisfies AdminReleaseMediaCandidateSummary;
+  });
+}
+
+export async function listAdminReleaseMediaIssues(): Promise<AdminReleaseMediaIssueSummary[]> {
+  const releases = await prisma.release.findMany({
+    select: {
+      id: true,
+      title: true,
+      date: true,
+      status: true,
+      preview: true,
+      performer: true,
+      feat: true,
+      roles: true,
+      userId: true,
+      track: {
+        select: {
+          id: true,
+          title: true,
+          track: true
+        },
+        orderBy: { index: "asc" }
+      }
+    },
+    orderBy: { date: "desc" }
+  });
+
+  const issues = await Promise.all(
+    releases.map(async (release) => {
+      const submissionData = parseSubmissionData(release);
+      const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
+      const submissionTracks = asArray(submissionData?.tracks);
+      const cover = await resolveAdminDetailCoverAsset({
+        id: release.id,
+        preview: asString(release.preview),
+        submissionData,
+        roles: release.roles,
+        coverImage: (release as Record<string, unknown>).coverImage,
+        userId: asString((release as Record<string, unknown>).userId),
+        title: asString(release.title)
+      });
+      const coverDiagnosis = await diagnoseMediaAsset({
+        kind: "cover",
+        storageKey: cover.storageKey ?? null,
+        resolvedUrl: cover.url ?? null,
+        fileName: fileNameFromUrl(cover.storageKey ?? cover.url ?? null),
+        discoveryNames: [release.preview, cover.url, cover.storageKey],
+        discoveryCandidates: [cover.storageKey, ...cover.candidateUrls]
+      });
+
+      let brokenAudioTracks = 0;
+      let repairableAudioTracks = 0;
+
+      for (let index = 0; index < dbTracks.length; index += 1) {
+        const dbTrack = inflateTrackRow(dbTracks[index]);
+        const submissionTrack = asRecord(submissionTracks[index]) ?? {};
+        const trackId =
+          asString(dbTrack.id) ?? asString(submissionTrack.id) ?? `track-${index + 1}`;
+        const resolvedAudio = await resolveTrackAudioAsset({
+          releaseId: release.id,
+          userId: asString((release as Record<string, unknown>).userId),
+          releaseTitle: asString(submissionData?.title) ?? asString(release.title),
+          trackId,
+          trackTitle: asString(submissionTrack.title) ?? asString(dbTrack.title),
+          audioFile: submissionTrack.audioFile ?? dbTrack.audioFile,
+          audioUpload: submissionTrack.audioUpload ?? dbTrack.audioUpload,
+          audioUrl: submissionTrack.audioUrl ?? dbTrack.audioUrl,
+          audio: submissionTrack.audio ?? dbTrack.audio,
+          track: submissionTrack.track ?? dbTrack.track
+        });
+        const diagnosis = await diagnoseMediaAsset({
+          kind: "audio",
+          storageKey: resolvedAudio.storageKey ?? null,
+          resolvedUrl: resolvedAudio.url ?? null,
+          fileName:
+            asString(submissionTrack.fileName) ??
+            asString(dbTrack.fileName) ??
+            asString(dbTrack.title),
+          discoveryNames: [
+            asString(submissionTrack.fileName),
+            asString(dbTrack.fileName),
+            resolvedAudio.storageKey,
+            resolvedAudio.url
+          ],
+          discoveryCandidates: [resolvedAudio.storageKey, ...resolvedAudio.candidateUrls]
+        });
+
+        if (diagnosis.status !== "ok") {
+          brokenAudioTracks += 1;
+        }
+        if (diagnosis.suggested_storage_key) {
+          repairableAudioTracks += 1;
+        }
+      }
+
+      if (coverDiagnosis.status === "ok" && brokenAudioTracks === 0) {
+        return null;
+      }
+
+      const releasePersons = mergePersonGroups(
+        parsePersons(release.roles),
+        parsePersons(submissionData?.persons)
+      );
+      const artists = unique([
+        ...releasePersons.performers,
+        ...releasePersons.feats,
+        ...splitNames(asString(release.performer)),
+        ...splitNames(asString(release.feat))
+      ]).filter(Boolean);
+
+      return {
+        id: release.id,
+        title: asString(submissionData?.title) ?? asString(release.title) ?? "Без названия",
+        artists,
+        status: resolveReleaseStatus({
+          status: release.status,
+          roles: release.roles,
+          confirmed: false,
+          upc: asString(submissionData?.upc)
+        }) as AdminReleaseDetailsResponse["status"],
+        release_date: toDate(asString(submissionData?.releaseDate) ?? (release.date as Date | undefined)),
+        cover_url: cover.url ?? null,
+        broken_cover: coverDiagnosis.status !== "ok",
+        broken_audio_tracks: brokenAudioTracks,
+        repairable_cover: Boolean(coverDiagnosis.suggested_storage_key),
+        repairable_audio_tracks: repairableAudioTracks,
+        total_tracks: dbTracks.length
+      } satisfies AdminReleaseMediaIssueSummary;
+    })
+  );
+
+  return issues.reduce<AdminReleaseMediaIssueSummary[]>((acc, issue) => {
+    if (issue) acc.push(issue);
+    return acc;
+  }, []);
 }
 
 export async function getAdminReleaseDownloadTarget(params: { releaseId: string; fileId: string }) {

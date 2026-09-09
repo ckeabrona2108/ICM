@@ -7,18 +7,28 @@ import { motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 
 const NAV = [
-  { label: "Главная", href: "#hero" },
-  { label: "Отзывы", href: "#reviews" },
-  { label: "Дистрибуция", href: "#how" },
-  { label: "Платформы", href: "#platforms" },
-  { label: "Тарифы", href: "#subscriptions" },
+  { label: "Главная", href: "/#hero" },
+  { label: "Сообщество", href: "/feed" },
+  { label: "Отзывы", href: "/#reviews" },
+  { label: "Дистрибуция", href: "/#how" },
+  { label: "Платформы", href: "/#platforms" },
+  { label: "Тарифы", href: "/#subscriptions" },
   { label: "AI Студия", href: "/dashboard/ai-studio" },
-  { label: "FAQ", href: "#faq" }
+  { label: "FAQ", href: "/#faq" }
 ];
 
-export function IcmHeader() {
+type HeaderUser = {
+  id?: string | null;
+  name?: string | null;
+  email?: string | null;
+  image?: string | null;
+  role?: "USER" | "ADMIN" | "MODERATOR" | null;
+} | null;
+
+export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
   const [open, setOpen] = React.useState(false);
   const [scrolled, setScrolled] = React.useState(false);
+  void _user;
 
   React.useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -32,14 +42,14 @@ export function IcmHeader() {
       initial={{ y: -40, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="fixed inset-x-0 top-0 z-[60] px-4 pt-[max(env(safe-area-inset-top),1rem)] sm:px-6 sm:pt-4 lg:px-8"
+      className="fixed inset-x-0 top-0 z-[220] px-4 pt-[max(env(safe-area-inset-top),1rem)] sm:px-6 sm:pt-4 lg:px-8"
     >
       <div className="mx-auto max-w-7xl">
         <div
-          className={`relative flex items-center justify-between gap-3 rounded-full border px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition-all duration-300 sm:px-5 lg:px-6 ${
+          className={`relative flex items-center justify-between gap-3 rounded-full border px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.30)] backdrop-blur-2xl transition-all duration-300 sm:px-5 lg:px-6 ${
             scrolled
-              ? "border-white/[0.10] bg-[rgba(8,8,12,0.78)]"
-              : "border-white/[0.08] bg-[rgba(8,8,12,0.65)]"
+              ? "border-white/[0.10] bg-[rgba(10,10,15,0.74)]"
+              : "border-white/[0.08] bg-[rgba(10,10,15,0.62)]"
           }`}
         >
           <Link href="/" className="group flex shrink-0 items-center">
@@ -55,13 +65,13 @@ export function IcmHeader() {
             </span>
           </Link>
 
-          <nav className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 md:flex">
+          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 text-center xl:flex">
             {NAV.map((link) => (
               link.href.startsWith("/") ? (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="whitespace-nowrap rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
+                  className="whitespace-nowrap rounded-full px-2.5 py-2 text-[13px] font-medium tracking-[-0.01em] text-white/[0.70] transition-all duration-200 hover:bg-white/[0.05] hover:text-white 2xl:px-3 2xl:text-[14px]"
                 >
                   {link.label}
                 </Link>
@@ -69,7 +79,7 @@ export function IcmHeader() {
                 <a
                   key={link.href}
                   href={link.href}
-                  className="whitespace-nowrap rounded-full px-4 py-2 text-[14px] font-medium text-white/[0.72] transition-all duration-200 hover:bg-white/[0.05] hover:text-white"
+                  className="whitespace-nowrap rounded-full px-2.5 py-2 text-[13px] font-medium tracking-[-0.01em] text-white/[0.70] transition-all duration-200 hover:bg-white/[0.05] hover:text-white 2xl:px-3 2xl:text-[14px]"
                 >
                   {link.label}
                 </a>
@@ -79,14 +89,14 @@ export function IcmHeader() {
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <Link
-              href="https://www.icecreammusic.net/login"
-              className="hidden rounded-full px-3 py-2 text-[14px] font-medium text-white/[0.72] transition-colors duration-200 hover:text-white sm:inline-block"
+              href="/login"
+              className="hidden rounded-full px-3 py-2 text-[14px] font-medium tracking-[-0.01em] text-white/[0.70] transition-colors duration-200 hover:text-white sm:inline-block"
             >
               Войти
             </Link>
             <Link
-              href="/login"
-              className="hidden rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.75)] transition-all duration-200 hover:bg-[#6a4ff0] sm:inline-flex"
+              href="/register"
+              className="hidden rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold tracking-[-0.01em] text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.75)] transition-all duration-200 hover:bg-[#6a4ff0] sm:inline-flex"
             >
               Создать аккаунт
             </Link>
@@ -94,7 +104,7 @@ export function IcmHeader() {
               type="button"
               aria-label="Меню"
               onClick={() => setOpen((s) => !s)}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white transition-colors hover:bg-white/[0.08] md:hidden"
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white transition-colors hover:bg-white/[0.08] xl:hidden"
             >
               {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
             </button>
@@ -103,7 +113,7 @@ export function IcmHeader() {
       </div>
 
       {open ? (
-        <div className="mx-auto mt-3 max-w-7xl md:hidden">
+        <div className="mx-auto mt-3 max-w-7xl xl:hidden">
           <div className="rounded-[28px] border border-white/[0.08] bg-[rgba(8,8,12,0.82)] p-2 shadow-[0_18px_44px_rgba(0,0,0,0.35)] backdrop-blur-2xl">
             {NAV.map((link) => (
               link.href.startsWith("/") ? (
@@ -127,14 +137,14 @@ export function IcmHeader() {
               )
             ))}
             <Link
-              href="https://www.icecreammusic.net/login"
+              href="/login"
               onClick={() => setOpen(false)}
               className="block rounded-2xl px-4 py-3 text-sm text-white/[0.72] transition-colors hover:bg-white/[0.05] hover:text-white"
             >
               Войти
             </Link>
             <Link
-              href="/login"
+              href="/register"
               onClick={() => setOpen(false)}
               className="mt-1 block rounded-2xl bg-[#7b61ff] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#6a4ff0]"
             >

@@ -14,6 +14,7 @@ import type { UserSubscriptionView } from "@/lib/subscription-service";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { cn } from "@/lib/utils";
+import type { UserArtistProfileSettings } from "@/lib/artist-profile-service";
 
 type FinanceReportStatusValue = "READY_TO_CONFIRM" | "AGREED";
 type ReleaseStatusFilterValue = "moderating" | "approved" | "rejected";
@@ -100,19 +101,23 @@ export function AdminUserDetailClient({
   initialReleases,
   initialFinance,
   initialReports,
-  initialSubscription
+  initialSubscription,
+  initialArtistProfiles
 }: {
   initialProfile: AdminUserProfileDetails;
   initialReleases: UserReleasesPayload;
   initialFinance: UserFinanceView;
   initialReports: UserReportItem[];
   initialSubscription: UserSubscriptionView | null;
+  initialArtistProfiles: UserArtistProfileSettings[];
 }) {
   const [profile, setProfile] = React.useState(initialProfile);
   const [releases, setReleases] = React.useState(initialReleases);
   const [finance, setFinance] = React.useState(initialFinance);
   const [reports, setReports] = React.useState(initialReports);
   const [subscriptionView, setSubscriptionView] = React.useState<UserSubscriptionView | null>(initialSubscription);
+  const [artistProfiles, setArtistProfiles] = React.useState(initialArtistProfiles);
+  const [artistVisibilityBusy, setArtistVisibilityBusy] = React.useState<string | null>(null);
 
   const [busy, setBusy] = React.useState<null | "reload" | "topup" | "report" | "subscription">(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -265,6 +270,35 @@ export function AdminUserDetailClient({
       setReleases(payload);
     } catch (reloadError) {
       setError(reloadError instanceof Error ? reloadError.message : "Не удалось загрузить релизы.");
+    }
+  }
+
+  async function toggleArtistVisibility(profileItem: UserArtistProfileSettings) {
+    setArtistVisibilityBusy(profileItem.artistKey);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/users/${profile.id}/artist-profiles/visibility`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          artistKey: profileItem.artistKey,
+          hidden: !profileItem.adminHidden
+        })
+      });
+      const payload = await response.json().catch(() => null) as { error?: string; adminHidden?: boolean } | null;
+      if (!response.ok || typeof payload?.adminHidden !== "boolean") {
+        throw new Error(payload?.error ?? "Не удалось изменить видимость артиста.");
+      }
+      setArtistProfiles((current) => current.map((item) =>
+        item.artistKey === profileItem.artistKey
+          ? { ...item, adminHidden: payload.adminHidden! }
+          : item
+      ));
+      setToast(payload.adminHidden ? "Артист скрыт публично." : "Артист снова опубликован.");
+    } catch (visibilityError) {
+      setError(visibilityError instanceof Error ? visibilityError.message : "Не удалось изменить видимость артиста.");
+    } finally {
+      setArtistVisibilityBusy(null);
     }
   }
 
@@ -423,6 +457,45 @@ export function AdminUserDetailClient({
           Обновить
         </button>
       </div>
+
+      <section className="rounded-2xl border border-white/[0.08] bg-[#15161d]/90 p-5">
+        <div className="mb-3">
+          <h2 className="text-[18px] font-semibold text-white">Публичные профили артистов</h2>
+          <p className="mt-1 text-[13px] text-white/55">Скрытие убирает профиль из поиска и закрывает его публичную страницу. Релизы и настройки не удаляются.</p>
+        </div>
+        <div className="space-y-2">
+          {artistProfiles.length === 0 ? (
+            <p className="text-[14px] text-white/60">Профилей артистов пока нет.</p>
+          ) : artistProfiles.map((profileItem) => (
+            <div key={profileItem.artistKey} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-black/20 px-3 py-3">
+              <div>
+                <p className="text-[15px] font-semibold text-white">{profileItem.settings.displayName}</p>
+                <p className="mt-1 text-[12px] text-white/50">{profileItem.releaseCount} рел. · {profileItem.adminHidden ? "Скрыт публично" : "Опубликован"}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {!profileItem.adminHidden ? (
+                  <Link href={`/artists/${profileItem.slug}`} target="_blank" className="rounded-md border border-white/[0.12] bg-white/[0.04] px-3 py-2 text-[12px] text-white/85 hover:bg-white/[0.08]">Открыть</Link>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={artistVisibilityBusy === profileItem.artistKey}
+                  onClick={() => void toggleArtistVisibility(profileItem)}
+                  className={cn(
+                    "rounded-md border px-3 py-2 text-[12px] font-semibold disabled:opacity-50",
+                    profileItem.adminHidden
+                      ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                      : "border-rose-400/25 bg-rose-500/10 text-rose-100"
+                  )}
+                >
+                  {artistVisibilityBusy === profileItem.artistKey
+                    ? "Сохраняем..."
+                    : profileItem.adminHidden ? "Показать публично" : "Скрыть публично"}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-white/[0.08] bg-[#15161d]/90 p-5">
         <div className="flex flex-wrap items-start gap-4">

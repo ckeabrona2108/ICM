@@ -19,6 +19,7 @@ import { listUserReports } from "@/lib/report-service";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { retryPrismaSerializationConflict } from "@/lib/prisma-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     return NextResponse.json(response, { status: 400 });
   }
 
-  const result = await prisma.$transaction(
+  const result = await retryPrismaSerializationConflict(() => prisma.$transaction(
     async (tx) => {
       const [totals, reports] = await Promise.all([
         getUserBalanceTotals(tx as typeof prisma, session.user.id),
@@ -73,11 +74,26 @@ export async function POST(request: Request) {
       if (issues.length > 0) return { issues, payoutId: null };
 
       const requisites = parsed.data.requisites;
+      const methodByInput = {
+        bank_transfer: "BANK_TRANSFER",
+        paypal: "PAYPAL",
+        other: "OTHER"
+      } as const;
       const payout = await tx.payouts.create({
         data: {
           id: randomUUID(),
           userId: session.user.id,
           amount: parsed.data.amount,
+          status: "REQUESTED",
+          method: methodByInput[requisites.payoutMethod],
+          requisites: {
+            recipientName: requisites.recipientName,
+            payoutMethod: requisites.payoutMethod,
+            accountNumber: requisites.accountNumber,
+            bankName: requisites.bankName,
+            paypalEmail: requisites.paypalEmail,
+            taxId: requisites.taxId
+          },
           recieverName: requisites.recipientName,
           accountNumber: requisites.accountNumber || requisites.paypalEmail || "",
           confirmed: false
@@ -87,7 +103,7 @@ export async function POST(request: Request) {
       return { issues: [], payoutId: payout.id };
     },
     { isolationLevel: "Serializable" }
-  );
+  ));
 
   if (result.issues.length > 0 || !result.payoutId) {
     const response: PayoutRequestFailureResponse = { ok: false, errors: result.issues };

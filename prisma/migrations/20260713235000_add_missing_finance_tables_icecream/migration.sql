@@ -24,7 +24,7 @@ $$;
 
 CREATE TABLE IF NOT EXISTS "icecream"."financeReport" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "userId" UUID NOT NULL,
+  "userId" TEXT NOT NULL,
   "periodStart" TIMESTAMP(6) NOT NULL,
   "periodEnd" TIMESTAMP(6) NOT NULL,
   "amount" DECIMAL(12,2) NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."financeReport" (
   "updatedAt" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "financeReport_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "financeReport_userId_fkey"
-    FOREIGN KEY ("userId") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("userId") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS "financeReport_userId_periodStart_periodEnd_idx"
 
 CREATE TABLE IF NOT EXISTS "icecream"."transaction" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "userId" UUID NOT NULL,
+  "userId" TEXT NOT NULL,
   "amount" DECIMAL(12,2) NOT NULL,
   "type" "icecream"."TransactionType" NOT NULL,
   "status" "icecream"."TransactionStatus" NOT NULL DEFAULT 'PENDING',
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."transaction" (
   "metadata" JSONB,
   CONSTRAINT "transaction_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "transaction_userId_fkey"
-    FOREIGN KEY ("userId") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("userId") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 

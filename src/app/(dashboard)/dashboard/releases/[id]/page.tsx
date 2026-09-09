@@ -12,6 +12,7 @@ import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { prisma } from "@/lib/prisma";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
 import Link from "next/link";
+import { ReleaseSceneSettingsClient } from "@/components/releases/release-scene-settings-client";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,13 @@ export default async function ReleaseDetailsPage({
             <Row label="Лейбл" value={release.label || "—"} />
             <Row label="Жанр" value={release.genre || "—"} />
             <Row label="Треков" value={String(release.tracks.length)} />
+            {release.status === "approved" || release.status === "distributed" ? (
+              <ReleaseSceneSettingsClient
+                releaseId={release.id}
+                tracks={release.tracks}
+                initialState={release.sceneShowcase!}
+              />
+            ) : null}
           </CardContent>
         </Card>
 

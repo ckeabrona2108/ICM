@@ -4,11 +4,12 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getAdminReleases, type AdminReleaseStatusFilter } from "@/lib/admin-release-queries";
-import { canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
+import { canManageReleasesSession } from "@/lib/admin-release-service";
 
 const allowedStatuses = new Set<AdminReleaseStatusFilter>([
   "moderation",
   "pending_verification",
+  "deletion_requests",
   "all",
   "approved",
   "rejected"

@@ -36,7 +36,8 @@ export async function POST(
     prisma,
     adminId: session.user.id,
     releaseId,
-    reason: rawReason
+    reason: rawReason,
+    action: "reject"
   });
   if (!result.ok) {
     if (result.error === "Release not found") {

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageHeader } from "@/components/layout/page-header";
+import { SubscriptionPaymentStatusNotice } from "@/components/tariffs/subscription-payment-status-notice";
 import { SubscriptionTiersClient } from "@/components/tariffs/subscription-tiers-client";
 import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { authOptions } from "@/lib/auth";
@@ -96,18 +97,17 @@ export default async function SubscriptionPage({
         description="Выберите тариф, чтобы увеличить лимиты релизов и открыть AI-функции."
       />
 
-      <div className="mb-5 rounded-2xl border border-white/[0.08] bg-[#13151d]/92 p-4 text-[14px] text-white/78">
-        {paymentResult?.applied ? (
-          <p className="mb-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
-            Оплата подтверждена. Подписка обновлена.
-            {paymentResult.paymentSummary?.totalTokens
-              ? ` Начислено ${formatAiTokenAmount(paymentResult.paymentSummary.totalTokens)} AI-токенов.`
-              : ""}
-          </p>
-        ) : paymentResult && paymentResult.status !== "already_confirmed" ? (
-          <p className="mb-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-amber-100">
-            Платёж ещё не подтверждён YooKassa. Если деньги списались, обновите страницу через несколько секунд.
-          </p>
+      <div className="ux-surface-soft mb-5 rounded-[24px] p-4 text-[14px] leading-6 text-white/74 sm:p-5">
+        {paymentResult ? (
+          <SubscriptionPaymentStatusNotice
+            status={paymentResult.status}
+            applied={paymentResult.applied}
+            tokensSummary={
+              paymentResult.paymentSummary?.totalTokens
+                ? `Начислено ${formatAiTokenAmount(paymentResult.paymentSummary.totalTokens)} AI-токенов.`
+                : null
+            }
+          />
         ) : null}
         <p>
           Текущий статус:{" "}
@@ -140,7 +140,7 @@ export default async function SubscriptionPage({
           />
         </div>
         {releaseQuota.requiresPaymentForNextRelease ? (
-          <p className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-amber-100">
+          <p className="mt-3 rounded-[18px] border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-amber-100">
             Лимит подписки исчерпан или подписка не активна. Следующий релиз нужно оплатить отдельно.
           </p>
         ) : null}
@@ -164,15 +164,15 @@ function QuotaCard({
   tone?: "default" | "success" | "warning";
 }) {
   return (
-    <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-3">
-      <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-white/42">{label}</p>
+    <div className="ux-surface-soft rounded-[20px] px-3 py-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/42">{label}</p>
       <p
         className={
           tone === "success"
-            ? "mt-1 text-[18px] font-bold text-emerald-200"
+            ? "mt-1 text-[18px] font-semibold text-emerald-200"
             : tone === "warning"
-              ? "mt-1 text-[18px] font-bold text-amber-200"
-              : "mt-1 text-[18px] font-bold text-white"
+              ? "mt-1 text-[18px] font-semibold text-amber-200"
+              : "mt-1 text-[18px] font-semibold text-white"
         }
       >
         {value}

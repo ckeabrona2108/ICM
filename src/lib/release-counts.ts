@@ -1,5 +1,6 @@
-import { isPrismaConnectionError } from "@/lib/prisma-errors";
+import { isPrismaConnectionError, isPrismaTableMissingError } from "@/lib/prisma-errors";
 import type { ReleaseLifecycleStatus } from "@/lib/release-policy";
+import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 
 export interface ReleaseSidebarCounts {
   all: number;
@@ -14,6 +15,7 @@ type LifecycleStatus =
   | "moderation"
   | "changes_required"
   | "approved"
+  | "dsp_confirmed"
   | "archived";
 
 const lifecycleRoleKeys = [
@@ -38,6 +40,8 @@ const lifecycleAliases: Record<string, LifecycleStatus> = {
   not_paid: "draft",
   approved: "approved",
   distributed: "approved",
+  dsp_confirmed: "dsp_confirmed",
+  published: "dsp_confirmed",
   archived: "archived"
 };
 
@@ -53,14 +57,26 @@ export function getExplicitReleaseLifecycleStatus(roles: unknown): LifecycleStat
 
   for (const key of lifecycleRoleKeys) {
     const normalized = normalizeLifecycleStatus(normalizeOptionalString(root[key]));
-    if (normalized) return normalized;
+    if (normalized && (normalized !== "dsp_confirmed" || hasDspDeliveryConfirmation(root))) return normalized;
   }
 
   const lifecycle = asRecord(root.lifecycle);
   const nested = normalizeLifecycleStatus(normalizeOptionalString(lifecycle?.state));
-  if (nested) return nested;
+  if (nested && (nested !== "dsp_confirmed" || hasDspDeliveryConfirmation(root))) return nested;
 
   return null;
+}
+
+/** A delivery state is trusted only when the persisted receipt identifies the DSP event.
+ * The submission API never writes this object; a future DSP ingestion integration owns it. */
+export function hasDspDeliveryConfirmation(roles: unknown): boolean {
+  const root = asRecord(roles);
+  const receipt = asRecord(root?.dspDeliveryConfirmation);
+  if (!receipt) return false;
+  const source = normalizeOptionalString(receipt.source)?.toLowerCase();
+  const confirmationId = normalizeOptionalString(receipt.confirmationId);
+  const confirmedAt = normalizeOptionalString(receipt.confirmedAt);
+  return source === "dsp" && Boolean(confirmationId && confirmedAt && !Number.isNaN(new Date(confirmedAt).getTime()));
 }
 
 export function getReleaseLifecycleStatus(
@@ -158,12 +174,12 @@ export function shouldTreatReleaseAsApproved(params: {
   roles?: unknown;
 }): boolean {
   const explicitLifecycle = getExplicitReleaseLifecycleStatus(params.roles);
-  if (explicitLifecycle && explicitLifecycle !== "approved" && explicitLifecycle !== "archived") {
+  if (explicitLifecycle && explicitLifecycle !== "approved" && explicitLifecycle !== "archived" && explicitLifecycle !== "dsp_confirmed") {
     return false;
   }
 
   const lifecycle = getReleaseLifecycleStatus(params.status, params.roles);
-  if (lifecycle === "approved") return true;
+  if (lifecycle === "approved" || lifecycle === "dsp_confirmed") return true;
 
   const signals = readLegacyReleaseSignals(params.roles);
   const explicitUpc = normalizeOptionalString(params.upc);
@@ -221,6 +237,7 @@ export function mapReleaseStatusToSection(
   const lifecycle = getReleaseLifecycleStatus(status, options?.roles);
   switch (lifecycle) {
     case "approved":
+    case "dsp_confirmed":
       return "all";
     case "changes_required":
       return "changes_required";
@@ -250,6 +267,7 @@ interface ReleaseGroupedItem {
 }
 
 interface ReleaseCountItem {
+  id?: string;
   status: string;
   confirmed?: boolean | null;
   upc?: string | null;
@@ -263,6 +281,29 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function isSubmittedToModeration(roles: unknown): boolean {
   return asRecord(roles)?.submittedToModeration === true;
+}
+
+function parseDraftUpdatedAt(roles: unknown): Date | null {
+  const root = asRecord(roles);
+  const raw =
+    normalizeOptionalString(root?.draftUpdatedAt) ??
+    normalizeOptionalString(root?.draftLastChangedAt);
+  if (!raw) return null;
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isExpiredDraftCountItem(item: ReleaseCountItem, now = new Date()): boolean {
+  const lifecycle = getReleaseLifecycleStatus(item.status, item.roles);
+  if (lifecycle !== "draft") return false;
+  if (item.confirmed || item.upc) return false;
+
+  const updatedAt = parseDraftUpdatedAt(item.roles);
+  if (!updatedAt) return false;
+
+  const expiresAt = updatedAt.getTime() + 180 * 24 * 60 * 60 * 1000;
+  return expiresAt <= now.getTime();
 }
 
 export function buildReleaseSidebarCounts(grouped: ReleaseGroupedItem[]): ReleaseSidebarCounts {
@@ -297,8 +338,14 @@ export async function getReleaseSidebarCountsForUser(
       release: {
         findMany(args: {
           where: { userId: string };
-          select: { status: true; confirmed: true; upc: true; roles: true };
+          select: { id: true; status: true; confirmed: true; upc: true; roles: true };
         }): Promise<ReleaseCountItem[]>;
+        deleteMany?: (args: {
+          where: {
+            id: { in: string[] };
+            userId: string;
+          };
+        }) => Promise<unknown>;
       };
     };
   }
@@ -314,16 +361,34 @@ export async function getReleaseSidebarCountsForUser(
   try {
     releases = await params.prisma.release.findMany({
       where: { userId: params.userId },
-      select: { status: true, confirmed: true, upc: true, roles: true }
+      select: { id: true, status: true, confirmed: true, upc: true, roles: true }
     });
   } catch (error) {
-    if (isPrismaConnectionError(error)) {
+    if (
+      isPrismaConnectionError(error) ||
+      isPrismaTableMissingError(error, "icecream.release") ||
+      isPrismaTableMissingError(error, "release")
+    ) {
       return counts;
     }
     throw error;
   }
 
+  const expiredDraftIds = releases
+    .filter((release) => release.id && isExpiredDraftCountItem(release))
+    .map((release) => release.id as string);
+  if (expiredDraftIds.length > 0) {
+    await params.prisma.release.deleteMany?.({
+      where: {
+        id: { in: expiredDraftIds },
+        userId: params.userId
+      }
+    });
+  }
+
   for (const release of releases) {
+    if (isExpiredDraftCountItem(release)) continue;
+    if (isReleaseHiddenFromCabinet(release.roles)) continue;
     const section = mapReleaseStatusToSection(
       release.status,
       release.confirmed,

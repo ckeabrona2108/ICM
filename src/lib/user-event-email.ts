@@ -171,18 +171,20 @@ export async function sendDashboardEventEmail(params: {
   title: string;
   message: string;
   href?: string | null;
+  includeCta?: boolean;
 }): Promise<boolean> {
   const greeting = greetUser(params.userName);
   const baseUrl = (process.env.NEXTAUTH_URL ?? "https://www.icecreammusic.net").replace(/\/$/u, "");
   const href = params.href ? `${baseUrl}${params.href.startsWith("/") ? params.href : `/${params.href}`}` : baseUrl;
+  const includeCta = params.includeCta ?? true;
   const result = await sendUserEventEmail({
     to: params.to,
     subject: params.title,
-    text: `${greeting}.\n\n${params.message}\n\nОткрыть: ${href}`,
+    text: includeCta ? `${greeting}.\n\n${params.message}\n\nОткрыть: ${href}` : `${greeting}.\n\n${params.message}`,
     html:
       `<p>${escapeHtml(greeting)}.</p>` +
       `<p>${escapeHtml(params.message)}</p>` +
-      `<p><a href="${escapeHtml(href)}">Открыть ICECREAMMUSIC</a></p>`
+      (includeCta ? `<p><a href="${escapeHtml(href)}">Открыть ICECREAMMUSIC</a></p>` : "")
   });
   return result.ok;
 }

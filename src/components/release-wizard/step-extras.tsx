@@ -52,8 +52,9 @@ export function StepExtras() {
   const canUsePriority = plan === "PRO" || plan === "ENTERPRISE";
 
   return (
-    <div className="space-y-4">
-      <WizardCard title="Дополнительные настройки">
+    <div className="space-y-5">
+      <div data-wizard-anchor="extras-general">
+      <WizardCard title="Важная информация">
         <div className="space-y-4">
           <Checkbox
             checked={data.earlyRussiaStart}
@@ -70,10 +71,10 @@ export function StepExtras() {
           />
 
           <div
-            className={`rounded-xl p-3 ${
+            className={`rounded-[22px] p-3 ${
               canUsePriority
                 ? "border border-emerald-400/30 bg-emerald-500/10"
-                : "border border-white/[0.10] bg-white/[0.03]"
+                : "border border-[var(--ux-accent)]/18 bg-[var(--ux-accent)]/[0.08]"
             }`}
             title={
               canUsePriority
@@ -85,7 +86,7 @@ export function StepExtras() {
               <div>
                 <p
                   className={`text-[13px] font-semibold ${
-                    canUsePriority ? "text-emerald-100" : "text-white/85"
+                    canUsePriority ? "text-emerald-100" : "text-white"
                   }`}
                 >
                   Приоритетный релиз
@@ -107,12 +108,12 @@ export function StepExtras() {
                   if (!canUsePriority) return;
                   set("priorityRelease", !data.priorityRelease);
                 }}
-                className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+                className={`rounded-[16px] px-5 py-3.5 text-[12px] font-semibold transition ${
                   canUsePriority
                     ? data.priorityRelease
-                      ? "bg-emerald-500 text-white"
+                      ? "bg-emerald-500 text-[#f8f4ee]"
                       : "border border-emerald-300/40 bg-transparent text-emerald-100"
-                    : "cursor-not-allowed border border-white/[0.12] bg-white/[0.03] text-white/45"
+                    : "cursor-not-allowed border border-[var(--ux-accent)]/18 bg-[var(--ux-accent)]/[0.04] text-white/42"
                 }`}
                 title={
                   canUsePriority
@@ -126,13 +127,15 @@ export function StepExtras() {
           </div>
         </div>
       </WizardCard>
+      </div>
 
+      <div data-wizard-anchor="extras-yandex">
       <WizardCard>
         <div className="mb-4 flex items-center gap-2">
           <span className="text-[18px] font-semibold tracking-tight text-[#ffcc00]">
             Яндекс
           </span>
-          <span className="text-[18px] font-semibold tracking-tight text-white">
+          <span className="text-[18px] font-semibold tracking-tight text-[#f8f4ee]">
             ✦ Музыка
           </span>
         </div>
@@ -141,15 +144,17 @@ export function StepExtras() {
         <DateInput
           value={data.yandexPreReleaseDate}
           onChange={(value) => set("yandexPreReleaseDate", value)}
-          className="max-w-xs"
+          className="w-full sm:max-w-[240px]"
         />
-        <p className="mt-3 text-[12px] leading-relaxed text-white/45">
+        <p className="mt-3 text-[12px] leading-relaxed text-[#7d7268]">
           Функция, с помощью которой слушатель сохраняет в свою коллекцию релиз до его открытия на
           Яндекс Музыке. Вы можете подготовить аудиторию к выходу сингла или альбома, а также
           привлечь новых поклонников. По памятке дата должна быть ровно за 7 дней до даты старта.
         </p>
       </WizardCard>
+      </div>
 
+      <div data-wizard-anchor="extras-comment">
       <WizardCard title="Комментарий для модератора">
         <FieldLabel>Комментарий</FieldLabel>
         <TextArea
@@ -159,6 +164,7 @@ export function StepExtras() {
           className="min-h-[110px]"
         />
       </WizardCard>
+      </div>
     </div>
   );
 }

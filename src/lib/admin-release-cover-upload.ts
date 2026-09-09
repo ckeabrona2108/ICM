@@ -2,6 +2,7 @@ import path from "node:path";
 
 import {
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client
 } from "@aws-sdk/client-s3";
@@ -123,6 +124,20 @@ export async function uploadAdminReleaseCover(input: {
     })
   );
 
+  // Verify the stored object directly. Calling the application's own HTTP
+  // preview route is unreliable behind Docker/OpenResty and can report a
+  // false failure even after S3 accepted the upload.
+  try {
+    await client.send(
+      new HeadObjectCommand({
+        Bucket: CONTRACTS_BUCKET,
+        Key: key
+      })
+    );
+  } catch {
+    throw new Error("Не удалось подтвердить загрузку обложки в хранилище.");
+  }
+
   const previewUrl =
     resolveRenderableStoredFileUrl({ storageKey: key }) ?? `/api/uploads/object/${encodePathSegments(key)}`;
 
@@ -131,18 +146,4 @@ export async function uploadAdminReleaseCover(input: {
     key,
     previewUrl
   };
-}
-
-export async function verifyAdminReleaseCoverUrl(url: string, baseUrl: string): Promise<number | null> {
-  try {
-    const response = await fetch(new URL(url, baseUrl).href, {
-      method: "GET",
-      headers: { Range: "bytes=0-0" },
-      redirect: "follow",
-      cache: "no-store"
-    });
-    return response.status;
-  } catch {
-    return null;
-  }
 }

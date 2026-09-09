@@ -1,6 +1,6 @@
 "use client";
 
-export type BrowserUploadKind = "audio" | "cover";
+export type BrowserUploadKind = "audio" | "cover" | "social";
 
 export interface BrowserUploadTarget {
   key: string;
@@ -68,29 +68,68 @@ async function uploadViaRelay(input: {
   key: string;
   blob: Blob;
   contentType: string;
+  onProgress?: (loaded: number, total: number) => void;
 }): Promise<RelayUploadResponse> {
-  const relayResponse = await fetch(`/api/uploads/relay?key=${encodeURIComponent(input.key)}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": input.contentType
-    },
-    body: input.blob
+  return await new Promise<RelayUploadResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/uploads/relay?key=${encodeURIComponent(input.key)}`);
+    xhr.responseType = "json";
+    xhr.setRequestHeader("Content-Type", input.contentType);
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return;
+      input.onProgress?.(event.loaded, event.total);
+    });
+    xhr.addEventListener("load", () => {
+      const payload = (xhr.response ?? null) as
+        | RelayUploadResponse
+        | { error?: string }
+        | null;
+
+      if (xhr.status >= 200 && xhr.status < 300 && payload && "key" in payload && payload.key) {
+        resolve(payload);
+        return;
+      }
+
+      const fallback =
+        payload && "error" in payload && typeof payload.error === "string"
+          ? payload.error
+          : "Не удалось загрузить файл через сервер.";
+      reject(new Error(fallback));
+    });
+    xhr.addEventListener("error", () => {
+      reject(new Error("Не удалось загрузить файл через сервер."));
+    });
+    xhr.send(input.blob);
   });
+}
 
-  const payload = (await relayResponse.json().catch(() => null)) as
-    | RelayUploadResponse
-    | { error?: string }
-    | null;
-
-  if (!relayResponse.ok || !payload || !("key" in payload) || !payload.key) {
-    const fallback =
-      payload && "error" in payload && typeof payload.error === "string"
-        ? payload.error
-        : "Не удалось загрузить файл через сервер.";
-    throw new Error(fallback);
-  }
-
-  return payload;
+async function uploadWithXhr(input: {
+  url: string;
+  method: string;
+  contentType: string;
+  blob: Blob;
+  onProgress?: (loaded: number, total: number) => void;
+}): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(input.method, input.url);
+    xhr.upload.addEventListener("progress", (event) => {
+      if (!event.lengthComputable) return;
+      input.onProgress?.(event.loaded, event.total);
+    });
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+      reject(new Error(`storage_http_${xhr.status}`));
+    });
+    xhr.addEventListener("error", () => {
+      reject(new Error("direct_upload_failed"));
+    });
+    xhr.setRequestHeader("Content-Type", input.contentType);
+    xhr.send(input.blob);
+  });
 }
 
 export async function uploadBrowserBlobToStorage(input: {
@@ -98,6 +137,7 @@ export async function uploadBrowserBlobToStorage(input: {
   contentType: string;
   kind: BrowserUploadKind;
   blob: Blob;
+  onProgress?: (loaded: number, total: number) => void;
 }): Promise<{
   key: string;
   bucket?: string;
@@ -112,17 +152,13 @@ export async function uploadBrowserBlobToStorage(input: {
   });
 
   try {
-    const uploadResponse = await fetch(target.url, {
+    await uploadWithXhr({
+      url: target.url,
       method: target.method ?? "PUT",
-      headers: {
-        "Content-Type": input.contentType
-      },
-      body: input.blob
+      contentType: input.contentType,
+      blob: input.blob,
+      onProgress: input.onProgress
     });
-
-    if (!uploadResponse.ok) {
-      throw new Error(`storage_http_${uploadResponse.status}`);
-    }
 
     return {
       key: target.key,
@@ -138,7 +174,8 @@ export async function uploadBrowserBlobToStorage(input: {
       const relay = await uploadViaRelay({
         key: target.key,
         blob: input.blob,
-        contentType: input.contentType
+        contentType: input.contentType,
+        onProgress: input.onProgress
       });
 
       return {

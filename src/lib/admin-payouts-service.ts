@@ -58,6 +58,16 @@ export function mapConfirmedToPayoutStatus(confirmed: boolean | null | undefined
   return "REQUESTED";
 }
 
+export function normalizePayoutStatus(
+  status: string | null | undefined,
+  confirmed: boolean | null | undefined
+): AdminPayoutStatus {
+  if (status === "REQUESTED" || status === "PROCESSING" || status === "PAID" || status === "REJECTED") {
+    return status;
+  }
+  return mapConfirmedToPayoutStatus(confirmed);
+}
+
 export async function listAdminPayoutRequests(prisma: any, limit = 200): Promise<AdminPayoutDetails[]> {
   const payouts = await prisma.payouts.findMany({
     orderBy: { createdAt: "desc" },
@@ -74,25 +84,25 @@ export async function listAdminPayoutRequests(prisma: any, limit = 200): Promise
   });
 
   return payouts.map((payout: any) => ({
-    ...parsePayoutRequisites({
-      recieverName: payout.recieverName,
-      accountNumber: payout.accountNumber
-    }),
+    ...parsePayoutRequisites(
+      payout.requisites ?? {
+        recieverName: payout.recieverName,
+        accountNumber: payout.accountNumber
+      }
+    ),
     id: payout.id,
     amount: Number(payout.amount ?? 0),
     currency: "RUB",
-    status: mapConfirmedToPayoutStatus(payout.confirmed),
+    status: normalizePayoutStatus(payout.status, payout.confirmed),
     createdAt: (payout.createdAt ?? new Date()).toISOString(),
-    updatedAt: (payout.createdAt ?? new Date()).toISOString(),
-    processedAt: payout.confirmed === true || payout.confirmed === null
-      ? (payout.createdAt ?? new Date()).toISOString()
-      : null,
+    updatedAt: (payout.updatedAt ?? payout.createdAt ?? new Date()).toISOString(),
+    processedAt: payout.processedAt?.toISOString() ?? null,
     user: {
       id: payout.user.id,
       name: payout.user.name,
       email: payout.user.email
     },
-    method: "BANK_TRANSFER",
+    method: payout.method ?? "BANK_TRANSFER",
     comment: null
   }));
 }

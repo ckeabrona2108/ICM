@@ -10,6 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const inputClassName =
+  "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
+
 function ResetPasswordPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -90,7 +93,7 @@ function ResetPasswordPageContent() {
         Задайте новый пароль для входа в аккаунт.
       </p>
 
-      <form className="mt-10 space-y-5" onSubmit={onSubmit}>
+      <form className="mt-10 space-y-5" onSubmit={onSubmit} noValidate>
         <div className="space-y-2">
           <Label
             htmlFor="password"
@@ -101,10 +104,11 @@ function ResetPasswordPageContent() {
           <Input
             id="password"
             type="password"
+            autoComplete="new-password"
             placeholder="Минимум 8 символов"
             value={form.password}
             onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+            className={inputClassName}
           />
         </div>
 
@@ -118,12 +122,13 @@ function ResetPasswordPageContent() {
           <Input
             id="confirmPassword"
             type="password"
+            autoComplete="new-password"
             placeholder="Повторите новый пароль"
             value={form.confirmPassword}
             onChange={(event) =>
               setForm((prev) => ({ ...prev, confirmPassword: event.target.value }))
             }
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+            className={inputClassName}
           />
         </div>
 

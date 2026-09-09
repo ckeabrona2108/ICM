@@ -1,23 +1,28 @@
 "use client";
 
 import * as React from "react";
-import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { getSession, signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { signIn } from "next-auth/react";
 import { ArrowRight, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const inputClassName =
+  "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
+
+function readSafeCallbackUrl() {
+  const callbackUrl = new URLSearchParams(window.location.search).get("callbackUrl");
+  return callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//") ? callbackUrl : null;
+}
+
 export default function LoginPage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [remember, setRemember] = useState(true);
-  const [form, setForm] = useState({ email: "", password: "" });
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [remember, setRemember] = React.useState(true);
+  const [form, setForm] = React.useState({ email: "", password: "" });
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,9 +30,12 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
+      const safeCallbackUrl = readSafeCallbackUrl();
+      const fallbackTarget = safeCallbackUrl ?? "/dashboard";
       const result = await signIn("credentials", {
         email: form.email,
         password: form.password,
+        callbackUrl: fallbackTarget,
         redirect: false
       });
 
@@ -36,16 +44,12 @@ export default function LoginPage() {
         return;
       }
 
-      let target = "/dashboard";
-      try {
-        const session = await getSession();
-        target = session?.user?.role === "ADMIN" ? "/admin" : "/dashboard";
-      } catch {
-        // getSession can fail on transient network issues; continue with safe fallback.
+      if (!result?.url) {
+        setError("Не удалось войти. Попробуйте снова");
+        return;
       }
 
-      router.push(target);
-      router.refresh();
+      window.location.assign(result.url);
     } catch {
       setError("Ошибка сети. Попробуйте снова");
     } finally {
@@ -55,7 +59,6 @@ export default function LoginPage() {
 
   return (
     <div className="w-full max-w-[560px]">
-      {/* Brand */}
       <div className="mb-12 flex justify-center">
         <Link href="/" className="flex items-center">
           <Image
@@ -69,7 +72,6 @@ export default function LoginPage() {
         </Link>
       </div>
 
-      {/* Title */}
       <h1 className="text-center text-[40px] font-semibold leading-[1.05] tracking-tight text-white sm:text-[48px]">
         С возвращением
       </h1>
@@ -77,8 +79,7 @@ export default function LoginPage() {
         Войдите в аккаунт, чтобы продолжить работу с релизами и аналитикой
       </p>
 
-      {/* Form */}
-      <form className="mt-10 space-y-5" onSubmit={onSubmit}>
+      <form className="mt-10 space-y-5" onSubmit={onSubmit} noValidate>
         <div className="space-y-2">
           <Label
             htmlFor="email"
@@ -88,11 +89,13 @@ export default function LoginPage() {
           </Label>
           <Input
             id="email"
-            type="email"
+            type="text"
+            autoComplete="username"
             placeholder="you@domain.com"
             value={form.email}
             onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+            className={inputClassName}
+            aria-invalid={error ? true : undefined}
           />
         </div>
 
@@ -106,21 +109,21 @@ export default function LoginPage() {
           <Input
             id="password"
             type="password"
+            autoComplete="current-password"
             placeholder="Введите пароль"
             value={form.password}
             onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-            className="h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25"
+            className={inputClassName}
           />
         </div>
 
-        {/* Remember + forgot */}
         <div className="flex items-center justify-between pt-1">
           <label className="inline-flex cursor-pointer items-center gap-2.5 text-[13.5px] text-white/70 select-none">
             <span className="relative flex h-[18px] w-[18px] items-center justify-center">
               <input
                 type="checkbox"
                 checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
+                onChange={(event) => setRemember(event.target.checked)}
                 className="peer absolute inset-0 cursor-pointer appearance-none rounded-md border border-white/20 bg-white/[0.04] transition-colors checked:border-white checked:bg-white"
               />
               <svg
@@ -179,7 +182,7 @@ export default function LoginPage() {
       </form>
 
       <p className="mt-8 text-center text-[14px] text-white/55">
-        Нет аккаунта?{" "}
+        Нет аккаунта?{' '}
         <Link
           href="/register"
           className="font-medium text-white underline-offset-4 transition-colors hover:underline"
@@ -187,7 +190,6 @@ export default function LoginPage() {
           Создать
         </Link>
       </p>
-
     </div>
   );
 }

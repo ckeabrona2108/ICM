@@ -47,6 +47,7 @@ export function SubscriptionPurchaseStats({
   purchases: SubscriptionPurchaseRow[];
 }) {
   const [filter, setFilter] = React.useState<PurchaseFilter>("all");
+  const [historyOpen, setHistoryOpen] = React.useState(false);
   const paidPurchases = React.useMemo(
     () => purchases.filter((purchase) => purchase.status === "paid"),
     [purchases]
@@ -102,74 +103,97 @@ export function SubscriptionPurchaseStats({
           />
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          {FILTERS.map((item) => {
-            const active = filter === item.value;
-            return (
-              <button
-                key={item.value}
-                type="button"
-                className={
-                  active
-                    ? "rounded-full border border-violet-300/40 bg-violet-400/20 px-4 py-2 text-[13px] font-semibold text-white"
-                    : "rounded-full border border-white/[0.12] bg-white/[0.03] px-4 py-2 text-[13px] font-semibold text-white/62 hover:bg-white/[0.06] hover:text-white"
-                }
-                onClick={() => setFilter(item.value)}
-              >
-                {item.label} <span className="text-white/45">{counts[item.value]}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-4 overflow-hidden rounded-2xl border border-white/[0.08]">
-          <div className="hidden grid-cols-[1.1fr_1fr_1fr_1fr_0.9fr] gap-3 border-b border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.16em] text-white/45 md:grid">
-            <span>Тариф</span>
-            <span>Оплата</span>
-            <span>Окончание</span>
-            <span>Сумма</span>
-            <span>Статус</span>
-          </div>
-
-          {filteredPurchases.length ? (
-            filteredPurchases.map((purchase) => (
-              <div
-                key={purchase.id}
-                className="grid gap-2 border-b border-white/[0.06] px-4 py-4 last:border-b-0 md:grid-cols-[1.1fr_1fr_1fr_1fr_0.9fr] md:items-center md:gap-3"
-              >
-                <div>
-                  <p className="text-[15px] font-bold text-white">{purchase.tariffLabel}</p>
-                  <p className="mt-0.5 text-[12px] font-medium text-white/40">
-                    {purchase.billingLabel} · заказ {purchase.id.slice(0, 8)}
-                  </p>
-                </div>
-                <MobileLabeledValue label="Оплата" value={formatDateTime(purchase.purchasedAt)} />
-                <MobileLabeledValue
-                  label="Окончание"
-                  value={purchase.endsAt ? formatDateTime(purchase.endsAt) : "—"}
-                  hint={
-                    purchase.status === "paid"
-                      ? purchase.billingLabel === "Годовая оплата"
-                        ? "расчётно 12 месяцев"
-                        : "расчётно 1 месяц"
-                      : undefined
-                  }
-                />
-                <MobileLabeledValue label="Сумма" value={formatRub(purchase.amountRub)} />
-                <div>
-                  <span
-                    className={`inline-flex rounded-full border px-3 py-1 text-[12px] font-semibold ${STATUS_CLASS_NAMES[purchase.status]}`}
-                  >
-                    {STATUS_LABELS[purchase.status]}
-                  </span>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="px-4 py-7 text-center text-[14px] font-medium text-white/50">
-              По выбранному фильтру покупок нет.
+        <div className="mt-5 rounded-2xl border border-white/[0.08] bg-white/[0.02]">
+          <button
+            type="button"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((value) => !value)}
+            className="flex w-full items-center justify-between gap-4 px-4 py-4 text-left sm:px-5"
+          >
+            <div>
+              <p className="text-[15px] font-semibold text-white">История покупок</p>
+              <p className="mt-1 text-[13px] text-white/50">
+                {historyOpen ? "Скрыть историю оплат и статусов." : "Открыть историю оплат и статусов."}
+              </p>
             </div>
-          )}
+            <span className="inline-flex min-h-10 items-center rounded-full border border-[#8d74ff]/40 bg-[linear-gradient(135deg,rgba(123,97,255,0.28),rgba(154,133,255,0.2))] px-4 py-2 text-[13px] font-extrabold tracking-[0.01em] text-white shadow-[0_18px_38px_-24px_rgba(123,97,255,0.88)]">
+              {historyOpen ? "Скрыть" : `Показать · ${purchases.length}`}
+            </span>
+          </button>
+
+          {historyOpen ? (
+            <div className="border-t border-white/[0.08] px-4 pb-4 pt-4 sm:px-5">
+              <div className="flex flex-wrap gap-2">
+                {FILTERS.map((item) => {
+                  const active = filter === item.value;
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      className={
+                        active
+                          ? "rounded-full border border-violet-300/40 bg-violet-400/20 px-4 py-2 text-[13px] font-semibold text-white"
+                          : "rounded-full border border-white/[0.12] bg-white/[0.03] px-4 py-2 text-[13px] font-semibold text-white/62 hover:bg-white/[0.06] hover:text-white"
+                      }
+                      onClick={() => setFilter(item.value)}
+                    >
+                      {item.label} <span className="text-white/45">{counts[item.value]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 overflow-hidden rounded-2xl border border-white/[0.08]">
+                <div className="hidden grid-cols-[1.1fr_1fr_1fr_1fr_0.9fr] gap-3 border-b border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[11px] font-bold uppercase tracking-[0.16em] text-white/45 md:grid">
+                  <span>Тариф</span>
+                  <span>Оплата</span>
+                  <span>Окончание</span>
+                  <span>Сумма</span>
+                  <span>Статус</span>
+                </div>
+
+                {filteredPurchases.length ? (
+                  filteredPurchases.map((purchase) => (
+                    <div
+                      key={purchase.id}
+                      className="grid gap-2 border-b border-white/[0.06] px-4 py-4 last:border-b-0 md:grid-cols-[1.1fr_1fr_1fr_1fr_0.9fr] md:items-center md:gap-3"
+                    >
+                      <div>
+                        <p className="text-[15px] font-bold text-white">{purchase.tariffLabel}</p>
+                        <p className="mt-0.5 text-[12px] font-medium text-white/40">
+                          {purchase.billingLabel} · заказ {purchase.id.slice(0, 8)}
+                        </p>
+                      </div>
+                      <MobileLabeledValue label="Оплата" value={formatDateTime(purchase.purchasedAt)} />
+                      <MobileLabeledValue
+                        label="Окончание"
+                        value={purchase.endsAt ? formatDateTime(purchase.endsAt) : "—"}
+                        hint={
+                          purchase.status === "paid"
+                            ? purchase.billingLabel === "Годовая оплата"
+                              ? "расчётно 12 месяцев"
+                              : "расчётно 1 месяц"
+                            : undefined
+                        }
+                      />
+                      <MobileLabeledValue label="Сумма" value={formatRub(purchase.amountRub)} />
+                      <div>
+                        <span
+                          className={`inline-flex rounded-full border px-3 py-1 text-[12px] font-semibold ${STATUS_CLASS_NAMES[purchase.status]}`}
+                        >
+                          {STATUS_LABELS[purchase.status]}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-4 py-7 text-center text-[14px] font-medium text-white/50">
+                    По выбранному фильтру покупок нет.
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>

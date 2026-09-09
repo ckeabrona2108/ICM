@@ -44,6 +44,12 @@ function validSubmission(): ReleaseSubmissionData {
     tracks: [
       {
         fileName: "track-01.wav",
+        audioFile: {
+          storageKey: "uploads/track-01.wav",
+          url: "/api/uploads/object/uploads/track-01.wav",
+          fileName: "track-01.wav",
+          contentType: "audio/wav"
+        },
         hasAudio: true,
         durationSec: 180,
         title: "Track 01",

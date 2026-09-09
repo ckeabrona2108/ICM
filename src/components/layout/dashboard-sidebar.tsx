@@ -8,8 +8,8 @@ import {
   AlertCircle,
   BarChart3,
   Bell,
+  Bookmark,
   BookOpenText,
-  CalendarDays,
   ChevronDown,
   CreditCard,
   ExternalLink,
@@ -17,13 +17,13 @@ import {
   HelpCircle,
   LayoutGrid,
   LogOut,
+  MessageSquare,
   Music2,
   Package,
   PanelLeftClose,
   Rocket,
   Sparkles,
   Store,
-  Ticket,
   UserRound,
   Wallet
 } from "lucide-react";
@@ -154,6 +154,26 @@ function buildNav(counts: {
     },
     {
       type: "leaf",
+      href: "/dashboard/messages",
+      label: "Сообщения",
+      icon: MessageSquare
+    },
+    {
+      type: "leaf",
+      href: "/dashboard/community",
+      label: "Collab Market",
+      icon: UserRound,
+      badge: "BETA",
+      badgeTone: "soon"
+    },
+    {
+      type: "leaf",
+      href: "/dashboard/community?view=collaborations&tab=favorites",
+      label: "Избранное",
+      icon: Bookmark
+    },
+    {
+      type: "leaf",
       href: "/dashboard/smart-links",
       label: "Smart Links",
       icon: ExternalLink
@@ -173,16 +193,8 @@ function buildNav(counts: {
       badge: "Скоро",
       badgeTone: "soon"
     },
-    {
-      type: "leaf",
-      href: "/dashboard/collab-market",
-      label: "Collab Market",
-      icon: Store,
-      badge: "Скоро",
-      badgeTone: "soon"
-    },
     { type: "leaf", href: "/dashboard/finance", label: "Кошелёк", icon: Wallet },
-    { type: "leaf", href: "/dashboard/profile", label: "Аккаунт", icon: UserRound },
+    { type: "leaf", href: "/dashboard/profile", label: "Профиль", icon: UserRound },
     {
       type: "leaf",
       href: "/dashboard/support",
@@ -283,7 +295,7 @@ export function DashboardSidebar({
   const nav = React.useMemo(() => buildNav(liveCounts), [liveCounts]);
   const activePath = optimisticPath ?? pathname;
 
-  const loadReleaseCounts = React.useCallback(async (force = false) => {
+  const loadReleaseCounts = React.useCallback(async () => {
     try {
       const load = async () => {
         const response = await fetch("/api/releases/counts", { method: "GET" });
@@ -356,16 +368,31 @@ export function DashboardSidebar({
   }, [pathname]);
 
   React.useEffect(() => {
+    if (!mobileMenuOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mobileMenuOpen]);
+
+  React.useEffect(() => {
     const onDraftsCount = (event: Event) => {
       const custom = event as CustomEvent<{ draftsCount?: number }>;
       const next = Number(custom.detail?.draftsCount);
       if (!Number.isFinite(next)) return;
       setLiveCounts((prev) => ({ ...prev, draftsCount: Math.max(0, Math.floor(next)) }));
-      void loadReleaseCounts(true);
+      void loadReleaseCounts();
     };
 
     const onReleaseCountsRefresh = () => {
-      void loadReleaseCounts(true);
+      void loadReleaseCounts();
     };
 
     const onSupportUnreadCount = (event: Event) => {
@@ -453,7 +480,7 @@ export function DashboardSidebar({
   }, []);
 
   React.useEffect(() => {
-    void loadReleaseCounts(true);
+    void loadReleaseCounts();
   }, [loadReleaseCounts]);
 
   React.useEffect(() => {
@@ -517,10 +544,36 @@ export function DashboardSidebar({
       { href: "/dashboard/releases", label: "Релизы", icon: Package },
       { href: "/dashboard/statistics", label: "Аналитика", icon: BarChart3 },
       { href: "/dashboard/finance", label: "Кошелёк", icon: Wallet },
-      { href: "/dashboard/profile", label: "Аккаунт", icon: UserRound }
+      { href: "/dashboard/profile", label: "Профиль", icon: UserRound }
     ],
     []
   );
+
+  React.useEffect(() => {
+    setOpen((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const item of nav) {
+        if (item.type !== "group") continue;
+        const hasActiveChild = item.children.some(
+          (child) => activePath === child.href || activePath.startsWith(`${child.href}/`)
+        );
+        const currentValue = current[item.id] ?? false;
+        if (hasActiveChild && !currentValue) {
+          next[item.id] = true;
+          changed = true;
+          continue;
+        }
+        if (!(item.id in next)) {
+          next[item.id] = false;
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [activePath, nav]);
 
   const sidebarNavigation = (
     <>
@@ -568,6 +621,9 @@ export function DashboardSidebar({
             <div key={item.id}>
               <button
                 type="button"
+                data-bypass-wizard-guard="true"
+                aria-expanded={isOpen}
+                aria-controls={`dashboard-sidebar-group-${item.id}`}
                 onClick={() => toggle(item.id)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14.5px] font-medium transition-colors",
@@ -583,6 +639,7 @@ export function DashboardSidebar({
               <AnimatePresence initial={false}>
                 {isOpen ? (
                   <motion.div
+                    id={`dashboard-sidebar-group-${item.id}`}
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
@@ -613,7 +670,7 @@ export function DashboardSidebar({
         <button
           type="button"
           onClick={() => {
-            import("next-auth/react").then((module) => module.signOut({ callbackUrl: "/login" }));
+            import("next-auth/react").then((module) => module.signOut({ callbackUrl: "/" }));
           }}
           className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium text-white/65 transition-colors hover:bg-white/[0.04] hover:text-white"
         >
@@ -636,9 +693,8 @@ export function DashboardSidebar({
       <AnimatePresence initial={false}>
         {mobileMenuOpen ? (
           <>
-            <motion.button
-              type="button"
-              aria-label="Закрыть меню кабинета"
+            <motion.div
+              aria-hidden="true"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -648,6 +704,9 @@ export function DashboardSidebar({
             />
             <motion.aside
               data-dashboard-sidebar="true"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Меню кабинета"
               initial={{ x: -28, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
               exit={{ x: -20, opacity: 0 }}
@@ -658,7 +717,7 @@ export function DashboardSidebar({
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] text-white/78 transition-colors hover:bg-white/[0.08]"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.12] bg-white/[0.04] text-white/78 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b61ff]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0a0c12]"
                   aria-label="Закрыть меню кабинета"
                 >
                   <PanelLeftClose className="h-4.5 w-4.5" />

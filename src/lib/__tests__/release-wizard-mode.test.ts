@@ -28,11 +28,11 @@ test("resolveReleaseSubmitMode preserves edit flow for already submitted release
   assert.equal(resolveReleaseSubmitMode("edit", "approved"), "edit");
 });
 
-test("shouldResubmitEditedRelease only flags returned and rejected releases", () => {
+test("shouldResubmitEditedRelease sends approved edits through moderation again", () => {
   assert.equal(shouldResubmitEditedRelease("changes_required"), true);
   assert.equal(shouldResubmitEditedRelease("rejected"), true);
-  assert.equal(shouldResubmitEditedRelease("approved"), false);
-  assert.equal(shouldResubmitEditedRelease("distributed"), false);
+  assert.equal(shouldResubmitEditedRelease("approved"), true);
+  assert.equal(shouldResubmitEditedRelease("distributed"), true);
   assert.equal(shouldResubmitEditedRelease("moderation"), false);
   assert.equal(shouldResubmitEditedRelease("draft"), false);
 });

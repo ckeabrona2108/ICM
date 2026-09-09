@@ -6,10 +6,11 @@ import {
   getAdminUserProfileDetails,
   listUserReleasesForAdmin
 } from "@/lib/admin-user-service";
-import { getUserFinanceView, type UserFinanceView } from "@/lib/finance-service";
+import { getUserFinanceView } from "@/lib/finance-service";
 import { prisma } from "@/lib/prisma";
-import { listUserReports, type UserReportItem } from "@/lib/report-service";
-import { getUserSubscription, type UserSubscriptionView } from "@/lib/subscription-service";
+import { listUserReports } from "@/lib/report-service";
+import { getUserSubscription } from "@/lib/subscription-service";
+import { getUserArtistProfileSettings } from "@/lib/artist-profile-service";
 
 export default async function AdminUserDetailsPage({ params }: { params: { id: string } }) {
   const profile = await getAdminUserProfileDetails(prisma, params.id);
@@ -23,11 +24,12 @@ export default async function AdminUserDetailsPage({ params }: { params: { id: s
     adminUserReleasesQuerySchema.parse({ page: 1, perPage: 20 })
   );
 
-  const [finance, reports, subscription]: [UserFinanceView, UserReportItem[], UserSubscriptionView | null] =
+  const [finance, reports, subscription, artistProfiles] =
     await Promise.all([
       getUserFinanceView(prisma, params.id),
       listUserReports(prisma, params.id),
-      getUserSubscription(prisma, params.id)
+      getUserSubscription(prisma, params.id),
+      getUserArtistProfileSettings(prisma, params.id)
     ]);
 
   return (
@@ -37,6 +39,7 @@ export default async function AdminUserDetailsPage({ params }: { params: { id: s
       initialFinance={finance}
       initialReports={reports}
       initialSubscription={subscription}
+      initialArtistProfiles={artistProfiles?.profiles ?? []}
     />
   );
 }

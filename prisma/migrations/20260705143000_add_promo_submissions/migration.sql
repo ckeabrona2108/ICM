@@ -8,8 +8,8 @@ $$;
 
 CREATE TABLE IF NOT EXISTS "icecream"."promo_submissions" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
-  "release_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
+  "release_id" TEXT NOT NULL,
   "status" "icecream"."PromoSubmissionStatus" NOT NULL DEFAULT 'SUBMITTED',
   "email" TEXT NOT NULL,
   "partner_name" TEXT NOT NULL,
@@ -35,17 +35,17 @@ CREATE TABLE IF NOT EXISTS "icecream"."promo_submissions" (
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "reviewed_at" TIMESTAMP(6),
-  "reviewed_by" UUID,
+  "reviewed_by" TEXT,
   CONSTRAINT "promo_submissions_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "promo_submissions_user_id_release_id_key" UNIQUE ("user_id", "release_id"),
   CONSTRAINT "promo_submissions_user_id_fkey"
-    FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "promo_submissions_release_id_fkey"
-    FOREIGN KEY ("release_id") REFERENCES "icecream"."release"("id")
+    FOREIGN KEY ("release_id") REFERENCES "icecream"."Release"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "promo_submissions_reviewed_by_fkey"
-    FOREIGN KEY ("reviewed_by") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("reviewed_by") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 

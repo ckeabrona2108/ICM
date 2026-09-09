@@ -7,12 +7,17 @@ import {
   getWebhookMetadata,
   getWebhookPaymentId,
   getWebhookStatus,
+  isYooKassaWebhookAuthorized,
   parseYooKassaWebhookPayload
 } from "@/lib/yookassa";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  if (!isYooKassaWebhookAuthorized(request.url)) {
+    return NextResponse.json({ error: "Webhook secret mismatch" }, { status: 403 });
+  }
+
   let payload: unknown;
   try {
     payload = await request.json();

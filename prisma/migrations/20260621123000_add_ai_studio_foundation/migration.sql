@@ -1,4 +1,4 @@
-ALTER TABLE "icecream"."user"
+ALTER TABLE "icecream"."User"
   ADD COLUMN IF NOT EXISTS "aiTokenBalance" INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS "aiMonthlyBonusLastGrantedAt" TIMESTAMP(6);
 
@@ -27,7 +27,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "ai_models_code_key" ON "icecream"."ai_models"
 
 CREATE TABLE IF NOT EXISTS "icecream"."ai_generations" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "ai_model_id" UUID,
   "section" TEXT NOT NULL,
   "model_code" TEXT NOT NULL,
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ai_generations" (
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ai_generations_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "ai_generations_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "ai_generations_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "ai_generations_ai_model_id_fkey" FOREIGN KEY ("ai_model_id") REFERENCES "icecream"."ai_models"("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS "ai_generations_section_status_idx" ON "icecream"."ai
 
 CREATE TABLE IF NOT EXISTS "icecream"."ai_uploads" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "section" TEXT NOT NULL,
   "file_name" TEXT NOT NULL,
   "storage_key" TEXT NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ai_uploads" (
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ai_uploads_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "ai_uploads_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id") ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT "ai_uploads_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS "ai_uploads_user_id_created_at_idx" ON "icecream"."ai_uploads"("user_id", "created_at");
@@ -81,7 +81,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "ai_token_packages_code_key" ON "icecream"."ai
 
 CREATE TABLE IF NOT EXISTS "icecream"."ai_token_transactions" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "user_id" UUID NOT NULL,
+  "user_id" TEXT NOT NULL,
   "package_code" TEXT,
   "type" TEXT NOT NULL,
   "amount_tokens" INTEGER NOT NULL,
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ai_token_transactions" (
   "metadata" JSONB,
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "ai_token_transactions_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "ai_token_transactions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "icecream"."user"("id") ON DELETE CASCADE ON UPDATE CASCADE
+  CONSTRAINT "ai_token_transactions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "icecream"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS "ai_token_transactions_user_id_created_at_idx" ON "icecream"."ai_token_transactions"("user_id", "created_at");

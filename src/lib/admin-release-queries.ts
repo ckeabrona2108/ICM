@@ -7,10 +7,12 @@ import {
   shouldTreatReleaseAsApproved
 } from "@/lib/release-counts";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
+import { getReleaseDeletionState } from "@/lib/release-deletion-state";
 
 export type AdminReleaseStatusFilter =
   | "moderation"
   | "pending_verification"
+  | "deletion_requests"
   | "all"
   | "approved"
   | "rejected";
@@ -89,6 +91,11 @@ function matchStatus(source: {
   upc: string | null;
   roles: unknown;
 }, filter: AdminReleaseStatusFilter): boolean {
+  const deletionState = getReleaseDeletionState(source.roles);
+  if (filter === "deletion_requests") {
+    return deletionState?.status === "requested" || deletionState?.status === "deleted";
+  }
+
   const status = source.status;
   const accepted = isAcceptedForAdminView(source);
 
@@ -272,6 +279,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
       const paymentDisplay = source.confirmed
         ? getReleasePaymentDisplayFromRoles(source.roles)
         : null;
+      const deletionState = getReleaseDeletionState(source.roles);
 
       return {
         id: source.id,
@@ -299,6 +307,9 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         moderationRemarks: undefined,
         moderationReturnedAt: undefined,
         priority: getReleasePriorityFromRoles(source.roles),
+        deletionStatus: deletionState?.status,
+        deletionRequestedAt: deletionState?.requestedAt,
+        deletionComment: deletionState?.comment,
         paid: Boolean(source.confirmed),
         paymentKind: source.confirmed ? paymentDisplay?.kind ?? "paid" : "unpaid",
         paymentLabel: source.confirmed

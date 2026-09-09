@@ -1,5 +1,5 @@
-import { DashboardSectionUnavailable } from "@/components/layout/section-unavailable";
+import { redirect } from "next/navigation";
 
 export default function CollabMarketPage() {
-  return <DashboardSectionUnavailable title="Collab Market" />;
+  redirect("/dashboard/community?view=collaborations");
 }

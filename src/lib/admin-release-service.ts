@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import type { ModerationRemark } from "@/lib/cabinet-types";
 
 export const upcSchema = z
   .string()
@@ -48,6 +49,20 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function normalizeModerationRemarks(remarks: ModerationRemark[] | undefined): ModerationRemark[] | undefined {
+  if (!remarks?.length) return undefined;
+
+  const normalized = remarks
+    .map((remark) => ({
+      field: remark.field?.trim() ?? "",
+      message: remark.message?.trim() ?? "",
+      section: remark.section?.trim() || undefined
+    }))
+    .filter((remark) => remark.field.length > 0 && remark.message.length > 0);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefined {
   const root = asRecord(roles);
   if (!root) return undefined;
@@ -59,6 +74,8 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
   next.rejectionReason = null;
   next.moderationComment = null;
   next.moderatorComment = null;
+  next.moderationRemarks = null;
+  next.moderationReturnedAt = null;
   next.lifecycleState = "approved";
   delete next.submittedToModeration;
 
@@ -72,6 +89,8 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
       rejectionReason: null,
       moderationComment: null,
       moderatorComment: null,
+      moderationRemarks: null,
+      moderationReturnedAt: null,
       lifecycleState: "approved"
     };
     delete (next.submissionData as Record<string, unknown>).submittedToModeration;
@@ -82,15 +101,26 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
 
 export function withAdminReleaseChangesRequiredState(
   roles: unknown,
-  reason: string
+  reason: string,
+  options?: {
+    remarks?: ModerationRemark[];
+    action?: "request_changes" | "reject";
+    returnedAt?: string;
+  }
 ): Record<string, unknown> {
   const next = withReleaseLifecycleState(roles, "changes_required");
+  const moderationRemarks = normalizeModerationRemarks(options?.remarks);
+  const moderationReturnedAt = options?.returnedAt?.trim() || null;
+  const moderationStatus = options?.action === "reject" ? "rejected" : "changes_required";
+
   next.needsChanges = true;
-  next.moderationStatus = "changes_required";
+  next.moderationStatus = moderationStatus;
   next.rejectReason = reason;
   next.rejectionReason = reason;
   next.moderationComment = reason;
   next.moderatorComment = reason;
+  next.moderationRemarks = moderationRemarks ?? null;
+  next.moderationReturnedAt = moderationReturnedAt;
 
   const submission = asRecord(next.submissionData);
   if (submission) {
@@ -99,11 +129,13 @@ export function withAdminReleaseChangesRequiredState(
       lifecycleState: "changes_required",
       submittedToModeration: false,
       needsChanges: true,
-      moderationStatus: "changes_required",
+      moderationStatus,
       rejectReason: reason,
       rejectionReason: reason,
       moderationComment: reason,
-      moderatorComment: reason
+      moderatorComment: reason,
+      moderationRemarks: moderationRemarks ?? null,
+      moderationReturnedAt
     };
   }
 
@@ -183,13 +215,17 @@ export async function approveReleaseByAdmin(params: {
     userId: release.userId,
     kind: "release_approved",
     title: "Релиз принят",
-    message: `Релиз «${release.title ?? "Без названия"}» принят и доступен в каталоге.`,
-    href: "/dashboard/releases",
+    message: `Релиз «${release.title ?? "Без названия"}» принят. Загрузите 30-секундный фрагмент, чтобы попасть на витрину.`,
+    href: `/dashboard/showcase?releaseId=${encodeURIComponent(release.id)}`,
     sendEmail: false,
     resetReadState: true
   });
 
-  return { releaseId: params.releaseId } as const;
+  return {
+    releaseId: params.releaseId,
+    userId: release.userId,
+    releaseTitle: release.title ?? "Без названия"
+  } as const;
 }
 
 export async function rejectReleaseByAdmin(params: {
@@ -197,6 +233,8 @@ export async function rejectReleaseByAdmin(params: {
   adminId: string;
   releaseId: string;
   reason: string;
+  remarks?: ModerationRemark[];
+  action?: "request_changes" | "reject";
 }) {
   const parsed = rejectReleaseSchema.safeParse({ reason: params.reason });
   if (!parsed.success) {
@@ -226,6 +264,8 @@ export async function rejectReleaseByAdmin(params: {
   }
 
   const reason = parsed.data.reason;
+  const moderationRemarks = normalizeModerationRemarks(params.remarks);
+  const returnedAt = new Date().toISOString();
   await params.prisma.release.update({
     where: { id: params.releaseId },
     data: {
@@ -234,7 +274,12 @@ export async function rejectReleaseByAdmin(params: {
       moderatorComment: reason,
       roles: withAdminReleaseChangesRequiredState(
         release.roles,
-        reason
+        reason,
+        {
+          remarks: moderationRemarks,
+          action: params.action,
+          returnedAt
+        }
       ) as Prisma.InputJsonValue
     }
   });
@@ -265,7 +310,7 @@ export async function rejectReleaseByAdmin(params: {
     resetReadState: true
   });
 
-  return { ok: true as const, reason };
+  return { ok: true as const, reason, remarks: moderationRemarks };
 }
 
 export async function deleteReleaseByAdmin(params: {

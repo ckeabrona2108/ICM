@@ -14,6 +14,7 @@ import {
   FileSpreadsheet,
   LogOut,
   MessageSquareText,
+  Music2,
   PanelLeft,
   Sparkles,
   UserRound,
@@ -23,6 +24,7 @@ import {
 import { useCurrentUser } from "@/components/user/user-provider";
 import { UserAvatar } from "@/components/user/user-avatar";
 import { ServiceWorkStatus } from "@/components/layout/service-work-status";
+import { VerifiedBadge } from "@/components/uitripled/native-verified-badge-shadcnui";
 import type {
   DashboardNotificationItemResponse,
   DashboardNotificationsResponse
@@ -94,15 +96,34 @@ function formatNotificationTimestamp(value: string): string {
   });
 }
 
-function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
-  const padding = "=".repeat((4 - (value.length % 4)) % 4);
-  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const bytes = window.atob(base64);
-  const result = new Uint8Array(bytes.length);
-  for (let index = 0; index < bytes.length; index += 1) {
-    result[index] = bytes.charCodeAt(index);
-  }
-  return result.buffer;
+export function optimisticallyMarkNotificationRead(
+  current: DashboardNotificationsResponse,
+  notificationId: string
+): DashboardNotificationsResponse {
+  const target = current.items.find((item) => item.id === notificationId);
+  if (!target?.isUnread) return current;
+
+  return {
+    unreadCount: Math.max(0, current.unreadCount - 1),
+    items: current.items.map((item) =>
+      item.id === notificationId ? { ...item, isUnread: false } : item
+    )
+  };
+}
+
+export function restoreOptimisticNotificationRead(
+  current: DashboardNotificationsResponse,
+  notificationId: string
+): DashboardNotificationsResponse {
+  const target = current.items.find((item) => item.id === notificationId);
+  if (!target || target.isUnread) return current;
+
+  return {
+    unreadCount: current.unreadCount + 1,
+    items: current.items.map((item) =>
+      item.id === notificationId ? { ...item, isUnread: true } : item
+    )
+  };
 }
 
 function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
@@ -118,9 +139,16 @@ function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
         toneClassName: "border-emerald-400/20 bg-emerald-500/10 text-emerald-200"
       };
     case "support_reply":
+    case "collaboration_response_received":
       return {
         icon: MessageSquareText,
         toneClassName: "border-cyan-400/20 bg-cyan-500/10 text-cyan-200"
+      };
+    case "artist_release_published":
+    case "artist_post_published":
+      return {
+        icon: Music2,
+        toneClassName: "border-violet-400/20 bg-violet-500/10 text-violet-200"
       };
     case "report_ready":
     case "report_changes_requested":
@@ -192,15 +220,19 @@ export function DashboardTopbar({
     notifications: null,
     user: null
   });
+  const [isDesktopViewport, setIsDesktopViewport] = React.useState(false);
   const [notifications, setNotifications] = React.useState<DashboardNotificationsResponse>({
     unreadCount: 0,
     items: []
   });
   const [notificationsLoading, setNotificationsLoading] = React.useState(true);
-  const [pushState, setPushState] = React.useState<
-    "unsupported" | "idle" | "enabling" | "enabled" | "error"
-  >("unsupported");
-  const [pushPublicKey, setPushPublicKey] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const syncViewport = () => setIsDesktopViewport(window.innerWidth >= 640);
+    syncViewport();
+    window.addEventListener("resize", syncViewport);
+    return () => window.removeEventListener("resize", syncViewport);
+  }, []);
 
   React.useEffect(() => {
     if (!hasSubscription || !subscriptionEndsAt) return;
@@ -289,31 +321,6 @@ export function DashboardTopbar({
     };
   }, []);
 
-  React.useEffect(() => {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-      return;
-    }
-
-    let cancelled = false;
-    void fetch("/api/dashboard/notifications/push-subscription", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Push status unavailable");
-        return response.json() as Promise<{ enabled: boolean; publicKey: string | null }>;
-      })
-      .then((payload) => {
-        if (cancelled) return;
-        setPushPublicKey(payload.publicKey);
-        setPushState(payload.enabled ? "enabled" : "idle");
-      })
-      .catch(() => {
-        if (!cancelled) setPushState("error");
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const markAllNotificationsAsRead = React.useCallback(async () => {
     const previous = notifications;
     setNotifications((current) => ({
@@ -328,30 +335,22 @@ export function DashboardTopbar({
     }
   }, [notifications]);
 
-  const enablePushNotifications = React.useCallback(async () => {
-    if (!pushPublicKey || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    setPushState("enabling");
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") throw new Error("Push permission denied");
+  const markNotificationAsRead = React.useCallback(async (notificationId: string) => {
+    const target = notifications.items.find((item) => item.id === notificationId);
+    if (!target?.isUnread) return;
 
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const existing = await registration.pushManager.getSubscription();
-      const subscription = existing ?? await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToArrayBuffer(pushPublicKey)
-      });
-      const response = await fetch("/api/dashboard/notifications/push-subscription", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(subscription.toJSON())
-      });
-      if (!response.ok) throw new Error("Push subscription failed");
-      setPushState("enabled");
-    } catch {
-      setPushState("error");
+    setNotifications((current) => optimisticallyMarkNotificationRead(current, notificationId));
+    try {
+      const response = await fetch(
+        `/api/dashboard/notifications/${encodeURIComponent(notificationId)}`,
+        { method: "PATCH" }
+      );
+      if (!response.ok) throw new Error("Не удалось сохранить статус уведомления.");
+    } catch (error) {
+      setNotifications((current) => restoreOptimisticNotificationRead(current, notificationId));
+      throw error;
     }
-  }, [pushPublicKey]);
+  }, [notifications.items]);
 
   const updateMenuPositions = React.useCallback(() => {
     const nextAi = aiButtonRef.current?.getBoundingClientRect();
@@ -408,7 +407,10 @@ export function DashboardTopbar({
 
       <ServiceWorkStatus className="order-1 flex min-w-0 items-center gap-2.5" />
 
-      <div className="order-2 ml-auto flex min-w-0 items-center gap-2 sm:gap-3" ref={menuRef}>
+      <div
+        className="order-2 ml-auto flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:gap-3"
+        ref={menuRef}
+      >
         {hasSubscription && effectivePlan ? (
           <div className="hidden shrink-0 flex-col items-end sm:flex">
             <span className="whitespace-nowrap rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-white/88 sm:text-[11px]">
@@ -424,7 +426,7 @@ export function DashboardTopbar({
 
         <Link
           href="/dashboard/finance"
-          className="flex items-center gap-1.5 rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1.5 text-[13px] font-medium text-white/88 transition-colors hover:border-white/[0.20] hover:bg-white/[0.05] sm:gap-2 sm:px-3 sm:py-2 sm:text-[14px]"
+          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1.5 text-[13px] font-medium text-white/88 transition-colors hover:border-white/[0.20] hover:bg-white/[0.05] sm:gap-2 sm:px-3 sm:py-2 sm:text-[14px]"
         >
           <Wallet className="h-3.5 w-3.5 text-white/70" />
           <span>{effectiveRoyaltyBalance}</span>
@@ -436,7 +438,7 @@ export function DashboardTopbar({
             type="button"
             onClick={() => setActiveMenu((prev) => (prev === "ai" ? null : "ai"))}
             className={cn(
-              "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[13px] font-medium transition-colors sm:px-3 sm:py-2 sm:text-[14px]",
+              "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border px-2.5 py-1.5 text-[13px] font-medium transition-colors sm:px-3 sm:py-2 sm:text-[14px]",
               activeMenu === "ai"
                 ? "border-[#7b3df5]/40 bg-[#7b3df5]/10 text-white"
                 : "border-white/[0.12] bg-white/[0.03] text-white/88 hover:border-white/[0.20] hover:bg-white/[0.05]"
@@ -460,7 +462,7 @@ export function DashboardTopbar({
             ? createPortal(
                 <div
                   ref={aiMenuRef}
-                  className="fixed z-[120] min-w-[220px] rounded-xl border border-white/[0.12] bg-[#141824]/95 p-1.5 shadow-[0_16px_32px_-20px_rgba(0,0,0,0.78)] backdrop-blur-[8px]"
+                  className="ux-floating fixed z-[120] min-w-[220px] rounded-xl p-1.5"
                   style={{
                     top: menuPosition.ai.top,
                     right: menuPosition.ai.right
@@ -502,13 +504,15 @@ export function DashboardTopbar({
             ? createPortal(
                 <div
                   ref={notificationsMenuRef}
-                  className="fixed z-[120] w-[min(380px,calc(100vw-24px))] rounded-xl border border-white/[0.12] bg-[#141824]/95 p-1.5 shadow-[0_16px_32px_-20px_rgba(0,0,0,0.78)] backdrop-blur-[8px]"
+                  className="ux-floating fixed left-3 right-3 z-[120] w-auto rounded-xl p-1.5 sm:left-auto sm:w-[min(380px,calc(100vw-24px))]"
                   style={{
                     top: menuPosition.notifications.top,
-                    right: menuPosition.notifications.right
+                    ...(isDesktopViewport
+                      ? { right: menuPosition.notifications.right }
+                      : {})
                   }}
                 >
-                  <div className="flex items-center justify-between rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-2.5">
+                  <div className="ux-surface-soft flex items-center justify-between rounded-lg px-3 py-2.5">
                     <div>
                       <div className="text-[14px] font-semibold text-white">Уведомления</div>
                       <div className="text-[12px] text-white/50">
@@ -527,25 +531,6 @@ export function DashboardTopbar({
                     </button>
                   </div>
 
-                  {pushPublicKey && pushState !== "unsupported" ? (
-                    <div className="mt-1.5 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-2.5">
-                      {pushState === "enabled" ? (
-                        <div className="text-[12px] font-medium text-emerald-300">
-                          PWA-уведомления включены
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={enablePushNotifications}
-                          disabled={pushState === "enabling"}
-                          className="text-[12px] font-medium text-white/65 transition-colors hover:text-white disabled:cursor-wait disabled:text-white/35"
-                        >
-                          {pushState === "enabling" ? "Включаем..." : "Включить PWA-уведомления"}
-                        </button>
-                      )}
-                    </div>
-                  ) : null}
-
                   <div className="mt-1.5 max-h-[420px] overflow-y-auto pr-1">
                     {notificationsLoading ? (
                       <div className="rounded-lg px-3 py-6 text-center text-[13px] text-white/55">
@@ -558,6 +543,7 @@ export function DashboardTopbar({
                             key={item.id}
                             item={item}
                             onNavigate={() => setActiveMenu(null)}
+                            onRead={markNotificationAsRead}
                           />
                         ))}
                       </div>
@@ -588,34 +574,46 @@ export function DashboardTopbar({
               size="sm"
               className="border-white/[0.10] bg-white/[0.08]"
             />
-            <span className="min-w-0">
-              <span className="block max-w-[120px] truncate text-[13px] font-medium text-white sm:max-w-[160px] sm:text-[14px]">
-                {displayName}
+            <span className="hidden min-w-0 sm:block">
+              <span className="flex max-w-[120px] items-center gap-2 sm:max-w-[160px]">
+                <span className="truncate text-[13px] font-medium text-white sm:text-[14px]">
+                  {displayName}
+                </span>
+                {effectiveVerification.status === "approved" ? (
+                  <VerifiedBadge
+                    variant="blue"
+                    size="sm"
+                    tooltip="Верифицированный профиль"
+                    className="-translate-y-0.5 shrink-0"
+                  />
+                ) : null}
               </span>
               <span className="hidden items-center gap-2 sm:flex">
                 <span className="max-w-[220px] truncate text-[12px] font-medium text-white/60">
                   {displayEmail}
                 </span>
-                <VerificationStatusBadge
-                  status={effectiveVerification.status}
-                  className="-translate-y-0.5"
-                />
+                {effectiveVerification.status !== "approved" ? (
+                  <VerificationStatusBadge
+                    status={effectiveVerification.status}
+                    className="-translate-y-0.5"
+                  />
+                ) : null}
               </span>
             </span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-white/50" />
+            <ChevronDown className="hidden h-3.5 w-3.5 shrink-0 text-white/50 sm:block" />
           </button>
 
           {activeMenu === "user" && menuPosition.user
             ? createPortal(
                 <div
                   ref={userMenuRef}
-                  className="fixed z-[120] min-w-[260px] rounded-xl border border-white/[0.12] bg-[#141824]/95 p-1.5 shadow-[0_16px_32px_-20px_rgba(0,0,0,0.78)] backdrop-blur-[8px]"
+                  className="ux-floating fixed z-[120] min-w-[260px] rounded-xl p-1.5"
                   style={{
                     top: menuPosition.user.top,
                     right: menuPosition.user.right
                   }}
                 >
-                  <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-3">
+                  <div className="ux-surface-soft rounded-lg px-3 py-3">
                     <div className="text-[15px] font-semibold text-white">{displayName}</div>
                     <div className="mt-1 text-[12px] font-medium text-white/52">{effectivePlan}</div>
                     <div className="mt-3 grid gap-2">
@@ -632,7 +630,7 @@ export function DashboardTopbar({
                       type="button"
                       onClick={() => {
                         setActiveMenu(null);
-                        import("next-auth/react").then((m) => m.signOut({ callbackUrl: "/login" }));
+                        import("next-auth/react").then((m) => m.signOut({ callbackUrl: "/" }));
                       }}
                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-white/80 transition-colors hover:bg-white/[0.05] hover:text-white"
                     >
@@ -684,10 +682,12 @@ function TopbarMenuLink({
 
 function NotificationMenuItem({
   item,
-  onNavigate
+  onNavigate,
+  onRead
 }: {
   item: DashboardNotificationItemResponse;
   onNavigate: () => void;
+  onRead: (notificationId: string) => Promise<void>;
 }) {
   const meta = getNotificationMeta(item.kind);
   const Icon = meta.icon;
@@ -695,7 +695,14 @@ function NotificationMenuItem({
   return (
     <Link
       href={item.href}
-      onClick={onNavigate}
+      onClick={async (event) => {
+        event.preventDefault();
+        try {
+          await onRead(item.id);
+        } catch {}
+        onNavigate();
+        window.location.assign(item.href);
+      }}
       className="flex items-start gap-3 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-white/[0.05]"
     >
       <span

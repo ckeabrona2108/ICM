@@ -1,4 +1,4 @@
-import { buildLocalObjectUrl } from "@/lib/s3";
+import { buildLocalObjectUrl, resolveRenderableStoredFileUrl } from "@/lib/s3";
 
 type StoredFileObject = {
   storageKey?: unknown;
@@ -18,6 +18,39 @@ function asString(value: unknown): string | null {
   const normalized = value.trim();
   return normalized || null;
 }
+
+function getUrlHost(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function getConfiguredStorageHosts(): Set<string> {
+  const candidates = [
+    process.env.NEXT_PUBLIC_S3_URL,
+    process.env.S3_PUBLIC_URL,
+    process.env.S3_ENDPOINT,
+    process.env.MINIO_ENDPOINT,
+    process.env.S3_HOST,
+    'https://s3.icecreammusic.net'
+  ];
+
+  return new Set(
+    candidates
+      .map((value) => {
+        const trimmed = value?.trim();
+        if (!trimmed) return null;
+        const normalized = trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`;
+        return getUrlHost(normalized);
+      })
+      .filter((value): value is string => Boolean(value))
+  );
+}
+
+const CONFIGURED_STORAGE_HOSTS = getConfiguredStorageHosts();
 
 function decodePathSegments(pathname: string): string[] {
   return pathname
@@ -58,6 +91,17 @@ function normalizeStoredFileKeyFromString(rawValue: string): string | null {
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     try {
       const parsed = new URL(trimmed);
+      if (
+        parsed.pathname.startsWith("/api/uploads/object/") ||
+        parsed.pathname.startsWith("/api/storage/preview")
+      ) {
+        return normalizeStoredFileKeyFromString(
+          `${parsed.pathname}${parsed.search ?? ""}${parsed.hash ?? ""}`
+        );
+      }
+      if (!CONFIGURED_STORAGE_HOSTS.has(parsed.host.toLowerCase())) {
+        return null;
+      }
       return normalizePathSegments(parsed.pathname);
     } catch {
       return null;
@@ -66,6 +110,9 @@ function normalizeStoredFileKeyFromString(rawValue: string): string | null {
 
   const stripped = trimmed.replace(/^\/+/u, "");
   if (!stripped) return null;
+  if (!stripped.includes("/") && /^(cover|artwork|image|preview)\.[a-z0-9]{2,8}$/iu.test(stripped)) {
+    return null;
+  }
   return normalizePathSegments(stripped);
 }
 
@@ -91,6 +138,23 @@ export function normalizeStoredFileKey(value: unknown): string | null {
 }
 
 export function buildStoredFileRouteUrl(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const looksLikeDirectUrl =
+      trimmed.startsWith("http://") ||
+      trimmed.startsWith("https://") ||
+      trimmed.startsWith("/api/uploads/object/") ||
+      trimmed.startsWith("api/uploads/object/") ||
+      trimmed.startsWith("/api/storage/preview") ||
+      trimmed.startsWith("api/storage/preview") ||
+      trimmed.startsWith("/");
+
+    if (looksLikeDirectUrl) {
+      const directUrl = resolveRenderableStoredFileUrl({ url: trimmed, storageKey: null });
+      if (directUrl) return directUrl;
+    }
+  }
+
   const key = normalizeStoredFileKey(value);
   if (!key) return null;
   return buildLocalObjectUrl(key);

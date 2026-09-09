@@ -11,6 +11,7 @@ export type UiReleaseStatus =
   | "changes_required"
   | "approved"
   | "distributed"
+  | "dsp_confirmed"
   | "rejected"
   | "archived";
 
@@ -25,7 +26,8 @@ const releaseStatusDescriptorMap: Record<UiReleaseStatus, ReleaseStatusDescripto
   moderation: { label: "На модерации", variant: "warning" },
   changes_required: { label: "Требуются изменения", variant: "warning" },
   approved: { label: "Принят", variant: "success" },
-  distributed: { label: "Опубликован", variant: "success" },
+  distributed: { label: "На дистрибуции", variant: "success" },
+  dsp_confirmed: { label: "Принят", variant: "success" },
   rejected: { label: "Отклонён", variant: "danger" },
   archived: { label: "Архив", variant: "muted" }
 };
@@ -42,6 +44,8 @@ const statusAliases: Record<string, UiReleaseStatus> = {
   revision_required: "changes_required",
   approved: "approved",
   distributed: "distributed",
+  dsp_confirmed: "dsp_confirmed",
+  published: "dsp_confirmed",
   rejected: "rejected",
   archived: "archived"
 };

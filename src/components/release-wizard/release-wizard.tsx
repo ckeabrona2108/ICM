@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
@@ -16,6 +16,7 @@ import {
   type WizardData,
   type WizardSubmissionMode
 } from "./wizard-context";
+import { StepIntro } from "./step-intro";
 import { StepInfo } from "./step-info";
 import { StepTracks } from "./step-tracks";
 import { StepExtras } from "./step-extras";
@@ -40,33 +41,234 @@ import {
 } from "@/lib/release-policy";
 import { resolveDraftReleaseId, resolveReleaseSubmitMode } from "@/lib/release-wizard-mode";
 import { shouldGuardUnsavedChanges } from "@/lib/wizard-dirty";
+import { readPendingSubmission, savePendingSubmission, completePendingSubmission } from "@/lib/release-submission-client";
 import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
 import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
 
 const STEPS: Array<{ id: StepId; label: string }> = [
-  { id: "info", label: "Информация по релизу" },
-  { id: "tracks", label: "Список треков" },
-  { id: "extras", label: "Дополнительные параметры" },
+  { id: "intro", label: "Что загружаем?" },
+  { id: "info", label: "Обложка и информация о релизе" },
+  { id: "persons", label: "Персоны и роли" },
+  { id: "codes", label: "Коды и даты релиза" },
+  { id: "stores", label: "Площадки распространения" },
+  { id: "tracks", label: "Загрузка аудио" },
+  { id: "extras", label: "Важная информация" },
   { id: "review", label: "Проверка" },
-  { id: "upload", label: "Загрузка" }
+  { id: "upload", label: "Финал" }
 ];
 
-type WizardValidatedStep = "info" | "tracks" | "extras";
-type WizardErrorSection = "release_info" | "tracks" | "stores" | "pricing";
+const WIZARD_TIMELINE = [
+  { key: "intro", label: "Шаг 1" },
+  { key: "info", label: "Шаг 2" },
+  { key: "persons", label: "Шаг 3" },
+  { key: "codes", label: "Шаг 4" },
+  { key: "stores", label: "Шаг 5" },
+  { key: "tracks", label: "Шаг 6" },
+  { key: "extras", label: "Шаг 7" },
+  { key: "review", label: "Шаг 8" },
+  { key: "final", label: "Финал" }
+] as const;
 
-const VALIDATED_STEPS: WizardValidatedStep[] = ["info", "tracks", "extras"];
+const STEP_CHROME: Record<StepId, { title: string; description: string; section: string; timelineIndex: number }> = {
+  intro: {
+    title: "Что загружаем?",
+    description: "Выберите формат релиза и проверьте базовые условия перед заполнением карточки.",
+    section: "Шаг 1",
+    timelineIndex: 0
+  },
+  info: {
+    title: "Обложка и информация о релизе",
+    description: "Заполните основные метаданные релиза: обложку, название, жанр, язык и лейбл.",
+    section: "Шаг 2",
+    timelineIndex: 1
+  },
+  persons: {
+    title: "Персоны и роли",
+    description: "Добавьте участников релиза и назначьте им роли отдельным шагом.",
+    section: "Шаг 3",
+    timelineIndex: 2
+  },
+  codes: {
+    title: "Коды и даты релиза",
+    description: "Укажите UPC, партнёрский код и даты релиза в отдельном экране.",
+    section: "Шаг 4",
+    timelineIndex: 3
+  },
+  stores: {
+    title: "Площадки распространения",
+    description: "Настройте сервисы и страны публикации до перехода к загрузке аудио.",
+    section: "Шаг 5",
+    timelineIndex: 4
+  },
+  tracks: {
+    title: "Загрузка аудио",
+    description: "Загрузите WAV или FLAC, проверьте превью и приведите список треков к финальному виду.",
+    section: "Шаг 6",
+    timelineIndex: 5
+  },
+  extras: {
+    title: "Важная информация",
+    description: "Дополнительные параметры, настройки доставки и служебные поля, влияющие на релиз.",
+    section: "Шаг 7",
+    timelineIndex: 6
+  },
+  review: {
+    title: "Проверка",
+    description: "Сверьте карточку релиза, список треков и статус заполнения перед отправкой на модерацию.",
+    section: "Шаг 8",
+    timelineIndex: 7
+  },
+  upload: {
+    title: "Финал",
+    description: "Дождитесь окончания загрузки и перехода релиза в очередь модерации.",
+    section: "Финал",
+    timelineIndex: 8
+  }
+};
+
+function ReleaseWizardTimeline({ step }: { step: StepId }) {
+  const activeIndex = STEP_CHROME[step].timelineIndex;
+
+  return (
+    <div className="rounded-[28px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.86),rgba(13,16,30,0.82))] px-5 py-5 shadow-[var(--ux-shadow-soft)] backdrop-blur-xl sm:px-7">
+      <div className="relative">
+        <div className="absolute left-[18px] right-[18px] top-[18px] h-px bg-white/[0.08]" />
+        <div
+          className="absolute left-[18px] top-[18px] h-px bg-[var(--ux-accent)] transition-all duration-300"
+          style={{ width: `calc(${Math.max(activeIndex, 0)} * ((100% - 36px) / 8))` }}
+        />
+        <div className="grid grid-cols-9 gap-2">
+          {WIZARD_TIMELINE.map((item, index) => {
+            const completed = index < activeIndex;
+            const active = index == activeIndex;
+            return (
+              <div key={item.key} className="flex flex-col items-center gap-2 text-center">
+                <span
+                  className={cn(
+                    "text-[11px] font-semibold uppercase tracking-[0.12em]",
+                    active ? "text-[#f5efe6]" : completed ? "text-[#cfc4ff]" : "text-white/30"
+                  )}
+                >
+                  {item.label}
+                </span>
+                <span
+                  className={cn(
+                    "relative z-10 grid h-4 w-4 place-items-center rounded-full border transition-colors",
+                    active && "border-[var(--ux-accent)] bg-[var(--ux-accent)] text-[#1a130f]",
+                    completed && "border-[var(--ux-accent)]/75 bg-[var(--ux-accent)]/22 text-[#cfc4ff]",
+                    !active && !completed && "border-white/[0.12] bg-white/[0.03] text-white/30"
+                  )}
+                >
+                  {completed ? <Check className="h-2.5 w-2.5" /> : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type WizardValidatedStep = "intro" | "info" | "persons" | "codes" | "stores" | "tracks" | "extras";
+type WizardErrorSection = "release_info" | "tracks" | "stores" | "pricing";
+type WizardAnchorId = "info-cover" | "info-basics" | "info-persons" | "info-codes" | "info-platforms" | "info-territories" | "tracks-upload" | "tracks-list" | "extras-general" | "extras-yandex" | "extras-comment";
+
+const VALIDATED_STEPS: WizardValidatedStep[] = ["intro", "info", "persons", "codes", "stores", "tracks", "extras"];
+
+type StepValidationState = {
+  step: WizardValidatedStep;
+  issues: ReleaseValidationIssue[];
+  message: string;
+  anchorId: WizardAnchorId | null;
+};
+
+function formatValidationList(items: string[]) {
+  if (items.length === 0) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} и ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")} и ${items[items.length - 1]}`;
+}
+
+function resolveValidationMessage(issue: ReleaseValidationIssue) {
+  const field = issue.field;
+
+  if (field === "cover") return "загрузите обложку релиза";
+  if (field === "title") return "укажите название релиза";
+  if (field === "genre") return "выберите жанр";
+  if (field === "metadataLanguage") return "выберите язык метаданных";
+  if (field === "label") return "укажите лейбл";
+  if (field === "releaseDate") return "укажите дату релиза";
+  if (field === "originalReleaseDate") return "укажите дату оригинального релиза";
+  if (field === "upc") return "укажите UPC";
+  if (field === "platformMode" || field === "platforms") return "настройте площадки";
+  if (field === "territoryMode" || field === "territoryCountries") return "настройте территории";
+  if (field === "persons" || field.startsWith("persons.")) {
+    return "добавьте хотя бы одну персону и присвойте ей роль";
+  }
+  if (field === "audioFiles") return "загрузите аудио";
+  if (field === "tracks") return "добавьте хотя бы один трек";
+
+  return issue.message || "заполните обязательное поле";
+}
+
+function resolveValidationAnchor(issue: ReleaseValidationIssue): WizardAnchorId | null {
+  const field = issue.field;
+
+  if (field === "cover") return "info-cover";
+
+  if (
+    field === "title" ||
+    field === "subtitle" ||
+    field === "genre" ||
+    field === "subgenre" ||
+    field === "metadataLanguage" ||
+    field === "label"
+  ) {
+    return "info-basics";
+  }
+
+  if (field === "persons" || field.startsWith("persons.")) return "info-persons";
+  if (field === "upc" || field === "releaseDate" || field === "originalReleaseDate") return "info-codes";
+  if (field === "platformMode" || field === "platforms") return "info-platforms";
+  if (field === "territoryMode" || field === "territoryCountries") return "info-territories";
+  if (field === "audioFiles") return "tracks-upload";
+  if (field === "tracks") return "tracks-list";
+
+  return null;
+}
 
 function mapIssueToWizardStep(issue: ReleaseValidationIssue): WizardValidatedStep | null {
   if (issue.field === "yandexPreReleaseDate") return "extras";
   if (issue.field === "releaseKind" && issue.code === "invalid") {
     return "tracks";
   }
+  if (issue.field === "persons" || issue.field.startsWith("persons.")) return "persons";
+  if (
+    issue.field === "upc" ||
+    issue.field === "partnerCode" ||
+    issue.field === "releaseDate" ||
+    issue.field === "startDate" ||
+    issue.field === "preorderDate" ||
+    issue.field === "rightsYear" ||
+    issue.field === "originalReleaseDate"
+  ) {
+    return "codes";
+  }
+  if (
+    issue.field === "platformMode" ||
+    issue.field === "platforms" ||
+    issue.field === "territoryMode" ||
+    issue.field === "territoryCountries"
+  ) {
+    return "stores";
+  }
 
   const section = mapReleaseValidationStep(issue.field);
   if (section === "tracks") return "tracks";
-  if (section === "stores") return "extras";
+  if (section === "stores") return "stores";
   if (section === "release_info") return "info";
   return null;
 }
@@ -75,7 +277,11 @@ function groupIssuesByStep(
   issues: ReleaseValidationIssue[]
 ): Record<WizardValidatedStep, string[]> {
   const grouped: Record<WizardValidatedStep, string[]> = {
+    intro: [],
     info: [],
+    persons: [],
+    codes: [],
+    stores: [],
     tracks: [],
     extras: []
   };
@@ -208,12 +414,14 @@ async function uploadBlobToStorage(params: {
   contentType: string;
   blob: Blob;
   kind: "audio" | "cover";
+  onProgress?: (loaded: number, total: number) => void;
 }): Promise<UploadedFileRef> {
   const uploaded = await uploadBrowserBlobToStorage({
     fileName: sanitizeFileName(params.fileName),
     contentType: params.contentType,
     kind: params.kind,
-    blob: params.blob
+    blob: params.blob,
+    onProgress: params.onProgress
   });
 
   const readUrl = buildObjectReadUrlFromKey(uploaded.key);
@@ -313,6 +521,10 @@ function WizardInner({
   const autosaveTimerRef = React.useRef<number | null>(null);
   const submittingRef = React.useRef(false);
   const draftSavePromiseRef = React.useRef<Promise<ReleaseDraftSaveResponse> | null>(null);
+  const queuedDraftSaveRef = React.useRef<{
+    method: "POST" | "PATCH";
+    payload: ReleaseDraftSaveRequest;
+  } | null>(null);
   const [draftStatus, setDraftStatus] = React.useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
@@ -323,8 +535,11 @@ function WizardInner({
   const [stepNavError, setStepNavError] = React.useState<string | null>(null);
   const [contractModalOpen, setContractModalOpen] = React.useState(false);
   const [contractGateStatus, setContractGateStatus] = React.useState<ContractStatusPayload | null>(null);
+  const [warningVisible, setWarningVisible] = React.useState(true);
+  const [validationToast, setValidationToast] = React.useState<string | null>(null);
   const wizardRootRef = React.useRef<HTMLDivElement | null>(null);
   const [lastSubmitResult, setLastSubmitResult] = React.useState<ReleaseSubmitSuccessResponse | null>(null);
+  const [uploadProgress, setUploadProgress] = React.useState(0);
   const [submitErrorsBySection, setSubmitErrorsBySection] = React.useState<
     Record<WizardErrorSection, string[]>
   >({
@@ -375,9 +590,25 @@ function WizardInner({
     () => groupIssuesByStep(validationIssues),
     [validationIssues]
   );
+  const issuesByStep = React.useMemo(() => {
+    const grouped: Partial<Record<WizardValidatedStep, ReleaseValidationIssue[]>> = {};
+
+    for (const issue of validationIssues) {
+      const stepId = mapIssueToWizardStep(issue);
+      if (!stepId) continue;
+      if (!grouped[stepId]) grouped[stepId] = [];
+      grouped[stepId]!.push(issue);
+    }
+
+    return grouped;
+  }, [validationIssues]);
   const stepIssuesWithSubmit = React.useMemo(() => {
     const grouped: Record<WizardValidatedStep, string[]> = {
+      intro: [...stepIssues.intro],
       info: [...stepIssues.info],
+      persons: [...stepIssues.persons],
+      codes: [...stepIssues.codes],
+      stores: [...stepIssues.stores],
       tracks: [...stepIssues.tracks],
       extras: [...stepIssues.extras]
     };
@@ -396,7 +627,7 @@ function WizardInner({
       pushUnique("tracks", message);
     }
     for (const message of submitErrorsBySection.stores) {
-      pushUnique("extras", message);
+      pushUnique("stores", message);
     }
     for (const message of submitErrorsBySection.pricing) {
       pushUnique("extras", message);
@@ -409,17 +640,57 @@ function WizardInner({
     [submissionData]
   );
 
-  const getCurrentStepValidation = React.useCallback(() => {
+  const getCurrentStepValidation = React.useCallback((): StepValidationState | null => {
     if (!VALIDATED_STEPS.includes(step as WizardValidatedStep)) return null;
+
     const currentStep = step as WizardValidatedStep;
-    const messages = stepIssues[currentStep];
-    if (messages.length === 0) return null;
-    return { step: currentStep, message: messages[0] };
-  }, [step, stepIssues]);
+    if (currentStep === "intro") {
+      if (data.type) return null;
+      return {
+        step: currentStep,
+        issues: [],
+        message: "Выберите один формат релиза: Single, EP или Album.",
+        anchorId: null
+      };
+    }
+
+    const issues = issuesByStep[currentStep] ?? [];
+    const fallbackMessages = stepIssues[currentStep] ?? [];
+
+    if (issues.length === 0 && fallbackMessages.length === 0) return null;
+
+    const messages =
+      issues.length > 0
+        ? Array.from(new Set(issues.map(resolveValidationMessage)))
+        : fallbackMessages;
+
+    return {
+      step: currentStep,
+      issues,
+      message: `Заполните обязательные поля: ${formatValidationList(messages)}.`,
+      anchorId: issues[0] ? resolveValidationAnchor(issues[0]) : null
+    };
+  }, [data.type, issuesByStep, step, stepIssues]);
 
   const getStepLabel = React.useCallback((stepId: WizardValidatedStep) => {
     return STEPS.find((stepMeta) => stepMeta.id === stepId)?.label ?? stepId;
   }, []);
+
+  const scrollToAnchor = React.useCallback((anchorId: WizardAnchorId | null) => {
+    if (!anchorId || typeof document === "undefined") return;
+
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(`[data-wizard-anchor="${anchorId}"]`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, []);
+
+  const announceValidationFailure = React.useCallback((params: StepValidationState) => {
+    setStepNavError(params.message);
+    setValidationToast(params.message);
+    scrollToAnchor(params.anchorId);
+  }, [scrollToAnchor]);
 
   const isStepIndexEnabled = React.useCallback(
     (targetIndex: number): boolean => {
@@ -450,15 +721,13 @@ function WizardInner({
 
       const currentValidation = getCurrentStepValidation();
       if (currentValidation) {
-        setStepNavError(
-          `Заполните обязательные поля шага «${getStepLabel(currentValidation.step)}». ${currentValidation.message ?? ""}`.trim()
-        );
+        announceValidationFailure(currentValidation);
         return;
       }
 
       setStepNavError("Невозможно перейти на этот шаг, пока не заполнены обязательные поля.");
     },
-    [getCurrentStepValidation, getStepLabel, idx, isStepIndexEnabled, setStep]
+    [announceValidationFailure, getCurrentStepValidation, idx, isStepIndexEnabled, setStep]
   );
 
   React.useEffect(() => {
@@ -489,9 +758,7 @@ function WizardInner({
   const goNext = () => {
     const currentValidation = getCurrentStepValidation();
     if (currentValidation) {
-      setStepNavError(
-        `Заполните обязательные поля шага «${getStepLabel(currentValidation.step)}». ${currentValidation.message ?? ""}`.trim()
-      );
+      announceValidationFailure(currentValidation);
       return;
     }
 
@@ -500,6 +767,12 @@ function WizardInner({
       goToStepIndex(nextIndex);
     }
   };
+  React.useEffect(() => {
+    if (!validationToast) return;
+    const timeout = window.setTimeout(() => setValidationToast(null), 4200);
+    return () => window.clearTimeout(timeout);
+  }, [validationToast]);
+
   const goPrev = () => {
     if (idx > 0) {
       setStepNavError(null);
@@ -536,25 +809,39 @@ function WizardInner({
       method: "POST" | "PATCH";
       payload: ReleaseDraftSaveRequest;
     }): Promise<ReleaseDraftSaveResponse> => {
+      queuedDraftSaveRef.current = params;
       if (draftSavePromiseRef.current) {
         return await draftSavePromiseRef.current;
       }
 
-      const resolvedReleaseId =
-        params.payload.releaseId ??
-        (submissionMode === "new" ? draftReleaseIdRef.current : sourceReleaseId);
-      const resolvedMethod = resolvedReleaseId ? "PATCH" : params.method;
-      const resolvedPayload: ReleaseDraftSaveRequest = {
-        ...params.payload,
-        releaseId: resolvedReleaseId
-      };
-
       const request = (async () => {
-        const parsed = await saveDraftToBackend(resolvedMethod, resolvedPayload);
-        if (parsed.releaseId) {
-          updateDraftReleaseId(parsed.releaseId);
+        let lastResult: ReleaseDraftSaveResponse | null = null;
+
+        while (queuedDraftSaveRef.current) {
+          const next = queuedDraftSaveRef.current;
+          queuedDraftSaveRef.current = null;
+
+          const resolvedReleaseId =
+            next.payload.releaseId ??
+            (submissionMode === "new" ? draftReleaseIdRef.current : sourceReleaseId);
+          const resolvedMethod = resolvedReleaseId ? "PATCH" : next.method;
+          const resolvedPayload: ReleaseDraftSaveRequest = {
+            ...next.payload,
+            releaseId: resolvedReleaseId
+          };
+
+          const parsed = await saveDraftToBackend(resolvedMethod, resolvedPayload);
+          if (parsed.releaseId) {
+            updateDraftReleaseId(parsed.releaseId);
+          }
+          lastResult = parsed;
         }
-        return parsed;
+
+        if (!lastResult) {
+          throw new Error("Не удалось сохранить черновик.");
+        }
+
+        return lastResult;
       })();
 
       draftSavePromiseRef.current = request;
@@ -577,6 +864,36 @@ function WizardInner({
     };
     let updatedTracks = data.tracks;
     let tracksChanged = false;
+    const uploadState = new Map<string, number>();
+    const uploadJobs: Array<{ id: string; size: number }> = [];
+
+    if (prepared.cover && prepared.cover.startsWith("data:") && !prepared.coverUpload) {
+      const coverBlob = dataUrlToBlob(prepared.cover);
+      uploadJobs.push({ id: "cover", size: Math.max(coverBlob.size, 1) });
+    }
+
+    for (let index = 0; index < preparedTracks.length; index += 1) {
+      const track = preparedTracks[index];
+      const trackState = data.tracks[index];
+      if (!trackState || track.hasAudio === false) continue;
+      if (track.audioFile?.storageKey && track.audioFile?.url) continue;
+      if (trackState.audioUpload?.storageKey && trackState.audioUpload?.url) continue;
+      const size = trackState.localAudioFile?.size ?? trackState.size ?? 0;
+      uploadJobs.push({ id: `track:${trackState.id}`, size: Math.max(size, 1) });
+    }
+
+    const totalUploadBytes = uploadJobs.reduce((sum, job) => sum + job.size, 0);
+    const updateUploadProgress = (id: string, loaded: number, total: number) => {
+      if (totalUploadBytes <= 0) return;
+      const normalizedLoaded = Math.max(0, Math.min(total || 1, loaded));
+      uploadState.set(id, normalizedLoaded);
+      const loadedBytes = uploadJobs.reduce(
+        (sum, job) => sum + Math.min(job.size, uploadState.get(job.id) ?? 0),
+        0
+      );
+      const next = Math.max(2, Math.min(96, Math.round((loadedBytes / totalUploadBytes) * 100)));
+      setUploadProgress(next);
+    };
 
     if (prepared.cover && prepared.cover.startsWith("data:") && !prepared.coverUpload) {
       try {
@@ -588,7 +905,8 @@ function WizardInner({
           fileName: `release-cover.${fileExtension}`,
           contentType,
           blob: coverBlob,
-          kind: "cover"
+          kind: "cover",
+          onProgress: (loaded, total) => updateUploadProgress("cover", loaded, total)
         });
         const coverUpload: UploadedCoverRef = {
           ...upload,
@@ -651,7 +969,8 @@ function WizardInner({
           fileName: trackState.name,
           contentType,
           blob: audioBlob,
-          kind: "audio"
+          kind: "audio",
+          onProgress: (loaded, total) => updateUploadProgress(`track:${trackState.id}`, loaded, total)
         });
         return { index, upload };
       } catch (error) {
@@ -696,6 +1015,10 @@ function WizardInner({
       set("tracks", updatedTracks);
     }
 
+    if (totalUploadBytes > 0) {
+      setUploadProgress(96);
+    }
+
     return prepared;
   }, [data, set, submissionData]);
 
@@ -714,7 +1037,9 @@ function WizardInner({
     }
 
     setSubmitting(true);
+    setUploadProgress(2);
     setSubmitPhase("uploading");
+    setStep("upload");
     setSubmitErrors([]);
     setSubmitErrorsBySection({
       release_info: [],
@@ -724,7 +1049,13 @@ function WizardInner({
     });
 
     try {
-      const preparedSubmissionData = await prepareSubmissionDataWithUploads();
+      const pendingSubmission = readPendingSubmission(
+        window.localStorage,
+        submissionMode === "new" ? draftReleaseIdRef.current : sourceReleaseId,
+        submissionDataSnapshot
+      );
+      const preparedSubmissionData = pendingSubmission?.payload.data ?? await prepareSubmissionDataWithUploads();
+      setUploadProgress((current) => Math.max(current, 97));
       setSubmitPhase("saving");
       const draftPayload: ReleaseDraftSaveRequest = {
         releaseId:
@@ -741,13 +1072,17 @@ function WizardInner({
 
       const draftMethod =
         submissionMode === "new" && !draftReleaseIdRef.current ? "POST" : "PATCH";
+      let savedDraft = pendingSubmission?.draft;
       const draftResult = await submitReleaseWithLatestDraft({
-        saveLatestDraft: async () =>
-          await persistDraft({ method: draftMethod, payload: draftPayload }),
+        savedDraft,
+        saveLatestDraft: async () => {
+          savedDraft = await persistDraft({ method: draftMethod, payload: draftPayload });
+          return savedDraft;
+        },
         submitForModeration: async (releaseId: string) => {
           setSubmitPhase("submitting");
 
-          const payload: ReleaseSubmitRequest = {
+          const payload: ReleaseSubmitRequest = pendingSubmission?.payload ?? {
             mode: resolveReleaseSubmitMode(submissionMode, currentStatus),
             releaseId,
             currentStatus,
@@ -755,9 +1090,14 @@ function WizardInner({
             data: preparedSubmissionData
           };
 
+          const idempotencyKey = pendingSubmission?.key ?? crypto.randomUUID();
+          savePendingSubmission(window.localStorage, {
+            key: idempotencyKey, snapshot: submissionDataSnapshot,
+            draft: savedDraft!, payload
+          });
           const response = await fetch("/api/releases/submit", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
             body: JSON.stringify(payload)
           });
 
@@ -802,8 +1142,11 @@ function WizardInner({
           const parsed = (await response.json().catch(() => null)) as
             | ReleaseSubmitSuccessResponse
             | null;
-          if (parsed?.ok) {
+          if (!parsed?.ok) throw new Error("Не удалось подтвердить отправку релиза. Повторите попытку.");
+          if (parsed.ok) {
+            completePendingSubmission(window.localStorage, releaseId);
             setLastSubmitResult(parsed);
+            setUploadProgress(100);
           }
         }
       });
@@ -816,7 +1159,6 @@ function WizardInner({
       setDraftStatus("saved");
       initialSnapshotRef.current = submissionDataSnapshot;
 
-      setStep("upload");
       setHasSubmittedToModeration(true);
       initialSnapshotRef.current = submissionDataSnapshot;
       setDraftStatus("idle");
@@ -843,6 +1185,7 @@ function WizardInner({
       }
 
     } catch (error) {
+      setStep("review");
       if (error instanceof Error && error.message === "submit_failed") {
         return;
       }
@@ -916,7 +1259,7 @@ function WizardInner({
         return;
       }
       if (section === "stores") {
-        setStep("info");
+        setStep("stores");
         return;
       }
       if (section === "pricing") {
@@ -930,7 +1273,7 @@ function WizardInner({
 
   const saveDraft = React.useCallback(
     async (manual: boolean): Promise<boolean> => {
-      const allowAutosave = submissionMode === "new";
+      const allowAutosave = true;
       if (!manual && !allowAutosave) {
         return false;
       }
@@ -980,9 +1323,6 @@ function WizardInner({
   );
 
   React.useEffect(() => {
-    if (submissionMode !== "new") {
-      return;
-    }
     if (step === "upload") {
       return;
     }
@@ -1121,120 +1461,124 @@ function WizardInner({
     }
   };
 
-  return (
-    <div ref={wizardRootRef} className="pb-12">
-      <div className="mb-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-[30px] font-bold tracking-tight text-white sm:text-[34px]">{pageTitle}</h1>
-          {submissionMode === "new" ? (
-            <span
-              className={cn(
-                "rounded-md border px-2 py-1 text-[11px] leading-none",
-                draftStatus === "saving" &&
-                  "border-amber-400/35 bg-amber-400/10 text-amber-200",
-                draftStatus === "saved" &&
-                  "border-emerald-400/35 bg-emerald-400/10 text-emerald-200",
-                draftStatus === "error" &&
-                  "border-rose-400/35 bg-rose-400/10 text-rose-200",
-                draftStatus === "idle" &&
-                  "border-white/[0.10] bg-white/[0.04] text-white/65"
-              )}
-            >
-              {draftStatus === "saving" && "Черновик сохраняется..."}
-              {draftStatus === "saved" && "Черновик сохранен"}
-              {draftStatus === "error" && "Ошибка сохранения черновика"}
-              {draftStatus === "idle" && "Черновик: ожидание"}
-            </span>
-          ) : null}
-        </div>
-      </div>
+  const currentChrome = STEP_CHROME[step];
 
-      {/* tabs */}
-      <div className="mb-5 flex flex-wrap items-center gap-1 rounded-xl border border-white/[0.08] bg-[#13151d]/85 p-1">
-        {STEPS.map((s, i) => {
-          const active = s.id === step;
-          const passed = i < idx;
-          const enabled = isStepIndexEnabled(i);
-          const validatedStep = VALIDATED_STEPS.includes(s.id as WizardValidatedStep)
-            ? (s.id as WizardValidatedStep)
-            : null;
-          const issuesCount = validatedStep ? stepIssuesWithSubmit[validatedStep].length : 0;
-          return (
-            <button
-              key={s.id}
-              type="button"
-              aria-disabled={!enabled}
-              onClick={() => {
-                goToStepIndex(i);
-              }}
-              className={cn(
-                "relative rounded-lg px-3 py-2 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/55",
-                active
-                  ? "text-white"
-                  : passed
-                    ? "text-white/70 hover:text-white"
-                    : enabled
-                      ? "cursor-pointer text-white/55 hover:text-white/90"
-                      : "cursor-not-allowed text-white/30"
-              )}
+  return (
+    <div ref={wizardRootRef} className="pb-16 pt-2">
+      <div className="mx-auto w-full max-w-[960px] space-y-6">
+        <div className="mx-auto flex w-full max-w-[860px] flex-wrap items-end justify-between gap-3">
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-[24px] font-semibold tracking-[-0.04em] text-[#f6f2ea] sm:text-[30px]">{pageTitle}</h1>
+              {submissionMode === "new" ? (
+                <span
+                  className={cn(
+                    "rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em]",
+                    draftStatus === "saving" && "border-[var(--ux-accent)]/35 bg-[var(--ux-accent)]/10 text-[#cfc4ff]",
+                    draftStatus === "saved" && "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+                    draftStatus === "error" && "border-rose-400/30 bg-rose-400/10 text-rose-200",
+                    draftStatus === "idle" && "border-[var(--ux-accent)]/35 bg-[var(--ux-accent)]/14 text-[#d8c9ff]"
+                  )}
+                >
+                  {draftStatus === "saving" && "Черновик сохраняется"}
+                  {draftStatus === "saved" && "Черновик сохранён"}
+                  {draftStatus === "error" && "Ошибка сохранения"}
+                  {draftStatus === "idle" && "Рабочий черновик"}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="mx-auto w-full max-w-[860px] space-y-5">
+          <ReleaseWizardTimeline step={step} />
+
+          {warningVisible ? (
+            <div className="relative rounded-[26px] border border-[#4d2d26] bg-[linear-gradient(180deg,rgba(88,37,29,0.34),rgba(22,19,18,0.96))] px-5 py-4 text-[#efe6dc] shadow-[0_20px_46px_-32px_rgba(0,0,0,0.95)] sm:px-6">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-[#6f2f25]/55 text-[#ffb59a]">
+                  <AlertTriangle className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[16px] font-semibold">Внимание</p>
+                  <p className="mt-1 max-w-3xl text-[13px] leading-6 text-[#cfb8a6]">
+                    По закону РФ запрещена дистрибуция треков с наркотематикой. Принимается только clean-версия без упоминаний запрещённых веществ.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWarningVisible(false)}
+                className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-xl text-[#8f7166] transition-colors hover:bg-white/[0.04] hover:text-[#f4e7d8]"
+                aria-label="Закрыть предупреждение"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c9beff]">{currentChrome.section}</p>
+            <h2 className="text-[38px] font-black tracking-[-0.055em] text-[#faf6ef] sm:text-[56px]">{currentChrome.title}</h2>
+            <p className="max-w-2xl text-[14px] leading-6 text-[var(--ux-text-secondary)]">{currentChrome.description}</p>
+          </div>
+
+          {stepNavError ? (
+            <div className="rounded-[20px] border border-rose-400/45 bg-[linear-gradient(180deg,rgba(127,29,29,0.22),rgba(32,18,20,0.92))] px-4 py-3.5 text-[13.5px] text-rose-100 shadow-[0_18px_46px_-30px_rgba(251,113,133,0.65)]">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
+                <p>{stepNavError}</p>
+              </div>
+            </div>
+          ) : null}
+
+          {validationToast ? (
+            <div className="pointer-events-none fixed bottom-6 right-6 z-[70] max-w-[420px] rounded-[18px] border border-rose-400/45 bg-[linear-gradient(180deg,rgba(127,29,29,0.3),rgba(32,18,20,0.96))] px-4 py-3 text-[13.5px] text-rose-50 shadow-[0_24px_60px_-28px_rgba(251,113,133,0.55)]">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-300" />
+                <p>{validationToast}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={step}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              className="mx-auto w-full max-w-[860px]"
             >
-              {active ? (
-                <motion.span
-                  layoutId="wizard-tab"
-                  className="absolute inset-0 rounded-lg bg-white/[0.06]"
-                  transition={{ type: "spring", stiffness: 380, damping: 32 }}
+              {step === "intro" ? <StepIntro /> : null}
+              {step === "info" ? <StepInfo section="basics" /> : null}
+              {step === "persons" ? <StepInfo section="persons" /> : null}
+              {step === "codes" ? <StepInfo section="codes" /> : null}
+              {step === "stores" ? <StepInfo section="stores" /> : null}
+              {step === "tracks" ? <StepTracks /> : null}
+              {step === "extras" ? <StepExtras /> : null}
+              {step === "review" ? (
+                <StepReview
+                  onSubmit={handleSubmit}
+                  errors={submitErrors}
+                  errorsBySection={submitErrorsBySection}
+                  onJumpToSection={jumpToErrorSection}
+                  blockingErrors={validationMessages}
+                  stepIssues={stepIssuesWithSubmit}
+                  isSubmitting={submitting}
+                  submitPhase={submitPhase}
                 />
               ) : null}
-              <span className="relative inline-flex items-center gap-2">
-                <span>{s.label}</span>
-                {validatedStep ? (
-                  issuesCount > 0 ? (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500/20 px-1.5 text-[11px] font-semibold text-rose-200">
-                      {issuesCount}
-                    </span>
-                  ) : (
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500/20 px-1.5 text-[11px] font-semibold text-emerald-200">
-                      ✓
-                    </span>
-                  )
-                ) : null}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      {stepNavError ? (
-        <p className="mb-5 rounded-lg border border-amber-400/20 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-200/95">
-          {stepNavError}
-        </p>
-      ) : null}
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-        >
-          {step === "info" ? <StepInfo /> : null}
-          {step === "tracks" ? <StepTracks /> : null}
-          {step === "extras" ? <StepExtras /> : null}
-          {step === "review" ? (
-            <StepReview
-              onSubmit={handleSubmit}
-              errors={submitErrors}
-              errorsBySection={submitErrorsBySection}
-              onJumpToSection={jumpToErrorSection}
-              blockingErrors={validationMessages}
-              stepIssues={stepIssuesWithSubmit}
-              isSubmitting={submitting}
-              submitPhase={submitPhase}
-            />
-          ) : null}
-          {step === "upload" ? <StepUpload submitResult={lastSubmitResult} /> : null}
-        </motion.div>
-      </AnimatePresence>
+              {step === "upload" ? (
+                <StepUpload
+                  submitResult={lastSubmitResult}
+                  progress={uploadProgress}
+                  submitPhase={submitPhase}
+                />
+              ) : null}
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
       <VerificationAccessModal
         open={contractModalOpen}
@@ -1278,7 +1622,7 @@ function WizardInner({
           <button
             type="button"
             onClick={goNext}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#7b3df5] px-4 py-2 text-[12.5px] font-medium text-white transition-all hover:-translate-y-0.5 hover:bg-[#8b4ff7]"
+            className="inline-flex items-center gap-1.5 rounded-[14px] bg-[var(--ux-accent)] px-4 py-2.5 text-[12.5px] font-semibold text-white transition-all hover:-translate-y-0.5 hover:bg-[var(--ux-accent-strong)]"
           >
             Далее
             <ArrowRight className="h-3.5 w-3.5" />
@@ -1286,8 +1630,8 @@ function WizardInner({
         </div>
       ) : null}
 
-      {guardOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4">
+        {guardOpen ? (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-4">
           <div className="w-full max-w-md rounded-2xl border border-white/[0.16] bg-[#12141c] p-5 shadow-2xl">
             <h3 className="text-[20px] font-semibold text-white">
               Сохранить изменения в черновик?
@@ -1325,8 +1669,9 @@ function WizardInner({
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

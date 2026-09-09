@@ -27,7 +27,7 @@ function readSmtpConfig(): SmtpConfig | null {
       : ["1", "true", "yes", "on"].includes(secureRaw.toLowerCase());
 
   const user = process.env.SMTP_BZ_USER?.trim() || process.env.SMTP_USER?.trim() || "";
-  const pass = process.env.SMTP_BZ_PASSWORD?.trim() || process.env.SMTP_PASS?.trim() || "";
+  const pass = process.env.SMTP_BZ_PASSWORD?.trim() || process.env.SMTP_PASSWORD?.trim() || process.env.SMTP_PASS?.trim() || "";
   if (!user || !pass) return null;
 
   return { host, port, secure, user, pass };
@@ -56,6 +56,8 @@ export function getSmtpBzTransporter(): Transporter | null {
 
 export function getSmtpFromAddress(): string | null {
   const configuredFromEmail =
+    process.env.SMTP_BZ_FROM?.trim() ||
+    process.env.SMTP_FROM?.trim() ||
     process.env.SMTP_FROM_EMAIL?.trim() ||
     process.env.RESEND_FROM_EMAIL?.trim();
   const smtpConfig = readSmtpConfig();

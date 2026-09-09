@@ -19,7 +19,16 @@ const resolvedImageHosts = (() => {
   return Array.from(hosts);
 })();
 
+const configuredDistDir = process.env.NEXT_DIST_DIR?.trim();
+if (configuredDistDir && (
+  !/^\.next-e2e\/[a-z0-9][a-z0-9-]{0,31}$/u.test(configuredDistDir)
+  || configuredDistDir.includes("..")
+)) {
+  throw new Error("NEXT_DIST_DIR must be a repo-local .next-e2e/<instance> directory");
+}
+
 const nextConfig = {
+  distDir: configuredDistDir || ".next",
   async headers() {
     return [
       {

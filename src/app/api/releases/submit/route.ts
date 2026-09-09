@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
@@ -8,7 +8,9 @@ import type {
   ReleaseSubmitSuccessResponse
 } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
+import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
 import { prisma } from "@/lib/prisma";
 import {
   getReleaseLifecycleStatus,
@@ -20,6 +22,7 @@ import {
 } from "@/lib/partner-codes";
 import {
   groupReleaseValidationIssuesByStep,
+  canEditRelease,
   releaseSubmissionDataSchema,
   type ReleaseSubmissionData,
   validateReleaseSubmission
@@ -38,6 +41,8 @@ import {
   readReleaseTypeFromSubmissionData
 } from "@/lib/release-submit-tracks";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
+
+import { executeIdempotentSubmission, validSubmissionKey } from "@/lib/release-submission-idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +117,25 @@ async function notifyReleaseSubmittedSafe(params: {
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const key = request.headers.get("Idempotency-Key");
+  if (!validSubmissionKey(key)) return NextResponse.json({ error: "Требуется корректный Idempotency-Key." }, { status: 400 });
+  let payload: unknown;
+  try { payload = await request.clone().json(); }
+  catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
+  const notifications: Array<Parameters<typeof notifyReleaseSubmittedSafe>[0]> = [];
+  const result = await executeIdempotentSubmission({
+    prisma, userId: session.user.id, key, payload,
+    execute: (tx) => executeSubmission(request, tx, notifications)
+  });
+  if (!result.replayed && result.response.ok) {
+    for (const notification of notifications) await notifyReleaseSubmittedSafe(notification);
+  }
+  return result.response;
+}
+
+async function executeSubmission(request: Request, db: Prisma.TransactionClient, notifications: Array<Parameters<typeof notifyReleaseSubmittedSafe>[0]>) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let payload: ReleaseSubmitRequest;
   try {
@@ -163,12 +187,43 @@ export async function POST(request: Request) {
     return NextResponse.json(response, { status: 400 });
   }
 
+  const missingAudio = (await Promise.all(
+    rawSubmissionData.tracks.map(async (track, index) => {
+      try {
+        const asset = await resolveTrackAudioAsset({
+          trackId: `submit-${index + 1}`,
+          trackTitle: track.title,
+          audioFile: track.audioFile,
+          track: track.fileName,
+          requireReachable: true
+        });
+        return asset.storageKey ? null : index;
+      } catch {
+        return index;
+      }
+    })
+  )).filter((index): index is number => index !== null);
+  if (missingAudio.length > 0) {
+    const errors = missingAudio.map((index) => ({
+      code: "audio_not_uploaded",
+      field: `tracks.${index}.audioFile`,
+      message: `Аудиофайл трека №${index + 1} не найден в хранилище. Загрузите его заново.`
+    }));
+    const response: ReleaseSubmitFailureResponse = {
+      ok: false,
+      errors,
+      errors_by_step: groupReleaseValidationIssuesByStep(errors)
+    };
+    return NextResponse.json(response, { status: 400 });
+  }
+
   const releaseId = payload.releaseId?.trim();
   if (!releaseId) {
     return NextResponse.json({ error: "releaseId is required" }, { status: 400 });
   }
 
-  const existing = await prisma.release.findFirst({
+  await db.$queryRaw`SELECT id FROM "icecream"."release" WHERE id::text = ${releaseId} AND "userId"::text = ${session.user.id} FOR UPDATE`;
+  const existing = await db.release.findFirst({
     where: { id: releaseId, userId: session.user.id },
     select: {
       id: true,
@@ -183,11 +238,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
   }
 
+  const lifecycle = getReleaseLifecycleStatus(existing.status, existing.roles) ?? "draft";
+  if (payload.mode !== "edit" && lifecycle === "moderation") {
+    const response: ReleaseSubmitSuccessResponse = {
+      ok: true,
+      releaseId: existing.id,
+      nextStatus: "moderation",
+      message: "Релиз уже отправлен на модерацию."
+    };
+    return NextResponse.json(response, { status: 200 });
+  }
+  const editPermission = canEditRelease({
+    status: lifecycle,
+    moderationStarted: Boolean(existing.status === "moderating")
+  });
+  if (!editPermission.allowed) {
+    return NextResponse.json({ error: editPermission.message }, { status: 409 });
+  }
+
+  const contract = await getUserContractStatus({ prisma: db as PrismaClient, userId: session.user.id });
+  if (contract.status === "unavailable") return NextResponse.json({ error: contract.reason }, { status: 503 });
+  if (!contract.canSubmitReleases) {
+    return NextResponse.json(
+      { error: contract.reason || "Для отправки релиза требуется подтвержденный договор." },
+      { status: 403 }
+    );
+  }
+
   const releaseDate = parseDate(data.releaseDate, existing.date);
   const startDate = parseDate(data.startDate, releaseDate);
   const preorderDate = parseDate(data.preorderDate, releaseDate);
 
-  const quota = await getUserReleaseQuota(session.user.id, prisma);
+  const quota = await getUserReleaseQuota(session.user.id, db);
   const submissionData: ReleaseSubmissionData = {
     ...rawSubmissionData,
     priorityRelease: sanitizePriorityReleaseFlag({
@@ -235,7 +317,7 @@ export async function POST(request: Request) {
     afterSync?: (tx: Prisma.TransactionClient) => Promise<void>;
   }) => {
     try {
-      const createdTracksCount = await prisma.$transaction(async (tx) => {
+      const createdTracksCount = await (async (tx: Prisma.TransactionClient) => {
         await tx.release.update({
           where: { id: existing.id },
           data: {
@@ -263,7 +345,7 @@ export async function POST(request: Request) {
           await params.afterSync(tx);
         }
         return persistedCount;
-      });
+      })(db);
 
       console.info(
         "[release-submit-track-sync]",
@@ -299,7 +381,9 @@ export async function POST(request: Request) {
   });
 
   if (payload.mode === "edit") {
-    const shouldResubmit = shouldResubmitEditedRelease(payload.currentStatus);
+    const currentLifecycle =
+      getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus;
+    const shouldResubmit = shouldResubmitEditedRelease(currentLifecycle);
     await updateReleaseAndSyncTracks({
       confirmed: existing.confirmed,
       status: shouldResubmit ? "moderating" : existing.status,
@@ -323,7 +407,7 @@ export async function POST(request: Request) {
     });
 
     if (shouldResubmit) {
-      await notifyReleaseSubmittedSafe({
+      notifications.push({
         releaseId: existing.id,
         releaseTitle: baseReleaseData.title,
         artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
@@ -333,7 +417,7 @@ export async function POST(request: Request) {
     const response: ReleaseSubmitSuccessResponse = {
       ok: true,
       releaseId: existing.id,
-      nextStatus: shouldResubmit ? "moderation" : (payload.currentStatus ?? "draft"),
+      nextStatus: shouldResubmit ? "moderation" : (currentLifecycle ?? "draft"),
       message: shouldResubmit
         ? "Релиз повторно отправлен на модерацию."
         : "Изменения релиза сохранены."
@@ -345,7 +429,7 @@ export async function POST(request: Request) {
   const submittedPartnerCode = submissionData.partnerCode?.trim() || "";
   const partnerCodeCheck = submittedPartnerCode
     ? await checkPartnerCodeForRelease({
-        prisma,
+        prisma: db,
         code: submittedPartnerCode,
         userId: session.user.id,
         userEmail: session.user.email ?? "",
@@ -424,7 +508,7 @@ export async function POST(request: Request) {
       }
     });
 
-    await notifyReleaseSubmittedSafe({
+    notifications.push({
       releaseId: existing.id,
       releaseTitle: baseReleaseData.title,
       artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
@@ -449,7 +533,7 @@ export async function POST(request: Request) {
         "moderation"
       ) as Prisma.InputJsonValue
     });
-    await notifyReleaseSubmittedSafe({
+    notifications.push({
       releaseId: existing.id,
       releaseTitle: baseReleaseData.title,
       artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
@@ -484,7 +568,7 @@ export async function POST(request: Request) {
       "moderation"
     ) as Prisma.InputJsonValue
   });
-  await notifyReleaseSubmittedSafe({
+  notifications.push({
     releaseId: existing.id,
     releaseTitle: baseReleaseData.title,
     artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"

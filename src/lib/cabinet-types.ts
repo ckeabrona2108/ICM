@@ -6,6 +6,7 @@ export type CabinetReleaseStatus =
   | "rejected"
   | "approved"
   | "distributed"
+  | "dsp_confirmed"
   | "archived";
 
 export interface CabinetTrackPerson {
@@ -73,6 +74,9 @@ export interface CabinetRelease {
   moderationReturnedAt?: string;
   rejectionReason?: string;
   priority?: boolean;
+  deletionStatus?: "requested" | "deleted" | "restored";
+  deletionRequestedAt?: string;
   earlyRussiaStart?: boolean;
   submissionData?: unknown;
+  sceneShowcase?: import("@/lib/scene-showcase-state").SceneShowcaseState;
 }

@@ -1,3 +1,4 @@
+import type { subscribe_level } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
@@ -5,10 +6,14 @@ import { authOptions } from "@/lib/auth";
 import { hasAiStudioAccess } from "@/lib/ai-studio";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { getUserContractStatus } from "@/lib/contract-verification";
-import { isPrismaConnectionError } from "@/lib/prisma-errors";
+import { getUserBalanceTotals } from "@/lib/finance-service";
+import { isAnyPrismaTableMissingError, isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
 import { resolveActiveSubscriptionPlan } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
+import { normalizeArtistProfileType } from "@/lib/artist-profile-type";
+import { buildStoredFileRouteUrl } from "@/lib/file-resolver";
+import { findLegacyUserById, findLegacyUserByEmail, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
 import { updateUserProfileSchema } from "@/lib/user-profile-policy";
 
 export const dynamic = "force-dynamic";
@@ -27,35 +32,90 @@ function getSessionUserId(session: Awaited<ReturnType<typeof getServerSession>>)
   return uuidV4LikePattern.test(userId) ? userId : null;
 }
 
+type CurrentUserProfileRow = {
+  id: string;
+  name: string | null;
+  email: string;
+  avatar: string | null;
+  balance: unknown;
+  aiTokenBalance?: unknown;
+  isSubscribed: boolean;
+  subscribeLevel: subscribe_level | null;
+  expiresAt: Date | null;
+  artistProfileType?: unknown;
+};
+
+async function findCurrentUser(userId: string): Promise<CurrentUserProfileRow | null> {
+  try {
+    return (await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true,
+        balance: true,
+        aiTokenBalance: true,
+        isSubscribed: true,
+        subscribeLevel: true,
+        expiresAt: true,
+        artistProfileType: true
+      }
+    })) as CurrentUserProfileRow | null;
+  } catch (error) {
+    if (isMissingCanonicalUserTable(error)) {
+      const legacyUser = await findLegacyUserById(prisma, userId);
+      return legacyUser
+        ? {
+            id: legacyUser.id,
+            name: legacyUser.name,
+            email: legacyUser.email,
+            avatar: legacyUser.avatar,
+            balance: 0,
+            aiTokenBalance: legacyUser.aiTokenBalance,
+            isSubscribed: false,
+            subscribeLevel: null,
+            expiresAt: null,
+            artistProfileType: legacyUser.artistProfileType
+          }
+        : null;
+    }
+    if (!/artistProfileType|aiTokenBalance/iu.test(String(error))) throw error;
+
+    const legacyUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true,
+        balance: true,
+        isSubscribed: true,
+        subscribeLevel: true,
+        expiresAt: true
+      }
+    });
+    return legacyUser as CurrentUserProfileRow | null;
+  }
+}
+
 async function mapCurrentUserProfile(userId: string) {
   const hasAiTokenBalanceColumn = await hasUserAiTokenBalanceColumn(prisma);
-  const [user, verification] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: hasAiTokenBalanceColumn
-        ? {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-            balance: true,
-            aiTokenBalance: true,
-            isSubscribed: true,
-            subscribeLevel: true,
-            expiresAt: true
-          }
-        : {
-            id: true,
-            name: true,
-            email: true,
-            avatar: true,
-            balance: true,
-            isSubscribed: true,
-            subscribeLevel: true,
-            expiresAt: true
-          }
-    }),
-    getUserContractStatus({ prisma, userId })
+  const [user, verification, balanceTotals] = await Promise.all([
+    findCurrentUser(userId),
+    getUserContractStatus({ prisma, userId }),
+    getUserBalanceTotals(prisma, userId).catch((error) => {
+      if (
+        isAnyPrismaTableMissingError(error, [
+          "FinanceReport",
+          "PayoutRequest",
+          "Transaction"
+        ])
+      ) {
+        return null;
+      }
+      throw error;
+    })
   ]);
 
   if (!user) return null;
@@ -70,8 +130,9 @@ async function mapCurrentUserProfile(userId: string) {
     id: user.id,
     name: user.name,
     email: user.email,
-    avatarUrl: user.avatar,
-    royaltyBalance: user.balance,
+    avatarUrl: buildStoredFileRouteUrl(user.avatar),
+    artistProfileType: normalizeArtistProfileType(user.artistProfileType),
+    royaltyBalance: balanceTotals?.availableToWithdraw ?? Number(user.balance ?? 0),
     aiTokenBalance,
     hasActiveSubscription,
     currentPlan:
@@ -141,6 +202,10 @@ export async function PATCH(request: Request) {
           id: { not: userId }
         },
         select: { id: true }
+      }).catch(async (error) => {
+        if (!isMissingCanonicalUserTable(error)) throw error;
+        const legacyUser = await findLegacyUserByEmail(prisma, email);
+        return legacyUser && legacyUser.id !== userId ? { id: legacyUser.id } : null;
       });
       if (duplicate) {
         return NextResponse.json({ error: "Этот email уже используется" }, { status: 409 });
@@ -153,7 +218,34 @@ export async function PATCH(request: Request) {
         name: parsed.data.name,
         ...(email ? { email } : {})
       }
+    }).catch(async (error) => {
+      if (!isMissingCanonicalUserTable(error)) throw error;
+      await prisma.$executeRawUnsafe(
+        `UPDATE "icecream"."User" SET "name" = $1, "email" = COALESCE($2, "email"), "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $3`,
+        parsed.data.name,
+        email ?? null,
+        userId
+      );
     });
+
+    if (parsed.data.artistProfileType) {
+      try {
+        await prisma.user.updateMany({
+          where: { id: userId },
+          data: { artistProfileType: parsed.data.artistProfileType }
+        });
+      } catch (error) {
+        if (isMissingCanonicalUserTable(error)) {
+          await prisma.$executeRawUnsafe(
+            `UPDATE "icecream"."User" SET "artistProfileType" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
+            parsed.data.artistProfileType === "producer" ? "artist" : parsed.data.artistProfileType,
+            userId
+          );
+        } else if (!/artistProfileType|column .* does not exist/iu.test(String(error))) {
+          throw error;
+        }
+      }
+    }
 
     const profile = await mapCurrentUserProfile(userId);
     if (!profile) {

@@ -58,6 +58,9 @@ export interface AdminReleaseDetails {
   moderationRemarks?: ModerationRemark[];
   moderationReturnedAt?: string;
   priority?: boolean;
+  deletionStatus?: "requested" | "deleted" | "restored";
+  deletionRequestedAt?: string;
+  deletionComment?: string;
   paid: boolean;
   paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code";
   paymentLabel?: string;

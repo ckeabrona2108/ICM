@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { addDays, addMonths } from "date-fns";
+import { isPrismaConnectionError, isPrismaPoolTimeoutError, isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
 
 export type EffectivePlan = "STANDARD" | "PRO" | "ENTERPRISE";
@@ -75,6 +76,42 @@ const PAYG_PRICING: PlanPricing = {
   videoShot: 75,
   videoClip: 100
 };
+
+function buildDefaultSubscriptionOverview(): SubscriptionOverview {
+  return {
+    plan: "STANDARD",
+    currentPlan: null,
+    hasActiveSubscription: false,
+    status: "none",
+    startedAt: null,
+    endsAt: null,
+    countdownDays: null,
+    shouldNotifyExpiry: false,
+    usage: {
+      periodStart: null,
+      periodEnd: null,
+      releasesUsed: 0,
+      aiDayUsed: 0,
+      aiMonthUsed: 0,
+      lastAiResetDay: null
+    },
+    limits: getPlanLimits("STANDARD", false),
+    pricing: PAYG_PRICING
+  };
+}
+
+function isSubscriptionRuntimeUnavailable(error: unknown): boolean {
+  return (
+    isPrismaConnectionError(error) ||
+    isPrismaPoolTimeoutError(error) ||
+    isPrismaTableMissingError(error, "icecream.user") ||
+    isPrismaTableMissingError(error, "user") ||
+    isPrismaTableMissingError(error, "subscription") ||
+    isPrismaTableMissingError(error, "icecream.subscription") ||
+    isPrismaTableMissingError(error, "subscription_usage") ||
+    isPrismaTableMissingError(error, "icecream.subscription_usage")
+  );
+}
 
 function getDelegate<T = Record<string, unknown>>(tx: TxClient, name: string): T | null {
   const delegate = (tx as Record<string, unknown>)[name];
@@ -574,33 +611,40 @@ async function resolveSubscriptionRuntime(tx: TxClient, userId: string): Promise
 }
 
 export async function getSubscriptionOverview(prisma: PrismaClient, userId: string): Promise<SubscriptionOverview> {
-  const runtime = await resolveSubscriptionRuntime(prisma, userId);
-  const now = new Date();
-  const countdownDays =
-    runtime.endsAt && runtime.endsAt.getTime() > now.getTime()
-      ? Math.ceil((runtime.endsAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
-      : null;
+  try {
+    const runtime = await resolveSubscriptionRuntime(prisma, userId);
+    const now = new Date();
+    const countdownDays =
+      runtime.endsAt && runtime.endsAt.getTime() > now.getTime()
+        ? Math.ceil((runtime.endsAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000))
+        : null;
 
-  return {
-    plan: runtime.plan,
-    currentPlan: runtime.currentPlan,
-    hasActiveSubscription: runtime.hasActiveSubscription,
-    status: runtime.status,
-    startedAt: runtime.startedAt ? runtime.startedAt.toISOString() : null,
-    endsAt: runtime.endsAt ? runtime.endsAt.toISOString() : null,
-    countdownDays,
-    shouldNotifyExpiry: countdownDays != null && countdownDays <= 3,
-    usage: {
-      periodStart: runtime.usage.periodStart ? runtime.usage.periodStart.toISOString() : null,
-      periodEnd: runtime.usage.periodEnd ? runtime.usage.periodEnd.toISOString() : null,
-      releasesUsed: runtime.usage.releasesUsed,
-      aiDayUsed: runtime.usage.aiRequestsUsedDay,
-      aiMonthUsed: runtime.usage.aiRequestsUsedMonth,
-      lastAiResetDay: runtime.usage.lastAiResetDay ? runtime.usage.lastAiResetDay.toISOString() : null
-    },
-    limits: runtime.limits,
-    pricing: PAYG_PRICING
-  };
+    return {
+      plan: runtime.plan,
+      currentPlan: runtime.currentPlan,
+      hasActiveSubscription: runtime.hasActiveSubscription,
+      status: runtime.status,
+      startedAt: runtime.startedAt ? runtime.startedAt.toISOString() : null,
+      endsAt: runtime.endsAt ? runtime.endsAt.toISOString() : null,
+      countdownDays,
+      shouldNotifyExpiry: countdownDays != null && countdownDays <= 3,
+      usage: {
+        periodStart: runtime.usage.periodStart ? runtime.usage.periodStart.toISOString() : null,
+        periodEnd: runtime.usage.periodEnd ? runtime.usage.periodEnd.toISOString() : null,
+        releasesUsed: runtime.usage.releasesUsed,
+        aiDayUsed: runtime.usage.aiRequestsUsedDay,
+        aiMonthUsed: runtime.usage.aiRequestsUsedMonth,
+        lastAiResetDay: runtime.usage.lastAiResetDay ? runtime.usage.lastAiResetDay.toISOString() : null
+      },
+      limits: runtime.limits,
+      pricing: PAYG_PRICING
+    };
+  } catch (error) {
+    if (isSubscriptionRuntimeUnavailable(error)) {
+      return buildDefaultSubscriptionOverview();
+    }
+    throw error;
+  }
 }
 
 export async function checkReleaseCreationLimit(prisma: PrismaClient, userId: string): Promise<LimitDecision> {
@@ -824,7 +868,7 @@ export async function applySubscriptionUpgrade(params: {
 
   const now = new Date();
   const currentEnd = existing
-    ? getSubscriptionEffectiveEndDate({
+      ? getSubscriptionEffectiveEndDate({
         ends_at: existing.ends_at ?? null,
         renewalAt: existing.renewalAt ?? null
       })

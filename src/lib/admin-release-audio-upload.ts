@@ -1,4 +1,5 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { HeadBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
@@ -71,6 +72,39 @@ function normalizeExtension(fileName: string): string | null {
   return ALLOWED_AUDIO_EXTENSIONS.has(extension) ? extension : null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+export function resolveAdminAudioSubmissionTrackIndex(params: {
+  trackId: string;
+  databaseTracks: Array<{ id: string }>;
+  submissionTracks: unknown[];
+}): number {
+  const exactSubmissionIndex = params.submissionTracks.findIndex(
+    (item) => asString(asRecord(item)?.id) === params.trackId
+  );
+  if (exactSubmissionIndex >= 0) return exactSubmissionIndex;
+
+  return params.databaseTracks.findIndex((item) => item.id === params.trackId);
+}
+
+export function buildAdminReleaseAudioStorageKey(params: {
+  trackId: string;
+  extension: string;
+  version?: string;
+}): string {
+  const extension = params.extension.replace(/^\./u, "");
+  return `tracks/${params.trackId}/${params.version ?? randomUUID()}.${extension}`;
+}
+
 async function verifyContractsBucket(client: S3Client): Promise<void> {
   await client.send(new HeadBucketCommand({ Bucket: CONTRACTS_BUCKET }));
 }
@@ -107,7 +141,10 @@ export async function uploadAdminReleaseAudio(input: {
   await verifyContractsBucket(client);
 
   const { extension } = validateAdminReleaseAudioFile(input.file);
-  const key = `tracks/${input.trackId}.${extension.replace(/^\./u, "")}`;
+  const key = buildAdminReleaseAudioStorageKey({
+    trackId: input.trackId,
+    extension
+  });
   const body = Buffer.from(await input.file.arrayBuffer());
 
   await client.send(

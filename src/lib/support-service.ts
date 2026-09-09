@@ -372,18 +372,18 @@ async function legacyCreateSupportTicket(params: {
     );
   });
 
-  try {
-    await notify({
+  notifyAdminNewSupportTicketDeferred(
+    notify,
+    {
       ticketId,
       subject: params.subject.trim(),
       userName: params.userName,
       userEmail: params.userEmail,
       createdAt: now,
       firstMessage: params.body.trim()
-    });
-  } catch (error) {
-    logger.error("[support] telegram notification failed", error);
-  }
+    },
+    logger
+  );
 
   return legacyGetSupportTicketDetails(params.prisma, ticketId);
 }
@@ -429,6 +429,8 @@ async function legacyAddUserSupportMessage(params: {
   const nextStatus = ticket.status === "WAITING_USER" ? "IN_PROGRESS" : null;
 
   await (params.prisma as any).$transaction(async (tx: any) => {
+    const now = new Date();
+
     await tx.$executeRawUnsafe(
       `
         INSERT INTO public."Message"
@@ -443,7 +445,7 @@ async function legacyAddUserSupportMessage(params: {
       params.body.trim(),
       "INBOUND",
       false,
-      new Date()
+      now
     );
 
     if (nextStatus) {
@@ -455,7 +457,17 @@ async function legacyAddUserSupportMessage(params: {
         `,
         params.ticketId,
         nextStatus,
-        new Date()
+        now
+      );
+    } else {
+      await tx.$executeRawUnsafe(
+        `
+          UPDATE public."SupportTicket"
+          SET "updatedAt" = $2
+          WHERE id = $1
+        `,
+        params.ticketId,
+        now
       );
     }
   });
@@ -667,6 +679,48 @@ function mapMessageDirection(direction: MessageDirection): ApiSupportSenderType 
   return direction === MESSAGE_DIRECTION.OUTBOUND ? "ADMIN" : "USER";
 }
 
+function toSupportMessageDto(message: {
+  id: string;
+  ticketId?: string | null;
+  direction: MessageDirection;
+  body: string;
+  createdAt: Date;
+}, fallbackTicketId: string): SupportTicketMessageDto {
+  return {
+    id: message.id,
+    ticketId: message.ticketId ?? fallbackTicketId,
+    senderType: mapMessageDirection(message.direction),
+    body: message.body,
+    createdAt: message.createdAt.toISOString()
+  };
+}
+
+function buildSupportTicketDto(params: {
+  id: string;
+  subject: string;
+  status: SupportTicketStatus;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  createdAt: Date;
+  updatedAt: Date;
+  lastMessage?: string;
+  messages?: SupportTicketMessageDto[];
+}): SupportTicketDto {
+  return {
+    id: params.id,
+    subject: params.subject,
+    status: normalizeStatus(params.status),
+    userId: params.userId,
+    userName: params.userName,
+    userEmail: params.userEmail,
+    createdAt: params.createdAt.toISOString(),
+    updatedAt: params.updatedAt.toISOString(),
+    lastMessage: params.lastMessage,
+    messages: params.messages
+  };
+}
+
 function mapListTicket(record: TicketListRecord): SupportTicketDto {
   const userRecord = (record as TicketListRecord & {
     user?: { id: string; name: string; email: string };
@@ -677,17 +731,17 @@ function mapListTicket(record: TicketListRecord): SupportTicketDto {
     (record as TicketListRecord & { Message?: Array<{ body?: string }>; messages?: Array<{ body?: string }> })
       .messages?.[0];
 
-  return {
+  return buildSupportTicketDto({
     id: record.id,
     subject: record.title,
-    status: normalizeStatus(record.status),
+    status: record.status,
     userId: record.userId,
     userName: userRecord?.name ?? "",
     userEmail: userRecord?.email ?? "",
-    createdAt: record.createdAt.toISOString(),
-    updatedAt: record.updatedAt.toISOString(),
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
     lastMessage: lastMessageRecord?.body
-  };
+  });
 }
 
 function mapDetailsTicket(record: TicketDetailsRecord): SupportTicketDto {
@@ -714,14 +768,65 @@ function mapDetailsTicket(record: TicketDetailsRecord): SupportTicketDto {
 
   return {
     ...mapListTicket(record),
-    messages: messages.map((message) => ({
-      id: message.id,
-      ticketId: message.ticketId ?? record.id,
-      senderType: mapMessageDirection(message.direction),
-      body: message.body,
-      createdAt: message.createdAt.toISOString()
-    }))
+    messages: messages.map((message) => toSupportMessageDto(message, record.id))
   };
+}
+
+async function loadSupportTicketDetailsOrThrow(
+  prisma: PrismaClient,
+  ticketId: string
+): Promise<SupportTicketDto> {
+  const ticket = await prisma.supportTicket.findUnique({
+    where: { id: ticketId },
+    include: ticketDetailsInclude
+  });
+
+  if (!ticket) {
+    throw new SupportNotFoundError();
+  }
+
+  return mapDetailsTicket(ticket);
+}
+
+function markSupportTicketMessagesReadDeferred(
+  prisma: PrismaClient,
+  userId: string,
+  ticketId: string
+): void {
+  void prisma.message.updateMany({
+    where: {
+      userId,
+      ticketId,
+      direction: MESSAGE_DIRECTION.OUTBOUND,
+      isRead: false
+    },
+    data: {
+      isRead: true
+    }
+  }).catch((error) => {
+    defaultLogger.warn(`[support] failed to mark ticket ${ticketId} as read`);
+    defaultLogger.error("[support] mark read failed", error);
+  });
+}
+
+async function safeWriteAdminLog(
+  prisma: PrismaClient,
+  params: { adminId: string; action: string; targetType: string; targetId: string | null; payload: unknown }
+) {
+  try {
+    await prisma.adminLog.create({
+      data: {
+        id: randomUUID(),
+        adminId: params.adminId,
+        action: params.action,
+        targetType: params.targetType,
+        targetId: params.targetId,
+        payload: params.payload
+      }
+    });
+  } catch {
+    // Admin log is best-effort only and must not block support actions.
+  }
 }
 
 export class SupportAccessError extends Error {
@@ -761,6 +866,26 @@ async function notifyUserAboutSupportReply(
   });
 }
 
+function notifyUserAboutSupportReplyDeferred(
+  prisma: PrismaClient,
+  ticket: Pick<SupportTicketDto, "id" | "userId">,
+  body: string
+): void {
+  void notifyUserAboutSupportReply(prisma, ticket, body).catch((error) => {
+    console.error("[support] reply notification failed", error);
+  });
+}
+
+function notifyAdminNewSupportTicketDeferred(
+  notify: (payload: TelegramNewTicketNotificationPayload) => Promise<boolean>,
+  payload: TelegramNewTicketNotificationPayload,
+  logger: LoggerLike
+): void {
+  void notify(payload).catch((error) => {
+    logger.error("[support] telegram notification failed", error);
+  });
+}
+
 function supportStorageUnavailable(cause?: unknown): SupportStorageUnavailableError {
   const error = new SupportStorageUnavailableError();
   if (cause !== undefined) {
@@ -790,6 +915,8 @@ export async function createSupportTicket(params: {
 
   try {
     const ticket = await params.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const firstMessageId = randomUUID();
       const createdTicket = await tx.supportTicket.create({
         data: {
           id: randomUUID(),
@@ -797,47 +924,63 @@ export async function createSupportTicket(params: {
           title: params.subject.trim(),
           description: params.body.trim(),
           status: SUPPORT_TICKET_STATUS.OPEN,
-          updatedAt: new Date()
+          updatedAt: now
         }
       });
 
       await tx.message.create({
         data: {
-          id: randomUUID(),
+          id: firstMessageId,
           userId: params.userId,
           ticketId: createdTicket.id,
           subject: params.subject.trim(),
           body: params.body.trim(),
-          direction: MESSAGE_DIRECTION.INBOUND
+          direction: MESSAGE_DIRECTION.INBOUND,
+          createdAt: now
         }
       });
 
-      return createdTicket;
+      return {
+        createdAt: createdTicket.createdAt ?? now,
+        firstMessageId,
+        id: createdTicket.id,
+        status: createdTicket.status ?? SUPPORT_TICKET_STATUS.OPEN,
+        subject: createdTicket.title,
+        updatedAt: createdTicket.updatedAt ?? now
+      };
     });
 
-    try {
-      await notify({
+    notifyAdminNewSupportTicketDeferred(
+      notify,
+      {
         ticketId: ticket.id,
         subject: ticket.title,
         userName: params.userName,
         userEmail: params.userEmail,
         createdAt: ticket.createdAt,
         firstMessage: params.body.trim()
-      });
-    } catch (error) {
-      logger.error("[support] telegram notification failed", error);
-    }
+      },
+      logger
+    );
 
-    const withMessages = await params.prisma.supportTicket.findUnique({
-      where: { id: ticket.id },
-      include: ticketDetailsInclude
+    return buildSupportTicketDto({
+      id: ticket.id,
+      subject: ticket.subject,
+      status: ticket.status,
+      userId: params.userId,
+      userName: params.userName,
+      userEmail: params.userEmail,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      lastMessage: params.body.trim(),
+      messages: [toSupportMessageDto({
+        id: ticket.firstMessageId,
+        ticketId: ticket.id,
+        direction: MESSAGE_DIRECTION.INBOUND,
+        body: params.body.trim(),
+        createdAt: ticket.createdAt
+      }, ticket.id)]
     });
-
-    if (!withMessages) {
-      throw new SupportNotFoundError();
-    }
-
-    return mapDetailsTicket(withMessages);
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;
@@ -870,6 +1013,87 @@ export async function listUserSupportTickets(prisma: PrismaClient, userId: strin
     }
     try {
       return await legacyListUserSupportTickets(prisma, userId);
+    } catch (legacyError) {
+      throw supportStorageUnavailable(legacyError);
+    }
+  }
+}
+
+export async function listUserUnreadSupportTicketSummaries(
+  prisma: PrismaClient,
+  userId: string,
+  take = 6
+): Promise<Array<{ id: string; subject: string; updatedAt: string }>> {
+  const backend = await resolveSupportBackend(prisma);
+
+  if (backend === "legacy") {
+    const unreadCount = await getUserUnreadSupportTicketCount(prisma, userId);
+    const tickets = await legacyListUserSupportTickets(prisma, userId);
+    return tickets.slice(0, Math.min(unreadCount, take)).map((ticket) => ({
+      id: ticket.id,
+      subject: ticket.subject,
+      updatedAt: ticket.updatedAt
+    }));
+  }
+
+  const messageRepo = (prisma as PrismaClient & {
+    message?: {
+      findMany?: (args: unknown) => Promise<Array<{ ticketId: string | null }>>;
+    };
+  }).message;
+  if (!messageRepo?.findMany) {
+    return [];
+  }
+
+  try {
+    const unreadRows = await messageRepo.findMany({
+      where: {
+        userId,
+        direction: MESSAGE_DIRECTION.OUTBOUND,
+        isRead: false,
+        ticketId: { not: null }
+      },
+      orderBy: { createdAt: "desc" },
+      distinct: ["ticketId"],
+      take,
+      select: {
+        ticketId: true
+      }
+    });
+    const ticketIds = unreadRows.flatMap((row) => row.ticketId ? [row.ticketId] : []);
+    if (ticketIds.length === 0) return [];
+    const tickets = await prisma.supportTicket.findMany({
+      where: {
+        userId,
+        id: { in: ticketIds }
+      },
+      select: {
+        id: true,
+        title: true,
+        updatedAt: true
+      }
+    });
+    const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket] as const));
+    return ticketIds.flatMap((ticketId) => {
+      const ticket = ticketsById.get(ticketId);
+      return ticket ? [{
+        id: ticket.id,
+        subject: ticket.title,
+        updatedAt: ticket.updatedAt.toISOString()
+      }] : [];
+    });
+  } catch (error) {
+    if (!isSupportTablesMissingError(error)) {
+      throw error;
+    }
+    try {
+      const unreadCount = await getUserUnreadSupportTicketCount(prisma, userId);
+      const tickets = await legacyListUserSupportTickets(prisma, userId);
+      return tickets.slice(0, Math.min(unreadCount, take)).map((ticket) => ({
+        id: ticket.id,
+        subject: ticket.subject,
+        updatedAt: ticket.updatedAt
+      }));
     } catch (legacyError) {
       throw supportStorageUnavailable(legacyError);
     }
@@ -925,41 +1149,13 @@ export async function getUserSupportTicket(
   }
 
   try {
-    const ticket = await prisma.supportTicket.findUnique({
-      where: { id: ticketId },
-      include: ticketDetailsInclude
-    });
-
-    if (!ticket) {
-      throw new SupportNotFoundError();
-    }
+    const ticket = await loadSupportTicketDetailsOrThrow(prisma, ticketId);
 
     if (ticket.userId !== userId) {
       throw new SupportAccessError();
     }
-
-    await prisma.message.updateMany({
-      where: {
-        userId,
-        ticketId: ticket.id,
-        direction: MESSAGE_DIRECTION.OUTBOUND,
-        isRead: false
-      },
-      data: {
-        isRead: true
-      }
-    });
-
-    const freshTicket = await prisma.supportTicket.findUnique({
-      where: { id: ticket.id },
-      include: ticketDetailsInclude
-    });
-
-    if (!freshTicket) {
-      throw new SupportNotFoundError();
-    }
-
-    return mapDetailsTicket(freshTicket);
+    markSupportTicketMessagesReadDeferred(prisma, userId, ticket.id);
+    return ticket;
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;
@@ -1015,23 +1211,18 @@ export async function addUserSupportMessage(params: {
           body: params.body.trim(),
           direction: MESSAGE_DIRECTION.INBOUND
         }
+      }),
+      params.prisma.supportTicket.update({
+        where: { id: ticket.id },
+        data: {
+          updatedAt: new Date(),
+          ...(nextStatus ? { status: nextStatus } : {})
+        }
       })
     ];
 
-    if (nextStatus) {
-      operations.push(
-        params.prisma.supportTicket.update({
-          where: { id: ticket.id },
-          data: {
-            status: nextStatus,
-            updatedAt: new Date()
-          }
-        })
-      );
-    }
-
     await params.prisma.$transaction(operations);
-    return getUserSupportTicket(params.prisma, params.userId, ticket.id);
+    return loadSupportTicketDetailsOrThrow(params.prisma, ticket.id);
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;
@@ -1077,16 +1268,7 @@ export async function getAdminSupportTicket(prisma: PrismaClient, ticketId: stri
   }
 
   try {
-    const ticket = await prisma.supportTicket.findUnique({
-      where: { id: ticketId },
-      include: ticketDetailsInclude
-    });
-
-    if (!ticket) {
-      throw new SupportNotFoundError();
-    }
-
-    return mapDetailsTicket(ticket);
+    return loadSupportTicketDetailsOrThrow(prisma, ticketId);
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;
@@ -1109,7 +1291,7 @@ export async function addAdminSupportReply(params: {
 
   if (backend === "legacy") {
     const result = await legacyAddAdminSupportReply(params);
-    await notifyUserAboutSupportReply(params.prisma, result, params.body);
+    notifyUserAboutSupportReplyDeferred(params.prisma, result, params.body);
     return result;
   }
 
@@ -1141,31 +1323,29 @@ export async function addAdminSupportReply(params: {
           status: SUPPORT_TICKET_STATUS.WAITING_USER,
           updatedAt: new Date()
         }
-      }),
-      params.prisma.adminLog.create({
-        data: {
-          id: randomUUID(),
-          adminId: params.adminId,
-          action: "SUPPORT_TICKET_REPLY",
-          targetType: "SupportTicket",
-          targetId: ticket.id,
-          payload: {
-            preview: params.body.trim().slice(0, 240)
-          }
-        }
       })
     ]);
 
-    await notifyUserAboutSupportReply(params.prisma, ticket, params.body);
+    await safeWriteAdminLog(params.prisma, {
+      adminId: params.adminId,
+      action: "SUPPORT_TICKET_REPLY",
+      targetType: "SupportTicket",
+      targetId: ticket.id,
+      payload: {
+        preview: params.body.trim().slice(0, 240)
+      }
+    });
 
-    return getAdminSupportTicket(params.prisma, ticket.id);
+    notifyUserAboutSupportReplyDeferred(params.prisma, ticket, params.body);
+
+    return loadSupportTicketDetailsOrThrow(params.prisma, ticket.id);
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;
     }
     try {
       const result = await legacyAddAdminSupportReply(params);
-      await notifyUserAboutSupportReply(params.prisma, result, params.body);
+      notifyUserAboutSupportReplyDeferred(params.prisma, result, params.body);
       return result;
     } catch (legacyError) {
       throw supportStorageUnavailable(legacyError);
@@ -1240,25 +1420,22 @@ export async function updateAdminSupportTicketStatus(params: {
             ? SUPPORT_TICKET_STATUS.WAITING_USER
             : SUPPORT_TICKET_STATUS.CLOSED;
 
-    await params.prisma.$transaction([
-      params.prisma.supportTicket.update({
-        where: { id: params.ticketId },
-        data: {
-          status: mappedStatus,
-          closedAt: mappedStatus === SUPPORT_TICKET_STATUS.CLOSED ? new Date() : null
-        }
-      }),
-      params.prisma.adminLog.create({
-        data: {
-          id: randomUUID(),
-          adminId: params.adminId,
-          action: "SUPPORT_TICKET_STATUS_CHANGED",
-          targetType: "SupportTicket",
-          targetId: params.ticketId,
-          payload: { status: params.status }
-        }
-      })
-    ]);
+    await params.prisma.supportTicket.update({
+      where: { id: params.ticketId },
+      data: {
+        status: mappedStatus,
+        closedAt: mappedStatus === SUPPORT_TICKET_STATUS.CLOSED ? new Date() : null,
+        updatedAt: new Date()
+      }
+    });
+
+    await safeWriteAdminLog(params.prisma, {
+      adminId: params.adminId,
+      action: "SUPPORT_TICKET_STATUS_CHANGED",
+      targetType: "SupportTicket",
+      targetId: params.ticketId,
+      payload: { status: params.status }
+    });
 
     return getAdminSupportTicket(params.prisma, params.ticketId);
   } catch (error) {

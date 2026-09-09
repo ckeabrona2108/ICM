@@ -109,8 +109,12 @@ function baseRelease(status: "ARCHIVED" | "MODERATION" | "DRAFT" | "CHANGES_REQU
 }
 
 test("mapReleaseToCabinetRelease maps status and remarks from DB data", async () => {
+  const source = {
+    ...baseRelease("ARCHIVED"),
+    rejectReason: "Причина не указана модератором."
+  };
   const release = await mapReleaseToCabinetRelease(
-    baseRelease("ARCHIVED") as never,
+    source as never,
     3
   );
 
@@ -119,6 +123,10 @@ test("mapReleaseToCabinetRelease maps status and remarks from DB data", async ()
   assert.equal(release.title, "Fallback Title");
   assert.equal(release.artist, "Nova Echo");
   assert.equal(release.coverUrl, "");
+  assert.equal(release.rejectionReason, "Причина не указана модератором.");
+  assert.equal(release.moderationReturnedAt, "2026-04-28 14:00");
+  assert.equal(release.moderationRemarks?.[0]?.section, "Релиз");
+  assert.equal(release.moderationRemarks?.[0]?.message, "Проверьте обложку.");
 });
 
 test("mapReleaseToCabinetRelease maps priority flag for card badge", async () => {
@@ -165,7 +173,7 @@ test("mapReleaseToCabinetRelease falls back to submission cover when cover image
   };
 
   const release = await mapReleaseToCabinetRelease(source as never, 1);
-  assert.equal(release.coverUrl, "");
+  assert.equal(release.coverUrl, "/api/uploads/object/uploads/user_1/release-cover.png");
 });
 
 test("mapReleaseToCabinetRelease prefers latest submission cover over stored cover image", async () => {
@@ -188,7 +196,7 @@ test("mapReleaseToCabinetRelease prefers latest submission cover over stored cov
   };
 
   const release = await mapReleaseToCabinetRelease(source as never, 1);
-  assert.equal(release.coverUrl, "");
+  assert.equal(release.coverUrl, "/api/uploads/object/uploads/user_1/new-cover.png");
 });
 
 test("mapReleaseToCabinetRelease prefers storageKey-based cover uploads over transient urls", async () => {

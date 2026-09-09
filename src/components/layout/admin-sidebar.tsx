@@ -9,13 +9,13 @@ import {
   BarChart3,
   CircleHelp,
   Ticket,
-  CreditCard,
-  FileText,
-  Headset,
-  LogOut,
+	  CreditCard,
+	  FileText,
+	  Flag,
+	  Headset,
+	  LogOut,
   Music2,
-  PanelLeft,
-  UserRound,
+	  UserRound,
   Verified
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -29,8 +29,9 @@ const items = [
   { href: "/admin/releases", label: "Релизы", icon: Music2 },
   { href: "/admin/ai-tokens", label: "AI-токены пользователей", icon: CreditCard },
   { href: "/admin/partner-codes", label: "Партнёрские коды", icon: Ticket },
-  { href: "/admin/support/tickets", label: "Поддержка", icon: Headset },
-  { href: "/admin/promo", label: "Промо", icon: Ticket },
+	  { href: "/admin/support/tickets", label: "Поддержка", icon: Headset },
+	  { href: "/admin/social-moderation", label: "Жалобы и посты", icon: Flag },
+	  { href: "/admin/promo", label: "Промо", icon: Ticket },
   { href: "/admin/analytics", label: "Аналитика CSV", icon: BarChart3 },
   { href: "/admin/catalog-sync", label: "Smart Catalog Sync", icon: BarChart3 },
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
@@ -136,7 +137,7 @@ export function AdminSidebar() {
 
   return (
     <>
-      <aside className="sticky top-0 hidden h-screen w-[260px] shrink-0 border-r border-white/[0.06] bg-[#08090d]/95 px-4 py-6 backdrop-blur-xl lg:block">
+      <aside className="perf-scroll-shell sticky top-0 hidden h-screen w-[260px] shrink-0 overflow-y-auto border-r border-white/[0.06] bg-[#08090d]/95 px-4 py-6 backdrop-blur-xl lg:block">
         {sidebarNavigation}
       </aside>
 

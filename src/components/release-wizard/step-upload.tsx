@@ -10,25 +10,16 @@ import { WizardCard } from "./wizard-ui";
 import type { ReleaseSubmitSuccessResponse } from "@/lib/api/contracts";
 
 export function StepUpload({
-  submitResult
+  submitResult,
+  progress,
+  submitPhase
 }: {
   submitResult?: ReleaseSubmitSuccessResponse | null;
+  progress: number;
+  submitPhase: "idle" | "uploading" | "saving" | "submitting";
 }) {
   const { data, reset, submissionMode } = useWizard();
-  const [progress, setProgress] = React.useState(0);
-  const [done, setDone] = React.useState(false);
-
-  React.useEffect(() => {
-    if (done) return;
-    if (progress >= 100) {
-      setDone(true);
-      return;
-    }
-    const t = setTimeout(() => {
-      setProgress((p) => Math.min(100, p + Math.random() * 18 + 6));
-    }, 380);
-    return () => clearTimeout(t);
-  }, [progress, done]);
+  const done = Boolean(submitResult);
 
   const sentToModeration =
     submitResult?.nextStatus === "moderation" ||
@@ -65,11 +56,11 @@ export function StepUpload({
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-col items-center gap-4 py-10"
         >
-          <span className="grid h-14 w-14 place-items-center rounded-full bg-emerald-500/15 text-emerald-400">
+          <span className="grid h-14 w-14 place-items-center rounded-full bg-[var(--ux-accent)]/15 text-[#cfc4ff]">
             <CheckCircle2 className="h-7 w-7" />
           </span>
-          <h3 className="text-[18px] font-semibold text-white">{title}</h3>
-          <p className="max-w-md text-[13px] text-white/55">{description}</p>
+          <h3 className="text-[18px] font-semibold text-[#f8f4ee]">{title}</h3>
+          <p className="max-w-md text-[13px] text-[#948575]">{description}</p>
           <div className="mt-2 flex items-center gap-2">
             <Link
               href={
@@ -77,7 +68,7 @@ export function StepUpload({
                   ? "/dashboard/moderation"
                   : "/dashboard/releases"
               }
-              className="rounded-lg bg-white/[0.06] px-4 py-2 text-[12.5px] text-white/85 transition-colors hover:bg-white/[0.10] hover:text-white"
+              className="rounded-[16px] bg-[#221b17] px-5 py-3 text-[12.5px] text-[#f5eee5] transition-colors hover:bg-[#241d19] hover:text-[#f8f4ee]"
             >
               {submitResult?.nextStatus === "pending_verification"
                 ? "К ожидающим релизам"
@@ -86,7 +77,7 @@ export function StepUpload({
             <button
               type="button"
               onClick={reset}
-              className="rounded-lg bg-[#7b3df5] px-4 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-[#8b4ff7]"
+              className="rounded-[16px] bg-[var(--ux-accent)] px-5 py-3 text-[12.5px] font-medium text-white transition-colors hover:bg-[var(--ux-accent-strong)]"
             >
               Создать ещё
             </button>
@@ -94,19 +85,23 @@ export function StepUpload({
         </motion.div>
       ) : (
         <div className="flex flex-col items-center gap-4 py-10">
-          <h3 className="text-[16px] font-semibold text-white">Загрузка релиза</h3>
-          <p className="max-w-md text-[13px] text-white/55">
-            Передаём данные релиза на наш сервер. Не закрывайте страницу до окончания загрузки.
+          <h3 className="text-[16px] font-semibold text-[#f8f4ee]">Загрузка релиза</h3>
+          <p className="max-w-md text-[13px] text-[#948575]">
+            {submitPhase === "uploading"
+              ? "Загружаем аудио и обложку в хранилище. Не закрывайте страницу до окончания загрузки."
+              : submitPhase === "saving"
+                ? "Файлы уже загружены. Сохраняем подготовленный черновик релиза."
+                : "Файлы загружены. Отправляем релиз на сервер и завершаем публикацию."}
           </p>
 
-          <div className="relative h-2 w-full max-w-md overflow-hidden rounded-full bg-white/[0.05]">
+          <div className="relative h-2 w-full max-w-md overflow-hidden rounded-full bg-[#1f1815]">
             <motion.div
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[#7b3df5] to-[#a78bfa]"
+              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-[var(--ux-accent)] to-[#9b8cff]"
               animate={{ width: `${progress}%` }}
               transition={{ duration: 0.4, ease: "easeOut" }}
             />
           </div>
-          <span className="text-[12px] tabular-nums text-white/55">
+          <span className="text-[12px] tabular-nums text-[#948575]">
             {Math.floor(progress)}%
           </span>
         </div>

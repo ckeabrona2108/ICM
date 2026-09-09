@@ -29,13 +29,33 @@ test("admin reject moves release lifecycle to changes required", () => {
         submittedToModeration: true
       }
     },
-    "Нужно оплатить релиз"
+    "Нужно оплатить релиз",
+    {
+      action: "request_changes",
+      returnedAt: "2026-08-10T14:00:00.000Z",
+      remarks: [
+        {
+          field: "cover",
+          section: "Релиз",
+          message: "Нужно обновить обложку."
+        }
+      ]
+    }
   );
 
   assert.equal(getReleaseLifecycleStatus("rejected", roles), "changes_required");
   assert.equal(roles.submittedToModeration, false);
   assert.equal(roles.needsChanges, true);
   assert.equal(roles.rejectReason, "Нужно оплатить релиз");
+  assert.equal(roles.moderationStatus, "changes_required");
+  assert.equal(roles.moderationReturnedAt, "2026-08-10T14:00:00.000Z");
+  assert.deepEqual(roles.moderationRemarks, [
+    {
+      field: "cover",
+      section: "Релиз",
+      message: "Нужно обновить обложку."
+    }
+  ]);
   assert.deepEqual(roles.submissionData, {
     lifecycleState: "changes_required",
     submittedToModeration: false,
@@ -44,7 +64,15 @@ test("admin reject moves release lifecycle to changes required", () => {
     rejectReason: "Нужно оплатить релиз",
     rejectionReason: "Нужно оплатить релиз",
     moderationComment: "Нужно оплатить релиз",
-    moderatorComment: "Нужно оплатить релиз"
+    moderatorComment: "Нужно оплатить релиз",
+    moderationRemarks: [
+      {
+        field: "cover",
+        section: "Релиз",
+        message: "Нужно обновить обложку."
+      }
+    ],
+    moderationReturnedAt: "2026-08-10T14:00:00.000Z"
   });
 });
 
@@ -70,13 +98,48 @@ test("reject service repairs a legacy rejected release still marked as moderatio
     prisma: prisma as never,
     adminId: "admin-1",
     releaseId: "release-1",
-    reason: "Требуется оплата"
+    reason: "Требуется оплата",
+    action: "request_changes",
+    remarks: [
+      {
+        field: "tracks.0.audioFile",
+        section: "Трек 1",
+        message: "Перезагрузите аудио."
+      }
+    ]
   });
 
   assert.equal(result.ok, true);
+  assert.deepEqual(result.remarks, [
+    {
+      field: "tracks.0.audioFile",
+      section: "Трек 1",
+      message: "Перезагрузите аудио."
+    }
+  ]);
   assert.ok(state.savedData);
   assert.equal(state.savedData.status, "rejected");
   assert.equal(state.savedData.rejectReason, "Требуется оплата");
+  assert.deepEqual(
+    (state.savedData.roles as Record<string, unknown>).moderationRemarks,
+    [
+      {
+        field: "tracks.0.audioFile",
+        section: "Трек 1",
+        message: "Перезагрузите аудио."
+      }
+    ]
+  );
+  assert.deepEqual(
+    result.remarks,
+    [
+      {
+        field: "tracks.0.audioFile",
+        section: "Трек 1",
+        message: "Перезагрузите аудио."
+      }
+    ]
+  );
   assert.equal(
     getReleaseLifecycleStatus("rejected", state.savedData.roles),
     "changes_required"

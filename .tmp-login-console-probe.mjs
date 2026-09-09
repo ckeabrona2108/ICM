@@ -1,0 +1,13 @@
+import { chromium } from '@playwright/test';
+const browser = await chromium.launch({ headless: true, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' });
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+page.on('console', msg => console.log('console', msg.type(), msg.text()));
+page.on('pageerror', err => console.log('pageerror', err.message));
+await page.goto('http://127.0.0.1:3002/login', { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(3000);
+await page.getByLabel('Email').fill('listener.b@local.icm');
+await page.getByLabel('Пароль').fill('DevPass123!');
+await page.getByRole('button', { name: /Войти/ }).click();
+await page.waitForTimeout(3000);
+console.log('final-url', page.url());
+await browser.close();

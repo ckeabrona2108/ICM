@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-explicit-any */
 // @ts-nocheck
 import {
   Prisma,
@@ -6,7 +7,11 @@ import {
 import { randomUUID } from "node:crypto";
 
 import { createAdminLog } from "@/lib/admin-log-service";
-import { isAnyPrismaTableMissingError, isPrismaTableMissingError } from "@/lib/prisma-errors";
+import {
+  isAnyPrismaTableMissingError,
+  isPrismaColumnMissingError,
+  isPrismaTableMissingError
+} from "@/lib/prisma-errors";
 import { listUserReports } from "@/lib/report-service";
 
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
@@ -54,12 +59,113 @@ const TX_TYPE_ROYALTY = "ROYALTY";
 const TX_TYPE_PAYOUT = "PAYOUT";
 const TX_TYPE_REFUND = "REFUND";
 const TX_TYPE_FEE = "FEE";
-const FINANCE_TABLE_FALLBACKS = ["FinanceReport", "financeReport", "Transaction", "transaction", "PayoutRequest", "payoutRequest", "payouts"];
+const FINANCE_TABLE_FALLBACKS = ["FinanceReport", "financeReport", "Transaction", "transaction", "payouts"];
 const REPORT_PAYLOAD_DESCRIPTION = "Finance report payload";
+const financeTableAvailabilityCache = new WeakMap<object, Map<string, Promise<boolean>>>();
+const financeColumnAvailabilityCache = new WeakMap<object, Map<string, Promise<boolean>>>();
 
 function getRepo<T = unknown>(prisma: PrismaClient, key: string): T | null {
   const repo = (prisma as unknown as Record<string, unknown>)[key];
   return repo ? (repo as T) : null;
+}
+
+async function hasIcecreamTable(prisma: PrismaClient, tableName: string): Promise<boolean> {
+  const rawClient = prisma as unknown as {
+    $queryRaw?: (query: Prisma.Sql) => Promise<Array<{ exists: boolean }>>;
+  };
+  if (typeof rawClient.$queryRaw !== "function") return true;
+
+  let clientCache = financeTableAvailabilityCache.get(prisma as object);
+  if (!clientCache) {
+    clientCache = new Map();
+    financeTableAvailabilityCache.set(prisma as object, clientCache);
+  }
+
+  const cached = clientCache.get(tableName);
+  if (cached) return cached;
+
+  const probe = rawClient
+    .$queryRaw(Prisma.sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'icecream'
+          AND table_name = ${tableName}
+      ) AS "exists"
+    `)
+    .then((rows) => rows[0]?.exists === true)
+    .catch(() => true);
+  clientCache.set(tableName, probe);
+  return probe;
+}
+
+async function hasIcecreamColumn(
+  prisma: PrismaClient,
+  tableName: string,
+  columnName: string
+): Promise<boolean> {
+  const rawClient = prisma as unknown as {
+    $queryRaw?: (query: Prisma.Sql) => Promise<Array<{ exists: boolean }>>;
+  };
+  if (typeof rawClient.$queryRaw !== "function") return true;
+
+  let clientCache = financeColumnAvailabilityCache.get(prisma as object);
+  if (!clientCache) {
+    clientCache = new Map();
+    financeColumnAvailabilityCache.set(prisma as object, clientCache);
+  }
+
+  const cacheKey = `${tableName}.${columnName}`;
+  const cached = clientCache.get(cacheKey);
+  if (cached) return cached;
+
+  const probe = rawClient
+    .$queryRaw(Prisma.sql`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'icecream'
+          AND table_name = ${tableName}
+          AND column_name = ${columnName}
+      ) AS "exists"
+    `)
+    .then((rows) => rows[0]?.exists === true)
+    .catch(() => true);
+  clientCache.set(cacheKey, probe);
+  return probe;
+}
+
+async function aggregatePendingPayout(
+  prisma: PrismaClient,
+  payoutsRepo: {
+    aggregate: (args: unknown) => Promise<{ _sum: { amount: Prisma.Decimal | number | null } }>;
+  } | null,
+  userId: string
+): Promise<{ _sum: { amount: Prisma.Decimal | number | null } }> {
+  if (!payoutsRepo) {
+    return { _sum: { amount: 0 as Prisma.Decimal | number | null } };
+  }
+
+  const aggregateByLegacyConfirmed = () => payoutsRepo.aggregate({
+    where: { userId, confirmed: false },
+    _sum: { amount: true }
+  });
+
+  if (!(await hasIcecreamColumn(prisma, "payouts", "status"))) {
+    return aggregateByLegacyConfirmed();
+  }
+
+  try {
+    return await payoutsRepo.aggregate({
+      where: { userId, status: { in: [PAYOUT_STATUS_REQUESTED, PAYOUT_STATUS_PROCESSING] } },
+      _sum: { amount: true }
+    });
+  } catch (error) {
+    if (isPrismaColumnMissingError(error, "payouts.status") || isPrismaColumnMissingError(error, "status")) {
+      return aggregateByLegacyConfirmed();
+    }
+    throw error;
+  }
 }
 
 async function writeBalanceAdminLogIfAvailable(
@@ -153,9 +259,6 @@ export async function getUserBalanceTotals(
       findMany?: (args: unknown) => Promise<unknown[]>;
     }
   >(prisma, "financeReport");
-  const payoutRequestRepo = getRepo<
-    { aggregate: (args: unknown) => Promise<{ _sum: { amount: Prisma.Decimal | number | null } }> }
-  >(prisma, "payoutRequest");
   const payoutsRepo = getRepo<
     { aggregate: (args: unknown) => Promise<{ _sum: { amount: Prisma.Decimal | number | null } }> }
   >(prisma, "payouts");
@@ -167,7 +270,7 @@ export async function getUserBalanceTotals(
   let pendingBalance = 0;
 
   if (typeof financeReportRepo?.findMany === "function") {
-    const reports = await listUserReports(prisma, userId);
+    const reports = await listUserReports(prisma, userId, { strict: true });
     for (const report of reports) {
       if (report.lifecycleState === "agreed") {
         agreedReportsBalance += toNumber(report.amount);
@@ -190,55 +293,27 @@ export async function getUserBalanceTotals(
     pendingBalance = toNumber(pendingReportsRaw._sum.amount);
   }
 
-  let pendingPayoutRaw = { _sum: { amount: 0 as Prisma.Decimal | number | null } };
-  try {
-    pendingPayoutRaw = payoutRequestRepo
-      ? await payoutRequestRepo.aggregate({
-          where: {
-            userId,
-            status: {
-              in: [PAYOUT_STATUS_REQUESTED, PAYOUT_STATUS_PROCESSING]
-            }
-          },
-          _sum: { amount: true }
-        })
-      : payoutsRepo
-        ? await payoutsRepo.aggregate({
-            where: {
-              userId,
-              confirmed: false
-            },
-            _sum: { amount: true }
-          })
-        : pendingPayoutRaw;
-  } catch (error) {
-    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
-      throw error;
-    }
+  // A generated production Prisma client always exposes these delegates. A
+  // missing delegate is treated as an unavailable module, except for small
+  // in-memory adapters used by callers that cannot model the full schema.
+  if (!financeReportRepo || !transactionRepo) {
+    throw new Error("Финансовые данные временно недоступны. Попробуйте позже.");
   }
-
-  let settlementRows: SettlementTransactionEntry[] = [];
-  try {
-    settlementRows = transactionRepo
-      ? await transactionRepo.findMany({
-          where: {
-            userId,
-            status: TX_STATUS_COMPLETED,
-            type: {
-              in: [TX_TYPE_PAYOUT, TX_TYPE_REFUND, TX_TYPE_FEE]
-            }
-          },
-          select: {
-            type: true,
-            amount: true
-          }
-        })
-      : [];
-  } catch (error) {
-    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
-      throw error;
-    }
+  if (!payoutsRepo && typeof (prisma as { $queryRaw?: unknown }).$queryRaw === "function") {
+    throw new Error("Финансовые данные временно недоступны. Попробуйте позже.");
   }
+  if (!(await hasIcecreamTable(prisma, "payouts"))) {
+    throw new Error("Финансовые данные временно недоступны: таблица payouts отсутствует.");
+  }
+  const pendingPayoutRaw = await aggregatePendingPayout(prisma, payoutsRepo, userId);
+  const settlementRows = await transactionRepo.findMany({
+    where: {
+      userId,
+      status: TX_STATUS_COMPLETED,
+      type: { in: [TX_TYPE_PAYOUT, TX_TYPE_REFUND, TX_TYPE_FEE] }
+    },
+    select: { type: true, amount: true }
+  });
 
   agreedReportsBalance = Number(agreedReportsBalance.toFixed(2));
   pendingBalance = Number(pendingBalance.toFixed(2));
@@ -286,28 +361,18 @@ export async function getUserFinanceView(
   try {
     reportsCount = financeReportRepo
       ? await financeReportRepo.count({ where: { userId } })
-      : (await listUserReports(prisma, userId)).length;
+      : (await listUserReports(prisma, userId, { strict: true })).length;
   } catch (error) {
     if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
       throw error;
     }
-    reportsCount = (await listUserReports(prisma, userId)).length;
+    reportsCount = (await listUserReports(prisma, userId, { strict: true })).length;
   }
 
-  try {
-    transactions = transactionRepo
-      ? await transactionRepo.findMany({
-          where: { userId },
-          orderBy: { createdAt: "desc" },
-          take: 100
-        })
-      : [];
-  } catch (error) {
-    if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
-      throw error;
-    }
-    transactions = [];
-  }
+  if (!transactionRepo) throw new Error("Финансовые данные временно недоступны.");
+  transactions = await transactionRepo.findMany({
+    where: { userId }, orderBy: { createdAt: "desc" }, take: 100
+  });
 
   return {
     agreedBalance: totals.agreedBalance,
@@ -391,7 +456,7 @@ export async function topUpUserBalanceByAdmin(params: {
   const financeNewValue = financeOldValue + params.amount;
 
   await params.prisma.$transaction(async (tx) => {
-    const report = await tx.financeReport.create({
+    await tx.financeReport.create({
       data: {
         id: randomUUID(),
         userId: params.userId,
@@ -502,7 +567,7 @@ export async function adjustUserBalanceByAdmin(params: {
 
   await params.prisma.$transaction(async (tx) => {
     if (params.type === "credit") {
-      const report = await tx.financeReport.create({
+      await tx.financeReport.create({
         data: {
           id: randomUUID(),
           userId: params.userId,

@@ -220,3 +220,72 @@ test("submitting a draft moves the count from drafts to moderation", async () =>
     changes_required: 0
   });
 });
+
+test("expired drafts are not counted and are deleted lazily", async () => {
+  let deletedIds: string[] = [];
+  const counts = await getReleaseSidebarCountsForUser({
+    userId: "user_1",
+    prisma: {
+      release: {
+        findMany: async () => [
+          {
+            id: "expired_draft",
+            status: "moderating",
+            confirmed: false,
+            upc: null,
+            roles: withReleaseLifecycleState(
+              {
+                draftUpdatedAt: "2026-01-01T00:00:00.000Z"
+              },
+              "draft"
+            )
+          },
+          {
+            id: "fresh_draft",
+            status: "moderating",
+            confirmed: false,
+            upc: null,
+            roles: withReleaseLifecycleState(
+              {
+                draftUpdatedAt: new Date().toISOString()
+              },
+              "draft"
+            )
+          }
+        ],
+        deleteMany: async (args) => {
+          deletedIds = args.where.id.in;
+          return { count: deletedIds.length };
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(counts, {
+    all: 0,
+    draft: 1,
+    moderation: 0,
+    changes_required: 0
+  });
+  assert.deepEqual(deletedIds, ["expired_draft"]);
+});
+
+test("missing release table returns empty sidebar counts instead of crashing", async () => {
+  const counts = await getReleaseSidebarCountsForUser({
+    userId: "user_1",
+    prisma: {
+      release: {
+        findMany: async () => {
+          throw new Error("The table `icecream.release` does not exist in the current database.");
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(counts, {
+    all: 0,
+    draft: 0,
+    moderation: 0,
+    changes_required: 0
+  });
+});

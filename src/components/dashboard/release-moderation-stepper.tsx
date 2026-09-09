@@ -10,7 +10,7 @@ import type { ReleaseTimelineStep } from "@/lib/release-timeline-state";
 const STEPS = [
   { id: 1, label: "Черновик" },
   { id: 2, label: "На модерации" },
-  { id: 3, label: "Опубликован" }
+  { id: 3, label: "Принят" }
 ] as const;
 
 /** Legacy режим: 1-3. Новый режим: steps + activeIndex. */

@@ -134,25 +134,14 @@ export function NewsDetailClient({
         </Link>
       </div>
 
-      <article className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
-        {item.cover_image ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={item.cover_image} alt={item.title} className="h-64 w-full object-cover" />
-        ) : null}
-        <div className="p-6 sm:p-7">
-          <div className="flex flex-wrap items-center gap-2 text-[12px] text-white/60">
-            {item.category ? (
-              <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-cyan-200">
-                {item.category}
-              </span>
-            ) : null}
-            <span>{formatDate(item.published_at)}</span>
-          </div>
+      <article className="overflow-hidden rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.028))] shadow-[0_30px_90px_-52px_rgba(0,0,0,0.76)]">
+        <div className="p-6 sm:p-8">
+          <div className="text-[12px] text-white/60">{formatDate(item.published_at)}</div>
 
-          <h1 className="mt-3 text-[30px] font-semibold leading-tight text-white">{item.title}</h1>
-          {item.excerpt ? <p className="mt-3 text-[16px] text-white/75">{item.excerpt}</p> : null}
+          <h1 className="mt-4 text-balance text-[34px] font-semibold leading-[1.02] tracking-[-0.05em] text-white sm:text-[44px]">{item.title}</h1>
+          {item.excerpt ? <p className="mt-4 max-w-3xl text-[17px] leading-8 text-white/72">{item.excerpt}</p> : null}
 
-          <div className="mt-5 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-white/85">{item.content}</div>
+          <div className="mt-8 whitespace-pre-wrap break-words text-[15px] leading-8 text-white/84">{item.content}</div>
 
           <div className="mt-8 border-t border-white/8 pt-5">
             <Link

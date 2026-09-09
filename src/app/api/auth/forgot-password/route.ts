@@ -20,6 +20,10 @@ function resolveBaseUrl(request: Request): string {
   return `${url.protocol}//${url.host}`;
 }
 
+function shouldExposeDeliveryErrors() {
+  return process.env.NODE_ENV !== "production" || process.env.AUTH_EXPOSE_PASSWORD_RESET_DELIVERY_ERRORS === "true";
+}
+
 export async function POST(request: Request) {
   const limited = enforceRateLimit({
     key: `auth:forgot:${getRequestIp(request)}`,
@@ -62,44 +66,73 @@ export async function POST(request: Request) {
       });
     }
 
-    if (user) {
-      const token = randomBytes(32).toString("hex");
-      const expires = new Date(Date.now() + 1000 * 60 * 30);
+    if (!user) {
+      if (shouldExposeDeliveryErrors()) {
+        return NextResponse.json(
+          { error: "Аккаунт с таким email не найден в текущей базе." },
+          { status: 404 }
+        );
+      }
 
+      return NextResponse.json({
+        ok: true,
+        message: "Если аккаунт существует, инструкция по восстановлению отправлена."
+      });
+    }
+
+    const transporter = getSmtpBzTransporter();
+    const from = getSmtpFromAddress();
+    if (!transporter || !from) {
+      console.error("[auth/forgot-password] SMTP is not configured");
+      return NextResponse.json(
+        { error: shouldExposeDeliveryErrors() ? "SMTP не настроен. Проверьте SMTP_* переменные в .env." : "Почтовый сервис временно недоступен." },
+        { status: 503 }
+      );
+    }
+
+    const token = randomBytes(32).toString("hex");
+    const expires = new Date(Date.now() + 1000 * 60 * 30);
+
+    await prisma.verification_tokens.deleteMany({
+      where: {
+        user_id: user.id,
+        type: "recover"
+      }
+    });
+
+    await prisma.verification_tokens.create({
+      data: {
+        user_id: user.id,
+        token,
+        type: "recover",
+        expires
+      }
+    });
+
+    const baseUrl = resolveBaseUrl(request);
+    const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+
+    try {
+      await transporter.sendMail({
+        from,
+        to: user.email,
+        subject: "Восстановление пароля ICECREAMMUSIC",
+        text: `Здравствуйте, ${user.name}.\n\nПерейдите по ссылке для сброса пароля: ${resetUrl}\n\nСсылка действует 30 минут.`,
+        html: `<p>Здравствуйте, ${user.name}.</p><p>Перейдите по ссылке для сброса пароля:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Ссылка действует 30 минут.</p>`
+      });
+    } catch (error) {
       await prisma.verification_tokens.deleteMany({
         where: {
           user_id: user.id,
-          type: "recover"
-        }
-      });
-
-      await prisma.verification_tokens.create({
-        data: {
-          user_id: user.id,
-          token,
           type: "recover",
-          expires
+          token
         }
       });
-
-      const baseUrl = resolveBaseUrl(request);
-      const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
-
-      const transporter = getSmtpBzTransporter();
-      const from = getSmtpFromAddress();
-      if (transporter && from) {
-        try {
-          await transporter.sendMail({
-            from,
-            to: user.email,
-            subject: "Восстановление пароля ICECREAMMUSIC",
-            text: `Здравствуйте, ${user.name}.\n\nПерейдите по ссылке для сброса пароля: ${resetUrl}\n\nСсылка действует 30 минут.`,
-            html: `<p>Здравствуйте, ${user.name}.</p><p>Перейдите по ссылке для сброса пароля:</p><p><a href=\"${resetUrl}\">${resetUrl}</a></p><p>Ссылка действует 30 минут.</p>`
-          });
-        } catch (error) {
-          console.error("[auth/forgot-password] failed to send reset email", error);
-        }
-      }
+      console.error("[auth/forgot-password] failed to send reset email", error);
+      return NextResponse.json(
+        { error: shouldExposeDeliveryErrors() ? "SMTP не отправил письмо. Проверьте логин, пароль, host/port и отправителя." : "Почтовый сервис временно недоступен." },
+        { status: 502 }
+      );
     }
 
     return NextResponse.json({

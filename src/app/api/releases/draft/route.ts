@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 
 import type { ReleaseDraftSaveRequest, ReleaseDraftSaveResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
+import { withDraftLastChangedAt } from "@/lib/draft-retention";
 import { prisma } from "@/lib/prisma";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import {
@@ -12,6 +13,7 @@ import {
   getReleaseLifecycleStatus,
   withReleaseLifecycleState
 } from "@/lib/release-counts";
+import { canEditRelease } from "@/lib/release-policy";
 import { readReleaseTypeFromSubmissionData } from "@/lib/release-submit-tracks";
 
 export const dynamic = "force-dynamic";
@@ -80,6 +82,14 @@ function mergeSubmissionData(roles: unknown, submissionData: Record<string, unkn
     ...root,
     submissionData
   };
+}
+
+function withDraftPersistenceState(
+  roles: unknown,
+  submissionData: Record<string, unknown>,
+  now: Date
+): Prisma.InputJsonValue {
+  return withDraftLastChangedAt(mergeSubmissionData(roles, submissionData), now);
 }
 
 function readSubmissionDataCover(data: Record<string, unknown>): string | null {
@@ -156,9 +166,7 @@ export async function POST(request: Request) {
       confirmed: false,
       status: "moderating",
       roles: withReleaseLifecycleState(
-        {
-          submissionData: payload.data
-        },
+        withDraftPersistenceState({}, payload.data as Record<string, unknown>, now),
         "draft"
       ) as Prisma.InputJsonValue
     },
@@ -208,7 +216,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Черновик не найден" }, { status: 404 });
   }
 
+  const lifecycle = getReleaseLifecycleStatus(existing.status, existing.roles) ?? "draft";
+  const editPermission = canEditRelease({
+    status: lifecycle,
+    moderationStarted: existing.status === "moderating"
+  });
+  if (!editPermission.allowed) {
+    return NextResponse.json({ error: editPermission.message }, { status: 409 });
+  }
+
   const data = payload.data as Record<string, unknown>;
+  const now = new Date();
   const releaseDate = parseDate(data.releaseDate, existing.date);
   const startDate = parseDate(data.startDate, existing.startDate);
   const preorderDate = parseDate(data.preorderDate, existing.preorderDate);
@@ -252,10 +270,7 @@ export async function PATCH(request: Request) {
       confirmed: existing.confirmed,
       status: existing.status,
       roles: withReleaseLifecycleState(
-        mergeSubmissionData(
-          existing.roles,
-          payload.data as Record<string, unknown>
-        ),
+        withDraftPersistenceState(existing.roles, payload.data as Record<string, unknown>, now),
         getReleaseLifecycleStatus(existing.status, existing.roles) ?? "draft"
       ) as Prisma.InputJsonValue
     }

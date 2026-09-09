@@ -97,3 +97,48 @@ export function isPrismaConnectionError(error: unknown): boolean {
     message.includes("prismaclientinitializationerror")
   );
 }
+
+export function isPrismaPoolTimeoutError(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === "P2024";
+  }
+
+  const message = extractErrorMessage(error).toLowerCase();
+  return (
+    message.includes("timed out fetching a new connection from the connection pool") ||
+    message.includes("connection pool timeout")
+  );
+}
+
+/** PostgreSQL may abort a serializable transaction when a concurrent request wins.
+ * This is expected contention, so callers can retry the whole transaction safely. */
+export function isPrismaSerializationConflictError(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === "P2034";
+  }
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "P2034"
+  ) {
+    return true;
+  }
+  return /transaction failed due to a write conflict|could not serialize access/i.test(
+    extractErrorMessage(error)
+  );
+}
+
+export async function retryPrismaSerializationConflict<T>(
+  execute: () => Promise<T>,
+  attempts = 3
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await execute();
+    } catch (error) {
+      if (!isPrismaSerializationConflictError(error) || attempt >= attempts) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, attempt * 25));
+    }
+  }
+}

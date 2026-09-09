@@ -1,8 +1,26 @@
+CREATE TABLE IF NOT EXISTS "icecream"."promo_links" (
+  "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+  "shortName" TEXT NOT NULL,
+  "releaseId" TEXT NOT NULL,
+  CONSTRAINT "promo_links_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "promo_links_releaseId_release_id_fk"
+    FOREIGN KEY ("releaseId") REFERENCES "icecream"."Release"("id") ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "icecream"."promo_urls" (
+  "id" TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+  "url" TEXT NOT NULL,
+  "promoLinkId" TEXT,
+  CONSTRAINT "promo_urls_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "promo_urls_promoLinkId_promo_links_id_fk"
+    FOREIGN KEY ("promoLinkId") REFERENCES "icecream"."promo_links"("id") ON DELETE CASCADE
+);
+
 WITH missing_releases AS (
   SELECT
     r.id AS release_id,
     COALESCE(NULLIF(BTRIM(r.title), ''), 'release') AS raw_title
-  FROM "icecream"."release" r
+  FROM "icecream"."Release" r
   LEFT JOIN "icecream"."promo_links" pl
     ON pl."releaseId" = r.id
   WHERE pl.id IS NULL

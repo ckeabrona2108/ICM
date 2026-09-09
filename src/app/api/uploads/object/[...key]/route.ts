@@ -5,36 +5,29 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
+import { parseHttpByteRange } from "@/lib/http-byte-range";
+import { isPublicStreamableStorageKey } from "@/lib/storage-object-access";
+import {
+  authorizeStorageReadRequest,
+  handleAuthorizedStorageUpload
+} from "@/lib/storage-route-handlers";
 import {
   ALLOWED_S3_IMAGE_PREFIXES,
   createPresignedDownload,
   findExistingS3ObjectKeyFallback,
   headStorageObjectDebug,
+  isAllowedAudioFile,
   isAllowedImageFile,
   objectExists,
   resolveExistingImageStorageKeyWithFallback,
-  resolvePublicStorageUrlFromKey
+  resolvePublicStorageUrlFromKey,
+  streamStoredObject
 } from "@/lib/s3";
 
-const LOCAL_STORAGE_ROOT = path.join(process.cwd(), ".tmp", "local-object-storage");
-
-function sanitizeKeySegments(segments: string[] | undefined): string[] | null {
-  if (!segments || segments.length === 0) return null;
-  const decoded = segments.map((segment) => decodeURIComponent(segment));
-  if (
-    decoded.some(
-      (segment) =>
-        segment.length === 0 ||
-        segment === "." ||
-        segment === ".." ||
-        segment.includes("/") ||
-        segment.includes("\\")
-    )
-  ) {
-    return null;
-  }
-  return decoded;
-}
+const LOCAL_STORAGE_ROOT =
+  process.env.NODE_ENV !== "production" && process.env.E2E_DISPOSABLE_STORAGE === "1" && process.env.E2E_STORAGE_ROOT
+    ? path.resolve(process.env.E2E_STORAGE_ROOT)
+    : path.join(process.cwd(), ".tmp", "local-object-storage");
 
 function resolveObjectPaths(segments: string[]) {
   const relativePath = path.join(...segments);
@@ -55,10 +48,11 @@ function inferContentType(filePath: string): string {
   return "application/octet-stream";
 }
 
-function isPublicStorageKeyCandidate(segments: string[]): boolean {
-  if (segments.length < 2) return false;
-  if (["previews", "tracks"].includes(segments[0])) return true;
-  return segments[0] === "contracts" && ["previews", "tracks"].includes(segments[1] ?? "");
+function resolveStreamContentType(key: string, contentType: string | null): string {
+  if (contentType && contentType !== "application/octet-stream" && contentType !== "binary/octet-stream") {
+    return contentType;
+  }
+  return inferContentType(key);
 }
 
 async function probeHttpHeadStatus(url: string): Promise<number | null> {
@@ -101,42 +95,30 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const segments = sanitizeKeySegments(context.params.key);
-  if (!segments) {
-    return NextResponse.json({ error: "Invalid storage key" }, { status: 400 });
-  }
-
-  const buffer = Buffer.from(await request.arrayBuffer());
-  const { filePath, metaPath } = resolveObjectPaths(segments);
-
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, buffer);
-  await writeFile(
-    metaPath,
-    JSON.stringify(
-      {
-        contentType: request.headers.get("content-type") || inferContentType(filePath)
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
-
-  return new NextResponse(null, { status: 200 });
+  return handleAuthorizedStorageUpload({
+    request,
+    rawKey: (context.params.key ?? []).join("/"),
+    principalId: session.user.id,
+    upload: async ({ key, bytes, contentType }) => {
+      const { filePath, metaPath } = resolveObjectPaths(key.split("/"));
+      await mkdir(path.dirname(filePath), { recursive: true });
+      await writeFile(filePath, bytes);
+      await writeFile(metaPath, JSON.stringify({ contentType }, null, 2), "utf8");
+      return { key };
+    },
+    success: () => new NextResponse(null, { status: 200 })
+  });
 }
 
 export async function GET(
   request: Request,
   context: { params: { key?: string[] } }
 ) {
-  const segments = sanitizeKeySegments(context.params.key);
-  if (!segments) {
-    return NextResponse.json({ error: "Invalid storage key" }, { status: 400 });
-  }
-
-  const { filePath, metaPath } = resolveObjectPaths(segments);
-  const requestedKey = segments.join("/");
+  const session = await getServerSession(authOptions);
+  const requestedAccess = authorizeStorageReadRequest(context.params.key, session?.user?.id ?? null);
+  if (!requestedAccess.allowed) return requestedAccess.response;
+  const segments = requestedAccess.segments;
+  const requestedKey = requestedAccess.key;
   const exactResolvedImageKey = shouldTryPublicImageFallback(requestedKey)
     ? await resolveExistingImageStorageKeyWithFallback(requestedKey)
     : null;
@@ -146,10 +128,89 @@ export async function GET(
     exactKeyFound !== true ? await findExistingS3ObjectKeyFallback(requestedKey) : null;
   const resolvedStorageKey = exactResolvedImageKey ?? (exactKeyFound === true ? requestedKey : fallbackFoundKey);
   const resolvedSegments = resolvedStorageKey?.split("/").filter(Boolean) ?? segments;
+  const resolvedAccess = authorizeStorageReadRequest(resolvedSegments, session?.user?.id ?? null);
+  if (!resolvedAccess.allowed) return resolvedAccess.response;
   const { filePath: resolvedFilePath, metaPath: resolvedMetaPath } = resolveObjectPaths(resolvedSegments);
-  const publicRootCandidate = resolvedStorageKey ? isPublicStorageKeyCandidate(resolvedSegments) : false;
+  const publicRootCandidate = resolvedStorageKey ? isPublicStreamableStorageKey(resolvedSegments) : false;
   const publicRootUrl = publicRootCandidate && resolvedStorageKey ? buildPublicRootUrl(resolvedStorageKey) : null;
   const checkedPrefixes = exactKeyFound !== true ? [...ALLOWED_S3_IMAGE_PREFIXES] : [];
+
+  if (resolvedStorageKey && isAllowedAudioFile(resolvedStorageKey)) {
+    try {
+      const storedObject = await streamStoredObject({
+        key: resolvedStorageKey,
+        range: request.headers.get("range") ?? undefined
+      });
+      if (storedObject) {
+        return new NextResponse(storedObject.body, {
+          status: storedObject.contentRange ? 206 : 200,
+          headers: {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, max-age=60",
+            "Content-Type": resolveStreamContentType(resolvedStorageKey, storedObject.contentType),
+            ...(storedObject.contentLength !== null
+              ? { "Content-Length": String(storedObject.contentLength) }
+              : {}),
+            ...(storedObject.contentRange
+              ? { "Content-Range": storedObject.contentRange }
+              : {}),
+            ...(storedObject.etag ? { ETag: storedObject.etag } : {}),
+            ...(storedObject.lastModified
+              ? { "Last-Modified": storedObject.lastModified }
+              : {})
+          }
+        });
+      }
+    } catch (error) {
+      const status =
+        typeof error === "object" && error && "$metadata" in error
+          ? Number((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode)
+          : 0;
+      if (status === 416) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: { "Accept-Ranges": "bytes" }
+        });
+      }
+      if (SHOULD_DEBUG_STORAGE_OBJECT_ROUTE) {
+        console.error("[storage-debug:audio-stream-error]", {
+          key: resolvedStorageKey,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
+
+  if (resolvedStorageKey && isAllowedImageFile(resolvedStorageKey)) {
+    try {
+      const storedObject = await streamStoredObject({
+        key: resolvedStorageKey
+      });
+      if (storedObject) {
+        return new NextResponse(storedObject.body, {
+          status: 200,
+          headers: {
+            "Cache-Control": "private, max-age=60",
+            "Content-Type": resolveStreamContentType(resolvedStorageKey, storedObject.contentType),
+            ...(storedObject.contentLength !== null
+              ? { "Content-Length": String(storedObject.contentLength) }
+              : {}),
+            ...(storedObject.etag ? { ETag: storedObject.etag } : {}),
+            ...(storedObject.lastModified
+              ? { "Last-Modified": storedObject.lastModified }
+              : {})
+          }
+        });
+      }
+    } catch (error) {
+      if (SHOULD_DEBUG_STORAGE_OBJECT_ROUTE) {
+        console.error("[storage-debug:image-stream-error]", {
+          key: resolvedStorageKey,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
 
   if (SHOULD_DEBUG_STORAGE_OBJECT_ROUTE) {
     console.log("[storage-debug:object-lookup]", {
@@ -222,8 +283,9 @@ export async function GET(
     }
   }
 
+  let fileSize = 0;
   try {
-    await stat(resolvedFilePath);
+    fileSize = (await stat(resolvedFilePath)).size;
     if (process.env.STORAGE_DEBUG === "1") {
       console.log("[storage-debug:object-hit]", {
         key: resolvedStorageKey ?? requestedKey,
@@ -259,11 +321,28 @@ export async function GET(
   }
 
   const url = new URL(request.url);
-  const response = new NextResponse(body, {
-    status: 200,
+  const rangeHeader = request.headers.get("range");
+  const byteRange = parseHttpByteRange(rangeHeader, fileSize);
+  if (rangeHeader && !byteRange) {
+    return new NextResponse(null, {
+      status: 416,
+      headers: {
+        "Accept-Ranges": "bytes",
+        "Content-Range": `bytes */${fileSize}`
+      }
+    });
+  }
+  const responseBody = byteRange ? body.subarray(byteRange.start, byteRange.end + 1) : body;
+  const response = new NextResponse(responseBody, {
+    status: byteRange ? 206 : 200,
     headers: {
       "Content-Type": url.searchParams.get("contentType") || contentType,
-      "Cache-Control": "private, max-age=60"
+      "Cache-Control": "private, max-age=60",
+      "Accept-Ranges": "bytes",
+      "Content-Length": String(responseBody.byteLength),
+      ...(byteRange
+        ? { "Content-Range": `bytes ${byteRange.start}-${byteRange.end}/${fileSize}` }
+        : {})
     }
   });
 

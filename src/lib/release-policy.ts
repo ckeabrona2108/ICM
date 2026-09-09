@@ -16,6 +16,7 @@ export const releaseLifecycleStatuses = [
   "changes_required",
   "approved",
   "distributed",
+  "dsp_confirmed",
   "archived",
   "rejected"
 ] as const;
@@ -882,6 +883,15 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
       }
     }
 
+    if (track.hasAudio !== false && !track.audioFile) {
+      pushIssue(
+        issues,
+        "required",
+        `${prefix}.audioFile`,
+        `Загрузите аудиофайл для трека №${index + 1}.`
+      );
+    }
+
     if (track.audioFile?.contentType && !trackAudioMimeTypes.has(track.audioFile.contentType.toLowerCase())) {
       pushIssue(
         issues,
@@ -1006,7 +1016,7 @@ export function canEditRelease(params: {
     };
   }
 
-  if (status === "approved" || status === "distributed") {
+  if (status === "approved" || status === "distributed" || status === "dsp_confirmed") {
     return {
       allowed: true,
       createsModerationCopy: true

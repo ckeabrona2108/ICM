@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { upsertSocialActivityEvent } from "@/lib/social-activity-service";
 
 export interface AdminNewsPostDto {
   id: string;
@@ -212,6 +213,9 @@ export async function createAdminNewsPost(params: {
       createdAt: publishedAt
     }
   });
+  if ((params.prisma as unknown as { social_activity_events?: unknown }).social_activity_events) {
+    await upsertSocialActivityEvent({ prisma: params.prisma, kind: "NEWS", sourceId: row.id, publishedAt: toCreatedAt(row), metadata: { title: row.title } });
+  }
 
   return mapAdminPost(row);
 }
@@ -264,12 +268,18 @@ export async function updateAdminNewsPost(params: {
         : {})
     }
   });
+  if ((params.prisma as unknown as { social_activity_events?: unknown }).social_activity_events) {
+    await upsertSocialActivityEvent({ prisma: params.prisma, kind: "NEWS", sourceId: row.id, publishedAt: toCreatedAt(row), metadata: { title: row.title } });
+  }
 
   return mapAdminPost(row);
 }
 
 export async function deleteAdminNewsPost(prisma: PrismaClient, id: string): Promise<boolean> {
   const result = await getNewsRepo(prisma).deleteMany({ where: { id } });
+  if (result.count > 0 && (prisma as unknown as { social_activity_events?: unknown }).social_activity_events) {
+    await prisma.social_activity_events.deleteMany({ where: { kind: "NEWS", source_id: id } });
+  }
   return result.count > 0;
 }
 

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { ARTIST_PROFILE_TYPES } from "@/lib/artist-profile-type";
+
 const avatarMimeTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 
 export const userProfileNameSchema = z
@@ -16,7 +18,8 @@ export const userProfileEmailSchema = z
 
 export const updateUserProfileSchema = z.object({
   name: userProfileNameSchema,
-  email: userProfileEmailSchema.optional()
+  email: userProfileEmailSchema.optional(),
+  artistProfileType: z.enum(ARTIST_PROFILE_TYPES).optional()
 });
 
 export const updateUserAvatarSchema = z.object({

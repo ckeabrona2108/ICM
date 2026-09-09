@@ -232,6 +232,18 @@ test("new user signs contract and verification becomes pending", async () => {
   assert.equal(status.status, "pending");
 });
 
+test("contract status reports unavailable verification storage without pretending it is unsigned", async () => {
+  const status = await getUserContractStatus({
+    prisma: {} as never,
+    userId: "user_1"
+  });
+
+  assert.equal(status.status, "unavailable");
+  assert.equal(status.signed, false);
+  assert.equal(status.canCreateRelease, false);
+  assert.match(status.reason, /временно недоступна/iu);
+});
+
 test("contract signing sends telegram notification only on first successful signature", async () => {
   const { prisma } = createFakePrisma();
   const notifications: Array<{ userId: string; userEmail: string }> = [];

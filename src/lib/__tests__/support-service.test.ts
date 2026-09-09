@@ -191,7 +191,7 @@ test("opening user ticket marks admin replies as read for this user", async () =
 
   const ticket = await getUserSupportTicket(prisma, "user_1", "ticket_1");
   assert.equal(ticket.id, "ticket_1");
-  assert.equal(findCalls, 2);
+  assert.equal(findCalls, 1);
   assert.equal(updateManyArgs.where.userId, "user_1");
   assert.equal(updateManyArgs.where.ticketId, "ticket_1");
   assert.equal(updateManyArgs.where.direction, "OUTBOUND");
@@ -293,9 +293,9 @@ test("addUserSupportMessage always saves inbound user message", async () => {
         }
         return null;
       },
-      update: async ({ data }: { data: { status: string } }) => {
+      update: async ({ data }: { data: { status?: string | null } }) => {
         updateCalled = true;
-        status = data.status;
+        status = data.status ?? null;
         return {};
       }
     },
@@ -317,7 +317,94 @@ test("addUserSupportMessage always saves inbound user message", async () => {
   });
 
   assert.equal(direction, "INBOUND");
-  assert.equal(updateCalled, false);
+  assert.equal(updateCalled, true);
+  assert.equal(status, null);
+  assert.equal(ticket.status, "OPEN");
+});
+
+test("addAdminSupportReply tolerates missing admin log storage", async () => {
+  let messageDirection: string | null = null;
+  let updatedStatus: string | null = null;
+  let findUniqueCalls = 0;
+
+  const prisma = {
+    supportTicket: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        findUniqueCalls += 1;
+        if (where.id === "ticket_1") {
+          if (findUniqueCalls === 1) {
+            return { id: "ticket_1", userId: "user_1", title: "Тема" };
+          }
+          return makeTicketDetails({ id: "ticket_1", status: "WAITING_USER" });
+        }
+        return null;
+      },
+      update: async ({ data }: { data: { status: string } }) => {
+        updatedStatus = data.status;
+        return {};
+      }
+    },
+    message: {
+      create: async ({ data }: { data: { direction: string } }) => {
+        messageDirection = data.direction;
+        return { id: "msg_2" };
+      }
+    },
+    adminLog: {
+      create: async () => {
+        throw new Error("admin log table missing");
+      }
+    },
+    ai_user_notifications: {
+      upsert: async () => ({ id: "support-reply-ticket_1" })
+    },
+    user: {
+      findUnique: async () => null
+    },
+    $transaction: async (items: any[]) => {
+      for (const item of items) {
+        await item;
+      }
+      return [];
+    }
+  } as any;
+
+  const ticket = await addAdminSupportReply({
+    prisma,
+    adminId: "admin_1",
+    ticketId: "ticket_1",
+    body: "Ответ пользователю"
+  });
+
+  assert.equal(messageDirection, "OUTBOUND");
+  assert.equal(updatedStatus, "WAITING_USER");
+  assert.equal(ticket.status, "WAITING_USER");
+});
+
+test("addUserSupportMessage keeps status null when only updatedAt changes", async () => {
+  let status: string | null = "not-called";
+  const prisma = {
+    supportTicket: {
+      findUnique: async () => makeTicketDetails({ id: "ticket_1", status: "OPEN" }),
+      update: async ({ data }: { data: { status?: string | null } }) => {
+        status = data.status ?? null;
+        return {};
+      }
+    },
+    message: {
+      create: async () => ({}),
+      updateMany: async () => ({ count: 1 })
+    },
+    $transaction: async (items: Promise<unknown>[]) => Promise.all(items)
+  } as any;
+
+  const ticket = await addUserSupportMessage({
+    prisma,
+    userId: "user_1",
+    ticketId: "ticket_1",
+    body: "Нужна помощь"
+  });
+
   assert.equal(status, null);
   assert.equal(ticket.status, "OPEN");
 });

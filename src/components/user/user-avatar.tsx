@@ -1,12 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import * as React from "react";
-import { UserRound } from "lucide-react";
 
+import { DEFAULT_USER_AVATAR_URL } from "@/lib/avatar";
 import { normalizeNextImageSrc } from "@/lib/image-src";
 import { cn } from "@/lib/utils";
-import { getInitials } from "@/lib/user-profile-policy";
 
 export function UserAvatar({
   name,
@@ -26,18 +24,17 @@ export function UserAvatar({
         ? "h-12 w-12"
         : "h-10 w-10";
 
-  const initials = getInitials(name ?? "");
   const safeAvatarUrl = normalizeNextImageSrc(avatarUrl);
   const [failedSrc, setFailedSrc] = React.useState<string | null>(null);
-  const isInlineAvatarSrc = Boolean(
-    safeAvatarUrl?.startsWith("data:image/") || safeAvatarUrl?.startsWith("blob:")
-  );
 
   React.useEffect(() => {
     setFailedSrc(null);
   }, [safeAvatarUrl]);
 
-  const shouldShowImage = Boolean(safeAvatarUrl && failedSrc !== safeAvatarUrl);
+  const displayAvatarUrl = safeAvatarUrl && failedSrc !== safeAvatarUrl
+    ? safeAvatarUrl
+    : DEFAULT_USER_AVATAR_URL;
+  const isDefaultAvatar = displayAvatarUrl === DEFAULT_USER_AVATAR_URL;
 
   return (
     <span
@@ -47,31 +44,17 @@ export function UserAvatar({
         className
       )}
     >
-      {shouldShowImage && safeAvatarUrl ? (
-        isInlineAvatarSrc ? (
-          <img
-            src={safeAvatarUrl}
-            alt={name ? `Аватар ${name}` : "Аватар пользователя"}
-            className="h-full w-full object-cover"
-            onError={() => setFailedSrc(safeAvatarUrl)}
-          />
-        ) : (
-          <Image
-            src={safeAvatarUrl}
-            alt={name ? `Аватар ${name}` : "Аватар пользователя"}
-            fill
-            sizes="64px"
-            className="object-cover"
-            onError={() => setFailedSrc(safeAvatarUrl)}
-          />
-        )
-      ) : name ? (
-        <span className="text-[12px] font-semibold uppercase tracking-[0.04em] text-white/86">
-          {initials}
-        </span>
-      ) : (
-        <UserRound className="h-4 w-4 text-white/70" />
-      )}
+      <img
+        src={displayAvatarUrl}
+        alt={name ? `Аватар ${name}` : "Аватар пользователя"}
+        className={cn("h-full w-full object-cover", isDefaultAvatar && "scale-[1.18]")}
+        onError={(event) => {
+          if (displayAvatarUrl !== DEFAULT_USER_AVATAR_URL) {
+            event.currentTarget.src = DEFAULT_USER_AVATAR_URL;
+          }
+          if (safeAvatarUrl) setFailedSrc(safeAvatarUrl);
+        }}
+      />
     </span>
   );
 }

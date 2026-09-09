@@ -270,12 +270,14 @@ export function buildStoredUserReportPayload(input: {
 
 async function listReportPayloadRecords(
   prisma: PrismaClient,
-  userId: string
+  userId: string,
+  strict = false
 ): Promise<Map<string, ReportPayloadRecord>> {
   const transactionRepo = getRepo<{
     findMany: (args: unknown) => Promise<Array<{ id: string; description: string | null; metadata: unknown }>>;
   }>(prisma, "transaction");
   if (!transactionRepo?.findMany) {
+    if (strict) throw new Error("Финансовые данные временно недоступны.");
     return new Map();
   }
 
@@ -295,6 +297,7 @@ async function listReportPayloadRecords(
       }
     });
   } catch (error) {
+    if (strict) throw error;
     const message = error instanceof Error ? error.message.toLowerCase() : "";
     if (message.includes("transaction") || message.includes("does not exist") || message.includes("unknown")) {
       return new Map();
@@ -524,8 +527,8 @@ async function getExistingReportWithPayload(
   }
 }
 
-export async function listUserReports(prisma: PrismaClient, userId: string): Promise<UserReportItem[]> {
-  const payloads = await listReportPayloadRecords(prisma, userId);
+export async function listUserReports(prisma: PrismaClient, userId: string, options: { strict?: boolean } = {}): Promise<UserReportItem[]> {
+  const payloads = await listReportPayloadRecords(prisma, userId, options.strict);
 
   try {
     const reports = await prisma.financeReport.findMany({
@@ -536,6 +539,7 @@ export async function listUserReports(prisma: PrismaClient, userId: string): Pro
 
     return reports.map((report) => mapReportItem(report, payloads.get(report.id)?.payload ?? null));
   } catch (error) {
+    if (options.strict) throw error;
     if (!isPrismaTableMissingError(error, "financeReport")) {
       throw error;
     }

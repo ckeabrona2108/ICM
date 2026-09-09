@@ -4,8 +4,9 @@ import type { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
+import { canManageReleasesSession } from "@/lib/admin-release-service";
 import {
+  resolveAdminAudioSubmissionTrackIndex,
   uploadAdminReleaseAudio,
   validateAdminReleaseAudioFile
 } from "@/lib/admin-release-audio-upload";
@@ -55,7 +56,8 @@ export async function POST(
           id: true,
           index: true,
           title: true,
-          track: true
+          track: true,
+          roles: true
         },
         orderBy: { index: "asc" }
       }
@@ -98,33 +100,48 @@ export async function POST(
     });
 
     const extension = uploaded.key.split("/").pop()?.split(".").pop()?.trim().toLowerCase() ?? "wav";
+    const audioFile = {
+      storageKey: uploaded.key,
+      url: uploaded.fileUrl,
+      fileName: fileValue.name,
+      contentType: fileValue.type,
+      sizeBytes: fileValue.size
+    };
     const nextRoles = cloneJson(release.roles);
     const nextSubmission = cloneJson(nextRoles.submissionData);
     const nextTracks = Array.isArray(nextSubmission.tracks) ? [...nextSubmission.tracks] : [];
-    const currentTrack = asRecord(nextTracks[trackRow.index]) ?? {};
-    nextTracks[trackRow.index] = {
+    const submissionTrackIndex = resolveAdminAudioSubmissionTrackIndex({
+      trackId,
+      databaseTracks: release.track,
+      submissionTracks: nextTracks
+    });
+    if (submissionTrackIndex < 0) {
+      return NextResponse.json({ error: "Track not found in submission data" }, { status: 404 });
+    }
+
+    const currentTrack = asRecord(nextTracks[submissionTrackIndex]) ?? {};
+    nextTracks[submissionTrackIndex] = {
       ...currentTrack,
       id: asString(currentTrack.id) ?? trackId,
       title: asString(currentTrack.title) ?? trackRow.title ?? "",
       fileName: asString(currentTrack.fileName) ?? fileValue.name,
       hasAudio: true,
       durationSec: currentTrack.durationSec ?? null,
-      audioFile: {
-        storageKey: uploaded.key,
-        url: uploaded.fileUrl,
-        fileName: fileValue.name,
-        contentType: fileValue.type,
-        sizeBytes: fileValue.size
-      }
+      audioFile
     };
     nextSubmission.tracks = nextTracks;
     nextRoles.submissionData = nextSubmission;
+    const nextTrackRoles = cloneJson(trackRow.roles);
+    nextTrackRoles.audioFile = audioFile;
+    nextTrackRoles.fileName = fileValue.name;
+    nextTrackRoles.hasAudio = true;
 
     await prisma.$transaction([
       prisma.track.update({
         where: { id: trackId },
         data: {
-          track: extension
+          track: extension,
+          roles: nextTrackRoles as Prisma.InputJsonValue
         }
       }),
       prisma.release.update({

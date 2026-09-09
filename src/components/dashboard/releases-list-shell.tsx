@@ -58,6 +58,7 @@ export function ReleasesListShell({
   variant = "compact",
   allowDraftDelete = false
 }: ReleasesListShellProps) {
+  const [visibleReleases, setVisibleReleases] = React.useState(releases);
   const [query, setQuery] = React.useState("");
   const [platform, setPlatform] = React.useState("");
   const [startDate, setStartDate] = React.useState("");
@@ -69,7 +70,7 @@ export function ReleasesListShell({
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = releases.slice();
+    let list = visibleReleases.slice();
     if (q) {
       list = list.filter((r) => {
         const fields = [
@@ -104,7 +105,7 @@ export function ReleasesListShell({
       return kb.localeCompare(ka);
     });
     return list;
-  }, [releases, query, platform, startDate, createdDate, sort]);
+  }, [visibleReleases, query, platform, startDate, createdDate, sort]);
 
   const total = filtered.length;
   const paging = normalizePagination({ total, page, perPage });
@@ -127,10 +128,31 @@ export function ReleasesListShell({
           showPay={showPay}
           variant={variant}
           allowDraftDelete={allowDraftDelete}
+          onDraftDeleted={
+            allowDraftDelete
+              ? (releaseId, draftsCount) => {
+                  setVisibleReleases((current) => current.filter((item) => item.id !== releaseId));
+                  if (typeof draftsCount === "number") {
+                    window.dispatchEvent(
+                      new CustomEvent("dashboard:drafts-count", {
+                        detail: { draftsCount }
+                      })
+                    );
+                  }
+                }
+              : undefined
+          }
+          onReleaseRemoved={(releaseId) => {
+            setVisibleReleases((current) => current.filter((item) => item.id !== releaseId));
+          }}
         />
       )),
     [allowDraftDelete, pageItems, showNumber, showPay, variant]
   );
+
+  React.useEffect(() => {
+    setVisibleReleases(releases);
+  }, [releases]);
 
   React.useEffect(() => {
     setPage(1);
@@ -186,7 +208,7 @@ export function ReleasesListShell({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Поиск по UPC, ISRC, треку, исполнителю, лейблу, коду партнёра"
-            className="h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 pl-10 pr-3.5 text-[15px] font-medium text-white placeholder:text-white/45 outline-none transition-colors focus:border-[#7b3df5]/60 focus:bg-white/[0.04]"
+            className="ux-control h-11 w-full rounded-[18px] pl-10 pr-3.5 text-[15px] font-medium text-white placeholder:text-white/40 outline-none focus:border-[#7b3df5]/60 focus:bg-white/[0.04]"
           />
         </div>
 
@@ -250,12 +272,12 @@ export function ReleasesListShell({
       ) : (
         <div className="space-y-4">
           {hasInconsistentListState ? (
-            <div className="rounded-xl border border-amber-300/25 bg-amber-500/10 p-4 text-[14px] text-amber-100">
+            <div className="ux-error rounded-[22px] p-4 text-[14px] text-amber-100">
               <p className="font-medium">Данные есть, но список не отображается из-за состояния фильтров/страницы.</p>
               <button
                 type="button"
                 onClick={resetFilters}
-                className="mt-2 rounded-lg border border-amber-200/30 px-3 py-1.5 text-[12px] font-semibold text-amber-50 transition-colors hover:bg-amber-200/10"
+                className="ux-control-compact mt-2 rounded-xl px-3 py-1.5 text-[12px] font-semibold text-amber-50 transition-colors hover:bg-amber-200/10"
               >
                 Сбросить фильтры
               </button>
@@ -304,7 +326,7 @@ function SelectInput({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className={cn(
-          "h-11 w-full appearance-none rounded-xl border border-white/[0.12] bg-black/25 px-3.5 pr-9 text-[15px] font-medium outline-none transition-colors focus:border-[#7b3df5]/60",
+          "ux-control h-11 w-full appearance-none rounded-[18px] px-3.5 pr-9 text-[15px] font-medium outline-none focus:border-[#7b3df5]/60",
           value ? "text-white" : "text-white/45",
           disabled && "cursor-not-allowed opacity-60"
         )}

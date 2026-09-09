@@ -40,6 +40,8 @@ interface AudioResolutionInput {
   audioUrl?: unknown;
   audio?: unknown;
   track?: unknown;
+  requireReachable?: boolean;
+  preferImmediateUrl?: boolean;
 }
 
 function asRecord(value: unknown): RecordLike | null {
@@ -101,16 +103,17 @@ function extractExtensionHint(value: string | null | undefined): string | null {
   return extension ?? null;
 }
 
-function normalizeCandidateUrl(value: unknown): string | null {
-  const storageKey = normalizeStoredFileKey(value);
-  if (storageKey) {
-    return buildStoredFileRouteUrl(storageKey);
-  }
+function isAbsoluteHttpUrl(value: string | null | undefined): value is string {
+  return Boolean(value && (value.startsWith("http://") || value.startsWith("https://")));
+}
 
-  const raw = asString(value);
-  if (!raw) return null;
-  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
-  return null;
+function normalizeCandidateUrls(value: unknown): string[] {
+  const raw = extractRawCandidateString(value);
+  const externalUrl = isAbsoluteHttpUrl(raw) ? raw : null;
+  const storageKey = normalizeStoredFileKey(value);
+  const storedFileUrl = storageKey ? buildStoredFileRouteUrl(storageKey) : null;
+
+  return unique([externalUrl, storedFileUrl].filter(Boolean) as string[]);
 }
 
 function normalizePreviewStorageKeyFromRawValue(rawValue: string, releaseId: string | null): string | null {
@@ -179,8 +182,7 @@ function extractRawCandidateString(value: unknown): string | null {
 function buildCandidateUrls(values: unknown[]): string[] {
   const candidates: string[] = [];
   for (const value of values) {
-    const url = normalizeCandidateUrl(value);
-    if (url) candidates.push(url);
+    candidates.push(...normalizeCandidateUrls(value));
   }
   return unique(candidates);
 }
@@ -240,14 +242,34 @@ function buildLegacyAudioCandidates(
   );
 }
 
-async function resolveCandidateGroups(groups: Array<{ source: ResolvedMediaAssetSource; candidates: string[] }>): Promise<ResolvedMediaAsset> {
+async function resolveCandidateGroups(
+  groups: Array<{ source: ResolvedMediaAssetSource; candidates: string[] }>,
+  options: { allowFallback?: boolean; preferImmediateUrl?: boolean } = {}
+): Promise<ResolvedMediaAsset> {
   const candidateUrls = unique(groups.flatMap((group) => group.candidates));
+  const firstUsableGroup = groups.find((group) => group.candidates.length > 0);
+
+  if (options.preferImmediateUrl) {
+    const fallbackUrl = firstUsableGroup?.candidates[0] ?? null;
+    if (fallbackUrl) {
+      const normalizedUrl = isAbsoluteHttpUrl(fallbackUrl)
+        ? fallbackUrl
+        : buildStoredFileRouteUrl(fallbackUrl) ?? fallbackUrl;
+      return {
+        storageKey: isAbsoluteHttpUrl(normalizedUrl) ? null : normalizeStoredFileKey(normalizedUrl),
+        url: normalizedUrl,
+        downloadUrl: normalizedUrl,
+        candidateUrls,
+        source: firstUsableGroup?.source ?? "not_found"
+      };
+    }
+  }
 
   for (const group of groups) {
     if (group.candidates.length === 0) continue;
     const resolved = await resolveFirstReachableStoredFileCandidateFromCandidates(group.candidates);
     if (resolved.url) {
-      const storageKey = normalizeStoredFileKey(resolved.url);
+      const storageKey = isAbsoluteHttpUrl(resolved.url) ? null : normalizeStoredFileKey(resolved.url);
       const finalUrl = storageKey ? buildStoredFileRouteUrl(storageKey) ?? resolved.url : resolved.url;
       return {
         storageKey,
@@ -259,12 +281,22 @@ async function resolveCandidateGroups(groups: Array<{ source: ResolvedMediaAsset
     }
   }
 
-  const firstUsableGroup = groups.find((group) => group.candidates.length > 0);
+  if (options.allowFallback === false) {
+    return {
+      storageKey: null,
+      url: null,
+      downloadUrl: null,
+      candidateUrls,
+      source: "not_found"
+    };
+  }
   const fallbackUrl = firstUsableGroup?.candidates[0] ?? null;
   if (fallbackUrl) {
-    const normalizedUrl = buildStoredFileRouteUrl(fallbackUrl) ?? fallbackUrl;
+    const normalizedUrl = isAbsoluteHttpUrl(fallbackUrl)
+      ? fallbackUrl
+      : buildStoredFileRouteUrl(fallbackUrl) ?? fallbackUrl;
     return {
-      storageKey: normalizeStoredFileKey(normalizedUrl),
+      storageKey: isAbsoluteHttpUrl(normalizedUrl) ? null : normalizeStoredFileKey(normalizedUrl),
       url: normalizedUrl,
       downloadUrl: normalizedUrl,
       candidateUrls,
@@ -374,16 +406,24 @@ export async function resolveTrackAudioAsset(input: AudioResolutionInput): Promi
     "m4a",
     "aiff"
   ]);
-  const legacyCandidates = buildLegacyAudioCandidates(input.trackId, trackValue, asString(input.audioUrl) ?? asString(input.audioFile));
+  const extensionHint = extractRawCandidateString(audioUrlValue)
+    ?? extractRawCandidateString(audioFileValue)
+    ?? extractRawCandidateString(audioUploadValue)
+    ?? extractRawCandidateString(audioValue)
+    ?? null;
+  const legacyCandidates = buildLegacyAudioCandidates(input.trackId, trackValue, extensionHint);
   const deterministicCandidates = unique([
     ...exactCandidates,
     ...variantCandidates,
     ...legacyCandidates
   ]);
-  const resolved = await resolveCandidateGroups([
-    { source: "exact", candidates: unique([...exactCandidates, ...variantCandidates]) },
-    { source: "legacy", candidates: legacyCandidates }
-  ]);
+  const resolved = await resolveCandidateGroups(
+    [
+      { source: "exact", candidates: unique([...exactCandidates, ...variantCandidates]) },
+      { source: "legacy", candidates: legacyCandidates }
+    ],
+    { allowFallback: !input.requireReachable, preferImmediateUrl: input.preferImmediateUrl }
+  );
   if (resolved.url) {
     if (resolved.source === "legacy") {
       console.warn("File resolved via legacy fallback:", {
@@ -395,6 +435,8 @@ export async function resolveTrackAudioAsset(input: AudioResolutionInput): Promi
     }
     return resolved;
   }
+
+  if (input.requireReachable) return resolved;
 
   const fallbackUrl = deterministicCandidates[0] ?? null;
   if (fallbackUrl) {

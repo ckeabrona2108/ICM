@@ -6,7 +6,10 @@ export type ReleaseTimelineStepId =
   | "verification"
   | "moderation"
   | "changes_required"
-  | "published";
+  | "approved"
+  | "distributed"
+  | "archived"
+  | "dsp_confirmed";
 
 export interface ReleaseTimelineStep {
   id: ReleaseTimelineStepId;
@@ -24,7 +27,7 @@ const BASE_STEPS: ReleaseTimelineStep[] = [
   { id: "draft", label: "Черновик" },
   { id: "unpaid", label: "Не оплачен" },
   { id: "moderation", label: "На модерации" },
-  { id: "published", label: "Опубликован" }
+  { id: "approved", label: "Принят" }
 ];
 
 const CHANGES_STEPS: ReleaseTimelineStep[] = [
@@ -32,7 +35,7 @@ const CHANGES_STEPS: ReleaseTimelineStep[] = [
   { id: "unpaid", label: "Не оплачен" },
   { id: "moderation", label: "На модерации" },
   { id: "changes_required", label: "Требуются изменения" },
-  { id: "published", label: "Опубликован" }
+  { id: "approved", label: "Принят" }
 ];
 
 const VERIFICATION_STEPS: ReleaseTimelineStep[] = [
@@ -40,7 +43,7 @@ const VERIFICATION_STEPS: ReleaseTimelineStep[] = [
   { id: "unpaid", label: "Не оплачен" },
   { id: "verification", label: "Подпись на проверке" },
   { id: "moderation", label: "На модерации" },
-  { id: "published", label: "Опубликован" }
+  { id: "approved", label: "Принят" }
 ];
 
 function withPaymentLabel(steps: ReleaseTimelineStep[], paid: boolean): ReleaseTimelineStep[] {
@@ -59,6 +62,15 @@ export function getReleaseTimelineState(
   releaseStatus: CabinetReleaseStatus,
   paid: boolean
 ): ReleaseTimelineState {
+  if (releaseStatus === "dsp_confirmed") {
+    const steps = withPaymentLabel(BASE_STEPS, paid);
+    return {
+      steps,
+      currentStep: "approved",
+      activeIndex: indexOfStep(steps, "approved"),
+      showPayButton: false
+    };
+  }
   if (releaseStatus === "draft") {
     const steps = withPaymentLabel(BASE_STEPS, paid);
     return {
@@ -114,11 +126,15 @@ export function getReleaseTimelineState(
     releaseStatus === "distributed" ||
     releaseStatus === "archived"
   ) {
-    const steps = withPaymentLabel(BASE_STEPS, paid);
+    const steps = withPaymentLabel(BASE_STEPS, paid).map((step): ReleaseTimelineStep =>
+      step.id === "approved" && releaseStatus !== "approved"
+        ? { id: releaseStatus, label: releaseStatus === "archived" ? "Архив" : "На дистрибуции" }
+        : step
+    );
     return {
       steps,
-      currentStep: "published",
-      activeIndex: indexOfStep(steps, "published"),
+      currentStep: releaseStatus,
+      activeIndex: indexOfStep(steps, releaseStatus),
       showPayButton: false
     };
   }

@@ -3,6 +3,8 @@
 
 # next.js
 /.next/
+/.next.stale-*/
+/.next-e2e/
 /out/
 
 # production
@@ -28,3 +30,8 @@ pnpm-debug.log*
 prisma/dev.db
 prisma/dev.db-journal
 .tmp/
+
+# Playwright runtime artifacts and authenticated browser state
+/test-results/
+/playwright-report/
+/blob-report/

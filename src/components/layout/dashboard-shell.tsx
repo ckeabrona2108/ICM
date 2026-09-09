@@ -10,7 +10,7 @@ export function DashboardShell({
   className?: string;
   children: React.ReactNode;
 }) {
-  return <div className={cn("perf-content-auto pb-12", className)}>{children}</div>;
+  return <div className={cn("perf-content-auto space-y-6 pb-10", className)}>{children}</div>;
 }
 
 export function PageSection({
@@ -23,7 +23,7 @@ export function PageSection({
   return (
     <section
       className={cn(
-        "perf-content-auto perf-paint-contain rounded-2xl border border-white/[0.08] bg-[#13151d]/92 p-4 shadow-[0_8px_24px_-20px_rgba(11,14,24,0.76)] backdrop-blur-[2px] sm:p-5",
+        "ux-surface perf-content-auto perf-paint-contain rounded-[28px] p-5 sm:p-6",
         className
       )}
     >
@@ -54,15 +54,15 @@ export function DashboardEmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/[0.12] bg-white/[0.02] py-20 text-center",
+        "ux-empty flex flex-col items-center justify-center gap-3 rounded-[28px] border-dashed py-16 text-center",
         className
       )}
     >
-      <span className="grid h-12 w-12 place-items-center rounded-full bg-white/[0.06] text-white/55">
+      <span className="ux-surface-soft grid h-12 w-12 place-items-center rounded-full text-white/55">
         <Inbox className="h-5 w-5" />
       </span>
-      <h3 className="text-[18px] font-semibold text-white">{title}</h3>
-      <p className="max-w-md text-[15px] font-medium text-white/68">{description}</p>
+      <h3 className="text-[20px] font-semibold text-white">{title}</h3>
+      <p className="max-w-md text-[15px] font-medium leading-6 text-white/62">{description}</p>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import bcrypt from "bcryptjs";
 
 const scrypt = promisify(scryptCallback);
 const KEY_LENGTH = 64;
@@ -11,8 +12,12 @@ export async function hashPassword(password: string): Promise<string> {
 }
 
 export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (/^\$2[aby]\$/u.test(storedHash)) {
+    return bcrypt.compare(password, storedHash);
+  }
+
   if (!storedHash.startsWith("scrypt$")) {
-    return password === storedHash;
+    return false;
   }
 
   const [algorithm, salt, hashHex] = storedHash.split("$");

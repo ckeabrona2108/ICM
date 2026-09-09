@@ -19,7 +19,16 @@ const decisionSchema = z.object({
   releaseId: z.string().trim().min(1),
   action: z.enum(["approve", "request_changes", "reject"]),
   upc: z.string().trim().optional(),
-  comment: z.string().trim().optional()
+  comment: z.string().trim().optional(),
+  remarks: z
+    .array(
+      z.object({
+        field: z.string().trim().min(1),
+        message: z.string().trim().min(1),
+        section: z.string().trim().optional()
+      })
+    )
+    .optional()
 });
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -37,6 +46,8 @@ function resetNeedsChangesFlags(roles: unknown): Record<string, unknown> | null 
   next.rejectionReason = null;
   next.moderationComment = null;
   next.moderatorComment = null;
+  next.moderationRemarks = null;
+  next.moderationReturnedAt = null;
   next.lifecycleState = "approved";
   delete next.submittedToModeration;
   const submission = asRecord(next.submissionData);
@@ -49,6 +60,8 @@ function resetNeedsChangesFlags(roles: unknown): Record<string, unknown> | null 
       rejectionReason: null,
       moderationComment: null,
       moderatorComment: null,
+      moderationRemarks: null,
+      moderationReturnedAt: null,
       lifecycleState: "approved"
     };
     delete (next.submissionData as Record<string, unknown>).submittedToModeration;
@@ -118,8 +131,8 @@ export async function POST(request: Request) {
       userId: release.userId,
       kind: "release_approved",
       title: "Релиз принят",
-      message: `Релиз «${release.title ?? "Без названия"}» принят и доступен в каталоге.`,
-      href: "/dashboard/releases",
+      message: `Релиз «${release.title ?? "Без названия"}» принят. Загрузите 30-секундный фрагмент, чтобы попасть на витрину.`,
+      href: `/dashboard/showcase?releaseId=${encodeURIComponent(release.id)}`,
       resetReadState: true
     });
 
@@ -133,6 +146,7 @@ export async function POST(request: Request) {
   }
 
   const comment = parsed.data.comment?.trim() || null;
+  const remarks = parsed.data.remarks?.length ? parsed.data.remarks : undefined;
   if (!canRejectRelease(release.status, release.roles)) {
     return NextResponse.json(
       { error: "Отклонение доступно только для релизов на модерации." },
@@ -142,6 +156,8 @@ export async function POST(request: Request) {
   if (!comment) {
     return NextResponse.json({ error: "Причина отклонения обязательна." }, { status: 400 });
   }
+  const moderationReturnedAt = new Date();
+  const moderationReturnedAtIso = moderationReturnedAt.toISOString();
 
   await prisma.release.update({
     where: { id: release.id },
@@ -151,7 +167,12 @@ export async function POST(request: Request) {
       moderatorComment: comment,
       roles: withAdminReleaseChangesRequiredState(
         release.roles,
-        comment
+        comment,
+        {
+          remarks,
+          action: parsed.data.action,
+          returnedAt: moderationReturnedAtIso
+        }
       ) as Prisma.InputJsonValue
     }
   });
@@ -175,7 +196,8 @@ export async function POST(request: Request) {
     message:
       parsed.data.action === "reject"
         ? "Релиз отклонён."
-        : "Релиз отправлен на доработку."
+        : "Релиз отправлен на доработку.",
+    remarks
   };
   return NextResponse.json(response, { status: 200 });
 }

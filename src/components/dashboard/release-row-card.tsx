@@ -3,11 +3,12 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
-  ClipboardList,
   Diamond,
   ExternalLink,
+  Loader2,
   Pause,
   Pencil,
   Play,
@@ -44,6 +45,8 @@ interface ReleaseRowCardProps {
   showNumber?: boolean;
   showPay?: boolean;
   allowDraftDelete?: boolean;
+  onDraftDeleted?: (releaseId: string, draftsCount?: number) => void;
+  onReleaseRemoved?: (releaseId: string) => void;
 }
 
 interface SubmissionTrackPersonLike {
@@ -191,7 +194,9 @@ function ReleaseRowCardBase({
   variant = "default",
   showNumber = false,
   showPay = true,
-  allowDraftDelete = false
+  allowDraftDelete = false,
+  onDraftDeleted,
+  onReleaseRemoved
 }: ReleaseRowCardProps) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -201,19 +206,25 @@ function ReleaseRowCardBase({
     Record<number, TrackQuickPreviewData | null>
   >({});
   const [deleting, setDeleting] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
+  const [deleteComment, setDeleteComment] = React.useState("");
   const [paying, setPaying] = React.useState(false);
   const [payError, setPayError] = React.useState<string | null>(null);
   const [coverBroken, setCoverBroken] = React.useState(false);
+  const primaryCoverCandidate =
+    release.coverUrlCandidates?.find((candidate) => candidate.trim().length > 0) ?? "";
+  const coverSource = release.coverUrl || primaryCoverCandidate || release.cover || "";
   const timelineState = getReleaseTimelineState(release.status, release.paid);
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
   const showPendingVerificationNotice = release.status === "pending_verification";
   const editLocked = release.status === "moderation";
-  const showHistoryIcon = release.status !== "draft";
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
+  const canRequestReleaseDeletion = release.status !== "draft";
   const activeCoverSrc = !coverBroken
-    ? resolveRenderableStoredFileUrl({ url: release.coverUrl || release.cover || "", storageKey: null })
+    ? resolveRenderableStoredFileUrl({ url: coverSource, storageKey: null })
     : null;
   const title = release.title?.trim() || "Без названия";
   const artist = release.artist?.trim() || "Исполнитель не указан";
@@ -305,8 +316,6 @@ function ReleaseRowCardBase({
 
   const handleDeleteDraft = React.useCallback(async () => {
     if (release.status !== "draft") return;
-    const confirmDelete = window.confirm("Удалить этот черновик без возможности восстановления?");
-    if (!confirmDelete) return;
 
     setDeleting(true);
     setDeleteError(null);
@@ -320,6 +329,21 @@ function ReleaseRowCardBase({
         | null;
 
       if (!response.ok) {
+        const isAlreadyDeleted =
+          response.status === 404 &&
+          parsed &&
+          typeof parsed === "object" &&
+          "error" in parsed &&
+          typeof parsed.error === "string" &&
+          /релиз не найден/i.test(parsed.error);
+
+        if (isAlreadyDeleted) {
+          setDeleteDialogOpen(false);
+          onDraftDeleted?.(release.id);
+          window.dispatchEvent(new CustomEvent("dashboard:release-counts-refresh"));
+          return;
+        }
+
         const errors =
           parsed &&
           typeof parsed === "object" &&
@@ -347,9 +371,12 @@ function ReleaseRowCardBase({
             detail: { draftsCount: parsed.draftsCount }
           })
         );
+        onDraftDeleted?.(release.id, parsed.draftsCount);
+      } else {
+        onDraftDeleted?.(release.id);
       }
+      setDeleteDialogOpen(false);
       window.dispatchEvent(new CustomEvent("dashboard:release-counts-refresh"));
-      router.refresh();
     } catch (error) {
       setDeleteError(
         error instanceof Error ? error.message : "Не удалось удалить черновик."
@@ -357,10 +384,51 @@ function ReleaseRowCardBase({
     } finally {
       setDeleting(false);
     }
-  }, [release.id, release.status, router]);
+  }, [onDraftDeleted, release.id, release.status]);
+
+  const handleRequestReleaseDeletion = React.useCallback(async () => {
+    if (!canRequestReleaseDeletion) return;
+
+    const comment = deleteComment.trim();
+    if (!comment) {
+      setDeleteError("Укажите причину снятия релиза с площадок.");
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/releases/${release.id}/delete-request`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ comment })
+      });
+      const parsed = (await response.json().catch(() => null)) as
+        | { error?: string; message?: string }
+        | null;
+
+      if (!response.ok) {
+        throw new Error(parsed?.error ?? "Не удалось отправить запрос на удаление релиза.");
+      }
+
+      setDeleteDialogOpen(false);
+      setDeleteComment("");
+      onReleaseRemoved?.(release.id);
+      window.dispatchEvent(new CustomEvent("dashboard:release-counts-refresh"));
+    } catch (error) {
+      setDeleteError(
+        error instanceof Error ? error.message : "Не удалось отправить запрос на удаление релиза."
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }, [canRequestReleaseDeletion, deleteComment, onReleaseRemoved, release.id]);
 
   const openDraftForEditing = () => {
-    if (!isDraftCardClickable) return;
+    if (!isDraftCardClickable || editing) return;
+    setEditing(true);
     router.push(`/dashboard/releases/${release.id}/edit`);
   };
 
@@ -488,17 +556,18 @@ function ReleaseRowCardBase({
           ) : (
             <ActionLink
               href={`/dashboard/releases/${release.id}/edit`}
-              ariaLabel="Редактировать копию"
-              title="Редактировать: копия в черновиках, затем на модерацию"
+              ariaLabel={editing ? "Открываем редактор" : "Редактировать копию"}
+              disabled={editing}
+              title={editing ? "Открываем редактор..." : "Редактировать: копия в черновиках, затем на модерацию"}
+              onClick={() => setEditing(true)}
             >
-              <Pencil className="h-3 w-3" strokeWidth={2} />
+              {editing ? (
+                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+              ) : (
+                <Pencil className="h-3 w-3" strokeWidth={2} />
+              )}
             </ActionLink>
           )}
-          {showHistoryIcon ? (
-            <ActionIcon ariaLabel="История модерации">
-              <ClipboardList className="h-3 w-3" strokeWidth={2} />
-            </ActionIcon>
-          ) : null}
           {release.status === "draft" && allowDraftDelete ? (
             <ActionIcon
               ariaLabel="Удалить"
@@ -506,10 +575,35 @@ function ReleaseRowCardBase({
               disabled={deleting}
               title={deleting ? "Удаляем черновик..." : "Удалить черновик"}
               onClick={() => {
-                void handleDeleteDraft();
+                setDeleteError(null);
+                setDeleteComment("");
+                setDeleteDialogOpen(true);
               }}
             >
-              <Trash2 className="h-3 w-3" strokeWidth={2} />
+              {deleting ? (
+                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+              ) : (
+                <Trash2 className="h-3 w-3" strokeWidth={2} />
+              )}
+            </ActionIcon>
+          ) : null}
+          {canRequestReleaseDeletion ? (
+            <ActionIcon
+              ariaLabel="Удалить релиз"
+              danger
+              disabled={deleting}
+              title={deleting ? "Отправляем запрос..." : "Удалить релиз с площадок"}
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteComment("");
+                setDeleteDialogOpen(true);
+              }}
+            >
+              {deleting ? (
+                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+              ) : (
+                <Trash2 className="h-3 w-3" strokeWidth={2} />
+              )}
             </ActionIcon>
           ) : null}
         </div>
@@ -752,6 +846,27 @@ function ReleaseRowCardBase({
         </AnimatePresence>
       </div>
 
+      <ReleaseDeleteDialog
+        open={deleteDialogOpen}
+        title={title}
+        status={release.status}
+        deleting={deleting}
+        error={deleteError}
+        comment={deleteComment}
+        onCommentChange={setDeleteComment}
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setDeleteComment("");
+        }}
+        onConfirm={() => {
+          if (release.status === "draft") {
+            void handleDeleteDraft();
+            return;
+          }
+          void handleRequestReleaseDeletion();
+        }}
+      />
+
       <AnimatePresence>
         {isQuickPreviewOpen ? (
           <>
@@ -904,13 +1019,17 @@ function MetaField({ label, value }: { label: string; value: React.ReactNode }) 
 function ActionLink({
   href,
   ariaLabel,
+  disabled,
   external,
+  onClick,
   title,
   children
 }: {
   href: string;
   ariaLabel: string;
+  disabled?: boolean;
   external?: boolean;
+  onClick?: () => void;
   title?: string;
   children: React.ReactNode;
 }) {
@@ -918,11 +1037,23 @@ function ActionLink({
     <Link
       href={href}
       aria-label={ariaLabel}
+      aria-disabled={disabled}
       title={title}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (disabled) {
+          event.preventDefault();
+          return;
+        }
+        onClick?.();
+      }}
       {...(external
         ? { target: "_blank", rel: "noopener noreferrer" }
         : {})}
-      className="grid h-8 w-8 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all hover:border-white/[0.20] hover:bg-white/[0.05] hover:text-white/95"
+      className={cn(
+        "grid h-8 w-8 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all hover:border-white/[0.20] hover:bg-white/[0.05] hover:text-white/95",
+        disabled && "pointer-events-none cursor-not-allowed opacity-70"
+      )}
     >
       {children}
     </Link>
@@ -950,7 +1081,11 @@ function ActionIcon({
       aria-label={ariaLabel}
       title={title}
       disabled={disabled}
-      onClick={onClick}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick?.();
+      }}
       className={cn(
         "grid h-8 w-8 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all",
         disabled && "cursor-not-allowed opacity-50",
@@ -961,6 +1096,143 @@ function ActionIcon({
     >
       {children}
     </button>
+  );
+}
+
+function ReleaseDeleteDialog({
+  open,
+  title,
+  status,
+  deleting,
+  error,
+  comment,
+  onCommentChange,
+  onClose,
+  onConfirm
+}: {
+  open: boolean;
+  title: string;
+  status: CabinetRelease["status"];
+  deleting: boolean;
+  error: string | null;
+  comment: string;
+  onCommentChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const [mounted, setMounted] = React.useState(false);
+  const commentRequired = status !== "draft";
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <AnimatePresence>
+      {open ? (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-[110] bg-black/65 backdrop-blur-[2px]"
+            onClick={() => {
+              if (deleting) return;
+              onClose();
+            }}
+          />
+          <div className="fixed inset-0 z-[120] grid place-items-center p-4">
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 8 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="w-[min(92vw,560px)] rounded-[28px] border border-white/10 bg-[#121521] p-6 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-[30px] font-semibold tracking-[-0.03em] text-white">
+                    {status === "draft" ? "Удалить черновик" : "Удалить релиз с площадок?"}
+                  </h3>
+                  <p className="mt-5 text-[15px] leading-8 text-white/78">
+                    {status === "draft"
+                      ? `Вы уверены, что хотите удалить черновик альбома «${title}» навсегда? Вы не сможете отменить это действие.`
+                      : `Вы уверены, что хотите удалить релиз «${title}» с площадок? Удаление может занять до 72 часов.`}
+                  </p>
+                  {status === "draft" ? (
+                    <p className="mt-5 text-[15px] leading-8 text-white/62">
+                      Не беспокойтесь, удаление черновика не исключит релиз из вашего каталога.
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={onClose}
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-white/10 bg-white/[0.03] text-white/55 transition hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {commentRequired ? (
+                <label className="mt-6 block">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/55">
+                    Причина удаления
+                  </span>
+                  <textarea
+                    value={comment}
+                    disabled={deleting}
+                    onChange={(event) => onCommentChange(event.target.value)}
+                    maxLength={1000}
+                    rows={4}
+                    placeholder="Укажите причину снятия релиза с площадок."
+                    className="mt-3 min-h-[112px] w-full resize-none rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-[15px] leading-6 text-white outline-none transition placeholder:text-white/35 focus:border-[#8b6cff]/55 focus:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+              ) : null}
+
+              {error ? (
+                <p className="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/[0.08] px-4 py-3 text-[13px] font-medium text-rose-200">
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="mt-8 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={onClose}
+                  className="inline-flex h-14 items-center justify-center rounded-2xl border border-[#6ce5ff]/35 px-8 text-[16px] font-semibold text-[#8deeff] transition hover:bg-[#6ce5ff]/8 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Отменить
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting || (commentRequired && !comment.trim())}
+                  onClick={onConfirm}
+                  className="inline-flex h-14 min-w-[164px] items-center justify-center rounded-2xl bg-[#ff4d5f] px-8 text-[16px] font-semibold text-white transition hover:bg-[#ff6171] disabled:cursor-not-allowed disabled:bg-[#ff4d5f]/70"
+                >
+                  {deleting ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : status === "draft" ? (
+                    "Удалить"
+                  ) : (
+                    "Удалить с площадок"
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        </>
+      ) : null}
+    </AnimatePresence>,
+    document.body
   );
 }
 

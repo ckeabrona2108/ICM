@@ -8,6 +8,7 @@ import {
 import { getAiStudioModelCatalog } from "@/lib/ai-studio-model-service";
 import { getAiChatThread, listAiChatThreads } from "@/lib/ai-chat-service";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
+import { getUserBalanceTotals } from "@/lib/finance-service";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { resolveStoredFileUrl } from "@/lib/s3";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
@@ -93,7 +94,7 @@ export async function getAiStudioPageData(
   const shouldLoadUploads = activeTab === "uploads";
   const shouldLoadChats = activeTab === "chat";
 
-  const [user, history, uploads, modelCatalog, chatThreads] = await Promise.all([
+  const [user, history, uploads, modelCatalog, chatThreads, balanceTotals] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: hasAiTokenBalanceColumn
@@ -160,7 +161,19 @@ export async function getAiStudioPageData(
       ["ai_uploads"]
     ),
     getAiStudioModelCatalog(),
-    shouldLoadChats ? listAiChatThreads(prisma, userId) : Promise.resolve([])
+    shouldLoadChats ? listAiChatThreads(prisma, userId) : Promise.resolve([]),
+    getUserBalanceTotals(prisma, userId).catch((error) => {
+      if (
+        isAnyPrismaTableMissingError(error, [
+          "FinanceReport",
+          "PayoutRequest",
+          "Transaction"
+        ])
+      ) {
+        return null;
+      }
+      throw error;
+    })
   ]);
 
   const activeChatThreadId =
@@ -195,7 +208,7 @@ export async function getAiStudioPageData(
     aiStudioStatus,
     aiTokenBalance,
     pendingAiTokenBalance,
-    royaltyBalance: user.balance,
+    royaltyBalance: balanceTotals?.availableToWithdraw ?? Number(user.balance ?? 0),
     entitlements,
     initialModelCatalog: modelCatalog,
     chatThreads,

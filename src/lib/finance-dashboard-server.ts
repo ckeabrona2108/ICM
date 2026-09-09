@@ -2,7 +2,6 @@
 import { prisma } from "@/lib/prisma";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { getUserBalanceTotals } from "@/lib/finance-service";
-import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { listUserReports } from "@/lib/report-service";
 
 export interface FinanceTransactionView {
@@ -130,12 +129,13 @@ export async function getFinanceDashboardViewData(
   const monthBuckets = buildRecentMonthBuckets(6);
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
-  const reportsRaw = await listUserReports(prisma, userId);
+  const reportsRaw = await listUserReports(prisma, userId, { strict: true });
   const totals = await getUserBalanceTotals(prisma, userId);
 
-  try {
-    balanceTransactionsRaw = balanceTransactionsRepo
-      ? await balanceTransactionsRepo.findMany({
+  if (!balanceTransactionsRepo || !royaltyTransactionsRepo?.aggregate) {
+    throw new Error("Финансовые данные временно недоступны.");
+  }
+  balanceTransactionsRaw = await balanceTransactionsRepo.findMany({
           where: { user_id: userId },
           orderBy: { created_at: "desc" },
           take: 20,
@@ -163,32 +163,11 @@ export async function getFinanceDashboardViewData(
               }
             }
           }
-        })
-      : [];
-  } catch (error) {
-    if (!isAnyPrismaTableMissingError(error, ["balance_transactions"])) {
-      throw error;
-    }
-    balanceTransactionsRaw = [];
-  }
-
-  try {
-    commissionTotalRaw =
-      royaltyTransactionsRepo && typeof royaltyTransactionsRepo.aggregate === "function"
-        ? await royaltyTransactionsRepo.aggregate({
-            where: {
-              user_id: userId,
-              reversed_at: null
-            },
-            _sum: { platform_commission_amount: true }
-          })
-        : { _sum: { platform_commission_amount: 0 } };
-  } catch (error) {
-    if (!isAnyPrismaTableMissingError(error, ["royalty_transactions"])) {
-      throw error;
-    }
-    commissionTotalRaw = { _sum: { platform_commission_amount: 0 } };
-  }
+        });
+  commissionTotalRaw = await royaltyTransactionsRepo.aggregate({
+    where: { user_id: userId, reversed_at: null },
+    _sum: { platform_commission_amount: true }
+  });
 
   const reports: FinanceReportClientItem[] = reportsRaw.map((report) => ({
     id: report.id,

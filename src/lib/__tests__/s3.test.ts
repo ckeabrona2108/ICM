@@ -88,7 +88,7 @@ test("allowed S3 helpers accept configured prefixes and case-insensitive media e
   assert.equal(isAllowedImageFile("contracts/previews/release-cover.JPEG"), true);
   assert.equal(isAllowedImageFile("contracts/previews/release-cover.gif"), false);
   assert.equal(isAllowedAudioFile("contracts/uploads/track-1.WAV"), true);
-  assert.equal(isAllowedAudioFile("contracts/uploads/track-1.mp3"), false);
+  assert.equal(isAllowedAudioFile("contracts/uploads/track-1.mp3"), true);
   assert.equal(isAllowedMediaFile("covers/release-cover.PNG"), true);
   assert.equal(isAllowedMediaFile("uploads/track-1.txt"), false);
 });
@@ -103,7 +103,7 @@ test("media extension and basename helpers normalize nested keys", () => {
     "1780941267894-release-cover"
   );
   assert.equal(isAllowedMediaExtension("contracts/uploads/track-1.WAV"), true);
-  assert.equal(isAllowedMediaExtension("contracts/uploads/track-1.mp3"), false);
+  assert.equal(isAllowedMediaExtension("contracts/uploads/track-1.mp3"), true);
 });
 
 test("classifyStorageProbe treats 403 as access denied unless head proves missing", () => {

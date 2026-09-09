@@ -23,3 +23,12 @@ test("draft release has dedicated badge", () => {
   assert.equal(badge?.label, "Черновик");
   assert.equal(badge?.variant, "warning");
 });
+
+test("delivery status does not claim publication without a DSP receipt", () => {
+  assert.equal(getReleaseStatusDescriptor("distributed")?.label, "На дистрибуции");
+});
+
+test("DSP-confirmed lifecycle is still shown to users as accepted", () => {
+  assert.equal(getReleaseStatusDescriptor("dsp_confirmed")?.label, "Принят");
+  assert.equal(getReleaseStatusDescriptor("published")?.label, "Принят");
+});

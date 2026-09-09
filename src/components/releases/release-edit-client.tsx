@@ -13,6 +13,7 @@ import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapCabinetReleaseToWizardSeed } from "@/lib/map-cabinet-to-wizard-seed";
 import { canEditRelease } from "@/lib/release-policy";
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
+import { ReleaseChangesNotice } from "@/components/dashboard/release-changes-notice";
 
 export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
   const seed = React.useMemo(() => mapCabinetReleaseToWizardSeed(release), [release]);
@@ -26,6 +27,8 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
       : release.status;
   const isDraftRelease = effectiveStatus === "draft";
   const willResubmitToModeration = shouldResubmitEditedRelease(effectiveStatus);
+  const showModerationContext =
+    effectiveStatus === "changes_required" || effectiveStatus === "rejected";
 
   const editPermission = React.useMemo(
     () =>
@@ -37,6 +40,8 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
           }),
     [cancelledModeration, release.moderationStarted, release.status]
   );
+  const createsModerationCopy = Boolean(editPermission.createsModerationCopy);
+  const submissionMode = createsModerationCopy ? "new" : "edit";
 
   const cancelModeration = React.useCallback(async () => {
     setCancellingModeration(true);
@@ -136,44 +141,36 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
 
   return (
     <div className="pb-12">
-      {release.status === "rejected" ? (
-        <div className="mb-5 rounded-xl border border-rose-500/25 bg-rose-500/[0.10] px-4 py-3 text-[12.5px] leading-relaxed text-rose-100/95">
-          <p className="font-medium">Релиз отклонён</p>
-          <p className="mt-1">
-            Причина: {release.rejectionReason || "Причина не указана модератором."}
+      {showModerationContext ? (
+        <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.28em] text-amber-100/65">
+            Контекст модерации
           </p>
-        </div>
-      ) : null}
-      {release.status === "changes_required" && release.rejectionReason ? (
-        <div className="mb-5 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-4 py-3 text-[12.5px] leading-relaxed text-amber-100/95">
-          <p className="font-medium">Релиз требует изменений</p>
-          <p className="mt-1">Причина: {release.rejectionReason}</p>
-        </div>
-      ) : null}
-
-      {(release.status === "changes_required" || release.status === "rejected") &&
-      release.moderationRemarks?.length ? (
-        <div className="mb-5 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-4 py-3 text-[12.5px] leading-relaxed text-amber-100/95">
-          <p className="font-medium">Замечания модератора</p>
-          {release.moderationReturnedAt ? (
-            <p className="mt-1 text-amber-100/75">Возврат: {release.moderationReturnedAt}</p>
+          <ReleaseChangesNotice
+            status={effectiveStatus === "rejected" ? "rejected" : "changes_required"}
+            reason={release.rejectionReason || "Причина не указана модератором."}
+            remarks={release.moderationRemarks ?? []}
+            returnedAt={release.moderationReturnedAt}
+          />
+          {willResubmitToModeration ? (
+            <p className="mt-3 text-[12.5px] leading-relaxed text-amber-100/82">
+              После правок релиз снова уйдёт на модерацию. Замечания модератора сохранены по
+              секциям, поэтому можно исправлять форму без потери контекста.
+            </p>
           ) : null}
-          <ul className="mt-2 space-y-1 text-amber-100/85">
-            {release.moderationRemarks.map((remark, index) => (
-              <li key={`${remark.field}-${index}`}>
-                • {remark.section ? `${remark.section}: ` : ""}
-                {remark.message}
-              </li>
-            ))}
-          </ul>
         </div>
-      ) : null}
-
-      {!isDraftRelease && willResubmitToModeration ? (
+      ) : !isDraftRelease && willResubmitToModeration ? (
         <div className="mb-5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 text-[12.5px] leading-relaxed text-amber-100/90">
           <p>
             После редактирования релиз будет повторно отправлен на модерацию. Пока проверка не
             завершена, итоговые изменения в каталоге считаются черновыми.
+          </p>
+        </div>
+      ) : createsModerationCopy ? (
+        <div className="mb-5 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] px-4 py-3 text-[12.5px] leading-relaxed text-sky-100/90">
+          <p>
+            Вы редактируете копию принятого релиза. Изменения будут сохранены как новый черновик и
+            после отправки снова попадут на модерацию. Для копии нужен новый UPC; UPC исходного релиза не переносится.
           </p>
         </div>
       ) : null}
@@ -181,10 +178,10 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
       <ReleaseWizard
         key={`release-wizard-edit-${release.id}`}
         seed={seed}
-        submissionMode="edit"
-        pageTitle={isDraftRelease ? "Новый релиз" : "Редактирование релиза"}
-        sourceReleaseId={release.id}
-        currentStatus={effectiveStatus}
+        submissionMode={submissionMode}
+        pageTitle={isDraftRelease || createsModerationCopy ? "Новый релиз" : "Редактирование релиза"}
+        sourceReleaseId={submissionMode === "edit" ? release.id : undefined}
+        currentStatus={submissionMode === "edit" ? effectiveStatus : undefined}
         moderationStarted={cancelledModeration ? false : release.moderationStarted}
       />
     </div>

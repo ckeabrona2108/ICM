@@ -1,9 +1,10 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
 import { buildStoredFileRouteUrl } from "@/lib/file-resolver";
 import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import { retryPrismaSerializationConflict } from "@/lib/prisma-errors";
 import {
   getSmartLinkPlatformLabel,
   SMART_LINK_PRIMARY_PLATFORM_CODES,
@@ -247,6 +248,10 @@ function slugify(input: string): string {
 
 function unique<T>(items: T[]): T[] {
   return Array.from(new Set(items));
+}
+
+function isUuidLike(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.trim());
 }
 
 function getBaseUrl(): string {
@@ -1108,7 +1113,7 @@ async function getPromoLinkBySlugWithFallback(slug: string) {
       continue;
     }
 
-    const promoLinkByRelease = await getPromoLinkByReleaseId(release.id);
+    const promoLinkByRelease = await getPromoLinkByReleaseIdWithRelease(release.id);
     if (promoLinkByRelease) {
       if (promoLinkByRelease.shortName === slug) {
         return await getPromoLinkBySlug(slug);
@@ -1124,7 +1129,9 @@ async function getPromoLinkBySlugWithFallback(slug: string) {
         }
       });
     } catch {
-      return getPromoLinkBySlug(slug);
+      const existingForRelease = await getPromoLinkByReleaseIdWithRelease(release.id);
+      if (existingForRelease) return existingForRelease;
+      continue;
     }
 
     return getPromoLinkBySlug(slug);
@@ -1134,11 +1141,76 @@ async function getPromoLinkBySlugWithFallback(slug: string) {
 }
 
 async function getPromoLinkByReleaseId(releaseId: string) {
+  if (!isUuidLike(releaseId)) return null;
   return prisma.promo_links.findFirst({
     where: {
       releaseId
     }
   });
+}
+
+async function getPromoLinkByReleaseIdWithRelease(releaseId: string) {
+  if (!isUuidLike(releaseId)) return null;
+  return prisma.promo_links.findFirst({
+    where: {
+      releaseId
+    },
+    include: {
+      release: {
+        include: {
+          user: {
+            select: {
+              name: true,
+              telegram: true,
+              vk: true,
+              personalSiteUrl: true
+            }
+          },
+          track: {
+            select: {
+              explicit: true
+            },
+            orderBy: {
+              index: "asc"
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+export async function getReleasePublicListenSummary(releaseId: string): Promise<{
+  publicSlug: string;
+  publicUrl: string;
+  coverUrl: string | null;
+  artist: string;
+  releaseDate: string;
+  platforms: Array<{
+    code: string;
+    label: string;
+    href: string;
+  }>;
+} | null> {
+  if (!isUuidLike(releaseId)) return null;
+  const promoLink = await getPromoLinkByReleaseId(releaseId);
+  if (!promoLink) return null;
+  const publicView = await getSmartLinkPublicView(promoLink.shortName);
+  if (!publicView) return null;
+  return {
+    publicSlug: publicView.publicSlug,
+    publicUrl: publicView.publicUrl,
+    coverUrl: publicView.coverUrl,
+    artist: publicView.artist,
+    releaseDate: publicView.releaseDate,
+    platforms: publicView.platforms
+      .filter((platform) => platform.status === "live" && platform.url)
+      .map((platform) => ({
+        code: platform.code,
+        label: platform.label,
+        href: `${getBaseUrl()}/l/${publicView.publicSlug}/go/${platform.code}`
+      }))
+  };
 }
 
 async function buildUniquePromoSlug(baseSlug: string): Promise<string> {
@@ -1149,6 +1221,27 @@ async function buildUniquePromoSlug(baseSlug: string): Promise<string> {
     counter += 1;
   }
   return candidate;
+}
+
+function isPrismaUniqueConstraintError(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) return error.code === "P2002";
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "P2002");
+}
+
+async function createPromoLink(releaseId: string, baseSlug: string) {
+  for (let suffix = 0; suffix < 100; suffix += 1) {
+    const shortName = suffix === 0 ? baseSlug : `${baseSlug}-${suffix + 1}`;
+    try {
+      return await prisma.promo_links.create({
+        data: { shortName, releaseId }
+      });
+    } catch (error) {
+      if (!isPrismaUniqueConstraintError(error)) throw error;
+      const existing = await getPromoLinkByReleaseId(releaseId);
+      if (existing) return existing;
+    }
+  }
+  throw new Error("SMART_LINK_SLUG_COLLISION");
 }
 
 export async function ensureSmartLinkForRelease(params: {
@@ -1190,12 +1283,7 @@ export async function ensureSmartLinkForRelease(params: {
       roles: release.roles
     });
     const slug = await buildUniquePromoSlug(slugify(`${artist}-${release.title}`));
-    promoLink = await prisma.promo_links.create({
-      data: {
-        shortName: slug,
-        releaseId: release.id
-      }
-    });
+    promoLink = await createPromoLink(release.id, slug);
   }
 
   return buildOwnerViewFromRelease({
@@ -1261,12 +1349,7 @@ export async function getSmartLinksByUser(userId: string): Promise<SmartLinkOwne
         roles: release.roles
       });
       const slug = await buildUniquePromoSlug(slugify(`${artist}-${release.title}`));
-      promoLink = await prisma.promo_links.create({
-        data: {
-          shortName: slug,
-          releaseId: release.id
-        }
-      });
+      promoLink = await createPromoLink(release.id, slug);
     }
 
     items.push(
@@ -1473,66 +1556,55 @@ async function appendSmartLinkAnalyticsEvent(params: {
   event: SmartLinkVisitorEvent;
   platformCode?: string;
 }) {
-  const release = await prisma.release.findUnique({
-    where: {
-      id: params.releaseId
-    },
-    select: {
-      roles: true,
-      user: {
+  await retryPrismaSerializationConflict(() =>
+    prisma.$transaction(async (tx) => {
+      const release = await tx.release.findUnique({
+        where: { id: params.releaseId },
         select: {
-          telegram: true,
-          vk: true,
-          personalSiteUrl: true
+          roles: true,
+          status: true,
+          confirmed: true,
+          upc: true,
+          user: { select: { telegram: true, vk: true, personalSiteUrl: true } }
+        }
+      });
+      if (!release || !shouldTreatReleaseAsApproved(release)) return;
+
+      const state = readSmartLinkState(
+        release.roles,
+        getDefaultFollowLinks(release.user),
+        normalizeSelectedPlatforms(release.roles)
+      );
+      const nextAnalytics = structuredClone(state.analytics) as SmartLinkAnalyticsState;
+      const key = todayKey(new Date(params.event.at));
+      const day = nextAnalytics.daily[key] ?? { views: 0, clicks: 0 };
+      if (params.event.type === "view") {
+        nextAnalytics.totalViews += 1;
+        day.views += 1;
+      } else {
+        nextAnalytics.totalClicks += 1;
+        day.clicks += 1;
+        if (params.platformCode) {
+          nextAnalytics.platformClicks[params.platformCode] =
+            (nextAnalytics.platformClicks[params.platformCode] ?? 0) + 1;
         }
       }
-    }
-  });
-  if (!release) return;
+      nextAnalytics.daily[key] = day;
+      nextAnalytics.sourceClicks[params.event.source] =
+        (nextAnalytics.sourceClicks[params.event.source] ?? 0) + 1;
+      nextAnalytics.countryClicks[params.event.country] =
+        (nextAnalytics.countryClicks[params.event.country] ?? 0) + 1;
+      nextAnalytics.cityClicks[params.event.city] =
+        (nextAnalytics.cityClicks[params.event.city] ?? 0) + 1;
+      nextAnalytics.deviceClicks[params.event.device] += 1;
+      nextAnalytics.recentEvents = [params.event, ...nextAnalytics.recentEvents].slice(0, 25);
 
-  const selectedPlatformCodes = normalizeSelectedPlatforms(release.roles);
-  const state = readSmartLinkState(
-    release.roles,
-    getDefaultFollowLinks(release.user),
-    selectedPlatformCodes
+      await tx.release.update({
+        where: { id: params.releaseId },
+        data: { roles: writeSmartLinkState(release.roles, { ...state, analytics: nextAnalytics }) }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   );
-
-  const nextAnalytics = structuredClone(state.analytics) as SmartLinkAnalyticsState;
-  const key = todayKey(new Date(params.event.at));
-  const day = nextAnalytics.daily[key] ?? { views: 0, clicks: 0 };
-  if (params.event.type === "view") {
-    nextAnalytics.totalViews += 1;
-    day.views += 1;
-  } else {
-    nextAnalytics.totalClicks += 1;
-    day.clicks += 1;
-    if (params.platformCode) {
-      nextAnalytics.platformClicks[params.platformCode] =
-        (nextAnalytics.platformClicks[params.platformCode] ?? 0) + 1;
-    }
-  }
-
-  nextAnalytics.daily[key] = day;
-  nextAnalytics.sourceClicks[params.event.source] =
-    (nextAnalytics.sourceClicks[params.event.source] ?? 0) + 1;
-  nextAnalytics.countryClicks[params.event.country] =
-    (nextAnalytics.countryClicks[params.event.country] ?? 0) + 1;
-  nextAnalytics.cityClicks[params.event.city] =
-    (nextAnalytics.cityClicks[params.event.city] ?? 0) + 1;
-  nextAnalytics.deviceClicks[params.event.device] += 1;
-  nextAnalytics.recentEvents = [params.event, ...nextAnalytics.recentEvents].slice(0, 25);
-
-  await prisma.release.update({
-    where: {
-      id: params.releaseId
-    },
-    data: {
-      roles: writeSmartLinkState(release.roles, {
-        ...state,
-        analytics: nextAnalytics
-      })
-    }
-  });
 }
 
 export async function trackSmartLinkView(params: {
@@ -1572,6 +1644,7 @@ export async function resolveSmartLinkRedirect(params: {
 }): Promise<string | null> {
   const row = await getPromoLinkBySlugWithFallback(params.slug);
   if (!row) return null;
+  if (!shouldTreatReleaseAsApproved(row.release)) return null;
 
   const selectedPlatformCodes = normalizeSelectedPlatforms(row.release.roles);
   const state = readSmartLinkState(

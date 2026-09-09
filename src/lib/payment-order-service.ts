@@ -23,12 +23,16 @@ import {
   buildStandalonePaymentUsage,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
-import {
-  calculateSubscriptionEndDate,
-  normalizeSubscriptionBillingPeriod
-} from "@/lib/subscription-billing";
+import { normalizeSubscriptionBillingPeriod } from "@/lib/subscription-billing";
+import { grantSubscriptionFromConfirmedPayment } from "@/lib/subscription-payment-service";
 import { sendAiTokensCreditedEmail, sendAiTokensPendingEmail } from "@/lib/user-event-email";
-import { getYooKassaPaymentStatus, type YooKassaPaymentStatus } from "@/lib/yookassa";
+import {
+  getYooKassaPayment,
+  getYooKassaPaymentStatus,
+  isConfirmedYooKassaPayment,
+  type YooKassaPaymentDetails,
+  type YooKassaPaymentStatus
+} from "@/lib/yookassa";
 
 type OrderType = "subscription" | "release";
 
@@ -67,6 +71,67 @@ function mapTariffToSubscribeLevel(value: unknown): "standard" | "professional" 
   if (tariff === "enterprise") return "enterprise";
   if (tariff === "pro") return "professional";
   return "standard";
+}
+
+function readProviderPaymentId(metadata: unknown): string | null {
+  const payload = readMetadata(metadata);
+  const providerPaymentId = payload.providerPaymentId;
+  if (typeof providerPaymentId !== "string") return null;
+  const normalized = providerPaymentId.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readExpectedAmountRub(metadata: unknown): number | null {
+  const payload = readMetadata(metadata);
+  const value = payload.amountRub;
+  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value);
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.round(parsed);
+  }
+  return null;
+}
+
+function assertVerifiedPaymentMatchesOrder(params: {
+  orderId: string;
+  metadata: unknown;
+  payment: YooKassaPaymentDetails;
+}) {
+  const storedProviderPaymentId = readProviderPaymentId(params.metadata);
+  if (storedProviderPaymentId && storedProviderPaymentId !== params.payment.providerPaymentId) {
+    throw new Error(`YooKassa payment mismatch for order ${params.orderId}: provider payment id differs.`);
+  }
+
+  const providerOrderId = params.payment.metadata.orderId?.trim();
+  if (providerOrderId && providerOrderId !== params.orderId) {
+    throw new Error(`YooKassa payment mismatch for order ${params.orderId}: provider metadata orderId differs.`);
+  }
+
+  const expectedAmountRub = readExpectedAmountRub(params.metadata);
+  if (expectedAmountRub != null && params.payment.amountRub != null && expectedAmountRub !== params.payment.amountRub) {
+    throw new Error(
+      `YooKassa payment mismatch for order ${params.orderId}: expected ${expectedAmountRub} RUB, received ${params.payment.amountRub} RUB.`
+    );
+  }
+}
+
+async function verifyConfirmedYooKassaPaymentForOrder(params: {
+  orderId: string;
+  metadata: unknown;
+  providerPaymentId?: string | null;
+}): Promise<YooKassaPaymentDetails> {
+  const providerPaymentId = params.providerPaymentId?.trim() || readProviderPaymentId(params.metadata);
+  if (!providerPaymentId) {
+    throw new Error(`Provider payment id is missing for order ${params.orderId}.`);
+  }
+
+  const payment = await getYooKassaPayment(providerPaymentId);
+  assertVerifiedPaymentMatchesOrder({
+    orderId: params.orderId,
+    metadata: params.metadata,
+    payment
+  });
+  return payment;
 }
 
 function readAiTokenPaymentSummary(metadata: unknown): PaymentOrderResult["paymentSummary"] {
@@ -255,7 +320,15 @@ async function applyConfirmedOrder(params: {
     return;
   }
 
-  if (params.order.confirmed) return;
+  if (params.order.confirmed) {
+    await setOrderPaymentStatus({
+      prisma: params.prisma,
+      orderId: params.order.id,
+      status: "completed",
+      completedAt: new Date()
+    });
+    return;
+  }
 
   if (params.order.type === "release") {
     const releaseId = typeof metadata.releaseId === "string" ? metadata.releaseId : null;
@@ -286,105 +359,9 @@ async function applyConfirmedOrder(params: {
   }
 
   if (params.order.type === "subscription") {
-    const now = new Date();
-    const tariffId = typeof metadata.tariffId === "string" ? metadata.tariffId.trim().toLowerCase() : "standard";
-    const billingPeriod = normalizeSubscriptionBillingPeriod(metadata.billingPeriod);
-    const providerPaymentId =
-      typeof metadata.providerPaymentId === "string" ? metadata.providerPaymentId.trim() : "";
-    const currentSubscriptionUser = await params.prisma.user.findFirst({
-      where: { id: params.order.userId },
-      select: { expiresAt: true }
-    });
-    const expiresAt = calculateSubscriptionEndDate({
-      billingPeriod,
-      now,
-      currentEnd: currentSubscriptionUser?.expiresAt ?? null
-    });
-    await params.prisma.user.updateMany({
-      where: { id: params.order.userId },
-      data: {
-        isSubscribed: true,
-        subscribeLevel: mapTariffToSubscribeLevel(tariffId),
-        expiresAt
-      }
-    });
-
-    const aiStudioStatus = await getAiStudioSystemStatus(params.prisma);
-    if (aiStudioStatus === "preparing") {
-      const queued = await params.prisma.$transaction(async (tx) => {
-        const claimed = await transitionOrderPaymentStatus({
-          prisma: tx,
-          orderId: params.order.id,
-          fromStatus: "pending_payment",
-          toStatus: "preparing",
-          completedAt: null
-        });
-        if (!claimed) {
-          return { ok: true as const, skipped: true };
-        }
-
-        const pendingResult = await queueAiTokensForSubscriptionBonus({
-          prisma: tx,
-          userId: params.order.userId,
-          tariffId,
-          billingPeriod
-        });
-        if (!pendingResult.ok) {
-          throw new Error(pendingResult.error);
-        }
-
-        await tx.orders.update({
-          where: { id: params.order.id },
-          data: { confirmed: true }
-        });
-
-        return { ok: true as const, skipped: false };
-      });
-
-      if (queued.skipped) {
-        return;
-      }
-
-      const summary = readSubscriptionPaymentSummary(params.order.metadata);
-      const user = await readOrderUserProfile(params.prisma, params.order.userId);
-      if (summary?.totalTokens) {
-        try {
-          await sendAiTokensPendingEmail({
-            to: user?.email,
-            userName: user?.name,
-            packageName: summary.packageName,
-            totalTokens: summary.totalTokens
-          });
-        } catch (error) {
-          console.error("[ai-token-email] pending subscription notification failed", {
-            orderId: params.order.id,
-            error
-          });
-        }
-      }
-      return;
-    }
-
-    const bonusGrant = await grantAiTokensForSubscriptionBonus({
-      prisma: params.prisma,
-      userId: params.order.userId,
-      tariffId,
-      billingPeriod,
-      providerPaymentId: providerPaymentId || null,
-      orderId: params.order.id
-    });
-    if (!bonusGrant.ok) {
-      throw new Error(bonusGrant.error);
-    }
-
-    await params.prisma.orders.update({
-      where: { id: params.order.id },
-      data: { confirmed: true }
-    });
-    await setOrderPaymentStatus({
+    const result = await grantSubscriptionFromConfirmedPayment({
       prisma: params.prisma,
       orderId: params.order.id,
-      status: "completed",
       completedAt: new Date()
     });
 
@@ -392,17 +369,31 @@ async function applyConfirmedOrder(params: {
     const user = await readOrderUserProfile(params.prisma, params.order.userId);
     if (summary?.totalTokens) {
       try {
-        await sendAiTokensCreditedEmail({
-          to: user?.email,
-          userName: user?.name,
-          packageName: summary.packageName,
-          totalTokens: summary.totalTokens
-        });
+        if (result.paymentStatus === "preparing") {
+          await sendAiTokensPendingEmail({
+            to: user?.email,
+            userName: user?.name,
+            packageName: summary.packageName,
+            totalTokens: summary.totalTokens
+          });
+        } else {
+          await sendAiTokensCreditedEmail({
+            to: user?.email,
+            userName: user?.name,
+            packageName: summary.packageName,
+            totalTokens: summary.totalTokens
+          });
+        }
       } catch (error) {
-        console.error("[ai-token-email] credited subscription notification failed", {
-          orderId: params.order.id,
-          error
-        });
+        console.error(
+          result.paymentStatus === "preparing"
+            ? "[ai-token-email] pending subscription notification failed"
+            : "[ai-token-email] credited subscription notification failed",
+          {
+            orderId: params.order.id,
+            error
+          }
+        );
       }
     }
   }
@@ -581,6 +572,23 @@ export async function applyYooKassaWebhookOrder(params: {
     };
   }
 
+  const verifiedPayment = await verifyConfirmedYooKassaPaymentForOrder({
+    orderId: order.id,
+    metadata: order.metadata,
+    providerPaymentId: params.providerPaymentId
+  });
+
+  if (!isConfirmedYooKassaPayment(verifiedPayment)) {
+    return {
+      ok: true,
+      status: verifiedPayment.status,
+      applied: false,
+      orderId: order.id,
+      paymentSummary,
+      aiStudioStatus: await getAiStudioSystemStatus(params.prisma)
+    };
+  }
+
   if (orderPaymentStatus === "preparing") {
     return {
       ok: true,
@@ -672,25 +680,14 @@ export async function confirmYooKassaOrderAfterReturn(params: {
     };
   }
 
-  const metadata = readMetadata(order.metadata);
-  const providerPaymentId =
-    typeof metadata.providerPaymentId === "string" ? metadata.providerPaymentId.trim() : "";
-  if (!providerPaymentId) {
-    return {
-      ok: false,
-      status: "not_found",
-      applied: false,
-      orderId: order.id,
-      paymentSummary,
-      error: "Provider payment id is missing"
-    };
-  }
-
-  const paymentStatus = await getYooKassaPaymentStatus(providerPaymentId);
-  if (paymentStatus !== "succeeded") {
+  const verifiedPayment = await verifyConfirmedYooKassaPaymentForOrder({
+    orderId: order.id,
+    metadata: order.metadata
+  });
+  if (!isConfirmedYooKassaPayment(verifiedPayment)) {
     return {
       ok: true,
-      status: paymentStatus,
+      status: verifiedPayment.status,
       applied: false,
       orderId: order.id,
       paymentSummary,

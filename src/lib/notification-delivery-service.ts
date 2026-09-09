@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import webpush from "web-push";
 
+import { toNotificationStorageId } from "@/lib/notification-storage-id";
 import { sendDashboardEventEmail } from "@/lib/user-event-email";
 
 export interface UserNotificationEvent {
@@ -11,8 +12,12 @@ export interface UserNotificationEvent {
   message: string;
   href: string;
   sendEmail?: boolean;
+  emailCta?: boolean;
   sendPush?: boolean;
   resetReadState?: boolean;
+  sourceType?: string;
+  sourceId?: string;
+  deliveryKey?: string;
 }
 
 function configureWebPush(): boolean {
@@ -38,18 +43,45 @@ async function sendPushNotifications(prisma: PrismaClient, event: UserNotificati
   });
 
   await Promise.all(subscriptions.map(async (subscription) => {
+    if (event.deliveryKey) {
+      const delivery = await prisma.social_notification_push_deliveries.upsert({
+        where: { outbox_id_endpoint: { outbox_id: event.deliveryKey, endpoint: subscription.endpoint } },
+        create: { outbox_id: event.deliveryKey, endpoint: subscription.endpoint },
+        update: {},
+        select: { id: true, delivered_at: true }
+      });
+      if (delivery.delivered_at) return;
+    }
     try {
       await webpush.sendNotification({
         endpoint: subscription.endpoint,
         keys: { p256dh: subscription.p256dh, auth: subscription.auth }
       }, payload);
+      if (event.deliveryKey) {
+        await prisma.social_notification_push_deliveries.update({
+          where: { outbox_id_endpoint: { outbox_id: event.deliveryKey, endpoint: subscription.endpoint } },
+          data: { delivered_at: new Date(), attempt_count: { increment: 1 }, last_error: null }
+        });
+      }
     } catch (error) {
       const statusCode = (error as { statusCode?: number }).statusCode;
       if (statusCode === 404 || statusCode === 410) {
         await prisma.push_subscriptions.deleteMany({ where: { endpoint: subscription.endpoint } });
+        if (event.deliveryKey) {
+          await prisma.social_notification_push_deliveries.update({
+            where: { outbox_id_endpoint: { outbox_id: event.deliveryKey, endpoint: subscription.endpoint } },
+            data: { delivered_at: new Date(), attempt_count: { increment: 1 }, last_error: `subscription removed (${statusCode})` }
+          });
+        }
         return;
       }
-      console.error("[notification-push] delivery failed", { eventId: event.id, statusCode, error });
+      if (event.deliveryKey) {
+        await prisma.social_notification_push_deliveries.update({
+          where: { outbox_id_endpoint: { outbox_id: event.deliveryKey, endpoint: subscription.endpoint } },
+          data: { attempt_count: { increment: 1 }, last_error: String(error).slice(0, 4_000) }
+        });
+      }
+      throw error;
     }
   }));
 }
@@ -58,16 +90,19 @@ export async function deliverUserNotification(
   prisma: PrismaClient,
   event: UserNotificationEvent
 ): Promise<void> {
+  const storageId = toNotificationStorageId(event.id);
   await prisma.ai_user_notifications.upsert({
-    where: { id: event.id },
+    where: { id: storageId },
     create: {
-      id: event.id,
+      id: storageId,
       user_id: event.userId,
       kind: event.kind,
       title: event.title,
       message: event.message,
       cta_label: "Открыть",
-      cta_href: event.href
+      cta_href: event.href,
+      source_type: event.sourceType ?? null,
+      source_id: event.sourceId ?? null
     },
     update: {
       kind: event.kind,
@@ -75,6 +110,8 @@ export async function deliverUserNotification(
       message: event.message,
       cta_label: "Открыть",
       cta_href: event.href,
+      source_type: event.sourceType ?? null,
+      source_id: event.sourceId ?? null,
       ...(event.resetReadState
         ? { read_at: null, created_at: new Date() }
         : {})
@@ -95,7 +132,8 @@ export async function deliverUserNotification(
       userName: user.name,
       title: event.title,
       message: event.message,
-      href: event.href
+      href: event.href,
+      includeCta: event.emailCta
     }));
   }
   if (event.sendPush !== false) {

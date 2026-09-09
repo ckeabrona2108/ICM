@@ -33,9 +33,24 @@ test("timeline: changes required shows changes step", () => {
   assert.equal(state.showPayButton, false);
 });
 
-test("timeline: approved shows published as current step", () => {
+test("timeline: approved stays accepted until DSP publication confirmation", () => {
   const state = getReleaseTimelineState("approved", true);
-  assert.equal(state.currentStep, "published");
+  assert.equal(state.currentStep, "approved");
   assert.equal(state.activeIndex, state.steps.length - 1);
   assert.equal(state.showPayButton, false);
 });
+
+test("timeline: DSP-confirmed lifecycle is still accepted as the final user step", () => {
+  const state = getReleaseTimelineState("dsp_confirmed", true);
+  assert.equal(state.currentStep, "approved");
+  assert.equal(state.steps[state.activeIndex]?.label, "Принят");
+  assert.equal(state.activeIndex, state.steps.length - 1);
+});
+
+for (const status of ["distributed", "archived"] as const) {
+  test(`timeline: ${status} is not evidence of DSP publication`, () => {
+    const state = getReleaseTimelineState(status, true);
+    assert.equal(state.currentStep, status);
+    assert.equal(state.steps.some((step) => step.label === "Опубликован"), false);
+  });
+}

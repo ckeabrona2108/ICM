@@ -9,6 +9,7 @@ import { ProfileBalanceCards } from "@/components/user/profile-balance-cards";
 import { UserProfileForm } from "@/components/user/user-profile-form";
 import { authOptions } from "@/lib/auth";
 import { getUserContractStatus } from "@/lib/contract-verification";
+import { getUserBalanceTotals } from "@/lib/finance-service";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { prisma } from "@/lib/prisma";
 import {
@@ -82,7 +83,7 @@ export default async function ProfilePage() {
 
   const hasAiTokenBalanceColumn = await hasUserAiTokenBalanceColumn(prisma);
 
-  const [contractStatus, subscriptionUser, subscriptionOrders] = await Promise.all([
+  const [contractStatus, subscriptionUser, subscriptionOrders, balanceTotals] = await Promise.all([
     getUserContractStatus({
       prisma,
       userId: session.user.id
@@ -117,7 +118,13 @@ export default async function ProfilePage() {
       },
       orderBy: { createdAt: "desc" },
       take: 20
-    })
+    }),
+    getUserBalanceTotals(prisma, session.user.id)
+      .then((value) => ({ value, error: null as string | null }))
+      .catch(() => ({
+        value: null,
+        error: "Баланс роялти временно недоступен. Повторите загрузку страницы."
+      }))
   ]);
 
   const purchases: SubscriptionPurchaseRow[] = subscriptionOrders.map((order) => {
@@ -168,11 +175,12 @@ export default async function ProfilePage() {
   return (
     <DashboardShell>
       <PageHeader
-        title="Персональные данные"
-        description="Изменяйте имя, email и аватар. Обновления применяются во всех разделах кабинета."
+        title="Настройки профиля"
+        description="Управляйте личными данными, балансом и историей подписок в едином dashboard-интерфейсе."
       />
       <ProfileBalanceCards
-        royaltyBalance={subscriptionUser?.balance ?? 0}
+        royaltyBalance={balanceTotals.value?.availableToWithdraw ?? null}
+        royaltyBalanceError={balanceTotals.error}
         aiTokenBalance={aiTokenBalance}
         monthlyBonusTokens={entitlements.monthlyBonusTokens}
       />

@@ -9,6 +9,7 @@ import {
   S3Client
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { selectUniqueStorageKeyFallback } from "./storage-object-access";
 
 function readStringEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -85,7 +86,7 @@ export const ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES = [
   "audios/"
 ] as const;
 const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"] as const;
-const ALLOWED_AUDIO_EXTENSIONS = [".wav"] as const;
+const ALLOWED_AUDIO_EXTENSIONS = [".wav", ".mp3", ".flac", ".aac", ".m4a", ".aiff"] as const;
 const LEGACY_IMAGE_EXTENSIONS = [
   "jpg",
   "jpeg",
@@ -236,6 +237,40 @@ function buildBucketCandidates(): string[] {
     .map((value) => (value ?? "").trim())
     .filter(Boolean);
   return Array.from(new Set(candidates));
+}
+
+export function getStorageReadBucketCandidates(key: string): string[] {
+  const candidates = buildBucketCandidates();
+  if (!isAllowedAudioFile(key)) return candidates;
+
+  // Admin track replacements are stored in `contracts`; older files can still
+  // live in `uploads`, so audio reads must search both without changing writes.
+  return [
+    ...candidates.filter((bucketName) => bucketName === "contracts"),
+    ...candidates.filter((bucketName) => bucketName !== "contracts")
+  ];
+}
+
+function isMissingStorageObjectError(error: unknown): boolean {
+  const name =
+    typeof error === "object" && error && "name" in error
+      ? String((error as { name?: unknown }).name ?? "")
+      : "";
+  const code =
+    typeof error === "object" && error && "Code" in error
+      ? String((error as { Code?: unknown }).Code ?? "")
+      : typeof error === "object" && error && "code" in error
+        ? String((error as { code?: unknown }).code ?? "")
+        : "";
+  const status =
+    typeof error === "object" &&
+    error &&
+    "$metadata" in error &&
+    typeof (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode === "number"
+      ? Number((error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode)
+      : null;
+  const message = error instanceof Error ? error.message : String(error);
+  return status === 404 || /notfound|nosuchkey|nosuchbucket|404|no such key/i.test(`${name} ${code} ${message}`);
 }
 
 function getDefaultBucketName(): string {
@@ -607,57 +642,37 @@ function toAbsoluteAppRouteUrl(url: string): string {
 
 async function checkStorageKeyExists(key: string): Promise<boolean | null> {
   const client = getClient();
-  const bucketName = await resolveBucketName(client);
-  if (!client || !bucketName) return null;
-  const cacheKey = `${bucketName}:${key}`;
-  
-  try {
-    await client.send(
-      new HeadObjectCommand({
-        Bucket: bucketName,
-        Key: key
-      })
-    );
-    if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
-      const firstKey = storageHeadCache.keys().next().value;
-      if (firstKey) storageHeadCache.delete(firstKey);
+  if (!client) return null;
+  const bucketNames = getStorageReadBucketCandidates(key);
+  const cacheKey = `${bucketNames.join(",")}:${key}`;
+  if (storageHeadCache.has(cacheKey)) return storageHeadCache.get(cacheKey) ?? null;
+
+  let indeterminate = false;
+  for (const bucketName of bucketNames) {
+    try {
+      await client.send(new HeadObjectCommand({ Bucket: bucketName, Key: key }));
+      storageHeadCache.set(cacheKey, true);
+      return true;
+    } catch (error) {
+      if (!isMissingStorageObjectError(error)) indeterminate = true;
     }
-    storageHeadCache.set(cacheKey, true);
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    const code = typeof error === "object" && error && "name" in error ? String((error as { name?: string }).name ?? "") : "";
-    if (/notfound|nosuchkey|404|no such key/i.test(`${code} ${message}`)) {
-      if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
-        const firstKey = storageHeadCache.keys().next().value;
-        if (firstKey) storageHeadCache.delete(firstKey);
-      }
-      storageHeadCache.set(cacheKey, false);
-      return false;
-    }
-    if (/accessdenied|forbidden|403/i.test(`${code} ${message}`)) {
-      if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
-        const firstKey = storageHeadCache.keys().next().value;
-        if (firstKey) storageHeadCache.delete(firstKey);
-      }
-      storageHeadCache.set(cacheKey, null);
-      return null;
-    }
-    if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
-      const firstKey = storageHeadCache.keys().next().value;
-      if (firstKey) storageHeadCache.delete(firstKey);
-    }
-    storageHeadCache.set(cacheKey, null);
-    return null;
   }
+
+  if (storageHeadCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
+    const firstKey = storageHeadCache.keys().next().value;
+    if (firstKey) storageHeadCache.delete(firstKey);
+  }
+  const result = indeterminate ? null : false;
+  storageHeadCache.set(cacheKey, result);
+  return result;
 }
 
 export async function headStorageObjectDebug(key: string): Promise<StorageHeadDebugResult> {
   const normalizedKey = normalizeStorageKey(key) ?? key;
   const client = getClient();
-  const bucketName = client ? await resolveBucketName(client) : null;
+  const bucketNames = getStorageReadBucketCandidates(normalizedKey);
   const baseResult: StorageHeadDebugResult = {
-    bucket: bucketName,
+    bucket: bucketNames[0] ?? null,
     endpoint: endpoint ?? null,
     region: region ?? null,
     forcePathStyle: true,
@@ -669,7 +684,7 @@ export async function headStorageObjectDebug(key: string): Promise<StorageHeadDe
     message: null
   };
 
-  if (!client || !bucketName) {
+  if (!client || bucketNames.length === 0) {
     return {
       ...baseResult,
       exists: null,
@@ -677,18 +692,18 @@ export async function headStorageObjectDebug(key: string): Promise<StorageHeadDe
     };
   }
 
-  try {
-    await client.send(
-      new HeadObjectCommand({
-        Bucket: bucketName,
-        Key: normalizedKey
-      })
-    );
-    return {
-      ...baseResult,
-      exists: true
-    };
-  } catch (error) {
+  let lastError: unknown = null;
+  for (const bucketName of bucketNames) {
+    try {
+      await client.send(new HeadObjectCommand({ Bucket: bucketName, Key: normalizedKey }));
+      return { ...baseResult, bucket: bucketName, exists: true };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  {
+    const error = lastError;
     const errorName =
       error instanceof Error
         ? error.name
@@ -872,61 +887,21 @@ export async function findExistingS3ObjectKeyFallback(requestedKey: string): Pro
   const normalizedRequestedKey = normalizeStorageKey(requestedKey);
   if (!normalizedRequestedKey) return null;
 
-  const requestedBaseName = getBaseNameWithoutExtension(normalizedRequestedKey)?.toLowerCase();
-  if (!requestedBaseName) return null;
-
-  const requestedParts = normalizedRequestedKey.split("/").filter(Boolean);
-  const requestedFileName = requestedParts.at(-1)?.toLowerCase() ?? "";
-  const requestedRelativePath = ALLOWED_S3_IMAGE_PREFIXES.find((prefix) => normalizedRequestedKey.startsWith(prefix))
-    ? normalizedRequestedKey.slice(ALLOWED_S3_IMAGE_PREFIXES.find((prefix) => normalizedRequestedKey.startsWith(prefix))!.length)
-    : null;
-  const requestedRelativeDir = requestedRelativePath?.split("/").slice(0, -1).join("/") ?? null;
+  const isAudioRequest = isAllowedAudioFile(normalizedRequestedKey);
+  const allowedPrefixes = isAudioRequest
+    ? ALLOWED_S3_AUDIO_CANDIDATE_PREFIXES
+    : ALLOWED_S3_IMAGE_PREFIXES;
   const allCandidateKeys = Array.from(
-    new Set((await Promise.all(ALLOWED_S3_IMAGE_PREFIXES.map((prefix) => listStorageKeysByPrefix(prefix)))).flat())
-  ).filter((candidateKey) => isAllowedS3Prefix(candidateKey) && isAllowedMediaExtension(candidateKey));
+    new Set((await Promise.all(allowedPrefixes.map((prefix) => listStorageKeysByPrefix(prefix)))).flat())
+  ).filter((candidateKey) =>
+    isAudioRequest ? isAllowedAudioFile(candidateKey) : isAllowedImageFile(candidateKey)
+  );
 
-  const uniqueOrNull = (matches: string[]): string | null => {
-    const uniqueMatches = Array.from(new Set(matches));
-    return uniqueMatches.length === 1 ? (uniqueMatches[0] ?? null) : null;
-  };
-
-  if (requestedRelativePath) {
-    const exactRelativeMatches = allCandidateKeys.filter((candidateKey) => {
-      const candidatePrefix = ALLOWED_S3_IMAGE_PREFIXES.find((prefix) => candidateKey.startsWith(prefix));
-      if (!candidatePrefix) return false;
-      const candidateRelativePath = candidateKey.slice(candidatePrefix.length);
-      return candidateRelativePath.toLowerCase() === requestedRelativePath.toLowerCase();
-    });
-    const exactRelativeMatch = uniqueOrNull(exactRelativeMatches);
-    if (exactRelativeMatch) return exactRelativeMatch;
-
-    const sameFolderBaseNameMatches = allCandidateKeys.filter((candidateKey) => {
-      const candidatePrefix = ALLOWED_S3_IMAGE_PREFIXES.find((prefix) => candidateKey.startsWith(prefix));
-      if (!candidatePrefix) return false;
-      const candidateRelativePath = candidateKey.slice(candidatePrefix.length);
-      const candidateRelativeDir = candidateRelativePath.split("/").slice(0, -1).join("/");
-      const candidateBaseName = getBaseNameWithoutExtension(candidateKey)?.toLowerCase();
-      return candidateRelativeDir === (requestedRelativeDir ?? "") && candidateBaseName === requestedBaseName;
-    });
-    const sameFolderBaseNameMatch = uniqueOrNull(sameFolderBaseNameMatches);
-    if (sameFolderBaseNameMatch) return sameFolderBaseNameMatch;
-  }
-
-  const exactFileNameMatches = allCandidateKeys.filter((candidateKey) => {
-    const candidateFileName = candidateKey.split("/").filter(Boolean).at(-1)?.toLowerCase() ?? "";
-    return candidateFileName === requestedFileName;
+  return selectUniqueStorageKeyFallback({
+    requestedKey: normalizedRequestedKey,
+    candidateKeys: allCandidateKeys,
+    allowedPrefixes
   });
-  const exactFileNameMatch = uniqueOrNull(exactFileNameMatches);
-  if (exactFileNameMatch) return exactFileNameMatch;
-
-  const baseNameMatches = allCandidateKeys.filter((candidateKey) => {
-    const candidateBaseName = getBaseNameWithoutExtension(candidateKey)?.toLowerCase();
-    return candidateBaseName === requestedBaseName;
-  });
-  const baseNameMatch = uniqueOrNull(baseNameMatches);
-  if (baseNameMatch) return baseNameMatch;
-
-  return null;
 }
 
 
@@ -1172,37 +1147,44 @@ function slugifyLookup(value: string): string {
 
 async function listStorageKeysByPrefix(prefix: string): Promise<string[]> {
   const client = getClient();
-  const bucketName = await resolveBucketName(client);
   const normalizedPrefix = normalizeStorageKey(prefix);
-  if (!client || !bucketName || !normalizedPrefix) return [];
+  if (!client || !normalizedPrefix) return [];
+  const bucketNames = getStorageReadBucketCandidates(normalizedPrefix);
 
-  const cacheKey = `${bucketName}:${normalizedPrefix}`;
+  const cacheKey = `${bucketNames.join(",")}:${normalizedPrefix}`;
   const cached = storagePrefixListCache.get(cacheKey);
   if (cached) return cached;
 
   const keys: string[] = [];
-  let continuationToken: string | undefined;
-  do {
-    const response = await client.send(
-      new ListObjectsV2Command({
-        Bucket: bucketName,
-        Prefix: normalizedPrefix,
-        ContinuationToken: continuationToken,
-        MaxKeys: 1000
-      })
-    );
-    for (const item of response.Contents ?? []) {
-      if (item.Key) keys.push(item.Key);
+  for (const bucketName of bucketNames) {
+    let continuationToken: string | undefined;
+    try {
+      do {
+        const response = await client.send(
+          new ListObjectsV2Command({
+            Bucket: bucketName,
+            Prefix: normalizedPrefix,
+            ContinuationToken: continuationToken,
+            MaxKeys: 1000
+          })
+        );
+        for (const item of response.Contents ?? []) {
+          if (item.Key) keys.push(item.Key);
+        }
+        continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+      } while (continuationToken);
+    } catch {
+      // A legacy bucket may be absent or inaccessible; continue with the rest.
     }
-    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
-  } while (continuationToken);
+  }
 
   if (storagePrefixListCache.size >= MAX_STORAGE_HEAD_CACHE_SIZE) {
     const firstKey = storagePrefixListCache.keys().next().value;
     if (firstKey) storagePrefixListCache.delete(firstKey);
   }
-  storagePrefixListCache.set(cacheKey, keys);
-  return keys;
+  const uniqueKeys = Array.from(new Set(keys));
+  storagePrefixListCache.set(cacheKey, uniqueKeys);
+  return uniqueKeys;
 }
 
 async function listStorageKeysByPrefixes(prefixes: string[]): Promise<string[]> {
@@ -1766,6 +1748,56 @@ export async function createPresignedDownload(input: {
     url,
     mock: false
   };
+}
+
+export type StorageObjectStream = {
+  body: ReadableStream;
+  contentLength: number | null;
+  contentRange: string | null;
+  contentType: string | null;
+  etag: string | null;
+  lastModified: string | null;
+};
+
+export async function streamStoredObject(input: {
+  key: string;
+  range?: string;
+}): Promise<StorageObjectStream | null> {
+  const client = getClient();
+  const normalizedKey = normalizeStorageKey(input.key);
+  if (!client || !normalizedKey) return null;
+
+  let rangeError: unknown = null;
+  for (const bucketName of getStorageReadBucketCandidates(normalizedKey)) {
+    try {
+      const output = await client.send(
+        new GetObjectCommand({
+          Bucket: bucketName,
+          Key: normalizedKey,
+          Range: input.range
+        })
+      );
+      if (!output.Body) continue;
+
+      return {
+        body: output.Body.transformToWebStream(),
+        contentLength: output.ContentLength ?? null,
+        contentRange: output.ContentRange ?? null,
+        contentType: output.ContentType ?? null,
+        etag: output.ETag ?? null,
+        lastModified: output.LastModified?.toUTCString() ?? null
+      };
+    } catch (error) {
+      const status =
+        typeof error === "object" && error && "$metadata" in error
+          ? Number((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode)
+          : 0;
+      if (status === 416) rangeError = error;
+    }
+  }
+
+  if (rangeError) throw rangeError;
+  return null;
 }
 
 export async function deleteStoredObject(input: {

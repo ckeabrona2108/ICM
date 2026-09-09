@@ -338,7 +338,7 @@ export default async function HomePage() {
     : null;
 
   return (
-    <main className="relative min-h-screen overflow-x-clip bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
+    <main className="relative min-h-screen w-full max-w-full bg-[radial-gradient(circle_at_50%_0%,rgba(94,76,255,0.18),transparent_26%),linear-gradient(180deg,#0a0b12_0%,#0a0b12_58%,#090a10_100%)] text-white">
       <LandingScrollUnlock />
       <script
         type="application/ld+json"
@@ -350,7 +350,7 @@ export default async function HomePage() {
         <div className="ambient-orbit-left absolute left-1/2 top-[14%] h-[420px] w-[760px] -translate-x-1/2 rounded-full border border-[#7b61ff]/10 bg-[#7b61ff]/10 blur-[140px]" />
       </div>
 
-      <IcmHeader />
+      <IcmHeader user={session?.user ?? null} />
 
       <section id="hero" className="relative">
         <div className="mx-auto grid max-w-7xl gap-10 px-6 pb-8 pt-28 sm:px-8 sm:pb-12 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-10 lg:pb-16 lg:pt-36">
@@ -364,6 +364,9 @@ export default async function HomePage() {
             <p className="mt-6 max-w-xl text-[15px] leading-relaxed text-white/65 sm:text-[17px]">
               Управляйте своим творчеством, продажами и маркетингом в одном месте, чтобы сделать
               вашу музыку заметной и доступной миллионам слушателей.
+            </p>
+            <p className="mt-4 max-w-xl border-l-2 border-[#7b61ff] pl-4 text-[14px] font-semibold leading-relaxed text-white/82 sm:text-[16px]">
+              Мы не просто доставляем музыку на площадки. Мы даём ей место, где её могут открыть.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Link

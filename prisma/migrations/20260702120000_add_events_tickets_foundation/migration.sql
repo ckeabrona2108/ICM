@@ -64,7 +64,7 @@ $$;
 
 CREATE TABLE IF NOT EXISTS "icecream"."venues" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "owner_user_id" UUID,
+  "owner_user_id" TEXT,
   "name" TEXT NOT NULL,
   "city" TEXT,
   "address" TEXT,
@@ -77,13 +77,13 @@ CREATE TABLE IF NOT EXISTS "icecream"."venues" (
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "venues_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "venues_owner_user_id_fkey"
-    FOREIGN KEY ("owner_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("owner_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS "icecream"."events" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "organizer_user_id" UUID NOT NULL,
+  "organizer_user_id" TEXT NOT NULL,
   "venue_id" UUID,
   "title" TEXT NOT NULL,
   "slug" TEXT NOT NULL,
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."events" (
   CONSTRAINT "events_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "events_slug_key" UNIQUE ("slug"),
   CONSTRAINT "events_organizer_user_id_fkey"
-    FOREIGN KEY ("organizer_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("organizer_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "events_venue_id_fkey"
     FOREIGN KEY ("venue_id") REFERENCES "icecream"."venues"("id")
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_tags" (
 CREATE TABLE IF NOT EXISTS "icecream"."event_artists" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "event_id" UUID NOT NULL,
-  "artist_user_id" UUID,
+  "artist_user_id" TEXT,
   "display_name" TEXT NOT NULL,
   "photo_url" TEXT,
   "role" "icecream"."EventArtistRole" NOT NULL DEFAULT 'ARTIST',
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_artists" (
     FOREIGN KEY ("event_id") REFERENCES "icecream"."events"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "event_artists_artist_user_id_fkey"
-    FOREIGN KEY ("artist_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("artist_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ticket_orders" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "event_id" UUID NOT NULL,
   "ticket_type_id" UUID NOT NULL,
-  "buyer_user_id" UUID,
+  "buyer_user_id" TEXT,
   "status" "icecream"."EventPaymentStatus" NOT NULL DEFAULT 'PENDING_PAYMENT',
   "buyer_email" TEXT NOT NULL,
   "buyer_phone" TEXT,
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ticket_orders" (
     FOREIGN KEY ("ticket_type_id") REFERENCES "icecream"."event_ticket_types"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "ticket_orders_buyer_user_id_fkey"
-    FOREIGN KEY ("buyer_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("buyer_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ticket_payments" (
 
 CREATE TABLE IF NOT EXISTS "icecream"."event_payouts" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-  "organizer_user_id" UUID NOT NULL,
+  "organizer_user_id" TEXT NOT NULL,
   "event_id" UUID,
   "status" "icecream"."EventPaymentStatus" NOT NULL DEFAULT 'PENDING_PAYMENT',
   "amount" DECIMAL(14,2) NOT NULL,
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_payouts" (
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "event_payouts_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "event_payouts_organizer_user_id_fkey"
-    FOREIGN KEY ("organizer_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("organizer_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "event_payouts_event_id_fkey"
     FOREIGN KEY ("event_id") REFERENCES "icecream"."events"("id")
@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_payouts" (
 CREATE TABLE IF NOT EXISTS "icecream"."event_financial_transactions" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "event_id" UUID NOT NULL,
-  "organizer_user_id" UUID NOT NULL,
+  "organizer_user_id" TEXT NOT NULL,
   "order_id" UUID,
   "payment_id" UUID,
   "payout_id" UUID,
@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_financial_transactions" (
     FOREIGN KEY ("event_id") REFERENCES "icecream"."events"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "event_financial_transactions_organizer_user_id_fkey"
-    FOREIGN KEY ("organizer_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("organizer_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "event_financial_transactions_order_id_fkey"
     FOREIGN KEY ("order_id") REFERENCES "icecream"."ticket_orders"("id")
@@ -303,7 +303,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_tickets" (
   "event_id" UUID NOT NULL,
   "ticket_type_id" UUID NOT NULL,
   "order_id" UUID,
-  "buyer_user_id" UUID,
+  "buyer_user_id" TEXT,
   "ticket_code" TEXT NOT NULL,
   "qr_payload" TEXT NOT NULL,
   "status" "icecream"."EventTicketStatus" NOT NULL DEFAULT 'AVAILABLE',
@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."event_tickets" (
     FOREIGN KEY ("order_id") REFERENCES "icecream"."ticket_orders"("id")
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT "event_tickets_buyer_user_id_fkey"
-    FOREIGN KEY ("buyer_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("buyer_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -336,7 +336,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ticket_checkins" (
   "id" UUID NOT NULL DEFAULT gen_random_uuid(),
   "event_id" UUID NOT NULL,
   "ticket_id" UUID NOT NULL,
-  "checked_in_by_user_id" UUID NOT NULL,
+  "checked_in_by_user_id" TEXT NOT NULL,
   "method" TEXT NOT NULL DEFAULT 'qr',
   "gate_name" TEXT,
   "notes" TEXT,
@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."ticket_checkins" (
     FOREIGN KEY ("ticket_id") REFERENCES "icecream"."event_tickets"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "ticket_checkins_checked_in_by_user_id_fkey"
-    FOREIGN KEY ("checked_in_by_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("checked_in_by_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -428,7 +428,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."staff_access_tokens" (
   "role" TEXT NOT NULL DEFAULT 'staff',
   "expires_at" TIMESTAMP(6) NOT NULL,
   "revoked_at" TIMESTAMP(6),
-  "created_by_user_id" UUID NOT NULL,
+  "created_by_user_id" TEXT NOT NULL,
   "last_used_at" TIMESTAMP(6),
   "created_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -437,7 +437,7 @@ CREATE TABLE IF NOT EXISTS "icecream"."staff_access_tokens" (
     FOREIGN KEY ("event_id") REFERENCES "icecream"."events"("id")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "staff_access_tokens_created_by_user_id_fkey"
-    FOREIGN KEY ("created_by_user_id") REFERENCES "icecream"."user"("id")
+    FOREIGN KEY ("created_by_user_id") REFERENCES "icecream"."User"("id")
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 

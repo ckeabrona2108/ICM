@@ -21,5 +21,10 @@ export function resolveReleaseSubmitMode(
 }
 
 export function shouldResubmitEditedRelease(currentStatus?: ReleaseLifecycleStatus): boolean {
-  return currentStatus === "changes_required" || currentStatus === "rejected";
+  return (
+    currentStatus === "changes_required" ||
+    currentStatus === "rejected" ||
+    currentStatus === "approved" ||
+    currentStatus === "distributed"
+  );
 }

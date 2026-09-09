@@ -32,6 +32,7 @@ async function notifyUserReportReady(params: {
     title: "Новый финансовый отчёт",
     message: `${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}`,
     href: "/dashboard/finance",
+    sendEmail: false,
     resetReadState: params.resetReadState
   });
 }

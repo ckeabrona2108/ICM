@@ -3,7 +3,8 @@ import test from "node:test";
 
 import {
   optimisticallyMarkNotificationRead,
-  restoreOptimisticNotificationRead
+  restoreOptimisticNotificationRead,
+  shouldShowNotificationTimestamp
 } from "@/components/layout/dashboard-topbar";
 import type { DashboardNotificationsResponse } from "@/lib/api/contracts";
 
@@ -37,4 +38,11 @@ test("individual optimistic notification rollback is idempotent", () => {
   const restored = restoreOptimisticNotificationRead(notifications, "notification_1");
 
   assert.equal(restored, notifications);
+});
+
+test("finance report notifications do not show timestamp in the menu", () => {
+  assert.equal(shouldShowNotificationTimestamp("report_ready"), false);
+  assert.equal(shouldShowNotificationTimestamp("report_changes_requested"), false);
+  assert.equal(shouldShowNotificationTimestamp("report_agreed"), false);
+  assert.equal(shouldShowNotificationTimestamp("support_reply"), true);
 });

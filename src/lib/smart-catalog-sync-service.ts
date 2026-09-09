@@ -148,6 +148,11 @@ const FINANCIAL_IMPORT_INCLUDE = {
   }
 } as const;
 
+const SMART_IMPORT_DELETE_TRANSACTION_OPTIONS = {
+  maxWait: 10_000,
+  timeout: 60_000
+} as const;
+
 function createSmartMatchContext(): SmartMatchContext {
   return {
     isrcMatches: new Map(),
@@ -2528,7 +2533,7 @@ export async function deleteSmartCatalogSyncImport(params: {
       await tx.catalog_imports.delete({
         where: { id: params.importId }
       });
-    });
+    }, SMART_IMPORT_DELETE_TRANSACTION_OPTIONS);
 
     await createAdminLog({
       adminId: params.adminId,
@@ -2577,7 +2582,7 @@ export async function deleteSmartCatalogSyncImport(params: {
     await tx.financial_imports.delete({
       where: { id: params.importId }
     });
-  });
+  }, SMART_IMPORT_DELETE_TRANSACTION_OPTIONS);
 
   await createAdminLog({
     adminId: params.adminId,

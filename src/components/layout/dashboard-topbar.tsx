@@ -96,6 +96,10 @@ function formatNotificationTimestamp(value: string): string {
   });
 }
 
+export function shouldShowNotificationTimestamp(kind: DashboardNotificationItemResponse["kind"]): boolean {
+  return kind !== "report_ready" && kind !== "report_changes_requested" && kind !== "report_agreed";
+}
+
 export function optimisticallyMarkNotificationRead(
   current: DashboardNotificationsResponse,
   notificationId: string
@@ -723,9 +727,11 @@ function NotificationMenuItem({
         <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-white/58">
           {item.message}
         </span>
-        <span className="mt-1.5 block text-[11px] font-medium text-white/36">
-          {formatNotificationTimestamp(item.createdAt)}
-        </span>
+        {shouldShowNotificationTimestamp(item.kind) ? (
+          <span className="mt-1.5 block text-[11px] font-medium text-white/36">
+            {formatNotificationTimestamp(item.createdAt)}
+          </span>
+        ) : null}
       </span>
     </Link>
   );

@@ -7,6 +7,7 @@ import { FinanceReportStatus } from "@prisma/client";
 import {
   createUserReportByAdmin,
   deleteUserReportByAdmin,
+  listAdminChangesRequestedReports,
   listUserReports,
   markUserReportAsAgreed,
   markUserReportAsRejected,
@@ -19,7 +20,8 @@ function createReportPrismaStub() {
     userBalance: 0,
     report: null as any,
     payloadTx: null as any,
-    adminLogs: [] as any[]
+    adminLogs: [] as any[],
+    notifications: [] as any[]
   };
 
   const financeReport = {
@@ -94,19 +96,32 @@ function createReportPrismaStub() {
     findMany: async ({ where }: any) => {
       if (
         !state.payloadTx ||
-        state.payloadTx.userId !== where.userId ||
+        (where.userId && state.payloadTx.userId !== where.userId) ||
         state.payloadTx.description !== where.description
       ) {
         return [];
       }
-      return [state.payloadTx];
+      return [
+        {
+          ...state.payloadTx,
+          user: { id: "user_1", name: "Олег", email: "oleg@example.com" }
+        }
+      ];
     }
   };
 
   const prisma = {
     user: {
-      findUnique: async ({ where }: any) =>
-        where.id === "user_1" ? { id: "user_1", balance: state.userBalance } : null,
+      findUnique: async ({ where }: any) => {
+        if (where.id === "user_1") {
+          return { id: "user_1", name: "Олег", email: "oleg@example.com", balance: state.userBalance };
+        }
+        if (where.id === "admin_1") {
+          return { id: "admin_1", name: "Админ", email: "admin@example.com", balance: 0 };
+        }
+        return null;
+      },
+      findMany: async ({ where }: any) => where?.isAdmin ? [{ id: "admin_1" }] : [],
       update: async ({ data }: any) => {
         state.userBalance += Number(data.balance.increment);
         return { id: "user_1", balance: state.userBalance };
@@ -120,12 +135,28 @@ function createReportPrismaStub() {
         return data;
       }
     },
+    ai_user_notifications: {
+      upsert: async ({ create, update }: any) => {
+        const existingIndex = state.notifications.findIndex((item: any) => item.id === create.id);
+        if (existingIndex >= 0) {
+          state.notifications[existingIndex] = { ...state.notifications[existingIndex], ...update };
+          return state.notifications[existingIndex];
+        }
+        state.notifications.push(create);
+        return create;
+      }
+    },
+    push_subscriptions: {
+      findMany: async () => []
+    },
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
         user: prisma.user,
         financeReport,
         transaction,
-        adminLog: prisma.adminLog
+        adminLog: prisma.adminLog,
+        ai_user_notifications: prisma.ai_user_notifications,
+        push_subscriptions: prisma.push_subscriptions
       })
   } as any;
 
@@ -245,6 +276,12 @@ test("rejected report can be updated and agreed once with balance credit", async
   });
   assert.equal(rejectResult.ok, true);
   assert.equal(state.payloadTx.metadata.workflowState, "changes_requested");
+  const adminNotification = state.notifications.find(
+    (item: any) => item.kind === "admin_report_changes_requested"
+  );
+  assert.ok(adminNotification);
+  assert.equal(adminNotification.user_id, "admin_1");
+  assert.match(adminNotification.message, /Нужна правка по UPC/);
 
   const updateResult = await updateUserReportByAdmin({
     prisma,
@@ -281,6 +318,50 @@ test("rejected report can be updated and agreed once with balance credit", async
   assert.equal(state.report.status, FinanceReportStatus.AGREED);
   assert.equal(state.userBalance, 1400);
   assert.equal(state.payloadTx.metadata.workflowState, "agreed");
+});
+
+test("admin changes requested list includes rejected reports with user comment", async () => {
+  const { prisma, state } = createReportPrismaStub();
+
+  await createUserReportByAdmin({
+    prisma,
+    adminId: "admin_1",
+    userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 0,
+    status: FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: 2,
+    year: 2026,
+    items: [
+      {
+        id: "row-1",
+        platformName: "Apple",
+        upc: "5063635044004",
+        releaseTitle: "NOT AFRAID",
+        amount: 678.02
+      }
+    ],
+    comment: "Q2 report"
+  });
+
+  await markUserReportAsRejected({
+    prisma,
+    reportId: state.report.id,
+    userId: "user_1",
+    userComment: "Не совпадает сумма по Apple"
+  });
+
+  const reports = await listAdminChangesRequestedReports(prisma);
+
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].id, state.report.id);
+  assert.equal(reports[0].lifecycleState, "changes_requested");
+  assert.equal(reports[0].user.id, "user_1");
+  assert.equal(reports[0].user.email, "oleg@example.com");
+  assert.equal(reports[0].userComment, "Не совпадает сумма по Apple");
+  assert.equal(reports[0].platformTotals[0].platformName, "Apple");
+  assert.equal(reports[0].platformTotals[0].amount, 678.02);
 });
 
 test("changes requested report can be resent to user without re-crediting balance", async () => {

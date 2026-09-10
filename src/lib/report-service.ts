@@ -37,6 +37,63 @@ async function notifyUserReportReady(params: {
   });
 }
 
+async function notifyAdminsReportChangesRequested(params: {
+  prisma: PrismaClient;
+  userId: string;
+  reportId: string;
+  amount: number;
+  quarter?: number | null;
+  year?: number | null;
+  userComment?: string | null;
+}) {
+  try {
+    const userRepo = getRepo<{
+      findMany?: (args: unknown) => Promise<Array<{ id: string }>>;
+      findUnique?: (args: unknown) => Promise<{ name?: string | null; email?: string | null } | null>;
+    }>(params.prisma, "user");
+    if (!userRepo?.findMany) return;
+
+    const admins = await userRepo.findMany({
+      where: { isAdmin: true },
+      select: { id: true }
+    });
+    if (!admins.length) return;
+
+    const user = userRepo.findUnique
+      ? await userRepo.findUnique({
+          where: { id: params.userId },
+          select: { name: true, email: true }
+        })
+      : null;
+    const userLabel = normalizeText(user?.name) || normalizeText(user?.email) || params.userId;
+    const comment = normalizeText(params.userComment, "Комментарий не указан.");
+    const message = `${userLabel} · ${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}. Комментарий: ${comment}`;
+
+    await Promise.all(
+      admins.map((admin) =>
+        deliverUserNotificationSafely(params.prisma, {
+          id: `admin-report-changes-requested-${params.reportId}-${admin.id}`,
+          userId: admin.id,
+          kind: "admin_report_changes_requested",
+          title: "Пользователь отклонил финансовый отчёт",
+          message,
+          href: `/admin/users/${params.userId}`,
+          sourceType: "finance_report",
+          sourceId: params.reportId,
+          sendEmail: false,
+          resetReadState: true
+        })
+      )
+    );
+  } catch (error) {
+    console.error("[report-admin-notification] changes requested notification failed", {
+      reportId: params.reportId,
+      userId: params.userId,
+      error
+    });
+  }
+}
+
 export type UserReportLifecycleState =
   | "ready_to_confirm"
   | "changes_requested"
@@ -72,6 +129,14 @@ export interface UserReportItem {
   userComment: string | null;
   items: UserReportLineItem[];
   platformTotals: UserReportPlatformTotal[];
+}
+
+export interface AdminChangesRequestedReportItem extends UserReportItem {
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  };
 }
 
 type StoredReportPayload = {
@@ -328,6 +393,96 @@ async function listReportPayloadRecords(
   }
 
   return map;
+}
+
+export async function listAdminChangesRequestedReports(
+  prisma: PrismaClient,
+  limit = 200
+): Promise<AdminChangesRequestedReportItem[]> {
+  const transactionRepo = getRepo<{
+    findMany: (args: unknown) => Promise<
+      Array<{
+        id: string;
+        userId: string;
+        description: string | null;
+        metadata: unknown;
+        createdAt?: Date | null;
+        user?: { id: string; name?: string | null; email?: string | null } | null;
+      }>
+    >;
+  }>(prisma, "transaction");
+  if (!transactionRepo?.findMany) return [];
+
+  let rows;
+  try {
+    rows = await transactionRepo.findMany({
+      where: {
+        description: REPORT_PAYLOAD_DESCRIPTION
+      },
+      orderBy: { createdAt: "desc" },
+      take: Math.max(limit * 3, limit),
+      select: {
+        id: true,
+        userId: true,
+        description: true,
+        metadata: true,
+        createdAt: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (message.includes("transaction") || message.includes("does not exist") || message.includes("unknown")) {
+      return [];
+    }
+    throw error;
+  }
+
+  const items: AdminChangesRequestedReportItem[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (items.length >= limit) break;
+    const metadata = row?.metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+      continue;
+    }
+
+    const rawReportId = normalizeText((metadata as Record<string, unknown>).reportId);
+    if (!rawReportId || seen.has(rawReportId)) {
+      continue;
+    }
+
+    const fallbackDate = row.createdAt instanceof Date ? row.createdAt : new Date();
+    const payload = parseStoredPayload(metadata, rawReportId, fallbackDate);
+    if (!payload || payload.workflowState !== "changes_requested") {
+      continue;
+    }
+
+    seen.add(rawReportId);
+    const report = mapPayloadRecordToUserReportItem({
+      id: row.id,
+      reportId: rawReportId,
+      payload
+    });
+
+    items.push({
+      ...report,
+      user: {
+        id: row.user?.id ?? row.userId,
+        name: row.user?.name ?? null,
+        email: row.user?.email ?? null
+      }
+    });
+  }
+
+  return items.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 async function upsertReportPayloadRecord(
@@ -1014,6 +1169,9 @@ export async function markUserReportAsRejected(params: {
   if (existingLifecycleState === "agreed") {
     return { ok: false as const, error: "Согласованный отчет нельзя вернуть на доработку." };
   }
+  const notificationAmount = existing.report ? toNumber(existing.report.amount) : existing.payloadRecord?.payload.amount ?? 0;
+  const notificationQuarter = existing.payloadRecord?.payload.quarter;
+  const notificationYear = existing.payloadRecord?.payload.year;
 
   try {
     await params.prisma.$transaction(async (tx) => {
@@ -1076,6 +1234,16 @@ export async function markUserReportAsRejected(params: {
       });
     });
   }
+
+  await notifyAdminsReportChangesRequested({
+    prisma: params.prisma,
+    userId: params.userId,
+    reportId: params.reportId,
+    amount: notificationAmount,
+    quarter: notificationQuarter,
+    year: notificationYear,
+    userComment: params.userComment ?? null
+  });
 
   return { ok: true as const };
 }

@@ -1,7 +1,5 @@
 // @ts-nocheck
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import test from "node:test";
 
 import { ReleaseStatus } from "@/lib/legacy-business-enums";
@@ -10,6 +8,7 @@ import {
   approveContractSignatureByAdmin,
   createContractSignature,
   getAdminVerificationCounts,
+  getContractSignatureById,
   getContractDocumentDownloadAsset,
   getContractSignatureDownloadAsset,
   getUserContractStatus,
@@ -76,6 +75,7 @@ type ReleaseRow = {
   moderationCancelledAt: Date | null;
   moderationReturnedAt: Date | null;
   moderationComment: string | null;
+  moderatorComment?: string | null;
   rejectionReason: string | null;
   rejectedAt: Date | null;
   rejectedBy: string | null;
@@ -159,14 +159,25 @@ function createFakePrisma(seed?: {
     },
     release: {
       findMany: async ({
-        where
+        where,
+        select
       }: {
-        where: { userId: string; status: ReleaseStatus };
-        select: { id: true };
+        where: { userId?: string; status?: ReleaseStatus };
+        select: { id?: true; status?: true; confirmed?: true; roles?: true };
       }) => {
-        return state.releases
-          .filter((item) => item.userId === where.userId && item.status === where.status)
-          .map((item) => ({ id: item.id }));
+        const rows = state.releases.filter((item) => {
+            if (where.userId && item.userId !== where.userId) return false;
+            if (where.status && item.status !== where.status) return false;
+            return true;
+          });
+        if (select.status) {
+          return rows.map((item) => ({
+            status: item.status,
+            confirmed: item.status === ReleaseStatus.MODERATION,
+            roles: null
+          }));
+        }
+        return rows.map((item) => ({ id: item.id }));
       },
       updateMany: async ({
         where,
@@ -305,6 +316,35 @@ test("contract signing does not fail when telegram notification fails", async ()
 
   assert.equal(result.status, "pending");
   assert.equal(loggerCalled, true);
+});
+
+test("contract signing creates downloadable signed document with signer data", async () => {
+  const { prisma } = createFakePrisma();
+
+  await createContractSignature({
+    prisma: prisma as never,
+    userId: "user_1",
+    userEmail: "artist@example.com",
+    userName: "Artist",
+    contractVersion: "2026-01",
+    signatureImage: SIGNATURE_DATA_URL,
+    signerData: validSignerData()
+  });
+
+  const asset = await getContractDocumentDownloadAsset({
+    prisma: prisma as never,
+    id: "ver_1"
+  });
+
+  assert.equal(asset?.contentType, "text/html; charset=utf-8");
+  assert.match(asset?.fileName ?? "", /^signed-contract-user_1-\d{4}-\d{2}-\d{2}-[a-f0-9]{16}\.html$/u);
+  assert.ok(asset?.body);
+
+  const html = asset.body.toString("utf8");
+  assert.match(html, /Подписанный договор ICECREAMMUSIC/u);
+  assert.match(html, /Иван Иванов/u);
+  assert.match(html, /data:application\/pdf;base64/u);
+  assert.match(html, /data:image\/png;base64/u);
 });
 
 test("admin counts include pending verification and pending verification releases", async () => {
@@ -540,8 +580,12 @@ test("admin approval approves verification and moves releases to moderation", as
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.movedReleaseIds, ["rel_1"]);
-  assert.equal(state.verifications[0]?.status, "APPROVED");
-  assert.equal(state.verifications[0]?.approvedByAdminId, "admin_1");
+  assert.equal(state.verifications[0]?.status, "approved");
+  const verification = await getContractSignatureById({
+    prisma: prisma as never,
+    id: "ver_1"
+  });
+  assert.equal(verification?.approvedByAdminId, "admin_1");
   assert.equal(state.releases[0]?.status, ReleaseStatus.MODERATION);
   assert.ok(state.releases[0]?.moderationStartedAt instanceof Date);
 });
@@ -607,10 +651,14 @@ test("admin rejection saves reason and moves releases to changes required", asyn
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.movedReleaseIds, ["rel_1"]);
-  assert.equal(state.verifications[0]?.status, "REJECTED");
-  assert.equal(state.verifications[0]?.rejectionReason, "Подпись не совпадает с паспортом");
+  assert.equal(state.verifications[0]?.status, "rejected");
+  const verification = await getContractSignatureById({
+    prisma: prisma as never,
+    id: "ver_1"
+  });
+  assert.equal(verification?.rejectionReason, "Подпись не совпадает с паспортом");
   assert.equal(state.releases[0]?.status, ReleaseStatus.CHANGES_REQUIRED);
-  assert.match(state.releases[0]?.moderationComment ?? "", /Верификация отклонена/u);
+  assert.match(state.releases[0]?.moderatorComment ?? "", /Верификация отклонена/u);
 });
 
 test("signature download asset returns PNG blob for base64 signatures", async () => {
@@ -662,7 +710,7 @@ test("signature download asset returns PNG blob for base64 signatures", async ()
   assert.equal(asset?.body?.byteLength, Buffer.from(SIGNATURE_DATA_URL.split(",")[1] ?? "", "base64").byteLength);
 });
 
-test("contract download asset returns contract PDF body", async () => {
+test("legacy contract download asset generates signed document instead of static PDF", async () => {
   const now = new Date("2026-05-06T18:00:00.000Z");
   const { prisma } = createFakePrisma({
     verifications: [
@@ -704,10 +752,81 @@ test("contract download asset returns contract PDF body", async () => {
     prisma: prisma as never,
     id: "ver_1"
   });
-  const expected = await readFile(path.join(process.cwd(), "public", "docs", "contract-2026-01.pdf"));
 
-  assert.equal(asset?.contentType, "application/pdf");
-  assert.equal(asset?.fileName, "contract-2026-01.pdf");
+  assert.equal(asset?.contentType, "text/html; charset=utf-8");
+  assert.equal(asset?.fileName, "signed-contract-user_1-2026-05-06.html");
   assert.ok(asset?.body);
-  assert.equal(asset?.body?.byteLength, expected.byteLength);
+  const html = asset.body.toString("utf8");
+  assert.match(html, /Подписанный договор ICECREAMMUSIC/u);
+  assert.match(html, /Иван Иванов/u);
+  assert.match(html, /data:application\/pdf;base64/u);
+  assert.match(html, /data:image\/png;base64/u);
+});
+
+test("contract download embeds remote signature image into offline html", async () => {
+  const now = new Date("2026-05-06T18:00:00.000Z");
+  const remoteSignatureUrl = "https://cdn.example.com/contracts/signatures/user_1/signature.png";
+  const signatureBody = Buffer.from("signature-png-body");
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    assert.equal(String(url), remoteSignatureUrl);
+    return new Response(signatureBody, {
+      status: 200,
+      headers: { "Content-Type": "image/png" }
+    });
+  }) as typeof fetch;
+
+  try {
+    const { prisma } = createFakePrisma({
+      verifications: [
+        {
+          id: "ver_1",
+          userId: "user_1",
+          userEmail: "artist@example.com",
+          userName: "Artist",
+          contractVersion: "2026-01",
+          contractFileName: "signed-contract-user_1-2026-05-06.html",
+          contractFileUrl: "data:text/html;charset=utf-8;base64,PGh0bWw+L2FwaS92ZXJpZmljYXRpb24vY29udHJhY3Qvc2lnbmF0dXJlP2lubGluZT0xPC9odG1sPg==",
+          signatureImageUrl: remoteSignatureUrl,
+          signedAt: now,
+          ipAddress: null,
+          userAgent: null,
+          status: "APPROVED",
+          rejectionReason: null,
+          approvedAt: now,
+          approvedByAdminId: "admin_1",
+          rejectedAt: null,
+          rejectedByAdminId: null,
+          createdAt: now,
+          updatedAt: now,
+          fullName: "Иван Иванов",
+          birthDate: "1990-01-01",
+          passportNumber: "1234 567890",
+          passportIssuedBy: "ОВД Москвы",
+          passportCode: "123-456",
+          passportIssueDate: "2010-01-01",
+          address: "Москва",
+          ogrnip: null,
+          inn: "1234567890",
+          snils: "123-456-789 00"
+        }
+      ]
+    });
+
+    const asset = await getContractDocumentDownloadAsset({
+      prisma: prisma as never,
+      id: "ver_1",
+      signatureFallbackUrl: "/api/verification/contract/signature?inline=1"
+    });
+
+    assert.equal(asset?.contentType, "text/html; charset=utf-8");
+    assert.ok(asset?.body);
+    const html = asset.body.toString("utf8");
+    assert.match(html, /data:image\/png;base64/u);
+    assert.doesNotMatch(html, /\/api\/verification\/contract\/signature/u);
+    assert.doesNotMatch(html, /cdn\.example\.com\/contracts\/signatures/u);
+    assert.match(html, new RegExp(signatureBody.toString("base64"), "u"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -45,7 +45,9 @@ export function UserProfileForm({
   const [success, setSuccess] = React.useState<string | null>(null);
   const [contractViewerOpen, setContractViewerOpen] = React.useState(false);
 
-  const canViewContract = effectiveVerification.isVerified;
+  const canViewContract = Boolean(effectiveVerification.verificationId) &&
+    effectiveVerification.status !== "not_signed" &&
+    effectiveVerification.status !== "unavailable";
   const subscriptionActive = Boolean(user?.hasActiveSubscription);
   const subscriptionLabel = subscriptionActive ? "Подписка активна" : "Активной подписки нет";
   const subscriptionClassName = subscriptionActive
@@ -270,6 +272,8 @@ export function UserProfileForm({
       <ContractReadOnlyModal
         open={contractViewerOpen}
         onClose={() => setContractViewerOpen(false)}
+        downloadHref={canViewContract ? "/api/verification/contract/download" : null}
+        previewHref={canViewContract ? "/api/verification/contract/download?inline=1" : null}
       />
     </Card>
   );

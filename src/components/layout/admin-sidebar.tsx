@@ -11,6 +11,7 @@ import {
   Ticket,
 	  CreditCard,
 	  FileText,
+  FileWarning,
 	  Flag,
 	  Headset,
 	  LogOut,
@@ -37,6 +38,7 @@ const items = [
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
   { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard },
+  { href: "/admin/reports/changes-requested", label: "Отчёты на доработке", icon: FileWarning },
   { href: "/admin/payout-schedule", label: "Периоды выплат", icon: CreditCard },
   { href: "/admin/playlists", label: "Плейлисты", icon: Music2 }
 ];

@@ -8,10 +8,14 @@ import { ContractViewer } from "@/components/verification/contract-viewer";
 
 export function ContractReadOnlyModal({
   open,
-  onClose
+  onClose,
+  downloadHref,
+  previewHref
 }: {
   open: boolean;
   onClose: () => void;
+  downloadHref?: string | null;
+  previewHref?: string | null;
 }) {
   React.useEffect(() => {
     if (!open) return;
@@ -23,6 +27,12 @@ export function ContractReadOnlyModal({
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
   }, [onClose, open]);
+
+  const previewSrc = React.useMemo(() => {
+    if (!previewHref || !open) return null;
+    const separator = previewHref.includes("?") ? "&" : "?";
+    return `${previewHref}${separator}viewer=${Date.now()}`;
+  }, [open, previewHref]);
 
   if (!open) return null;
 
@@ -36,23 +46,43 @@ export function ContractReadOnlyModal({
               Режим просмотра
             </p>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onClose}
-            className="h-9 rounded-lg px-2.5"
-            aria-label="Закрыть просмотр договора"
-            title="Закрыть"
-          >
-            <X className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-2">
+            {downloadHref ? (
+              <Button
+                asChild
+                type="button"
+                variant="outline"
+                className="h-9 rounded-lg px-3 text-[12px] font-semibold"
+              >
+                <a href={downloadHref}>Скачать</a>
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              className="h-9 rounded-lg px-2.5"
+              aria-label="Закрыть просмотр договора"
+              title="Закрыть"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
-        <ContractViewer
-          className="min-h-0 flex-1"
-          readOnly
-          allowExternalOpen={false}
-        />
+        {previewSrc ? (
+          <iframe
+            title="Подписанный договор"
+            src={previewSrc}
+            className="min-h-0 flex-1 rounded-2xl border border-white/12 bg-white"
+          />
+        ) : (
+          <ContractViewer
+            className="min-h-0 flex-1"
+            readOnly
+            allowExternalOpen={false}
+          />
+        )}
       </div>
     </div>
   );

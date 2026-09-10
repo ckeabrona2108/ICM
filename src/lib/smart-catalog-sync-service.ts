@@ -1595,6 +1595,89 @@ export async function previewFinancialImport(params: {
   });
 }
 
+export async function buildPersonalReportReplacementFromFile(params: {
+  userId: string;
+  sourceFileName: string;
+  arrayBuffer: ArrayBuffer | Buffer;
+}): Promise<{
+  items: UserReportLineItem[];
+  amount: number;
+  periodStart: Date | null;
+  periodEnd: Date | null;
+  matchedRows: number;
+  skippedRows: number;
+}> {
+  const parsed = await parseInputFile(params.sourceFileName, params.arrayBuffer);
+  const detectedColumns = detectSmartColumns(parsed.headers);
+  const matchContext = createSmartMatchContext();
+  const groupedRows = buildGroupedFinancialPreviewInputs(parsed.rows, detectedColumns);
+  const items: UserReportLineItem[] = [];
+  const periodStarts: Date[] = [];
+  const periodEnds: Date[] = [];
+  let skippedRows = 0;
+
+  for (const { raw, normalized } of groupedRows) {
+    const match = await findFinancialMatchWithContext(normalized, matchContext);
+    if (match.action !== "MATCH" || match.ownerUserId !== params.userId) {
+      skippedRows += 1;
+      continue;
+    }
+
+    const amount = Number(resolveFinancialNetAmount(normalized as Record<string, unknown>).toFixed(2));
+    if (amount <= 0) {
+      skippedRows += 1;
+      continue;
+    }
+
+    const releaseDate = parseDateLoose(normalized.release_date ?? null);
+    const endDate = parseDateLoose(normalized.end_date ?? null);
+    if (releaseDate) periodStarts.push(releaseDate);
+    if (endDate) periodEnds.push(endDate);
+
+    const sourceRows = Array.isArray(raw.SourceRowsData)
+      ? raw.SourceRowsData as GroupedFinancialSourceRow[]
+      : [];
+
+    if (sourceRows.length > 0) {
+      const sourceTotal = sourceRows.reduce((sum, sourceRow) => sum + Number(sourceRow.amount || 0), 0);
+      let allocated = 0;
+      sourceRows.forEach((sourceRow, sourceIndex) => {
+        const lineAmount = sourceIndex === sourceRows.length - 1
+          ? Number((amount - allocated).toFixed(2))
+          : Number((sourceTotal > 0 ? amount * (sourceRow.amount / sourceTotal) : amount / sourceRows.length).toFixed(2));
+        allocated = Number((allocated + lineAmount).toFixed(2));
+        if (lineAmount <= 0) return;
+        items.push({
+          id: `${match.matchedReleaseId ?? "release"}:${sourceRow.rowNumber || sourceIndex + 1}`,
+          platformName: sourceRow.platformName || normalized.platform?.trim() || "Без площадки",
+          upc: normalizeAnalyticsUpc(normalized.upc ?? ""),
+          releaseTitle: String(match.release?.title ?? sourceRow.title ?? normalized.title ?? "Без названия"),
+          amount: lineAmount
+        });
+      });
+      continue;
+    }
+
+    items.push({
+      id: `${match.matchedReleaseId ?? "release"}:${normalized.row_number}`,
+      platformName: normalized.platform?.trim() || "Без площадки",
+      upc: normalizeAnalyticsUpc(normalized.upc ?? ""),
+      releaseTitle: String(match.release?.title ?? normalized.title ?? "Без названия"),
+      amount
+    });
+  }
+
+  const total = Number(items.reduce((sum, item) => sum + item.amount, 0).toFixed(2));
+  return {
+    items,
+    amount: total,
+    periodStart: periodStarts.length > 0 ? new Date(Math.min(...periodStarts.map((item) => item.getTime()))) : null,
+    periodEnd: periodEnds.length > 0 ? new Date(Math.max(...periodEnds.map((item) => item.getTime()))) : null,
+    matchedRows: items.length,
+    skippedRows
+  };
+}
+
 async function resolvePlatformCommissionRate(userId: string | null | undefined, labelName: string | null | undefined) {
   if (userId) {
     const contractRate = await prisma.contract_commission_rates.findFirst({

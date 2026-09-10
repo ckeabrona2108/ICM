@@ -16,6 +16,7 @@ const inputClassName =
 export default function RegisterPage() {
   const [created, setCreated] = React.useState(false);
   const [agree, setAgree] = React.useState(false);
+  const [termsOpen, setTermsOpen] = React.useState(false);
   const [policyOpen, setPolicyOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -86,17 +87,20 @@ export default function RegisterPage() {
   }
 
   React.useEffect(() => {
-    if (!policyOpen) return;
+    if (!policyOpen && !termsOpen) return;
 
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPolicyOpen(false);
+      if (event.key === "Escape") {
+        setPolicyOpen(false);
+        setTermsOpen(false);
+      }
     };
 
     window.addEventListener("keydown", onEscape);
     return () => {
       window.removeEventListener("keydown", onEscape);
     };
-  }, [policyOpen]);
+  }, [policyOpen, termsOpen]);
 
   return (
     <>
@@ -213,7 +217,14 @@ export default function RegisterPage() {
             </span>
             <span>
               Я принимаю{' '}
-              <span className="text-white">условия использования</span> и{' '}
+              <button
+                type="button"
+                onClick={() => setTermsOpen(true)}
+                className="text-white underline-offset-4 hover:underline"
+              >
+                условия использования
+              </button>{' '}
+              и{' '}
               <button
                 type="button"
                 onClick={() => setPolicyOpen(true)}
@@ -268,6 +279,65 @@ export default function RegisterPage() {
           </Link>
         </p>
       </div>
+
+      {termsOpen ? (
+        <div
+          className="fixed inset-0 z-[140] flex items-start justify-center overflow-y-auto bg-[#04050b]/82 p-3 py-6 backdrop-blur-md sm:items-center"
+          onClick={() => setTermsOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Условия использования"
+            className="flex max-h-[calc(100dvh-48px)] min-h-[420px] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/12 bg-[#11131b] shadow-[0_40px_120px_-60px_rgba(0,0,0,0.95)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 sm:px-5">
+              <h2 className="text-[16px] font-semibold text-white sm:text-[18px]">
+                Условия использования
+              </h2>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTermsOpen(false)}
+                className="h-9 rounded-lg px-2.5"
+                aria-label="Закрыть окно условий использования"
+                title="Закрыть"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 text-[14px] leading-7 text-white/75 sm:px-8 sm:py-7">
+              <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                <h3 className="mb-4 text-[15px] font-semibold uppercase tracking-[0.16em] text-white/55">
+                  1. В случае возникновения проблем с LKPO
+                </h3>
+                <p>
+                  Сторона ICECREAMMUSIC предоставляет сайт и услуги на условиях
+                  «как есть» и «по доступности». ICECREAMMUSIC не заявляет и не
+                  гарантирует, что сайт или их использование: (i) будут
+                  бесперебойными, (ii) будут без неточностей или ошибок, (iii)
+                  будут отвечать вашим требованиям или (iv) будут работать в
+                  конфигурации или с оборудованием либо программным обеспечением,
+                  которое вы используете. ICECREAMMUSIC не предоставляет никаких
+                  гарантий, за исключением явно указанных в настоящем соглашении,
+                  и настоящим отказывается от любых и всех подразумеваемых
+                  гарантий, включая, без ограничений, гарантии пригодности для
+                  определенной цели, товарной пригодности и не нарушения прав.
+                  Исключение ущерба. ICECREAMMUSIC не несет ответственности перед
+                  вами или любыми третьим лицами за какой-либо побочный,
+                  случайный, косвенный, штрафной или особый ущерб, включая убытки,
+                  связанные с упущенной выгодой, потерей данных или нематериальных
+                  активов, возникший в результате использования сервиса
+                  ICECREAMMUSIC или связанный с ним, с любым основанием для иска,
+                  даже в случае предупреждения о возможности такого ущерба.
+                </p>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {policyOpen ? (
         <div

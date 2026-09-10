@@ -2,32 +2,33 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
-import { canManageUsers } from "@/lib/admin-user-service";
-import { getContractDocumentDownloadAsset } from "@/lib/contract-verification";
+import {
+  getContractDocumentDownloadAsset,
+  getUserContractStatus
+} from "@/lib/contract-verification";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(
-  request: Request,
-  context: { params: { id: string } }
-) {
+export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!canManageUsers(session.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const status = await getUserContractStatus({
+    prisma,
+    userId: session.user.id
+  });
+
+  if (!status.verificationId || status.status === "not_signed" || status.status === "unavailable") {
+    return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
-  const verificationId = context.params.id?.trim();
-  if (!verificationId) {
-    return NextResponse.json({ error: "Verification id is required" }, { status: 400 });
-  }
-
+  const inline = new URL(request.url).searchParams.get("inline") === "1";
   const asset = await getContractDocumentDownloadAsset({
     prisma,
-    id: verificationId,
-    inline: new URL(request.url).searchParams.get("inline") === "1",
-    signatureFallbackUrl: `/api/admin/verification/${encodeURIComponent(verificationId)}/signature/download?inline=1`
+    id: status.verificationId,
+    inline,
+    signatureFallbackUrl: "/api/verification/contract/signature?inline=1"
   });
   if (!asset) {
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
@@ -37,7 +38,6 @@ export async function GET(
     return NextResponse.redirect(new URL(asset.redirectUrl, request.url), { status: 302 });
   }
 
-  const inline = new URL(request.url).searchParams.get("inline") === "1";
   const body = asset.body ? new Uint8Array(asset.body) : null;
   return new NextResponse(body, {
     status: 200,

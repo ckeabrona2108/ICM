@@ -122,6 +122,21 @@ function normalizeReportYear(value: unknown): number | null {
   return numeric;
 }
 
+export function resolveSelectedReportQuarterPeriod(input: {
+  quarter?: number | null;
+  year?: number | null;
+}): { periodStart: Date; periodEnd: Date } | null {
+  const quarter = normalizeReportQuarter(input.quarter);
+  const year = normalizeReportYear(input.year);
+  if (!quarter || !year) return null;
+
+  const startMonth = (quarter - 1) * 3;
+  return {
+    periodStart: new Date(Date.UTC(year, startMonth, 1, 0, 0, 0, 0)),
+    periodEnd: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59, 999))
+  };
+}
+
 const CATALOG_IMPORT_INCLUDE = {
   rows: {
     orderBy: { row_number: "asc" }
@@ -2079,6 +2094,10 @@ export async function applyFinancialImport(params: {
   const allocationOverrides = new Map<string, number>();
   const reportQuarter = normalizeReportQuarter(params.reportQuarter);
   const reportYear = normalizeReportYear(params.reportYear);
+  const selectedReportPeriod = resolveSelectedReportQuarterPeriod({
+    quarter: reportQuarter,
+    year: reportYear
+  });
   for (const item of params.allocations ?? []) {
     if (!item?.rowId) continue;
     allocationOverrides.set(item.rowId, numberFromLoose(item.netAmount));
@@ -2424,13 +2443,15 @@ export async function applyFinancialImport(params: {
 
       const reportId = randomUUID();
       let persistedReportId = reportId;
+      const reportPeriodStart = selectedReportPeriod?.periodStart ?? aggregate.periodStart;
+      const reportPeriodEnd = selectedReportPeriod?.periodEnd ?? aggregate.periodEnd;
 
       try {
         const financeReport = await financeReportRepo.create({
           data: {
             userId,
-            periodStart: aggregate.periodStart,
-            periodEnd: aggregate.periodEnd,
+            periodStart: reportPeriodStart,
+            periodEnd: reportPeriodEnd,
             amount: Number(aggregate.amount.toFixed(2)),
             currency: "RUB",
             status: "READY_TO_CONFIRM",
@@ -2457,13 +2478,13 @@ export async function applyFinancialImport(params: {
             metadata: buildStoredUserReportPayload({
               reportId: persistedReportId,
               workflowState: "ready_to_confirm",
-              periodStart: aggregate.periodStart,
-              periodEnd: aggregate.periodEnd,
+              periodStart: reportPeriodStart,
+              periodEnd: reportPeriodEnd,
               amount: Number(aggregate.amount.toFixed(2)),
               currency: "RUB",
               quarter: reportQuarter,
               year: reportYear,
-              fallbackDate: aggregate.periodEnd,
+              fallbackDate: reportPeriodEnd,
               adminComment: null,
               items: reportItems
             })

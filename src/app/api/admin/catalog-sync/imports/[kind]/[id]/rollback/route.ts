@@ -11,7 +11,7 @@ type RouteContext = {
   }>;
 };
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,10 +22,24 @@ export async function POST(_request: Request, context: RouteContext) {
 
   try {
     const { kind, id } = await context.params;
+    const payload = (await request.json().catch(() => null)) as
+      | {
+          reportQuarter?: number | string | null;
+          reportYear?: number | string | null;
+        }
+      | null;
+    const reportQuarter =
+      payload?.reportQuarter === null || payload?.reportQuarter === undefined
+        ? null
+        : Number(payload.reportQuarter);
+    const reportYear =
+      payload?.reportYear === null || payload?.reportYear === undefined
+        ? null
+        : Number(payload.reportYear);
     const item =
       kind === "catalog"
         ? await rollbackCatalogImport({ importId: id, adminId: session.user.id })
-        : await rollbackFinancialImport({ importId: id, adminId: session.user.id });
+        : await rollbackFinancialImport({ importId: id, adminId: session.user.id, reportQuarter, reportYear });
 
     return NextResponse.json({ ok: true, item }, { status: 200 });
   } catch (error) {

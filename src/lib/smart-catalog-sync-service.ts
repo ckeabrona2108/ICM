@@ -106,6 +106,11 @@ type FinancialAllocationAdjustment = {
   netAmount: number;
 };
 
+type FinancialReportSelection = {
+  reportQuarter: number | null;
+  reportYear: number | null;
+};
+
 function normalizeReportQuarter(value: unknown): number | null {
   const numeric = Number(value);
   if (!Number.isInteger(numeric) || numeric < 1 || numeric > 4) {
@@ -135,6 +140,48 @@ export function resolveSelectedReportQuarterPeriod(input: {
     periodStart: new Date(Date.UTC(year, startMonth, 1, 0, 0, 0, 0)),
     periodEnd: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59, 999))
   };
+}
+
+function readFinancialReportSelection(metadata: unknown): FinancialReportSelection | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const record = metadata as Record<string, unknown>;
+  const reportQuarter = normalizeReportQuarter(record.reportQuarter);
+  const reportYear = normalizeReportYear(record.reportYear);
+  if (!reportQuarter || !reportYear) return null;
+  return { reportQuarter, reportYear };
+}
+
+async function resolveFinancialReportSelections(importIds: string[]): Promise<Map<string, FinancialReportSelection>> {
+  if (!importIds.length) return new Map();
+
+  const history = await prisma.import_history.findMany({
+    where: {
+      import_type: "finance",
+      import_id: { in: importIds },
+      action: { in: ["APPLY", "ROLLBACK"] }
+    },
+    orderBy: { created_at: "desc" },
+    select: {
+      import_id: true,
+      metadata: true
+    }
+  });
+
+  const selections = new Map<string, FinancialReportSelection>();
+  for (const item of history) {
+    if (selections.has(item.import_id)) continue;
+    const selection = readFinancialReportSelection(item.metadata);
+    if (selection) selections.set(item.import_id, selection);
+  }
+  return selections;
+}
+
+function attachFinancialReportSelection<T extends { id: string }>(
+  item: T,
+  selections: Map<string, FinancialReportSelection>
+): T & Partial<FinancialReportSelection> {
+  const selection = selections.get(item.id);
+  return selection ? { ...item, ...selection } : item;
 }
 
 const CATALOG_IMPORT_INCLUDE = {
@@ -2528,13 +2575,23 @@ export async function applyFinancialImport(params: {
     targetId: params.importId
   });
 
-  return financialImportsRepo.findUniqueOrThrow({
+  const item = await financialImportsRepo.findUniqueOrThrow({
     where: { id: params.importId },
     include: FINANCIAL_IMPORT_INCLUDE
   });
+  const selectionMap = new Map<string, FinancialReportSelection>();
+  if (reportQuarter && reportYear) {
+    selectionMap.set(params.importId, { reportQuarter, reportYear });
+  }
+  return attachFinancialReportSelection(item, selectionMap);
 }
 
-export async function rollbackFinancialImport(params: { importId: string; adminId: string }) {
+export async function rollbackFinancialImport(params: {
+  importId: string;
+  adminId: string;
+  reportQuarter?: number | null;
+  reportYear?: number | null;
+}) {
   const financialImportsRepo = requireClientRepo<{
     findUniqueOrThrow: typeof prisma.financial_imports.findUniqueOrThrow;
     update: typeof prisma.financial_imports.update;
@@ -2546,6 +2603,8 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
   const importJob = await financialImportsRepo.findUniqueOrThrow({
     where: { id: params.importId }
   });
+  const reportQuarter = normalizeReportQuarter(params.reportQuarter);
+  const reportYear = normalizeReportYear(params.reportYear);
 
   const applyHistory = await importHistoryReadRepo.findFirst({
     where: {
@@ -2565,13 +2624,36 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
       }
     });
 
-    return financialImportsRepo.findUniqueOrThrow({
+    if (reportQuarter && reportYear) {
+      await prisma.import_history.create({
+        data: {
+          import_type: "finance",
+          import_id: params.importId,
+          action: "ROLLBACK",
+          actor_id: params.adminId,
+          description: "Financial import rolled back",
+          metadata: {
+            reportQuarter,
+            reportYear
+          }
+        }
+      });
+    }
+
+    const item = await financialImportsRepo.findUniqueOrThrow({
       where: { id: params.importId },
       include: FINANCIAL_IMPORT_INCLUDE
     });
+    const selectionMap = new Map<string, FinancialReportSelection>();
+    if (reportQuarter && reportYear) {
+      selectionMap.set(params.importId, { reportQuarter, reportYear });
+    }
+    return attachFinancialReportSelection(item, selectionMap);
   }
 
   const metadata = applyHistory.metadata as FinancialApplyState;
+  const rollbackReportQuarter = reportQuarter ?? normalizeReportQuarter(metadata.reportQuarter);
+  const rollbackReportYear = reportYear ?? normalizeReportYear(metadata.reportYear);
 
   await prisma.$transaction(async (tx) => {
     const balanceTransactionsRepo = requireClientRepo<{
@@ -2657,7 +2739,11 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
         import_id: params.importId,
         action: "ROLLBACK",
         actor_id: params.adminId,
-        description: "Financial import rolled back"
+        description: "Financial import rolled back",
+        metadata: {
+          reportQuarter: rollbackReportQuarter,
+          reportYear: rollbackReportYear
+        }
       }
     });
   }, {
@@ -2665,10 +2751,15 @@ export async function rollbackFinancialImport(params: { importId: string; adminI
     timeout: 60_000
   });
 
-  return financialImportsRepo.findUniqueOrThrow({
+  const item = await financialImportsRepo.findUniqueOrThrow({
     where: { id: params.importId },
     include: FINANCIAL_IMPORT_INCLUDE
   });
+  const selectionMap = new Map<string, FinancialReportSelection>();
+  if (rollbackReportQuarter && rollbackReportYear) {
+    selectionMap.set(params.importId, { reportQuarter: rollbackReportQuarter, reportYear: rollbackReportYear });
+  }
+  return attachFinancialReportSelection(item, selectionMap);
 }
 
 export async function listSmartCatalogSyncImports(limit = 100) {
@@ -2683,7 +2774,12 @@ export async function listSmartCatalogSyncImports(limit = 100) {
     })
   ]);
 
-  return { catalog, finance };
+  const selections = await resolveFinancialReportSelections(finance.map((item) => item.id));
+
+  return {
+    catalog,
+    finance: finance.map((item) => attachFinancialReportSelection(item, selections))
+  };
 }
 
 export async function deleteSmartCatalogSyncImport(params: {
@@ -2808,8 +2904,12 @@ export async function getSmartCatalogSyncImportDetails(kind: SmartImportKind, im
   }
 
   if (item.status === "PREVIEW") {
-    return recomputeFinancialPreviewSnapshot(importId);
+    const previewItem = await recomputeFinancialPreviewSnapshot(importId);
+    if (!previewItem) return null;
+    const selections = await resolveFinancialReportSelections([previewItem.id]);
+    return attachFinancialReportSelection(previewItem, selections);
   }
 
-  return item;
+  const selections = await resolveFinancialReportSelections([item.id]);
+  return attachFinancialReportSelection(item, selections);
 }

@@ -76,6 +76,8 @@ type ImportItem = {
   gross_amount_total?: string | number | null;
   net_amount_total?: string | number | null;
   commission_total?: string | number | null;
+  reportQuarter?: number | null;
+  reportYear?: number | null;
   summary?: ImportSummary | null;
   rows?: CatalogRow[];
   conflicts?: CatalogConflict[];
@@ -409,10 +411,18 @@ export function AdminCatalogSyncClient() {
     if (selectedKind !== "finance") {
       return;
     }
+    const savedQuarter = Number(selectedImport?.reportQuarter ?? 0);
+    const savedYear = Number(selectedImport?.reportYear ?? 0);
+    if (Number.isInteger(savedQuarter) && savedQuarter >= 1 && savedQuarter <= 4 && Number.isInteger(savedYear) && savedYear >= 2000 && savedYear <= 3000) {
+      setFinanceReportQuarter(savedQuarter);
+      setFinanceReportYear(savedYear);
+      return;
+    }
+
     const nextQuarterYear = resolveQuarterYear(selectedImport?.created_at);
     setFinanceReportQuarter(nextQuarterYear.quarter);
     setFinanceReportYear(nextQuarterYear.year);
-  }, [selectedImport?.id, selectedImport?.created_at, selectedKind]);
+  }, [selectedImport?.id, selectedImport?.created_at, selectedImport?.reportQuarter, selectedImport?.reportYear, selectedKind]);
 
   const loadImports = React.useCallback(async () => {
     setLoadingImports(true);
@@ -531,9 +541,9 @@ export function AdminCatalogSyncClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
-            action === "apply" && selectedKind === "finance"
+            selectedKind === "finance"
               ? {
-                  allocations,
+                  ...(action === "apply" ? { allocations } : {}),
                   reportQuarter: financeReportQuarter,
                   reportYear: financeReportYear
                 }

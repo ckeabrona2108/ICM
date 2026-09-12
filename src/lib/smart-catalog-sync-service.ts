@@ -215,6 +215,10 @@ const SMART_IMPORT_DELETE_TRANSACTION_OPTIONS = {
   timeout: 60_000
 } as const;
 
+export function shouldRollbackFinancialImportBeforeDelete(status: unknown): boolean {
+  return status === "CONFIRMED";
+}
+
 function createSmartMatchContext(): SmartMatchContext {
   return {
     isrcMatches: new Map(),
@@ -578,6 +582,14 @@ function numberFromLoose(value: string | number | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function optionalNumberFromLoose(value: string | number | null | undefined): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
+    return null;
+  }
+
+  return Number(numberFromLoose(value).toFixed(2));
+}
+
 function resolveFinancialNetAmount(source: Record<string, unknown>): number {
   const royaltyTotal = numberFromLoose(source.royalty_total as string | number | null | undefined);
   if (royaltyTotal) return royaltyTotal;
@@ -643,7 +655,15 @@ function parseFinancialSourceRowsData(input: unknown): GroupedFinancialSourceRow
         rowNumber: Math.max(1, Math.trunc(numberFromLoose(source.rowNumber as string | number | null | undefined))),
         platformName: String(source.platformName ?? "").trim() || "Без площадки",
         title: String(source.title ?? "").trim() || null,
-        amount
+        amount,
+        artistName: String(source.artistName ?? "").trim() || null,
+        labelName: String(source.labelName ?? "").trim() || null,
+        usageType: String(source.usageType ?? "").trim() || null,
+        quantity: numberFromLoose(source.quantity as string | number | null | undefined) || null,
+        authorAmount: optionalNumberFromLoose(source.authorAmount as string | number | null | undefined),
+        relatedAmount: optionalNumberFromLoose(source.relatedAmount as string | number | null | undefined),
+        periodStart: String(source.periodStart ?? "").trim() || null,
+        periodEnd: String(source.periodEnd ?? "").trim() || null
       } satisfies GroupedFinancialSourceRow;
     })
     .filter((item): item is GroupedFinancialSourceRow => Boolean(item));
@@ -1499,6 +1519,14 @@ type GroupedFinancialSourceRow = {
   platformName: string;
   title: string | null;
   amount: number;
+  artistName: string | null;
+  labelName: string | null;
+  usageType: string | null;
+  quantity: number | null;
+  authorAmount: number | null;
+  relatedAmount: number | null;
+  periodStart: string | null;
+  periodEnd: string | null;
 };
 
 function buildGroupedFinancialSourceRow(
@@ -1510,7 +1538,15 @@ function buildGroupedFinancialSourceRow(
     rowNumber,
     platformName: normalized.platform?.trim() || "Без площадки",
     title: normalized.title?.trim() || null,
-    amount: Number(amount.toFixed(2))
+    amount: Number(amount.toFixed(2)),
+    artistName: normalized.artist?.trim() || null,
+    labelName: normalized.label?.trim() || null,
+    usageType: normalized.usage_type?.trim() || null,
+    quantity: numberFromLoose(normalized.quantity) || null,
+    authorAmount: optionalNumberFromLoose(normalized.royalty_author),
+    relatedAmount: optionalNumberFromLoose(normalized.royalty_related),
+    periodStart: normalized.release_date?.trim() || null,
+    periodEnd: normalized.end_date?.trim() || null
   };
 }
 
@@ -1714,7 +1750,15 @@ export async function buildPersonalReportReplacementFromFile(params: {
           platformName: sourceRow.platformName || normalized.platform?.trim() || "Без площадки",
           upc: normalizeAnalyticsUpc(normalized.upc ?? ""),
           releaseTitle: String(match.release?.title ?? sourceRow.title ?? normalized.title ?? "Без названия"),
-          amount: lineAmount
+          amount: lineAmount,
+          artistName: sourceRow.artistName ?? normalized.artist ?? null,
+          labelName: sourceRow.labelName ?? normalized.label ?? null,
+          usageType: sourceRow.usageType ?? normalized.usage_type ?? null,
+          quantity: sourceRow.quantity ?? numberFromLoose(normalized.quantity),
+          authorAmount: sourceRow.authorAmount,
+          relatedAmount: sourceRow.relatedAmount,
+          periodStart: sourceRow.periodStart ?? normalized.release_date ?? null,
+          periodEnd: sourceRow.periodEnd ?? normalized.end_date ?? null
         });
       });
       continue;
@@ -1725,7 +1769,15 @@ export async function buildPersonalReportReplacementFromFile(params: {
       platformName: normalized.platform?.trim() || "Без площадки",
       upc: normalizeAnalyticsUpc(normalized.upc ?? ""),
       releaseTitle: String(match.release?.title ?? normalized.title ?? "Без названия"),
-      amount
+      amount,
+      artistName: normalized.artist ?? null,
+      labelName: normalized.label ?? null,
+      usageType: normalized.usage_type ?? null,
+      quantity: numberFromLoose(normalized.quantity),
+      authorAmount: optionalNumberFromLoose(normalized.royalty_author),
+      relatedAmount: optionalNumberFromLoose(normalized.royalty_related),
+      periodStart: normalized.release_date ?? null,
+      periodEnd: normalized.end_date ?? null
     });
   }
 
@@ -2164,6 +2216,14 @@ export async function applyFinancialImport(params: {
       commissionAmount: number;
       commissionRate: number;
       netAmount: number;
+      artistName: string | null;
+      labelName: string | null;
+      usageType: string | null;
+      quantity: number | null;
+      authorAmount: number | null;
+      relatedAmount: number | null;
+      periodStart: string | null;
+      periodEnd: string | null;
       sourceRowsCount: number;
       sourceRows: GroupedFinancialSourceRow[];
     }>;
@@ -2430,6 +2490,14 @@ export async function applyFinancialImport(params: {
         commissionAmount,
         commissionRate,
         netAmount,
+        artistName: normalized.artist ?? null,
+        labelName: release?.labelName ?? normalized.label ?? null,
+        usageType: normalized.usage_type ?? null,
+        quantity: numberFromLoose(normalized.quantity) || null,
+        authorAmount: optionalNumberFromLoose(normalized.royalty_author),
+        relatedAmount: optionalNumberFromLoose(normalized.royalty_related),
+        periodStart: normalized.release_date ?? null,
+        periodEnd: normalized.end_date ?? null,
         sourceRowsCount,
         sourceRows
       });
@@ -2462,7 +2530,15 @@ export async function applyFinancialImport(params: {
               platformName: allocation.platformName?.trim() || "Без площадки",
               upc: allocation.upc?.trim() || "",
               releaseTitle: allocation.releaseTitle?.trim() || "Без названия",
-              amount: Number(allocation.netAmount.toFixed(2))
+              amount: Number(allocation.netAmount.toFixed(2)),
+              artistName: allocation.artistName,
+              labelName: allocation.labelName,
+              usageType: allocation.usageType,
+              quantity: allocation.quantity,
+              authorAmount: allocation.authorAmount,
+              relatedAmount: allocation.relatedAmount,
+              periodStart: allocation.periodStart,
+              periodEnd: allocation.periodEnd
             }];
           }
 
@@ -2482,7 +2558,15 @@ export async function applyFinancialImport(params: {
                 platformName: sourceRow.platformName,
                 upc: allocation.upc?.trim() || "",
                 releaseTitle: allocation.releaseTitle?.trim() || sourceRow.title || "Без названия",
-                amount
+                amount,
+                artistName: sourceRow.artistName ?? allocation.artistName,
+                labelName: sourceRow.labelName ?? allocation.labelName,
+                usageType: sourceRow.usageType ?? null,
+                quantity: sourceRow.quantity,
+                authorAmount: sourceRow.authorAmount,
+                relatedAmount: sourceRow.relatedAmount,
+                periodStart: sourceRow.periodStart,
+                periodEnd: sourceRow.periodEnd
               };
             })
             .filter((item) => item.amount !== 0);
@@ -2850,6 +2934,14 @@ export async function deleteSmartCatalogSyncImport(params: {
     throw new Error("Import not found");
   }
 
+  const rolledBackBeforeDelete = shouldRollbackFinancialImportBeforeDelete(item.status);
+  if (rolledBackBeforeDelete) {
+    await rollbackFinancialImport({
+      importId: params.importId,
+      adminId: params.adminId
+    });
+  }
+
   await prisma.$transaction(async (tx) => {
     const importHistoryRepo = requireClientRepo<{
       deleteMany: typeof tx.import_history.deleteMany;
@@ -2875,14 +2967,16 @@ export async function deleteSmartCatalogSyncImport(params: {
     details: {
       kind: "finance",
       status: item.status,
-      source_file_name: item.source_file_name
+      source_file_name: item.source_file_name,
+      rolled_back_before_delete: rolledBackBeforeDelete
     }
   }).catch(() => null);
 
   return {
     ok: true,
     id: params.importId,
-    kind: params.kind
+    kind: params.kind,
+    rolledBackBeforeDelete
   };
 }
 

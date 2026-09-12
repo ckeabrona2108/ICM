@@ -2,7 +2,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveSelectedReportQuarterPeriod } from "@/lib/smart-catalog-sync-service";
+import {
+  detectSmartColumns,
+  resolveSelectedReportQuarterPeriod,
+  shouldRollbackFinancialImportBeforeDelete
+} from "@/lib/smart-catalog-sync-service";
 
 test("selected finance report quarter resolves to quarter date range", () => {
   const period = resolveSelectedReportQuarterPeriod({
@@ -17,4 +21,35 @@ test("selected finance report quarter resolves to quarter date range", () => {
 test("invalid finance report quarter selection returns null", () => {
   assert.equal(resolveSelectedReportQuarterPeriod({ quarter: 5, year: 2026 }), null);
   assert.equal(resolveSelectedReportQuarterPeriod({ quarter: 2, year: 1999 }), null);
+});
+
+test("finance report csv columns detect artist, quantity and royalty detail fields", () => {
+  const columns = detectSmartColumns([
+    "UPC",
+    "Название",
+    "Исполнитель",
+    "Платформа",
+    "Вид использования",
+    "Период начала",
+    "Период окончания",
+    "Количество",
+    "Вознаграждение Лицензиара (Авторские)",
+    "Вознаграждение Лицензиара (Смежные)",
+    "Лейбл"
+  ]);
+
+  assert.equal(columns.upc, "UPC");
+  assert.equal(columns.title, "Название");
+  assert.equal(columns.artist, "Исполнитель");
+  assert.equal(columns.platform, "Платформа");
+  assert.equal(columns.usage_type, "Вид использования");
+  assert.equal(columns.quantity, "Количество");
+  assert.equal(columns.royalty_author, "Вознаграждение Лицензиара (Авторские)");
+  assert.equal(columns.royalty_related, "Вознаграждение Лицензиара (Смежные)");
+});
+
+test("confirmed finance import is rolled back before deletion", () => {
+  assert.equal(shouldRollbackFinancialImportBeforeDelete("CONFIRMED"), true);
+  assert.equal(shouldRollbackFinancialImportBeforeDelete("PREVIEW"), false);
+  assert.equal(shouldRollbackFinancialImportBeforeDelete("ROLLED_BACK"), false);
 });

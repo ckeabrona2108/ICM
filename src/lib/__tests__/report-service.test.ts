@@ -8,6 +8,7 @@ import {
   createUserReportByAdmin,
   deleteUserReportByAdmin,
   listAdminChangesRequestedReports,
+  listAdminFinanceReports,
   listUserReports,
   markUserReportAsAgreed,
   markUserReportAsRejected,
@@ -61,8 +62,12 @@ function createReportPrismaStub() {
       return null;
     },
     findMany: async ({ where }: any) => {
-      if (!state.report || state.report.userId !== where.userId) return [];
-      return [state.report];
+      if (!state.report) return [];
+      if (where?.userId && state.report.userId !== where.userId) return [];
+      return [{
+        ...state.report,
+        user: { id: "user_1", name: "Олег", email: "oleg@example.com" }
+      }];
     }
   };
 
@@ -182,7 +187,12 @@ test("pending report stores quarter details and line items in payload", async ()
         platformName: "Яндекс.Музыка",
         upc: "1234567890123",
         releaseTitle: "Последний танец",
-        amount: 856
+        amount: 856,
+        artistName: "Шведов Андрей Александрович(YUNG$HVED) Ульянов Иван Иванович(Evianway)",
+        usageType: "Подписка",
+        quantity: "1" as any,
+        authorAmount: "0" as any,
+        relatedAmount: "21130,03" as any
       }
     ],
     comment: "Q3 report"
@@ -198,6 +208,11 @@ test("pending report stores quarter details and line items in payload", async ()
   assert.equal(reports[0].quarterLabel, "3 квартал 2026");
   assert.equal(reports[0].platformTotals[0].platformName, "Яндекс.Музыка");
   assert.equal(reports[0].platformTotals[0].amount, 856);
+  assert.equal(reports[0].items[0].artistName, "Шведов Андрей Александрович(YUNG$HVED) Ульянов Иван Иванович(Evianway)");
+  assert.equal(reports[0].items[0].usageType, "Подписка");
+  assert.equal(reports[0].items[0].quantity, 1);
+  assert.equal(reports[0].items[0].authorAmount, 0);
+  assert.equal(reports[0].items[0].relatedAmount, 21130.03);
 });
 
 test("report platform totals use exact line item amounts per platform", async () => {
@@ -249,6 +264,41 @@ test("report platform totals use exact line item amounts per platform", async ()
     reports[0].platformTotals.reduce((sum, item) => Number((sum + item.amount).toFixed(2)), 0),
     212034.05
   );
+});
+
+test("admin finance reports list includes users and report payloads", async () => {
+  const { prisma } = createReportPrismaStub();
+
+  await createUserReportByAdmin({
+    prisma,
+    adminId: "admin_1",
+    userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 0,
+    status: FinanceReportStatus.READY_TO_CONFIRM,
+    quarter: 2,
+    year: 2026,
+    items: [
+      {
+        id: "row-1",
+        platformName: "Apple",
+        upc: "5063635044004",
+        releaseTitle: "NOT AFRAID",
+        amount: 678.02
+      }
+    ],
+    comment: "Q2 report"
+  });
+
+  const reports = await listAdminFinanceReports(prisma, 20);
+
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].user.id, "user_1");
+  assert.equal(reports[0].user.email, "oleg@example.com");
+  assert.equal(reports[0].quarterLabel, "2 квартал 2026");
+  assert.equal(reports[0].amount, 678.02);
+  assert.equal(reports[0].items[0].platformName, "Apple");
 });
 
 test("rejected report can be updated and agreed once with balance credit", async () => {

@@ -61,6 +61,35 @@ function getVisibleReportComment(comment: string | null): string | null {
   return normalizedComment;
 }
 
+function formatReportLineDate(value?: string | null): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("ru-RU");
+}
+
+function formatReportLinePeriod(item: { periodStart?: string | null; periodEnd?: string | null }): string {
+  const start = formatReportLineDate(item.periodStart);
+  const end = formatReportLineDate(item.periodEnd);
+  if (start === "—" && end === "—") return "—";
+  if (start === end) return start;
+  return `${start} - ${end}`;
+}
+
+function formatReportLineQuantity(value?: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toLocaleString("ru-RU");
+}
+
+function formatOptionalReportCurrency(value?: number | null): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return formatCurrency(value, "RUB");
+}
+
+function hasReportValue(value: unknown): boolean {
+  return value !== null && value !== undefined && value !== "";
+}
+
 export function FinancePageClient({
   initialReports,
   initialTransactions,
@@ -798,13 +827,25 @@ function ReportDetailsModal({
   busy: null | "agree" | "reject";
 }) {
   const visibleAdminComment = getVisibleReportComment(report.adminComment);
+  const hasDetailedItems = report.items.some(
+    (item) =>
+      item.artistName ||
+      item.usageType ||
+      hasReportValue(item.quantity) ||
+      hasReportValue(item.authorAmount) ||
+      hasReportValue(item.relatedAmount) ||
+      item.periodStart ||
+      item.periodEnd
+  );
+  const showPeriodStartColumn = report.items.some((item) => item.periodStart);
+  const showPeriodEndColumn = report.items.some((item) => item.periodEnd);
   if (typeof document === "undefined") {
     return null;
   }
 
   return createPortal(
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-[#05060b]/80 px-4 py-4 backdrop-blur-sm">
-      <div className="max-h-[calc(100dvh-32px)] w-full max-w-4xl overflow-y-auto rounded-[28px] border border-white/10 bg-[#11131a] p-5 shadow-[0_30px_90px_-42px_rgba(0,0,0,0.95)] sm:p-6">
+      <div className="max-h-[calc(100dvh-32px)] w-full max-w-[min(1180px,calc(100vw-24px))] overflow-y-auto overflow-x-hidden rounded-[28px] border border-white/10 bg-[#11131a] p-5 shadow-[0_30px_90px_-42px_rgba(0,0,0,0.95)] sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -844,7 +885,7 @@ function ReportDetailsModal({
           ) : null}
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-[0.95fr,1.05fr]">
+        <div className={cn("mt-5 grid gap-4", hasDetailedItems ? "lg:grid-cols-1" : "lg:grid-cols-[0.95fr,1.05fr]")}>
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
             <h4 className="text-[15px] font-semibold text-white">По площадкам</h4>
             <div className="mt-3 space-y-2">
@@ -867,29 +908,82 @@ function ReportDetailsModal({
           </div>
 
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-            <h4 className="text-[15px] font-semibold text-white">Релизы и UPC</h4>
-            <div className="mt-3 space-y-2">
-              {report.items.length ? (
-                report.items.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-3"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[14px] font-semibold text-white">{item.releaseTitle}</p>
-                        <p className="mt-1 text-[12px] text-white/52">UPC: {item.upc || "—"}</p>
+            <h4 className="text-[15px] font-semibold text-white">
+              {hasDetailedItems ? "Детализация начислений" : "Релизы и UPC"}
+            </h4>
+            {hasDetailedItems && report.items.length ? (
+              <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.06] bg-black/20">
+                <table className="w-full min-w-[1120px] text-left text-[13px]">
+                  <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
+                    <tr>
+                      <th className="px-3 py-3 font-semibold">UPC</th>
+                      <th className="px-3 py-3 font-semibold">Название</th>
+                      <th className="px-3 py-3 font-semibold">Исполнитель</th>
+                      <th className="px-3 py-3 font-semibold">Площадка</th>
+                      <th className="px-3 py-3 font-semibold">Вид использования</th>
+                      {showPeriodStartColumn ? <th className="px-3 py-3 font-semibold">Период начала</th> : null}
+                      {showPeriodEndColumn ? <th className="px-3 py-3 font-semibold">Период окончания</th> : null}
+                      <th className="px-3 py-3 text-right font-semibold">Кол-во</th>
+                      <th className="px-3 py-3 text-right font-semibold">Авторские права</th>
+                      <th className="px-3 py-3 text-right font-semibold">Смежные права</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.05]">
+                    {report.items.map((item) => (
+                      <tr key={item.id} className="text-white/72">
+                        <td className="px-3 py-3 text-white/54">{item.upc || "—"}</td>
+                        <td className="max-w-[220px] px-3 py-3 font-semibold text-white">
+                          <span className="block break-words">{item.releaseTitle}</span>
+                        </td>
+                        <td className="max-w-[180px] px-3 py-3">
+                          <span className="block break-words">{item.artistName || "—"}</span>
+                        </td>
+                        <td className="max-w-[170px] px-3 py-3">
+                          <span className="block break-words">{item.platformName || "Без площадки"}</span>
+                        </td>
+                        <td className="px-3 py-3">{item.usageType || "—"}</td>
+                        {showPeriodStartColumn ? (
+                          <td className="px-3 py-3 text-white/58">{formatReportLineDate(item.periodStart)}</td>
+                        ) : null}
+                        {showPeriodEndColumn ? (
+                          <td className="px-3 py-3 text-white/58">{formatReportLineDate(item.periodEnd)}</td>
+                        ) : null}
+                        <td className="px-3 py-3 text-right">{formatReportLineQuantity(item.quantity)}</td>
+                        <td className="px-3 py-3 text-right font-semibold text-white/78">
+                          {formatOptionalReportCurrency(item.authorAmount)}
+                        </td>
+                        <td className="px-3 py-3 text-right font-semibold text-white/78">
+                          {formatOptionalReportCurrency(item.relatedAmount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {report.items.length ? (
+                  report.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[14px] font-semibold text-white">{item.releaseTitle}</p>
+                          <p className="mt-1 text-[12px] text-white/52">UPC: {item.upc || "—"}</p>
+                        </div>
+                        <span className="text-[14px] font-semibold text-white">
+                          {formatCurrency(item.amount, "RUB")}
+                        </span>
                       </div>
-                      <span className="text-[14px] font-semibold text-white">
-                        {formatCurrency(item.amount, "RUB")}
-                      </span>
                     </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-[14px] text-white/58">Детализация по релизам не добавлена.</p>
-              )}
-            </div>
+                  ))
+                ) : (
+                  <p className="text-[14px] text-white/58">Детализация по релизам не добавлена.</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

@@ -38,6 +38,7 @@ const items = [
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
   { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard },
+  { href: "/admin/reports", label: "Финансовые отчёты", icon: FileText, exact: true },
   { href: "/admin/reports/changes-requested", label: "Отчёты на доработке", icon: FileWarning },
   { href: "/admin/payout-schedule", label: "Периоды выплат", icon: CreditCard },
   { href: "/admin/playlists", label: "Плейлисты", icon: Music2 }
@@ -101,8 +102,8 @@ export function AdminSidebar() {
         {items.map((item) => {
           const Icon = item.icon;
           const active =
-            item.href === "/admin"
-              ? pathname === "/admin"
+            item.href === "/admin" || item.exact
+              ? pathname === item.href
               : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
           return (

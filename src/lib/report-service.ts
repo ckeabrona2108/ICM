@@ -105,6 +105,14 @@ export interface UserReportLineItem {
   upc: string;
   releaseTitle: string;
   amount: number;
+  artistName?: string | null;
+  labelName?: string | null;
+  usageType?: string | null;
+  quantity?: number | null;
+  authorAmount?: number | null;
+  relatedAmount?: number | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
 }
 
 export interface UserReportPlatformTotal {
@@ -132,6 +140,14 @@ export interface UserReportItem {
 }
 
 export interface AdminChangesRequestedReportItem extends UserReportItem {
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  };
+}
+
+export interface AdminFinanceReportItem extends UserReportItem {
   user: {
     id: string;
     name: string | null;
@@ -180,6 +196,28 @@ function normalizeText(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function normalizeOptionalAmount(value: unknown): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
+    return null;
+  }
+
+  const amount = typeof value === "string"
+    ? roundAmount(Number(value.replace(/\s/g, "").replace(",", ".")))
+    : roundAmount(toNumber(value as Prisma.Decimal | number | null | undefined));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function normalizeOptionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) {
+    return null;
+  }
+
+  const normalized = typeof value === "string"
+    ? Number(value.replace(/\s/g, "").replace(",", "."))
+    : Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
 function coerceQuarter(value: unknown): number | null {
   const normalized = Number(value);
   if (!Number.isInteger(normalized) || normalized < 1 || normalized > 4) {
@@ -218,7 +256,15 @@ function normalizeLineItems(items: unknown): UserReportLineItem[] {
         platformName: normalizeText(source.platformName, "Без площадки"),
         upc: normalizeText(source.upc),
         releaseTitle: normalizeText(source.releaseTitle, "Без названия"),
-        amount
+        amount,
+        artistName: normalizeText(source.artistName) || null,
+        labelName: normalizeText(source.labelName) || null,
+        usageType: normalizeText(source.usageType) || null,
+        quantity: normalizeOptionalNumber(source.quantity),
+        authorAmount: normalizeOptionalAmount(source.authorAmount),
+        relatedAmount: normalizeOptionalAmount(source.relatedAmount),
+        periodStart: normalizeText(source.periodStart) || null,
+        periodEnd: normalizeText(source.periodEnd) || null
       };
     })
     .filter((item) => item.amount > 0);
@@ -483,6 +529,157 @@ export async function listAdminChangesRequestedReports(
   }
 
   return items.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function listAdminFinanceReports(
+  prisma: PrismaClient,
+  limit = 500
+): Promise<AdminFinanceReportItem[]> {
+  const payloadsByUser = new Map<string, Map<string, ReportPayloadRecord>>();
+
+  const transactionRepo = getRepo<{
+    findMany: (args: unknown) => Promise<
+      Array<{
+        id: string;
+        userId: string;
+        metadata: unknown;
+        createdAt?: Date | null;
+        user?: { id: string; name?: string | null; email?: string | null } | null;
+      }>
+    >;
+  }>(prisma, "transaction");
+
+  if (transactionRepo?.findMany) {
+    try {
+      const rows = await transactionRepo.findMany({
+        where: {
+          description: REPORT_PAYLOAD_DESCRIPTION
+        },
+        orderBy: { createdAt: "desc" },
+        take: Math.max(limit * 2, limit),
+        select: {
+          id: true,
+          userId: true,
+          metadata: true,
+          createdAt: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      const payloadOnlyReports: AdminFinanceReportItem[] = [];
+      const seenPayloadOnly = new Set<string>();
+
+      for (const row of rows) {
+        const metadata = row?.metadata;
+        if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+          continue;
+        }
+        const rawReportId = normalizeText((metadata as Record<string, unknown>).reportId);
+        if (!rawReportId) continue;
+
+        const fallbackDate = row.createdAt instanceof Date ? row.createdAt : new Date();
+        const payload = parseStoredPayload(metadata, rawReportId, fallbackDate);
+        if (!payload) continue;
+
+        const userPayloads = payloadsByUser.get(row.userId) ?? new Map<string, ReportPayloadRecord>();
+        if (!userPayloads.has(rawReportId)) {
+          userPayloads.set(rawReportId, {
+            id: row.id,
+            reportId: rawReportId,
+            payload
+          });
+          payloadsByUser.set(row.userId, userPayloads);
+        }
+
+        if (!seenPayloadOnly.has(rawReportId)) {
+          seenPayloadOnly.add(rawReportId);
+          payloadOnlyReports.push({
+            ...mapPayloadRecordToUserReportItem({
+              id: row.id,
+              reportId: rawReportId,
+              payload
+            }),
+            user: {
+              id: row.user?.id ?? row.userId,
+              name: row.user?.name ?? null,
+              email: row.user?.email ?? null
+            }
+          });
+        }
+      }
+
+      try {
+        const reports = await prisma.financeReport.findMany({
+          orderBy: { createdAt: "desc" },
+          take: limit,
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true
+              }
+            }
+          }
+        });
+
+        return reports.map((report) => ({
+          ...mapReportItem(report, payloadsByUser.get(report.userId)?.get(report.id)?.payload ?? null),
+          user: {
+            id: report.user?.id ?? report.userId,
+            name: report.user?.name ?? null,
+            email: report.user?.email ?? null
+          }
+        }));
+      } catch (error) {
+        if (!isPrismaTableMissingError(error, "financeReport")) {
+          throw error;
+        }
+        return payloadOnlyReports.slice(0, limit);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      if (!message.includes("transaction") && !message.includes("does not exist") && !message.includes("unknown")) {
+        throw error;
+      }
+    }
+  }
+
+  try {
+    const reports = await prisma.financeReport.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    return reports.map((report) => ({
+      ...mapReportItem(report, null),
+      user: {
+        id: report.user?.id ?? report.userId,
+        name: report.user?.name ?? null,
+        email: report.user?.email ?? null
+      }
+    }));
+  } catch (error) {
+    if (!isPrismaTableMissingError(error, "financeReport")) {
+      throw error;
+    }
+    return [];
+  }
 }
 
 async function upsertReportPayloadRecord(

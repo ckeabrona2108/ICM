@@ -17,6 +17,14 @@ export interface FinanceReportClientItem {
     upc: string;
     releaseTitle: string;
     amount: number;
+    artistName?: string | null;
+    labelName?: string | null;
+    usageType?: string | null;
+    quantity?: number | null;
+    authorAmount?: number | null;
+    relatedAmount?: number | null;
+    periodStart?: string | null;
+    periodEnd?: string | null;
   }>;
   platformTotals: Array<{
     platformName: string;

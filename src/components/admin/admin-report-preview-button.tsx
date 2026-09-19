@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { Eye } from "lucide-react";
+import { Eye, Loader2 } from "lucide-react";
 
 import { formatCurrency } from "@/lib/format";
 import type { AdminFinanceReportItem } from "@/lib/report-service";
@@ -215,20 +215,70 @@ function PreviewModal({
   );
 }
 
-export function AdminReportPreviewButton({ report }: { report: AdminFinanceReportItem }) {
+type AdminReportSummary = Pick<AdminFinanceReportItem, "id" | "amount" | "quarterLabel" | "lifecycleState" | "user">;
+
+export function AdminReportPreviewButton({ report }: { report: AdminReportSummary }) {
   const [open, setOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [fullReport, setFullReport] = React.useState<AdminFinanceReportItem | null>(null);
+
+  async function openPreview() {
+    setOpen(true);
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(report.user.id)}/reports/${encodeURIComponent(report.id)}`, {
+        cache: "no-store"
+      });
+      const payload = (await response.json().catch(() => null)) as { report?: AdminFinanceReportItem; error?: string } | null;
+      if (!response.ok || !payload?.report) {
+        throw new Error(payload?.error || "Не удалось загрузить отчёт.");
+      }
+      setFullReport({ ...payload.report, user: report.user });
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Не удалось загрузить отчёт.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => void openPreview()}
+        disabled={loading}
         className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/12 bg-white/[0.04] px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-white/[0.08]"
       >
-        <Eye className="h-4 w-4" />
-        Посмотреть
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+        {loading ? "Загрузка..." : "Посмотреть"}
       </button>
-      {open ? <PreviewModal report={report} onClose={() => setOpen(false)} /> : null}
+      {open && loading ? (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-[#05060b]/80 px-4 backdrop-blur-sm">
+          <div className="rounded-2xl border border-white/10 bg-[#11131a] px-5 py-4 text-[14px] text-white/72 shadow-2xl">
+            Загружаем детализацию отчёта...
+          </div>
+        </div>
+      ) : null}
+      {open && !loading && error ? (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-[#05060b]/80 px-4 backdrop-blur-sm">
+          <div className="max-w-md rounded-2xl border border-rose-400/20 bg-[#11131a] px-5 py-4 shadow-2xl">
+            <p className="text-[14px] text-rose-100">{error}</p>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="mt-4 rounded-xl border border-white/10 px-3 py-2 text-[13px] font-semibold text-white/75 hover:text-white"
+            >
+              Закрыть
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {open && !loading && !error && fullReport ? (
+        <PreviewModal report={fullReport} onClose={() => setOpen(false)} />
+      ) : null}
     </>
   );
 }

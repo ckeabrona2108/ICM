@@ -84,6 +84,7 @@ type ReleaseRow = {
 function createFakePrisma(seed?: {
   verifications?: VerificationRow[];
   releases?: ReleaseRow[];
+  failReleaseModerationTimestampUpdate?: boolean;
 }) {
   const state = {
     verifications: [...(seed?.verifications ?? [])],
@@ -154,8 +155,10 @@ function createFakePrisma(seed?: {
         Object.assign(row, data, { updatedAt: new Date() });
         return row;
       },
-      count: async ({ where }: { where: { status: VerificationRow["status"] } }) =>
-        state.verifications.filter((item) => item.status === where.status).length
+      count: async ({ where }: { where: { status: VerificationRow["status"] } }) => {
+        const expectedStatus = where.status === "moderating" ? "PENDING" : where.status;
+        return state.verifications.filter((item) => item.status === expectedStatus).length;
+      }
     },
     release: {
       findMany: async ({
@@ -186,6 +189,9 @@ function createFakePrisma(seed?: {
         where: { id: { in: string[] } };
         data: Partial<ReleaseRow>;
       }) => {
+        if (seed?.failReleaseModerationTimestampUpdate && "moderationStartedAt" in data) {
+          throw new Error("Unknown argument `moderationStartedAt`.");
+        }
         let count = 0;
         for (const row of state.releases) {
           if (where.id.in.includes(row.id)) {
@@ -588,6 +594,71 @@ test("admin approval approves verification and moves releases to moderation", as
   assert.equal(verification?.approvedByAdminId, "admin_1");
   assert.equal(state.releases[0]?.status, ReleaseStatus.MODERATION);
   assert.ok(state.releases[0]?.moderationStartedAt instanceof Date);
+});
+
+test("admin approval falls back when moderation timestamp columns are unavailable", async () => {
+  const now = new Date("2026-05-06T18:00:00.000Z");
+  const { prisma, state } = createFakePrisma({
+    failReleaseModerationTimestampUpdate: true,
+    verifications: [
+      {
+        id: "ver_fallback",
+        userId: "user_fallback",
+        userEmail: "artist@example.com",
+        userName: "Artist",
+        contractVersion: "2026-01",
+        contractFileName: "contract-2026-01.pdf",
+        contractFileUrl: "/docs/contract-2026-01.pdf",
+        signatureImageUrl: SIGNATURE_DATA_URL,
+        signedAt: now,
+        ipAddress: null,
+        userAgent: null,
+        status: "PENDING",
+        rejectionReason: null,
+        approvedAt: null,
+        approvedByAdminId: null,
+        rejectedAt: null,
+        rejectedByAdminId: null,
+        createdAt: now,
+        updatedAt: now,
+        fullName: "Иван Иванов",
+        birthDate: "1990-01-01",
+        passportNumber: "1234 567890",
+        passportIssuedBy: "ОВД Москвы",
+        passportCode: "123-456",
+        passportIssueDate: "2010-01-01",
+        address: "Москва",
+        ogrnip: null,
+        inn: "1234567890",
+        snils: "123-456-789 00"
+      }
+    ],
+    releases: [
+      {
+        id: "rel_fallback",
+        userId: "user_fallback",
+        status: ReleaseStatus.PENDING_VERIFICATION,
+        moderationStartedAt: null,
+        moderationCancelledAt: null,
+        moderationReturnedAt: null,
+        moderationComment: null,
+        rejectionReason: null,
+        rejectedAt: null,
+        rejectedBy: null
+      }
+    ]
+  });
+
+  const result = await approveContractSignatureByAdmin({
+    prisma: prisma as never,
+    verificationId: "ver_fallback",
+    adminId: "admin_1"
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.movedReleaseIds, ["rel_fallback"]);
+  assert.equal(state.releases[0]?.status, ReleaseStatus.MODERATION);
+  assert.equal(state.releases[0]?.moderationStartedAt, null);
 });
 
 test("admin rejection saves reason and moves releases to changes required", async () => {

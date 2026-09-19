@@ -558,6 +558,9 @@ model release {
   status                       verification_status            @default(moderating)
   roles                        Json?
   moderatorComment             String?
+  moderationStartedAt          DateTime?                       @db.Timestamp(3)
+  moderationCancelledAt        DateTime?                       @db.Timestamp(3)
+  moderationReturnedAt         DateTime?                       @db.Timestamp(3)
   earlyStartInRussia           Boolean?
   realTimeDelivery             Boolean?
   yandexSoonNewRelease         DateTime?                      @db.Timestamp(6)

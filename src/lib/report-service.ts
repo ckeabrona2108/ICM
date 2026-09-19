@@ -148,6 +148,7 @@ export interface AdminChangesRequestedReportItem extends UserReportItem {
 }
 
 export interface AdminFinanceReportItem extends UserReportItem {
+  itemCount?: number;
   user: {
     id: string;
     name: string | null;
@@ -533,9 +534,16 @@ export async function listAdminChangesRequestedReports(
 
 export async function listAdminFinanceReports(
   prisma: PrismaClient,
-  limit = 500
+  limit = 500,
+  options: { includeDetails?: boolean } = {}
 ): Promise<AdminFinanceReportItem[]> {
+  const includeDetails = options.includeDetails !== false;
   const payloadsByUser = new Map<string, Map<string, ReportPayloadRecord>>();
+
+  const stripReportDetails = (report: AdminFinanceReportItem): AdminFinanceReportItem =>
+    includeDetails
+      ? report
+      : { ...report, itemCount: report.items.length, items: [], platformTotals: [] };
 
   const transactionRepo = getRepo<{
     findMany: (args: unknown) => Promise<
@@ -599,7 +607,7 @@ export async function listAdminFinanceReports(
 
         if (!seenPayloadOnly.has(rawReportId)) {
           seenPayloadOnly.add(rawReportId);
-          payloadOnlyReports.push({
+          payloadOnlyReports.push(stripReportDetails({
             ...mapPayloadRecordToUserReportItem({
               id: row.id,
               reportId: rawReportId,
@@ -610,7 +618,7 @@ export async function listAdminFinanceReports(
               name: row.user?.name ?? null,
               email: row.user?.email ?? null
             }
-          });
+          }));
         }
       }
 
@@ -629,7 +637,7 @@ export async function listAdminFinanceReports(
           }
         });
 
-        return reports.map((report) => ({
+        return reports.map((report) => stripReportDetails({
           ...mapReportItem(report, payloadsByUser.get(report.userId)?.get(report.id)?.payload ?? null),
           user: {
             id: report.user?.id ?? report.userId,
@@ -666,7 +674,7 @@ export async function listAdminFinanceReports(
       }
     });
 
-    return reports.map((report) => ({
+    return reports.map((report) => stripReportDetails({
       ...mapReportItem(report, null),
       user: {
         id: report.user?.id ?? report.userId,

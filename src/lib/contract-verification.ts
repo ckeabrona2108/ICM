@@ -1049,6 +1049,13 @@ function isSchemaUnavailableError(error: unknown): boolean {
   );
 }
 
+function isReleaseModerationColumnUnavailableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /moderationStartedAt|moderationCancelledAt|moderationReturnedAt|Unknown argument|does not exist/i.test(
+    error.message
+  );
+}
+
 function buildVerificationRejectedMessage(reason: string): string {
   return `Верификация отклонена: ${reason}`;
 }
@@ -1623,17 +1630,36 @@ async function movePendingVerificationReleasesToModeration(params: {
   const ids = pending.map((item: { id: string }) => item.id);
   if (ids.length === 0) return [];
 
-  await releaseModel.updateMany({
-    where: { id: { in: ids } },
-    data: {
-      status: RELEASE_STATUS_MODERATION,
-      moderationStartedAt: params.now,
-      moderationCancelledAt: null,
-      moderationReturnedAt: null,
-      moderatorComment: null,
-      rejectReason: null
+  try {
+    await releaseModel.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: RELEASE_STATUS_MODERATION,
+        moderationStartedAt: params.now,
+        moderationCancelledAt: null,
+        moderationReturnedAt: null,
+        moderatorComment: null,
+        rejectReason: null
+      }
+    });
+  } catch (error) {
+    if (!isReleaseModerationColumnUnavailableError(error)) {
+      throw error;
     }
-  });
+
+    console.warn("[verification] release moderation timestamp fields unavailable; approving without timestamp reset", {
+      userId: params.userId,
+      releaseIds: ids
+    });
+    await releaseModel.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        status: RELEASE_STATUS_MODERATION,
+        moderatorComment: null,
+        rejectReason: null
+      }
+    });
+  }
 
   return ids;
 }
@@ -2435,11 +2461,13 @@ export async function getAdminVerificationCounts(params: {
 
   try {
     const [verificationPending, releaseStateCounts] = await Promise.all([
-      model.findMany({}).then((rows) =>
-        rows
-          .map((row) => toListItem(row as ContractSignatureRecordLike))
-          .filter((item) => item.status === "pending").length
-      ),
+      typeof model.count === "function"
+        ? model.count({ where: { status: toDbStatus("pending") } })
+        : model.findMany({}).then((rows) =>
+            rows
+              .map((row) => toListItem(row as ContractSignatureRecordLike))
+              .filter((item) => item.status === "pending").length
+          ),
       countReleaseStates()
     ]);
 

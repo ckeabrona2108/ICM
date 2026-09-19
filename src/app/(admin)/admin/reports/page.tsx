@@ -28,7 +28,7 @@ function lifecycleClass(report: AdminFinanceReportItem) {
 }
 
 export default async function AdminFinanceReportsPage() {
-  const reports = await listAdminFinanceReports(prisma, 500);
+  const reports = await listAdminFinanceReports(prisma, 500, { includeDetails: false });
   const pendingCount = reports.filter((report) => report.lifecycleState === "ready_to_confirm").length;
   const reworkCount = reports.filter((report) => report.lifecycleState === "changes_requested").length;
 
@@ -107,7 +107,7 @@ export default async function AdminFinanceReportsPage() {
                       {formatRubCurrency(report.amount)}
                     </td>
                     <td className="px-5 py-4 text-right text-[14px] font-semibold text-white/78">
-                      {report.items.length}
+                      {report.itemCount ?? report.items.length}
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex justify-end gap-2">

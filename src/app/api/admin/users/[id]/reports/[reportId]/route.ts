@@ -9,8 +9,34 @@ import {
   canManageUsers
 } from "@/lib/admin-users-service";
 import { prisma } from "@/lib/prisma";
+import { listUserReports } from "@/lib/report-service";
 
 export const dynamic = "force-dynamic";
+
+export async function GET(
+  _request: Request,
+  context: { params: { id: string; reportId: string } }
+) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!canManageUsers(session.user.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const userId = context.params.id?.trim();
+  const reportId = context.params.reportId?.trim();
+  if (!userId || !reportId) {
+    return NextResponse.json({ error: "User id and report id are required" }, { status: 400 });
+  }
+
+  const reports = await listUserReports(prisma, userId);
+  const report = reports.find((item) => item.id === reportId);
+  if (!report) {
+    return NextResponse.json({ error: "Report not found" }, { status: 404 });
+  }
+
+  return NextResponse.json({ report }, { status: 200 });
+}
 
 export async function PATCH(
   request: Request,

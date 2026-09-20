@@ -29,7 +29,11 @@ ALTER TABLE "icecream"."payouts"
 
 UPDATE "icecream"."payouts"
 SET "status" = CASE
-  WHEN "confirmed" IS TRUE THEN 'PAID'::"icecream"."PayoutRequestStatus"
+  -- Several legacy rows were marked confirmed without an amount. They cannot
+  -- represent an actual payout and must not create a zero-value debit.
+  WHEN "confirmed" IS TRUE AND "amount" IS NOT NULL AND "amount" > 0
+    THEN 'PAID'::"icecream"."PayoutRequestStatus"
+  WHEN "confirmed" IS TRUE THEN 'REJECTED'::"icecream"."PayoutRequestStatus"
   WHEN "confirmed" IS NULL THEN 'REJECTED'::"icecream"."PayoutRequestStatus"
   ELSE 'REQUESTED'::"icecream"."PayoutRequestStatus"
 END

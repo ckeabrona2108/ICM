@@ -1,5 +1,21 @@
 BEGIN;
 
+-- Older installations have the original `payouts` table but may not have
+-- received the payout-request enum introduced by the finance ledger.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_type type
+    JOIN pg_namespace namespace ON namespace.oid = type.typnamespace
+    WHERE namespace.nspname = 'icecream' AND type.typname = 'PayoutRequestStatus'
+  ) THEN
+    CREATE TYPE "icecream"."PayoutRequestStatus" AS ENUM (
+      'REQUESTED', 'PROCESSING', 'PAID', 'REJECTED'
+    );
+  END IF;
+END $$;
+
 -- `payouts` is the canonical payout-request table. Keep the older flattened
 -- columns during the transition so existing rows remain readable.
 ALTER TABLE "icecream"."payouts"

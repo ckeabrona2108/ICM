@@ -71,3 +71,37 @@ test("authorizeUserCredentials rejects invalid password", async () => {
     prisma.user.findMany = originalFindMany;
   }
 });
+
+test("authorizeUserCredentials falls back to the legacy store when a deployed column is missing", async () => {
+  const originalFindMany = prisma.user.findMany.bind(prisma.user);
+  const originalQueryRaw = prisma.$queryRaw.bind(prisma);
+  const passwordHash = await hashPassword("DevPass123!");
+
+  prisma.user.findMany = (async () => {
+    throw new Error('The column `user.isAdmin` does not exist in the current database.');
+  }) as typeof prisma.user.findMany;
+  prisma.$queryRaw = (async () => [{
+    id: "legacy-user-1",
+    email: "artist.a@local.icm",
+    name: "Ckeabrona",
+    password: passwordHash,
+    avatar: null,
+    role: "USER",
+    artistProfileType: "artist",
+    aiTokenBalance: 0,
+    aiPendingTokenBalance: 0
+  }]) as typeof prisma.$queryRaw;
+
+  try {
+    const result = await authorizeUserCredentials({
+      email: "artist.a@local.icm",
+      password: "DevPass123!"
+    });
+
+    assert.equal(result?.id, "legacy-user-1");
+    assert.equal(result?.role, "USER");
+  } finally {
+    prisma.user.findMany = originalFindMany;
+    prisma.$queryRaw = originalQueryRaw;
+  }
+});

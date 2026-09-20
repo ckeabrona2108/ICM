@@ -50,8 +50,9 @@ export default function LoginPage() {
       }
 
       window.location.assign(result.url);
-    } catch {
-      setError("Ошибка сети. Попробуйте снова");
+    } catch (error) {
+      console.error("[login] credentials request failed", error);
+      setError("Не удалось связаться с сервером входа. Проверьте соединение или восстановите пароль.");
     } finally {
       setLoading(false);
     }

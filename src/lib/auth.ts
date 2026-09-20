@@ -5,6 +5,7 @@ import { z } from "zod";
 import { verifyPassword } from "@/lib/password";
 import { findLegacyUsersForLogin, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
 import { prisma } from "@/lib/prisma";
+import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { normalizeNextImageSrc } from "@/lib/image-src";
 
@@ -19,6 +20,20 @@ const loginSchema = z.object({
 
 function normalizeLoginIdentifier(value: string) {
   return value.trim().toLowerCase();
+}
+
+function shouldUseLegacyUserStore(error: unknown) {
+  return (
+    isMissingCanonicalUserTable(error) ||
+    isAnyPrismaColumnMissingError(error, [
+      "user.password",
+      "password",
+      "user.avatar",
+      "avatar",
+      "user.isAdmin",
+      "isAdmin"
+    ])
+  );
 }
 
 const adminEmails = new Set(
@@ -65,7 +80,9 @@ export async function authorizeUserCredentials(credentials: unknown) {
       id: "asc"
     }
   }).catch(async (error) => {
-    if (!isMissingCanonicalUserTable(error)) throw error;
+    // Some deployed databases still use the legacy User table. A missing optional
+    // column must not turn a valid login into a 500 response.
+    if (!shouldUseLegacyUserStore(error)) throw error;
     const legacyUsers = await findLegacyUsersForLogin(prisma, parsed.data.email);
     return legacyUsers.map((user) => ({
       id: user.id,

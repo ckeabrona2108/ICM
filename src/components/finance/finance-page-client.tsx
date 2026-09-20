@@ -12,16 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type {
-  PayoutRequestBody,
-  PayoutRequestFailureResponse,
-  PayoutRequestSuccessResponse
-} from "@/lib/api/contracts";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { FinanceReportStatus } from "@/lib/finance-policy";
 import type { FinanceTransactionView } from "@/lib/finance-dashboard-server";
 import type { PayoutWindowState } from "@/lib/payout-schedule";
 import { computeAvailableToWithdraw } from "@/lib/payouts";
+import type { PayoutRequestSummary } from "@/lib/payout-request";
+import { PayoutRequestWizard } from "@/components/finance/payout-request-wizard";
 
 const RevenueChart = dynamic(
   () => import("@/components/charts/revenue-chart").then((module) => module.RevenueChart),
@@ -68,14 +65,6 @@ function formatReportLineDate(value?: string | null): string {
   return parsed.toLocaleDateString("ru-RU");
 }
 
-function formatReportLinePeriod(item: { periodStart?: string | null; periodEnd?: string | null }): string {
-  const start = formatReportLineDate(item.periodStart);
-  const end = formatReportLineDate(item.periodEnd);
-  if (start === "—" && end === "—") return "—";
-  if (start === end) return start;
-  return `${start} - ${end}`;
-}
-
 function formatReportLineQuantity(value?: number | null): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return value.toLocaleString("ru-RU");
@@ -98,7 +87,8 @@ export function FinancePageClient({
   initialAccruals,
   initialAccrualSeries,
   minimumPayoutAmount,
-  payoutWindow
+  payoutWindow,
+  initialPayoutRequests
 }: {
   initialReports: FinanceReportClientItem[];
   initialTransactions: FinanceTransactionView[];
@@ -108,26 +98,13 @@ export function FinancePageClient({
   initialAccrualSeries: Array<{ period: string; amount: number }>;
   minimumPayoutAmount: number;
   payoutWindow: PayoutWindowState;
+  initialPayoutRequests: PayoutRequestSummary[];
 }) {
-  type PayoutMethodUi = "bank_transfer" | "paypal_soon" | "usdt_soon" | "btc_soon";
-  const fieldClass =
-    "mt-2 h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3.5 text-[15px] font-medium text-white outline-none transition-colors placeholder:text-white/45 focus:border-[#7b3df5]/60";
-
-  const [amount, setAmount] = React.useState("");
-  const [recipientName, setRecipientName] = React.useState("");
-  const [payoutMethod, setPayoutMethod] =
-    React.useState<PayoutMethodUi>("bank_transfer");
-  const [accountNumber, setAccountNumber] = React.useState("");
-  const [bankName, setBankName] = React.useState("");
-  const [paypalEmail] = React.useState("");
-  const [taxId, setTaxId] = React.useState("");
   const [reports, setReports] = React.useState(initialReports);
   const [agreedBalance, setAgreedBalance] = React.useState(initialAgreedBalance);
-  const [pendingPayout, setPendingPayout] = React.useState<number>(initialPendingPayout);
+  const [pendingPayout] = React.useState<number>(initialPendingPayout);
   const [accruals, setAccruals] = React.useState(initialAccruals);
-  const [submitting, setSubmitting] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [, setError] = React.useState<string | null>(null);
   const [reportNotice, setReportNotice] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<FinanceTab>(
     initialReports.some((report) => report.status === "ready_to_confirm") ? "Отчеты" : "Запрос выплаты"
@@ -154,9 +131,6 @@ export function FinancePageClient({
     pendingPayout
   });
 
-  const canRequestPayout =
-    availableToWithdraw >= minimumPayoutAmount && pendingReportsCount === 0 && payoutWindow.isOpen;
-
   const filteredTransactions = initialTransactions.filter((transaction) => {
     if (transactionFilter === "Все") return true;
     if (transactionFilter === "Начисления") return transaction.type === "Royalty";
@@ -164,68 +138,6 @@ export function FinancePageClient({
     if (transactionFilter === "Выплаты") return transaction.type === "Payout";
     return true;
   });
-
-  async function requestPayout() {
-    setError(null);
-    setSuccess(null);
-
-    const parsedAmount = Number(amount.replace(",", "."));
-    if (!Number.isFinite(parsedAmount)) {
-      setError("Укажите корректную сумму выплаты.");
-      return;
-    }
-    if (payoutMethod !== "bank_transfer") {
-      setError("Этот способ получения пока недоступен.");
-      return;
-    }
-
-    const payload: PayoutRequestBody = {
-      amount: parsedAmount,
-      requisites: {
-        recipientName,
-        payoutMethod: "bank_transfer",
-        accountNumber,
-        bankName,
-        paypalEmail,
-        taxId
-      }
-    };
-
-    setSubmitting(true);
-
-    try {
-      const response = await fetch("/api/finance/payouts/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        const parsed = (await response.json().catch(() => null)) as
-          | PayoutRequestFailureResponse
-          | { error?: string }
-          | null;
-
-        if (parsed && "errors" in parsed && Array.isArray(parsed.errors)) {
-          setError(parsed.errors.map((item) => item.message).join(" "));
-        } else {
-          const fallbackMessage =
-            parsed && "error" in parsed ? parsed.error : undefined;
-          setError(fallbackMessage ?? "Не удалось создать заявку на выплату.");
-        }
-        return;
-      }
-
-      const parsed = (await response.json()) as PayoutRequestSuccessResponse;
-      setSuccess(parsed.message);
-      setPendingPayout((prev) => prev + Math.abs(parsedAmount));
-      setAmount("");
-    } catch {
-      setError("Сервис выплат временно недоступен. Повторите позже.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
   async function submitReportDecision(decision: "agree" | "reject") {
     if (!selectedReport) {
@@ -460,117 +372,13 @@ export function FinancePageClient({
 
           {activeTab === "Запрос выплаты" ? (
             <PageSection className="mt-4">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-[20px] font-semibold text-white">Запрос выплаты</h2>
-                <span className="text-[13px] font-semibold text-white/55">
-                  Доступно: {formatCurrency(availableToWithdraw, "RUB")}
-                </span>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <label className="text-[13px] font-semibold text-white/70">
-                    Сумма
-                    <input
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      placeholder="0.00"
-                      className={fieldClass}
-                    />
-                  </label>
-
-                  <label className="text-[13px] font-semibold text-white/70">
-                    Получатель
-                    <input
-                      value={recipientName}
-                      onChange={(event) => setRecipientName(event.target.value)}
-                      placeholder="ФИО / компания"
-                      className={fieldClass}
-                    />
-                  </label>
-
-                  <label className="text-[13px] font-semibold text-white/70">
-                    Способ получения
-                    <select
-                      value={payoutMethod}
-                      onChange={(event) =>
-                        setPayoutMethod(event.target.value as PayoutMethodUi)
-                      }
-                      className={fieldClass}
-                    >
-                      <option value="bank_transfer">Банковский перевод</option>
-                      <option value="paypal_soon">PayPal (скоро)</option>
-                      <option value="usdt_soon">USDT (скоро)</option>
-                      <option value="btc_soon">BTC (скоро)</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="grid gap-3 md:grid-cols-3">
-                  <label className="text-[13px] font-semibold text-white/70 md:col-span-2">
-                    Реквизиты
-                    <input
-                      value={accountNumber}
-                      onChange={(event) => setAccountNumber(event.target.value)}
-                      placeholder="Номер счета / кошелька"
-                      className={fieldClass}
-                    />
-                  </label>
-
-                  {payoutMethod === "bank_transfer" ? (
-                    <label className="text-[13px] font-semibold text-white/70">
-                      Банк
-                      <input
-                        value={bankName}
-                        onChange={(event) => setBankName(event.target.value)}
-                        placeholder="Название банка"
-                        className={fieldClass}
-                      />
-                    </label>
-                  ) : null}
-                </div>
-
-                {payoutMethod === "bank_transfer" ? (
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <label className="text-[13px] font-semibold text-white/70 md:col-span-2">
-                      ИНН / Налоговый ID
-                      <input
-                        value={taxId}
-                        onChange={(event) => setTaxId(event.target.value)}
-                        placeholder="Налоговый идентификатор"
-                        className={fieldClass}
-                      />
-                    </label>
-                  </div>
-                ) : null}
-
-                {payoutMethod !== "bank_transfer" ? (
-                  <p className="text-[13px] font-semibold text-white/60">
-                    Выбранный способ пока недоступен.
-                  </p>
-                ) : null}
-                {!payoutWindow.isOpen ? (
-                  <p className="text-[13px] font-semibold text-sky-200">
-                    {payoutWindow.message}
-                  </p>
-                ) : null}
-
-                {error ? <p className="text-[13px] font-semibold text-rose-300">{error}</p> : null}
-                {success ? (
-                  <p className="text-[13px] font-semibold text-emerald-300">{success}</p>
-                ) : null}
-
-                <Button
-                  type="button"
-                  onClick={() => {
-                    void requestPayout();
-                  }}
-                  disabled={!canRequestPayout || submitting}
-                  className="btn-shine h-12 w-full px-6 text-[14px] leading-none md:w-auto"
-                >
-                  {submitting ? "Отправка..." : "Создать заявку на выплату"}
-                </Button>
-              </div>
+              <PayoutRequestWizard
+                reports={reports}
+                availableToWithdraw={availableToWithdraw}
+                minimumPayoutAmount={minimumPayoutAmount}
+                payoutWindow={payoutWindow}
+                initialPayoutRequests={initialPayoutRequests}
+              />
             </PageSection>
           ) : null}
 

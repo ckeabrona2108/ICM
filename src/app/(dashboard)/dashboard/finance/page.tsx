@@ -32,6 +32,7 @@ export default async function FinancePage() {
       initialAccrualSeries={data.accrualSeries}
       minimumPayoutAmount={data.minimumPayoutAmount}
       payoutWindow={data.payoutWindow}
+      initialPayoutRequests={data.payoutRequests}
     />
   );
 }

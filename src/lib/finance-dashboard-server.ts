@@ -4,6 +4,7 @@ import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { listUserReports } from "@/lib/report-service";
 import { getCurrentPayoutWindowState, type PayoutWindowState } from "@/lib/payout-schedule";
+import { listUserPayoutRequests, type PayoutRequestSummary } from "@/lib/payout-request";
 
 export interface FinanceTransactionView {
   id: string;
@@ -29,6 +30,7 @@ export interface FinanceDashboardViewData {
   pendingReportsCount: number;
   minimumPayoutAmount: number;
   payoutWindow: PayoutWindowState;
+  payoutRequests: PayoutRequestSummary[];
 }
 
 function getRepo<T = Record<string, unknown>>(client: unknown, name: string): T | null {
@@ -133,9 +135,10 @@ export async function getFinanceDashboardViewData(
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
   const reportsRaw = await listUserReports(prisma, userId, { strict: true });
-  const [totals, payoutWindow] = await Promise.all([
+  const [totals, payoutWindow, payoutRequests] = await Promise.all([
     getUserBalanceTotals(prisma, userId),
-    getCurrentPayoutWindowState(prisma)
+    getCurrentPayoutWindowState(prisma),
+    listUserPayoutRequests(prisma, userId)
   ]);
 
   if (!balanceTransactionsRepo || !royaltyTransactionsRepo?.aggregate) {
@@ -287,6 +290,7 @@ export async function getFinanceDashboardViewData(
     deductionsAndCommission,
     pendingReportsCount,
     minimumPayoutAmount: readMinimumPayoutAmount(),
-    payoutWindow
+    payoutWindow,
+    payoutRequests
   };
 }

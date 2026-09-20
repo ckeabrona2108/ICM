@@ -11,13 +11,25 @@ import {
 function validRequest(): PayoutRequestInput {
   return {
     amount: 120,
+    quarter: 2,
+    year: 2026,
+    taxStatus: "self_employed",
     requisites: {
       recipientName: "Nova Echo",
       payoutMethod: "bank_transfer",
       accountNumber: "ES9121000418450200051332",
       bankName: "Santander",
-      paypalEmail: "",
+      bankBik: "044525225",
       taxId: "A12345678"
+    },
+    documents: {
+      reportId: "11111111-1111-4111-8111-111111111111",
+      supportingDocument: {
+        key: "private/payout-documents/11111111-1111-4111-8111-111111111111/receipt.pdf",
+        name: "receipt.pdf",
+        size: 1024,
+        contentType: "application/pdf"
+      }
     }
   };
 }
@@ -27,7 +39,8 @@ function validContext(): PayoutServerContext {
     availableBalance: 500,
     pendingReportsCount: 0,
     minimumPayoutAmount: 100,
-    reportStatuses: ["agreed", "agreed"]
+    reportStatuses: ["agreed", "agreed"],
+    selectedQuarterBalance: 500
   };
 }
 
@@ -88,14 +101,50 @@ test("validatePayoutRequest validates bank requisites", () => {
   assert.ok(issues.some((issue) => issue.field === "requisites.taxId"));
 });
 
-test("validatePayoutRequest validates paypal requisites", () => {
+test("validatePayoutRequest validates bank BIK", () => {
   const payload = validRequest();
-  payload.requisites.payoutMethod = "paypal";
-  payload.requisites.paypalEmail = "broken-mail";
-  payload.requisites.accountNumber = "";
+  payload.requisites.bankBik = "123";
 
   const issues = validatePayoutRequest(payload, validContext());
-  assert.ok(issues.some((issue) => issue.field === "requisites.paypalEmail"));
+  assert.ok(issues.some((issue) => issue.field === "requisites.bankBik"));
+});
+
+test("validatePayoutRequest blocks a payout above the selected quarter balance", () => {
+  const payload = validRequest();
+  payload.amount = 300;
+  const issues = validatePayoutRequest(payload, { ...validContext(), selectedQuarterBalance: 200 });
+  assert.ok(issues.some((issue) => issue.field === "amount" && issue.message.includes("выбранному кварталу")));
+});
+
+test("validatePayoutRequest blocks a duplicate selected quarter", () => {
+  const issues = validatePayoutRequest(validRequest(), { ...validContext(), duplicateQuarterRequest: true });
+  assert.ok(issues.some((issue) => issue.field === "quarter"));
+});
+
+test("validatePayoutRequest requires receipt data for an individual", () => {
+  const payload = validRequest();
+  payload.taxStatus = "individual";
+  const issues = validatePayoutRequest(payload, validContext());
+  assert.ok(issues.some((issue) => issue.field === "documents.receiptDetails"));
+});
+
+test("validatePayoutRequest requires an individual's handwritten receipt acknowledgement", () => {
+  const payload = validRequest();
+  payload.taxStatus = "individual";
+  payload.documents.receiptDetails = {
+    passportSeries: "1234",
+    passportNumber: "123456",
+    passportIssuedBy: "ОВД",
+    passportIssueDate: "2020-01-01",
+    birthDate: "1990-01-01",
+    registrationAddress: "Москва"
+  };
+
+  const issues = validatePayoutRequest(payload, validContext());
+  assert.ok(issues.some((issue) => issue.field === "documents.receiptAcknowledged"));
+
+  payload.documents.receiptAcknowledged = true;
+  assert.equal(validatePayoutRequest(payload, validContext()).length, 0);
 });
 
 test("validatePayoutRequest accepts valid input", () => {
@@ -111,5 +160,5 @@ test("payout request schema ignores forged balance and report fields", () => {
     minimumPayoutAmount: 1,
     reportStatuses: []
   });
-  assert.deepEqual(Object.keys(parsed).sort(), ["amount", "requisites"]);
+  assert.deepEqual(Object.keys(parsed).sort(), ["amount", "documents", "quarter", "requisites", "taxStatus", "year"]);
 });

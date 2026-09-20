@@ -3,8 +3,18 @@ import { z } from "zod";
 export const financeReportStatusSchema = z.enum(["ready_to_confirm", "changes_requested", "agreed"]);
 export type FinanceReportStatus = z.infer<typeof financeReportStatusSchema>;
 
-const payoutMethodSchema = z.enum(["bank_transfer", "paypal", "other"]);
+const payoutMethodSchema = z.literal("bank_transfer");
 export type PayoutMethod = z.infer<typeof payoutMethodSchema>;
+
+export const payoutTaxStatusSchema = z.enum(["individual", "self_employed"]);
+export type PayoutTaxStatus = z.infer<typeof payoutTaxStatusSchema>;
+
+const payoutDocumentSchema = z.object({
+  key: z.string().trim().regex(/^private\/payout-documents\/[a-zA-Z0-9-]+\/[a-zA-Z0-9._-]+$/u),
+  name: z.string().trim().min(1).max(180),
+  size: z.number().int().positive().max(10 * 1024 * 1024),
+  contentType: z.enum(["application/pdf", "image/jpeg", "image/png"])
+});
 
 export interface PayoutValidationIssue {
   code: string;
@@ -13,14 +23,30 @@ export interface PayoutValidationIssue {
 }
 
 export const payoutRequestSchema = z.object({
-  amount: z.number(),
+  amount: z.number().finite(),
+  quarter: z.number().int().min(1).max(4),
+  year: z.number().int().min(2020).max(2100),
+  taxStatus: payoutTaxStatusSchema,
   requisites: z.object({
     recipientName: z.string().trim(),
     payoutMethod: payoutMethodSchema,
     accountNumber: z.string().trim().optional().default(""),
     bankName: z.string().trim().optional().default(""),
-    paypalEmail: z.string().trim().optional().default(""),
+    bankBik: z.string().trim().optional().default(""),
     taxId: z.string().trim().optional().default("")
+  }),
+  documents: z.object({
+    reportId: z.string().uuid(),
+    supportingDocument: payoutDocumentSchema,
+    receiptDetails: z.object({
+      passportSeries: z.string().trim().min(4).max(4),
+      passportNumber: z.string().trim().min(6).max(6),
+      passportIssuedBy: z.string().trim().min(2).max(500),
+      passportIssueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+      registrationAddress: z.string().trim().min(5).max(500)
+    }).optional(),
+    receiptAcknowledged: z.literal(true).optional()
   })
 });
 
@@ -34,6 +60,8 @@ export interface PayoutServerContext {
   payoutWindowOpen?: boolean;
   payoutWindowMessage?: string;
   activePayoutRequestsCount?: number;
+  selectedQuarterBalance?: number;
+  duplicateQuarterRequest?: boolean;
 }
 
 function pushIssue(
@@ -75,6 +103,31 @@ export function validatePayoutRequest(
       "invalid",
       "amount",
       "Сумма выплаты превышает доступный баланс по согласованным отчетам."
+    );
+  }
+
+  if (!Number.isFinite(context.selectedQuarterBalance) || (context.selectedQuarterBalance ?? 0) <= 0) {
+    pushIssue(
+      issues,
+      "invalid",
+      "quarter",
+      "За выбранный квартал нет согласованного отчета с доступными средствами."
+    );
+  } else if (input.amount > (context.selectedQuarterBalance ?? 0)) {
+    pushIssue(
+      issues,
+      "invalid",
+      "amount",
+      "Сумма выплаты превышает доступную сумму по выбранному кварталу."
+    );
+  }
+
+  if (context.duplicateQuarterRequest) {
+    pushIssue(
+      issues,
+      "forbidden",
+      "quarter",
+      "По выбранному кварталу уже создана заявка на выплату."
     );
   }
 
@@ -158,6 +211,22 @@ export function validatePayoutRequest(
       );
     }
 
+    if (!input.requisites.bankBik.trim()) {
+      pushIssue(
+        issues,
+        "required",
+        "requisites.bankBik",
+        "Укажите БИК банка."
+      );
+    } else if (!/^\d{9}$/u.test(input.requisites.bankBik.trim())) {
+      pushIssue(
+        issues,
+        "invalid",
+        "requisites.bankBik",
+        "БИК должен состоять из 9 цифр."
+      );
+    }
+
     if (!input.requisites.taxId.trim()) {
       pushIssue(
         issues,
@@ -168,30 +237,21 @@ export function validatePayoutRequest(
     }
   }
 
-  if (input.requisites.payoutMethod === "paypal") {
-    if (!input.requisites.paypalEmail.trim()) {
-      pushIssue(
-        issues,
-        "required",
-        "requisites.paypalEmail",
-        "Укажите PayPal e-mail для выплаты."
-      );
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(input.requisites.paypalEmail.trim())) {
-      pushIssue(
-        issues,
-        "invalid",
-        "requisites.paypalEmail",
-        "Укажите корректный PayPal e-mail."
-      );
-    }
-  }
-
-  if (input.requisites.payoutMethod === "other" && !input.requisites.accountNumber.trim()) {
+  if (input.taxStatus === "individual" && !input.documents.receiptDetails) {
     pushIssue(
       issues,
       "required",
-      "requisites.accountNumber",
-      "Укажите реквизиты для выбранного способа выплаты."
+      "documents.receiptDetails",
+      "Заполните данные для расписки."
+    );
+  }
+
+  if (input.taxStatus === "individual" && input.documents.receiptAcknowledged !== true) {
+    pushIssue(
+      issues,
+      "required",
+      "documents.receiptAcknowledged",
+      "Подтвердите, что расписку нужно переписать от руки, подписать и загрузить."
     );
   }
 

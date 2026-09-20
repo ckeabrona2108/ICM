@@ -26,16 +26,22 @@ CREATE INDEX IF NOT EXISTS "payouts_status_createdAt_idx"
 
 ALTER TABLE "icecream"."transaction"
   ADD COLUMN IF NOT EXISTS "payoutId" UUID;
--- Preserve requests created by the former ledger API, including reservations.
-INSERT INTO "icecream"."payouts" (
-  "id", "userId", "amount", "status", "method", "requisites", "createdAt",
-  "updatedAt", "processedAt", "paidAt", "rejectedAt", "confirmed"
-)
-SELECT "id", "userId", "amount", "status", "method", "requisites", "createdAt",
-  "updatedAt", "processedAt", "paidAt", "rejectedAt",
-  CASE WHEN "status" = 'PAID' THEN TRUE WHEN "status" = 'REJECTED' THEN NULL ELSE FALSE END
-FROM "icecream"."payoutRequest"
-ON CONFLICT ("id") DO NOTHING;
+-- Preserve requests created by the former ledger API when that legacy table
+-- exists. Some installations started directly with `payouts`.
+DO $$
+BEGIN
+  IF to_regclass('icecream."payoutRequest"') IS NOT NULL THEN
+    INSERT INTO "icecream"."payouts" (
+      "id", "userId", "amount", "status", "method", "requisites", "createdAt",
+      "updatedAt", "processedAt", "paidAt", "rejectedAt", "confirmed"
+    )
+    SELECT "id", "userId", "amount", "status", "method", "requisites", "createdAt",
+      "updatedAt", "processedAt", "paidAt", "rejectedAt",
+      CASE WHEN "status" = 'PAID' THEN TRUE WHEN "status" = 'REJECTED' THEN NULL ELSE FALSE END
+    FROM "icecream"."payoutRequest"
+    ON CONFLICT ("id") DO NOTHING;
+  END IF;
+END $$;
 
 -- Link known historical debits before creating missing ones. Never infer a
 -- payment identity from its amount: ambiguous historical records need review.

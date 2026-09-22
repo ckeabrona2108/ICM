@@ -9,6 +9,13 @@ export interface AdminPayoutUserInfo {
 export type AdminPayoutStatus = "REQUESTED" | "PROCESSING" | "PAID" | "REJECTED";
 export type AdminPayoutMethod = "BANK_TRANSFER";
 
+export interface AdminPayoutDocument {
+  key: string;
+  name: string;
+  size: number;
+  contentType: string;
+}
+
 export interface AdminPayoutDetails {
   id: string;
   amount: number;
@@ -23,10 +30,20 @@ export interface AdminPayoutDetails {
   accountDetails: string;
   bankName: string;
   taxId: string;
+  contractNumber: number | null;
   paypalEmail: string;
   comment: string | null;
   payoutWindowLabel: string | null;
   payoutPeriodLabel: string | null;
+  quarter: number | null;
+  year: number | null;
+  taxStatus: string | null;
+  bankBik: string;
+  reportId: string | null;
+  supportingDocument: AdminPayoutDocument | null;
+  receiptDetails: Record<string, string> | null;
+  receiptAcknowledged: boolean;
+  rejectionReason: string | null;
 }
 
 export interface ParsedPayoutRequisites {
@@ -34,9 +51,53 @@ export interface ParsedPayoutRequisites {
   accountDetails: string;
   bankName: string;
   taxId: string;
+  contractNumber: number | null;
   paypalEmail: string;
   payoutWindowLabel: string | null;
   payoutPeriodLabel: string | null;
+  quarter: number | null;
+  year: number | null;
+  taxStatus: string | null;
+  bankBik: string;
+  reportId: string | null;
+  supportingDocument: AdminPayoutDocument | null;
+  receiptDetails: Record<string, string> | null;
+  receiptAcknowledged: boolean;
+  rejectionReason: string | null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asOptionalNumber(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function parseSupportingDocument(value: unknown): AdminPayoutDocument | null {
+  const document = asRecord(value);
+  if (!document) return null;
+
+  const key = String(document.key ?? "").trim();
+  const name = String(document.name ?? "").trim();
+  const size = Number(document.size);
+  const contentType = String(document.contentType ?? "").trim();
+  if (!key || !name || !Number.isFinite(size) || size <= 0 || !contentType) return null;
+  return { key, name, size, contentType };
+}
+
+function parseReceiptDetails(value: unknown): Record<string, string> | null {
+  const receipt = asRecord(value);
+  if (!receipt) return null;
+  const details = Object.fromEntries(
+    Object.entries(receipt)
+      .flatMap(([key, item]) => typeof item === "string" ? [[key, item.trim()] as const] : [])
+      .filter(([, item]) => Boolean(item))
+  );
+  return Object.keys(details).length > 0 ? details : null;
 }
 
 export function parsePayoutRequisites(
@@ -57,9 +118,19 @@ export function parsePayoutRequisites(
     accountDetails,
     bankName,
     taxId,
+    contractNumber: asOptionalNumber(source.contractNumber),
     paypalEmail,
     payoutWindowLabel: payoutWindow ? String(payoutWindow.label ?? "").trim() || null : null,
-    payoutPeriodLabel: payoutWindow ? String(payoutWindow.periodLabel ?? "").trim() || null : null
+    payoutPeriodLabel: payoutWindow ? String(payoutWindow.periodLabel ?? "").trim() || null : null,
+    quarter: asOptionalNumber(source.quarter),
+    year: asOptionalNumber(source.year),
+    taxStatus: String(source.taxStatus ?? "").trim() || null,
+    bankBik: String(source.bankBik ?? "").trim(),
+    reportId: String(source.reportId ?? "").trim() || null,
+    supportingDocument: parseSupportingDocument(source.supportingDocument),
+    receiptDetails: parseReceiptDetails(source.receiptDetails),
+    receiptAcknowledged: source.receiptAcknowledged === true,
+    rejectionReason: String(source.rejectionReason ?? "").trim() || null
   };
 }
 

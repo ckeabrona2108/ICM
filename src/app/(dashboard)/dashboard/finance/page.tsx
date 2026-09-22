@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 
 import { FinancePageClient } from "@/components/finance/finance-page-client";
 import { authOptions } from "@/lib/auth";
+import { getUserContractStatus } from "@/lib/contract-verification";
 import { getFinanceDashboardViewData } from "@/lib/finance-dashboard-server";
+import { prisma } from "@/lib/prisma";
 
 export default async function FinancePage() {
   const session = await getServerSession(authOptions);
@@ -22,6 +24,11 @@ export default async function FinancePage() {
     );
   }
 
+  const contractStatus = await getUserContractStatus({
+    prisma,
+    userId: session.user.id
+  }).catch(() => null);
+
   return (
     <FinancePageClient
       initialReports={data.reports}
@@ -33,6 +40,7 @@ export default async function FinancePage() {
       minimumPayoutAmount={data.minimumPayoutAmount}
       payoutWindow={data.payoutWindow}
       initialPayoutRequests={data.payoutRequests}
+      contractNumber={contractStatus?.status === "approved" ? contractStatus.contractNumber : null}
     />
   );
 }

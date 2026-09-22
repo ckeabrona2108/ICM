@@ -78,8 +78,11 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const key = new URL(request.url).searchParams.get("key") ?? "";
-  const mayRead = session.user.role === "ADMIN" || isOwnerDocumentKey(key, session.user.id);
+  const url = new URL(request.url);
+  const key = url.searchParams.get("key") ?? "";
+  const download = url.searchParams.get("download") === "1";
+  const isPayoutDocument = key.startsWith("private/payout-documents/");
+  const mayRead = isPayoutDocument && (session.user.role === "ADMIN" || isOwnerDocumentKey(key, session.user.id));
   if (!mayRead) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const stored = await streamStoredObject({ key }).catch(() => null);
@@ -87,7 +90,7 @@ export async function GET(request: Request) {
   return new NextResponse(stored.body, {
     headers: {
       "Content-Type": stored.contentType ?? "application/octet-stream",
-      "Content-Disposition": "inline",
+      "Content-Disposition": download ? "attachment; filename=payment-document" : "inline",
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff"
     }

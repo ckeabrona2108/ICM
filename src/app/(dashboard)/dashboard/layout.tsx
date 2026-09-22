@@ -52,6 +52,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     canCreateRelease: false,
     signedAt: null,
     contractVersion: null,
+    contractNumber: null,
     reason: "Статус верификации временно недоступен.",
     rejectionReason: null,
     rejectionKind: null,

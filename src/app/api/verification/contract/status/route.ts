@@ -28,6 +28,7 @@ export async function GET() {
             canCreateRelease: false,
             signedAt: null,
             contractVersion: null,
+            contractNumber: null,
             reason: "Статус верификации временно недоступен. Попробуйте позже.",
             rejectionReason: null,
             rejectionKind: null,

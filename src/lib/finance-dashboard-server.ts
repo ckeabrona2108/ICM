@@ -110,7 +110,7 @@ function buildRecentMonthBuckets(months: number): Array<{
 }
 
 export function readMinimumPayoutAmount(): number {
-  const fallback = 10000;
+  const fallback = 2000;
   const fromEnv = Number(process.env.FINANCE_MIN_PAYOUT_AMOUNT ?? fallback);
   return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : fallback;
 }
@@ -158,6 +158,12 @@ export async function getFinanceDashboardViewData(
                 currency: true,
                 platform_name: true,
                 source_reference: true,
+                financial_import_id: true,
+                import: {
+                  select: {
+                    status: true
+                  }
+                },
                 release: {
                   select: {
                     title: true,
@@ -174,7 +180,15 @@ export async function getFinanceDashboardViewData(
           }
         });
   commissionTotalRaw = await royaltyTransactionsRepo.aggregate({
-    where: { user_id: userId, reversed_at: null },
+    where: {
+      user_id: userId,
+      reversed_at: null,
+      import: {
+        is: {
+          status: "CONFIRMED"
+        }
+      }
+    },
     _sum: { platform_commission_amount: true }
   });
 
@@ -200,7 +214,13 @@ export async function getFinanceDashboardViewData(
   ).length;
   const accrualReports = reports.filter((report) => report.status !== "agreed");
 
-  const transactions: FinanceTransactionView[] = balanceTransactionsRaw.map((transaction) => {
+  const transactions: FinanceTransactionView[] = balanceTransactionsRaw
+    .filter((transaction) => {
+      const royalty = transaction.royalty_transaction;
+      // Financial ledger entries are valid only while their source import remains confirmed.
+      return !royalty || royalty.financial_import_id && royalty.import?.status === "CONFIRMED";
+    })
+    .map((transaction) => {
     const amount = decimalToNumber(transaction.amount);
     const royalty = transaction.royalty_transaction;
     const loweredDescription = String(transaction.description ?? "").toLowerCase();
@@ -254,7 +274,7 @@ export async function getFinanceDashboardViewData(
           ? descriptionParts.join(" • ")
           : transaction.description ?? ""
     };
-  });
+    });
 
   const accruals = roundMoney(
     accrualReports.reduce((sum, report) => sum + decimalToNumber(report.amount), 0)

@@ -72,14 +72,14 @@ test("validatePayoutRequest blocks payout outside payout window", () => {
   assert.ok(issues.some((issue) => issue.field === "payoutWindow"));
 });
 
-test("validatePayoutRequest blocks duplicate active payout request", () => {
+test("validatePayoutRequest permits another quarter while a different payout is active", () => {
   const issues = validatePayoutRequest(validRequest(), {
     ...validContext(),
     payoutWindowOpen: true,
-    activePayoutRequestsCount: 1
+    duplicateQuarterRequest: false
   });
 
-  assert.ok(issues.some((issue) => issue.field === "activePayoutRequests"));
+  assert.ok(!issues.some((issue) => issue.field === "activePayoutRequests"));
 });
 
 test("validatePayoutRequest validates minimum amount", () => {

@@ -149,9 +149,9 @@ export function AdminUsersClient({ initialData }: { initialData: AdminUsersListR
               <tr>
                 <th className="px-3 py-3">Пользователь</th>
                 <th className="px-3 py-3">ID</th>
-                <th className="px-3 py-3">Дата регистрации</th>
+                <th className="px-3 py-3">Подтверждение email</th>
                 <th className="px-3 py-3">Подписка</th>
-                <th className="px-3 py-3">Баланс</th>
+                <th className="px-3 py-3">Доступно к выплате</th>
                 <th className="px-3 py-3">Релизы</th>
                 <th className="px-3 py-3">Статус</th>
                 <th className="px-3 py-3">Действие</th>

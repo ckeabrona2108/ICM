@@ -43,6 +43,15 @@ function getModalCopy(status: ContractStatusPayload) {
     };
   }
 
+  if (status.status === "update_required") {
+    return {
+      title: "Договор обновлён",
+      text: "Требуется ознакомиться с новой версией договора, проверить свои данные и подписать её повторно. До подписи новая версия не считается принятой.",
+      primary: "Открыть новую версию",
+      secondary: "Позже"
+    };
+  }
+
   return {
     title: "Необходимо подписать договор",
     text: "Для выпуска релизов необходимо пройти верификацию и подписать договор. Если Вы уже подписывали договор ранее, пройдите процедуру заново.",
@@ -73,7 +82,8 @@ export function VerificationAccessModal({
   const showContractAction =
     status.status === "not_signed" ||
     status.status === "rejected" ||
-    status.status === "invalid_signature";
+    status.status === "invalid_signature" ||
+    status.status === "update_required";
 
   return (
     <>
@@ -122,6 +132,7 @@ export function VerificationAccessModal({
           onClose();
           router.refresh();
         }}
+        initialSignerData={status.signerData}
       />
     </>
   );

@@ -3,37 +3,58 @@
 import * as React from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 
+import type { ContractSignerFormData } from "@/lib/contract-verification-shared";
 import { cn } from "@/lib/utils";
+import { ContractSigningPage } from "@/components/verification/contract-signing-page";
 
 const DOCUMENT_VIEW_URL = "/api/verification/contract/document";
-const PAGE_TEN_BACKGROUND_URL = "/docs/contract-page-10-source.png";
-const PAGE_TEN_WIDTH = 1874;
-const PAGE_TEN_HEIGHT = 1032;
 
-type ContractImagePage = {
-  pageNumber: number;
-  imageUrl: string;
-  ratio: number;
+type ContractTextPage = {
+  number: number;
+  text: string;
 };
 
+function splitContractParagraphs(text: string): string[] {
+  return text
+    .split(/(?<![\d.])(?=\d{1,2}\.(?:\d{1,2}\.)?\s)/gu)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+}
+
+function isSectionHeading(paragraph: string): boolean {
+  return /^\d{1,2}\.\s+[А-ЯЁ0-9 ,;:«»"'()\-–—]+$/u.test(paragraph);
+}
+
 function ContractPage({
-  imageUrl,
-  ratio
+  page,
+  contractNumber
 }: {
-  imageUrl: string;
-  ratio: number;
+  page: ContractTextPage;
+  contractNumber: number | null;
 }) {
   return (
-    <div className="mx-auto w-full max-w-[1100px] overflow-hidden rounded-[2px] bg-white shadow-[0_24px_70px_-42px_rgba(0,0,0,0.8)]">
-      <div
-        aria-hidden
-        className="w-full select-none bg-cover bg-top bg-no-repeat [image-rendering:auto] [pointer-events:none] [-webkit-user-drag:none] [-webkit-user-select:none]"
-        style={{
-          aspectRatio: `1 / ${ratio}`,
-          backgroundImage: `url("${imageUrl}")`
-        }}
-      />
-    </div>
+    <section className="mx-auto w-full max-w-[860px] rounded-sm border border-slate-200 bg-white px-[20mm] py-[25mm] font-['Iowan_Old_Style','Baskerville','Times_New_Roman',serif] text-[15px] font-normal leading-[1.62] text-slate-900 antialiased shadow-[0_24px_70px_-42px_rgba(0,0,0,0.8)]">
+      {page.number === 1 ? (
+        <header className="mb-8 text-center">
+          <p className="text-right text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">ICECREAMMUSIC | Лицензионный договор</p>
+          <h2 className="mt-8 text-[22px] font-bold uppercase tracking-[0.015em]">Лицензионный договор {contractNumber ? `№ ${contractNumber}` : "— номер будет присвоен после подписания"}</h2>
+          <p className="mt-2 text-[13px] leading-relaxed">на использование объектов авторских и смежных прав и их цифровую дистрибуцию</p>
+          <div className="mt-7 flex justify-between text-[14px] font-semibold"><span>г. Калининград</span><span>Дата появится после подписания</span></div>
+        </header>
+      ) : null}
+      <p className="mb-5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Страница {page.number}</p>
+      {splitContractParagraphs(page.text).map((paragraph, index) => (
+        <p
+          key={`${page.number}-${index}`}
+          className={cn(
+            "mb-4 whitespace-pre-wrap text-justify font-normal tracking-[0.003em] [overflow-wrap:anywhere] last:mb-0",
+            isSectionHeading(paragraph) ? "mt-7 font-bold uppercase tracking-[0.01em] [text-indent:0]" : "[text-indent:1.25cm]"
+          )}
+        >
+          {paragraph}
+        </p>
+      ))}
+    </section>
   );
 }
 
@@ -41,16 +62,22 @@ export function ContractViewer({
   className,
   onReadStateChange,
   readOnly = false,
-  allowExternalOpen = true
+  allowExternalOpen = true,
+  signerData,
+  signatureDataUrl
 }: {
   className?: string;
   onReadStateChange?: (readToEnd: boolean) => void;
   readOnly?: boolean;
   allowExternalOpen?: boolean;
+  signerData?: Partial<ContractSignerFormData> | null;
+  signatureDataUrl?: string | null;
 }) {
   const [ready, setReady] = React.useState(false);
   const [loadError, setLoadError] = React.useState(false);
-  const [pages, setPages] = React.useState<ContractImagePage[]>([]);
+  const [pages, setPages] = React.useState<ContractTextPage[]>([]);
+  const [contractNumber, setContractNumber] = React.useState<number | null>(null);
+  const [pseudonym, setPseudonym] = React.useState<string | null>(null);
   const [isReadToEnd, setIsReadToEnd] = React.useState(false);
 
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -59,57 +86,21 @@ export function ContractViewer({
     let mounted = true;
     void (async () => {
       try {
-        const response = await fetch(DOCUMENT_VIEW_URL, { method: "GET", cache: "no-store" });
+        const response = await fetch(`${DOCUMENT_VIEW_URL}?format=json`, { method: "GET", cache: "no-store" });
         if (!response.ok) {
           throw new Error("document_load_failed");
         }
-        const data = await response.arrayBuffer();
-        if (!data.byteLength) {
+        const data = (await response.json()) as { pages?: ContractTextPage[]; contractNumber?: number | null; pseudonym?: string | null };
+        if (!Array.isArray(data.pages) || data.pages.length === 0) {
           throw new Error("document_empty");
         }
 
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-
-        const loadingTask = pdfjs.getDocument({ data });
-        const pdf = await loadingTask.promise;
-        const parsedPages: ContractImagePage[] = [];
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-          if (pageNumber === 10) {
-            parsedPages.push({
-              pageNumber,
-              imageUrl: PAGE_TEN_BACKGROUND_URL,
-              ratio: PAGE_TEN_HEIGHT / PAGE_TEN_WIDTH
-            });
-            continue;
-          }
-
-          const page = await pdf.getPage(pageNumber);
-          const viewport = page.getViewport({ scale: 1.8 });
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-          const context = canvas.getContext("2d", { alpha: false });
-          if (!context) {
-            throw new Error("canvas_context_unavailable");
-          }
-
-          await page
-            .render({
-              canvasContext: context,
-              viewport
-            })
-            .promise;
-
-          parsedPages.push({
-            pageNumber,
-            imageUrl: canvas.toDataURL("image/png"),
-            ratio: viewport.height / viewport.width
-          });
-        }
-
         if (mounted) {
-          setPages(parsedPages);
+          setPages(data.pages);
+          if (Number.isInteger(data.contractNumber) && (data.contractNumber ?? 0) >= 1534) {
+            setContractNumber(data.contractNumber as number);
+          }
+          setPseudonym(data.pseudonym?.trim() || null);
           setLoadError(false);
         }
         if (mounted) setReady(true);
@@ -137,6 +128,16 @@ export function ContractViewer({
     handleScroll();
   }, [handleScroll, pages.length]);
 
+  const preventCopy = (event: React.ClipboardEvent | React.DragEvent | React.MouseEvent) => {
+    event.preventDefault();
+  };
+
+  const preventCopyShortcut = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+    }
+  };
+
   return (
       <div className={cn("space-y-3", className)}>
       {!readOnly ? (
@@ -151,8 +152,13 @@ export function ContractViewer({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onCopy={preventCopy}
+        onCut={preventCopy}
+        onDragStart={preventCopy}
+        onContextMenu={preventCopy}
+        onKeyDown={preventCopyShortcut}
         className={cn(
-          "overflow-y-auto rounded-2xl border border-white/12 bg-[#0a0f1c] [scroll-behavior:smooth]",
+          "select-none overflow-y-auto rounded-2xl border border-white/12 bg-[#0a0f1c] [scroll-behavior:smooth]",
           readOnly ? "h-[50vh] p-2.5 sm:h-[52vh] sm:p-3" : "h-[68vh] p-4 sm:p-5"
         )}
       >
@@ -168,13 +174,8 @@ export function ContractViewer({
 
           {ready && !loadError ? (
             <>
-              {pages.map((page) => (
-                <ContractPage
-                  key={`contract-page-${page.pageNumber}`}
-                  imageUrl={page.imageUrl}
-                  ratio={page.ratio}
-                />
-              ))}
+              {pages.filter((page) => page.number !== 10).map((page) => <ContractPage key={`contract-page-${page.number}`} page={page} contractNumber={contractNumber} />)}
+              <ContractSigningPage signerData={signerData} signatureDataUrl={signatureDataUrl} pseudonym={pseudonym} />
             </>
           ) : null}
 

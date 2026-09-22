@@ -1591,6 +1591,7 @@ function WizardInner({
           canCreateRelease: false,
           signedAt: null,
           contractVersion: null,
+          contractNumber: null,
           reason: "Для выпуска релизов необходимо пройти верификацию и подписать договор.",
           rejectionReason: null,
           rejectionKind: null,

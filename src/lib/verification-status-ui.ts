@@ -29,6 +29,13 @@ export function getVerificationStatusMeta(status: ContractSignatureStatus) {
       className: "border-rose-400/25 bg-rose-500/10 text-rose-100"
     };
   }
+  if (status === "update_required") {
+    return {
+      label: "Договор обновлён",
+      tooltip: "Требуется ознакомиться с новой версией и подписать её повторно.",
+      className: "border-amber-300/30 bg-amber-500/12 text-amber-100"
+    };
+  }
   return {
     label: "Не верифицирован",
     tooltip: "Подпишите договор, чтобы выпускать релизы.",

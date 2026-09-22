@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AdminVerificationReviewActions } from "@/components/admin/admin-verification-review-actions";
 import {
+  type ContractRevision,
   getContractSignatureById,
   isVerificationSignatureUnavailable
 } from "@/lib/contract-verification";
@@ -26,6 +27,12 @@ function statusView(status: string) {
   if (status === "invalid_signature") {
     return {
       label: "Требуется повторная подпись",
+      className: "border-amber-300/30 bg-amber-500/12 text-amber-100"
+    };
+  }
+  if (status === "update_required") {
+    return {
+      label: "Требуется новая подпись",
       className: "border-amber-300/30 bg-amber-500/12 text-amber-100"
     };
   }
@@ -68,6 +75,31 @@ function Field({
   );
 }
 
+function getContractChanges(
+  previous: ContractRevision,
+  current: Awaited<ReturnType<typeof getContractSignatureById>>
+) {
+  if (!current) return [];
+  const fields: Array<[string, keyof ContractRevision, string | null]> = [
+    ["Версия договора", "contractVersion", current.contractVersion],
+    ["Псевдоним", "pseudonym", current.pseudonym],
+    ["ФИО", "fullName", current.fullName],
+    ["Дата рождения", "birthDate", current.birthDate],
+    ["Паспорт", "passportNumber", current.passportNumber],
+    ["Кем выдан паспорт", "passportIssuedBy", current.passportIssuedBy],
+    ["Код подразделения", "passportCode", current.passportCode],
+    ["Дата выдачи паспорта", "passportIssueDate", current.passportIssueDate],
+    ["Адрес регистрации", "address", current.address],
+    ["ОГРНИП", "ogrnip", current.ogrnip],
+    ["ИНН", "inn", current.inn],
+    ["СНИЛС", "snils", current.snils]
+  ];
+
+  return fields
+    .filter(([, key, next]) => (previous[key] ?? "") !== (next ?? ""))
+    .map(([label, key, next]) => ({ label, previous: previous[key] ?? "—", next: next ?? "—" }));
+}
+
 export default async function VerificationDetailsPage({
   params
 }: {
@@ -85,6 +117,8 @@ export default async function VerificationDetailsPage({
       : item.status;
   const status = statusView(effectiveStatus);
   const canOpenSignature = !isVerificationSignatureUnavailable(item.signatureImageUrl);
+  const previousRevision = item.contractHistory.at(-1) ?? null;
+  const changes = previousRevision ? getContractChanges(previousRevision, item) : [];
 
   return (
     <div className="pb-10">
@@ -108,7 +142,7 @@ export default async function VerificationDetailsPage({
           <span className={`inline-flex rounded-full border px-3 py-1.5 text-[12px] font-semibold ${status.className}`}>
             {status.label}
           </span>
-          <AdminVerificationReviewActions verificationId={item.id} status={effectiveStatus} />
+          <AdminVerificationReviewActions verificationId={item.id} status={item.status} />
         </div>
       </div>
 
@@ -162,6 +196,27 @@ export default async function VerificationDetailsPage({
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/38">Файл договора</p>
             <p className="mt-1.5 break-words text-[13px] text-white/70">{item.contractFileName || "—"}</p>
           </div>
+
+          {item.contractHistory.length ? (
+            <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-500/[0.04] p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-100/70">Предыдущие версии</p>
+              <div className="mt-3 space-y-2">
+                {item.contractHistory.map((revision, index) => (
+                  <div key={`${revision.contractVersion}-${revision.signedAt}-${index}`} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-black/10 px-3 py-2.5">
+                    <div>
+                      <span className="text-[13px] text-white/72">{revision.contractVersion} от {formatDate(revision.signedAt)}</span>
+                      {revision.contractFileUrl?.startsWith("/docs/") ? (
+                        <p className="mt-1 text-[12px] text-amber-100/65">Архив подписи не был сохранён старой системой.</p>
+                      ) : null}
+                    </div>
+                    <a href={`/api/admin/verification/${item.id}/contract/history/${index}/download`} className="text-[12px] font-semibold text-amber-100 transition hover:text-white">
+                      {revision.contractFileUrl?.startsWith("/docs/") ? "Скачать исходный текст" : "Скачать подписанный договор"}
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </section>
       </div>
 
@@ -179,6 +234,29 @@ export default async function VerificationDetailsPage({
           <Field label="Адрес" value={item.address ?? "—"} />
         </div>
       </section>
+
+      {previousRevision ? (
+        <section className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/[0.04] p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[18px] font-semibold text-white">Обновление договора</h2>
+            <p className="text-[13px] text-white/55">{previousRevision.contractVersion} → {item.contractVersion}</p>
+          </div>
+          <p className="mt-2 text-[13px] text-white/55">Предыдущая версия подписана: {formatDate(previousRevision.signedAt)}</p>
+          {changes.length ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {changes.map((change) => (
+                <div key={change.label} className="rounded-xl border border-white/[0.08] bg-black/10 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/40">{change.label}</p>
+                  <p className="mt-2 break-words text-[13px] text-rose-200/85">Было: {change.previous}</p>
+                  <p className="mt-1 break-words text-[13px] text-emerald-200/90">Стало: {change.next}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-4 text-[13px] text-white/62">Изменились условия договора; данные пользователя не менялись.</p>
+          )}
+        </section>
+      ) : null}
 
       <section className="mt-4 rounded-2xl border border-white/[0.08] bg-[#0d0f16] p-5">
         <h2 className="text-[18px] font-semibold text-white">История решения</h2>

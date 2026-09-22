@@ -12,14 +12,19 @@ export function DashboardVerificationStatusModal({
   initialStatus: ContractStatusPayload;
 }) {
   const { user } = useCurrentUser();
-  const effectiveStatus = user?.verification ?? initialStatus;
+  const effectiveStatus =
+    initialStatus.status === "update_required" ? initialStatus : user?.verification ?? initialStatus;
   const shouldPrompt =
-    effectiveStatus.status === "rejected" || effectiveStatus.status === "invalid_signature";
+    effectiveStatus.status === "rejected" ||
+    effectiveStatus.status === "invalid_signature" ||
+    effectiveStatus.status === "update_required";
   const [warningOpen, setWarningOpen] = React.useState(shouldPrompt);
 
   React.useEffect(() => {
     setWarningOpen(
-      effectiveStatus.status === "rejected" || effectiveStatus.status === "invalid_signature"
+      effectiveStatus.status === "rejected" ||
+        effectiveStatus.status === "invalid_signature" ||
+        effectiveStatus.status === "update_required"
     );
   }, [effectiveStatus.rejectionReason, effectiveStatus.status, effectiveStatus.verificationId]);
 

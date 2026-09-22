@@ -59,7 +59,6 @@ export interface PayoutServerContext {
   reportStatuses: FinanceReportStatus[];
   payoutWindowOpen?: boolean;
   payoutWindowMessage?: string;
-  activePayoutRequestsCount?: number;
   selectedQuarterBalance?: number;
   duplicateQuarterRequest?: boolean;
 }
@@ -164,15 +163,6 @@ export function validatePayoutRequest(
       "forbidden",
       "payoutWindow",
       context.payoutWindowMessage || "Заявку на выплату можно создать только в период выплат."
-    );
-  }
-
-  if ((context.activePayoutRequestsCount ?? 0) > 0) {
-    pushIssue(
-      issues,
-      "forbidden",
-      "activePayoutRequests",
-      "У вас уже есть активная заявка на выплату."
     );
   }
 

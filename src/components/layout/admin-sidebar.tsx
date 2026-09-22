@@ -37,6 +37,7 @@ const items = [
   { href: "/admin/catalog-sync", label: "Smart Catalog Sync", icon: BarChart3 },
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
+  { href: "/admin/verification/updates", label: "Обновления договоров", icon: FileWarning },
   { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard },
   { href: "/admin/reports", label: "Финансовые отчёты", icon: FileText, exact: true },
   { href: "/admin/reports/changes-requested", label: "Отчёты на доработке", icon: FileWarning },
@@ -104,7 +105,9 @@ export function AdminSidebar() {
           const active =
             item.href === "/admin" || item.exact
               ? pathname === item.href
-              : pathname === item.href || pathname.startsWith(`${item.href}/`);
+              : item.href === "/admin/verification"
+                ? pathname === item.href
+                : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
           return (
             <Link

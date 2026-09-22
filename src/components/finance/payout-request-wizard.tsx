@@ -28,6 +28,7 @@ type StepPaymentProps = {
   available: number;
   minimum: number;
   window: PayoutWindowState;
+  contractNumber: number | null;
 };
 
 type StepRequisitesProps = {
@@ -70,6 +71,7 @@ type StepReviewProps = {
   bankBik: string;
   taxId: string;
   document: UploadedDocument | null;
+  contractNumber: number;
   onEdit: (step: Step) => void;
 };
 
@@ -118,19 +120,30 @@ function receiptHtml(input: {
   recipientName: string; passportSeries: string; passportNumber: string; passportIssuedBy: string;
   passportIssueDate: string; birthDate: string; registrationAddress: string; amount: number;
   quarterLabel: string; bankName: string; accountNumber: string; bankBik: string;
+  contractNumber: number;
 }): string {
   const escape = (value: string) => value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
-  return `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Расписка ICECREAMMUSIC</title><style>body{font:16px Georgia,serif;line-height:1.55;margin:55px;color:#111}h1{text-align:center;font:700 22px Arial;margin:0 0 36px}.sign{margin-top:40px}</style><h1>РАСПИСКА</h1><p>Я, ${escape(input.recipientName)}, действующий на основании паспорта: серия ${escape(input.passportSeries)}, номер ${escape(input.passportNumber)}, выдан ${escape(input.passportIssuedBy)}, дата выдачи ${formatDate(input.passportIssueDate)}, дата рождения ${formatDate(input.birthDate)}, зарегистрированный по адресу ${escape(input.registrationAddress)},</p><p>получил вознаграждение (royalty) от ICECREAMMUSIC в размере:</p><p><strong>${formatCurrency(input.amount, "RUB")}</strong><br>${escape(amountWords(input.amount))}</p><p>за отчетный период: <strong>${escape(input.quarterLabel)}</strong>.</p><p>Выплата производится по следующим реквизитам: ${escape(input.bankName)}, счет ${escape(input.accountNumber)}, БИК ${escape(input.bankBik)}, получатель ${escape(input.recipientName)}.</p><p>Претензий не имею.</p><p class="sign">Подпись: __________<br>Фамилия и инициалы: __________<br><br>Дата расписки: __________</p></html>`;
+  return `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Расписка ICECREAMMUSIC</title><style>body{font:16px Georgia,serif;line-height:1.55;margin:55px;color:#111}h1{text-align:center;font:700 22px Arial;margin:0 0 36px}.sign{margin-top:40px}</style><h1>РАСПИСКА</h1><p>Я, ${escape(input.recipientName)}, действующий на основании паспорта: серия ${escape(input.passportSeries)}, номер ${escape(input.passportNumber)}, выдан ${escape(input.passportIssuedBy)}, дата выдачи ${formatDate(input.passportIssueDate)}, дата рождения ${formatDate(input.birthDate)}, зарегистрированный по адресу ${escape(input.registrationAddress)}, по лицензионному договору № ${input.contractNumber},</p><p>получил вознаграждение (royalty) от ICECREAMMUSIC в размере:</p><p><strong>${formatCurrency(input.amount, "RUB")}</strong><br>${escape(amountWords(input.amount))}</p><p>за отчетный период: <strong>${escape(input.quarterLabel)}</strong>.</p><p>Выплата производится по следующим реквизитам: ${escape(input.bankName)}, счет ${escape(input.accountNumber)}, БИК ${escape(input.bankBik)}, получатель ${escape(input.recipientName)}.</p><p>Претензий не имею.</p><p class="sign">Подпись: __________<br>Фамилия и инициалы: __________<br><br>Дата расписки: __________</p></html>`;
 }
 
-export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayoutAmount, payoutWindow, initialPayoutRequests }: {
+export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayoutAmount, payoutWindow, initialPayoutRequests, contractNumber }: {
   reports: FinanceReportClientItem[];
   availableToWithdraw: number;
   minimumPayoutAmount: number;
   payoutWindow: PayoutWindowState;
   initialPayoutRequests: PayoutRequestSummary[];
+  contractNumber: number | null;
 }) {
-  const agreedReports = reports.filter((report) => report.status === "agreed" && report.quarter && report.year);
+  const [payoutRequests, setPayoutRequests] = React.useState(initialPayoutRequests);
+  const lockedPeriods = new Set(
+    payoutRequests
+      .filter((request) => request.status !== "REJECTED" && request.quarter && request.year)
+      .map((request) => `${request.year}-${request.quarter}`)
+  );
+  const agreedReports = reports.filter(
+    (report) => report.status === "agreed" && report.quarter && report.year &&
+      !lockedPeriods.has(`${report.year}-${report.quarter}`)
+  );
   const [step, setStep] = React.useState<Step>(1);
   const [amount, setAmount] = React.useState("");
   const [selectedReportId, setSelectedReportId] = React.useState(agreedReports[0]?.id ?? "");
@@ -147,20 +160,27 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
   const [uploading, setUploading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [notice, setNotice] = React.useState<string | null>(null);
-  const [createdPayout, setCreatedPayout] = React.useState<PayoutRequestSummary | null>(null);
+
+  React.useEffect(() => {
+    if (!agreedReports.some((report) => report.id === selectedReportId)) {
+      setSelectedReportId(agreedReports[0]?.id ?? "");
+    }
+  }, [agreedReports, selectedReportId]);
 
   const selectedReport = agreedReports.find((report) => report.id === selectedReportId) ?? null;
   const parsedAmount = Number(amount.replace(",", "."));
   const bankName = bankChoice === "Другой банк" ? customBankName : bankChoice;
   const quarterAmount = selectedReport?.amount ?? 0;
-  const canStart = Boolean(selectedReport) && Number.isFinite(parsedAmount) && parsedAmount >= minimumPayoutAmount && parsedAmount <= Math.min(availableToWithdraw, quarterAmount) && payoutWindow.isOpen;
+  const canStart = Boolean(contractNumber && selectedReport) && Number.isFinite(parsedAmount) && parsedAmount >= minimumPayoutAmount && parsedAmount <= Math.min(availableToWithdraw, quarterAmount) && payoutWindow.isOpen;
 
   const updateReceipt = (field: keyof typeof receiptDetails, value: string) => setReceiptDetails((current) => ({ ...current, [field]: value }));
 
   function validateCurrentStep(): boolean {
     setNotice(null);
     if (step === 1 && !canStart) {
-      setNotice(parsedAmount > 0 && parsedAmount < minimumPayoutAmount
+      setNotice(!contractNumber
+        ? "Для заявки на выплату подпишите действующую версию лицензионного договора."
+        : parsedAmount > 0 && parsedAmount < minimumPayoutAmount
         ? `Минимальная сумма выплаты — ${formatCurrency(minimumPayoutAmount, "RUB")}.`
         : "Проверьте сумму, выбранный согласованный отчет и окно выплат.");
       return false;
@@ -194,7 +214,8 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
 
   function downloadReceipt() {
     if (!selectedReport || taxStatus !== "individual") return;
-    const html = receiptHtml({ recipientName, ...receiptDetails, amount: parsedAmount, quarterLabel: selectedReport.quarterLabel, bankName, accountNumber, bankBik });
+    if (!contractNumber) return;
+    const html = receiptHtml({ recipientName, ...receiptDetails, amount: parsedAmount, quarterLabel: selectedReport.quarterLabel, bankName, accountNumber, bankBik, contractNumber });
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     const anchor = document.createElement("a");
     anchor.href = url; anchor.download = `receipt-${selectedReport.quarterLabel.replace(/\s+/gu, "-")}.html`; anchor.click();
@@ -203,7 +224,8 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
 
   function previewReceipt() {
     if (!selectedReport || taxStatus !== "individual") return;
-    const html = receiptHtml({ recipientName, ...receiptDetails, amount: parsedAmount, quarterLabel: selectedReport.quarterLabel, bankName, accountNumber, bankBik });
+    if (!contractNumber) return;
+    const html = receiptHtml({ recipientName, ...receiptDetails, amount: parsedAmount, quarterLabel: selectedReport.quarterLabel, bankName, accountNumber, bankBik, contractNumber });
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
     window.open(url, "_blank", "noopener,noreferrer");
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -228,46 +250,102 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
         throw new Error(message);
       }
       const success = data as PayoutRequestSuccessResponse;
-      setCreatedPayout({ id: success.payoutRequestId, amount: parsedAmount, status: "REQUESTED", createdAt: new Date().toISOString(), quarter: selectedReport.quarter, year: selectedReport.year });
+      const createdPayout = {
+        id: success.payoutRequestId,
+        amount: parsedAmount,
+        status: "REQUESTED" as const,
+        createdAt: new Date().toISOString(),
+        quarter: selectedReport.quarter,
+        year: selectedReport.year,
+        rejectionReason: null,
+        recipientName: recipientName.trim() || null,
+        bankName: bankName.trim() || null,
+        accountDetails: accountNumber.trim() || null,
+        bankBik: bankBik.trim() || null,
+        taxId: taxId.trim() || null,
+        contractNumber,
+        supportingDocument: supportingDocument ? { key: supportingDocument.key, name: supportingDocument.name } : null
+      };
+      setPayoutRequests((current) => [createdPayout, ...current]);
+      setAmount("");
+      setSupportingDocument(null);
+      setReceiptAcknowledged(false);
+      setStep(1);
+      setNotice("Заявка отправлена. Можно создать следующую заявку за другой квартал.");
     } catch (error) { setNotice(error instanceof Error ? error.message : "Не удалось отправить заявку."); }
     finally { setSubmitting(false); }
   }
 
-  const knownPayout = createdPayout ?? initialPayoutRequests.find((item) => item.status === "REQUESTED" || item.status === "PROCESSING") ?? null;
-  if (knownPayout) return <PayoutCreatedCard payout={knownPayout} />;
-
-  return <section className="mx-auto max-w-4xl rounded-[26px] border border-white/[0.10] bg-[#11131d]/95 p-4 shadow-[0_24px_80px_-48px_rgba(91,46,229,0.75)] sm:p-7">
+  return <div className="mx-auto max-w-4xl space-y-4">
+    <PayoutRequestHistory requests={payoutRequests} />
+    <section className="rounded-[26px] border border-white/[0.10] bg-[#11131d]/95 p-4 shadow-[0_24px_80px_-48px_rgba(91,46,229,0.75)] sm:p-7">
     <ol className="mb-8 grid grid-cols-4 gap-1" aria-label="Этапы создания заявки">
       {steps.map((item) => <li key={item.id} className="min-w-0">
-        <button type="button" disabled={item.id > step} onClick={() => setStep(item.id)} className="flex w-full items-center gap-2 text-left disabled:cursor-default">
+        <button type="button" disabled={item.id > step} onClick={() => setStep(item.id)} className="flex w-full items-center justify-center gap-2 text-center disabled:cursor-default">
           <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-full border text-[12px] font-bold", item.id < step ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100" : item.id === step ? "border-[#9b6bff] bg-[#7b3df5]/20 text-white" : "border-white/10 bg-white/[0.03] text-white/35")}>{item.id < step ? <Check className="h-4 w-4" /> : item.id}</span>
           <span className={cn("hidden truncate text-[12px] font-semibold sm:inline", item.id <= step ? "text-white" : "text-white/35")}>{item.label}</span>
         </button>
       </li>)}
     </ol>
-    {step === 1 ? <StepPayment reports={agreedReports} selectedReportId={selectedReportId} setSelectedReportId={setSelectedReportId} amount={amount} setAmount={setAmount} taxStatus={taxStatus} setTaxStatus={setTaxStatus} available={availableToWithdraw} minimum={minimumPayoutAmount} window={payoutWindow} /> : null}
+    {step === 1 ? <StepPayment reports={agreedReports} selectedReportId={selectedReportId} setSelectedReportId={setSelectedReportId} amount={amount} setAmount={setAmount} taxStatus={taxStatus} setTaxStatus={setTaxStatus} available={availableToWithdraw} minimum={minimumPayoutAmount} window={payoutWindow} contractNumber={contractNumber} /> : null}
     {step === 2 ? <StepRequisites recipientName={recipientName} setRecipientName={setRecipientName} bankChoice={bankChoice} setBankChoice={setBankChoice} customBankName={customBankName} setCustomBankName={setCustomBankName} accountNumber={accountNumber} setAccountNumber={setAccountNumber} bankBik={bankBik} setBankBik={setBankBik} taxId={taxId} setTaxId={setTaxId} /> : null}
     {step === 3 ? <StepDocuments taxStatus={taxStatus} selectedReport={selectedReport} recipientName={recipientName} receiptDetails={receiptDetails} updateReceipt={updateReceipt} receiptAcknowledged={receiptAcknowledged} setReceiptAcknowledged={setReceiptAcknowledged} supportingDocument={supportingDocument} uploading={uploading} uploadDocument={uploadDocument} downloadReceipt={downloadReceipt} previewReceipt={previewReceipt} /> : null}
-    {step === 4 && selectedReport ? <StepReview report={selectedReport} amount={parsedAmount} taxStatus={taxStatus} recipientName={recipientName} bankName={bankName} accountNumber={accountNumber} bankBik={bankBik} taxId={taxId} document={supportingDocument} onEdit={setStep} /> : null}
-    {notice ? <p className="mt-5 rounded-xl border border-rose-400/25 bg-rose-500/10 px-3.5 py-3 text-[13px] font-medium text-rose-100">{notice}</p> : null}
+    {step === 4 && selectedReport && contractNumber ? <StepReview report={selectedReport} amount={parsedAmount} taxStatus={taxStatus} recipientName={recipientName} bankName={bankName} accountNumber={accountNumber} bankBik={bankBik} taxId={taxId} document={supportingDocument} contractNumber={contractNumber} onEdit={setStep} /> : null}
+    {notice ? <p className={cn("mt-5 rounded-xl border px-3.5 py-3 text-[13px] font-medium", notice.startsWith("Заявка отправлена") ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100" : "border-rose-400/25 bg-rose-500/10 text-rose-100")}>{notice}</p> : null}
     <div className="mt-7 flex flex-wrap justify-between gap-3 border-t border-white/[0.08] pt-5">
       {step > 1 ? <Button type="button" variant="outline" onClick={() => setStep((step - 1) as Step)} className="border-white/15 bg-white/[0.03]"><ChevronLeft className="mr-1 h-4 w-4" />Назад</Button> : <span />}
       {step < 4 ? <Button type="button" onClick={() => validateCurrentStep() && setStep((step + 1) as Step)} className="btn-shine"><span>Продолжить</span><ChevronRight className="ml-1 h-4 w-4" /></Button> : <Button type="button" onClick={() => void submit()} disabled={submitting} className="btn-shine">{submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Отправить заявку</Button>}
     </div>
-  </section>;
+    </section>
+  </div>;
 }
 
-function StepPayment({ reports, selectedReportId, setSelectedReportId, amount, setAmount, taxStatus, setTaxStatus, available, minimum, window }: StepPaymentProps) {
+function StepPayment({ reports, selectedReportId, setSelectedReportId, amount, setAmount, taxStatus, setTaxStatus, available, minimum, window, contractNumber }: StepPaymentProps) {
   const selected = reports.find((report: FinanceReportClientItem) => report.id === selectedReportId);
-  return <div><h2 className="text-[22px] font-semibold text-white">Создание запроса на выплату</h2><div className="mt-5 rounded-2xl border border-[#7b3df5]/25 bg-[#7b3df5]/10 p-4"><p className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#c7b5ff]">Доступно к выплате</p><p className="mt-1 text-[28px] font-semibold text-white">{formatCurrency(available, "RUB")}</p><p className="mt-1 text-[13px] text-white/55">Минимальная сумма: {formatCurrency(minimum, "RUB")}</p></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-[13px] font-semibold text-white/70">Сумма выплаты<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">Отчетный период<select value={selectedReportId} onChange={(event) => setSelectedReportId(event.target.value)} className={fieldClass}><option value="">Выберите квартал</option>{reports.map((report: FinanceReportClientItem) => <option value={report.id} key={report.id}>{report.quarterLabel} · {formatCurrency(report.amount, "RUB")}</option>)}</select></label></div>{selected ? <p className="mt-3 text-[13px] text-white/55">По выбранному кварталу доступно: {formatCurrency(selected.amount, "RUB")}. Одна заявка создается только для одного квартала.</p> : <p className="mt-3 text-[13px] text-amber-200">Нет согласованных отчетов, доступных для выплаты.</p>}<fieldset className="mt-6"><legend className="text-[13px] font-semibold text-white/70">Налоговый статус</legend><div className="mt-2 grid gap-3 sm:grid-cols-2">{[["individual", "Физическое лицо", "Для выплаты потребуется заполненная расписка."], ["self_employed", "Самозанятый", "Для выплаты потребуется чек из приложения «Мой налог»." ]].map(([id, title, description]) => <label key={id} className={cn("cursor-pointer rounded-2xl border p-4", taxStatus === id ? "border-[#8b5cf6]/55 bg-[#7b3df5]/12" : "border-white/[0.09] bg-white/[0.02]")}><input className="sr-only" type="radio" checked={taxStatus === id} onChange={() => setTaxStatus(id as TaxStatus)} /><span className="block font-semibold text-white">{title}</span><span className="mt-1 block text-[13px] leading-relaxed text-white/55">{description}</span></label>)}</div></fieldset>{!window.isOpen ? <p className="mt-5 rounded-xl border border-sky-400/25 bg-sky-500/10 px-3.5 py-3 text-[13px] text-sky-100">{window.message}</p> : null}</div>;
+  return <div><h2 className="text-[22px] font-semibold text-white">Создание запроса на выплату</h2><div className="mt-5 rounded-2xl border border-[#7b3df5]/25 bg-[#7b3df5]/10 p-4"><p className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#c7b5ff]">Доступно к выплате</p><p className="mt-1 text-[28px] font-semibold text-white">{formatCurrency(available, "RUB")}</p><p className="mt-1 text-[13px] text-white/55">Минимальная сумма: {formatCurrency(minimum, "RUB")}</p></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-[13px] font-semibold text-white/70">Сумма выплаты<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">Отчетный период<select value={selectedReportId} onChange={(event) => setSelectedReportId(event.target.value)} className={fieldClass}><option value="">Выберите квартал</option>{reports.map((report: FinanceReportClientItem) => <option value={report.id} key={report.id}>{report.quarterLabel} · {formatCurrency(report.amount, "RUB")}</option>)}</select></label></div>{contractNumber ? <p className="mt-3 flex items-center gap-2 text-[12px] text-white/45"><span>Лицензионный договор</span><span className="text-white/20">·</span><span className="font-semibold text-white/75">№ {contractNumber}</span></p> : null}{selected ? <p className="mt-3 text-[13px] text-white/55">По выбранному кварталу доступно: {formatCurrency(selected.amount, "RUB")}. Одна заявка создается только для одного квартала.</p> : <p className="mt-3 text-[13px] text-amber-200">Нет согласованных отчетов, доступных для выплаты.</p>}<fieldset className="mt-6"><legend className="text-[13px] font-semibold text-white/70">Налоговый статус</legend><div className="mt-2 grid gap-3 sm:grid-cols-2">{[["individual", "Физическое лицо", "Для выплаты потребуется заполненная расписка."], ["self_employed", "Самозанятый", "Для выплаты потребуется чек из приложения «Мой налог»." ]].map(([id, title, description]) => <label key={id} className={cn("cursor-pointer rounded-2xl border p-4", taxStatus === id ? "border-[#8b5cf6]/55 bg-[#7b3df5]/12" : "border-white/[0.09] bg-white/[0.02]")}><input className="sr-only" type="radio" checked={taxStatus === id} onChange={() => setTaxStatus(id as TaxStatus)} /><span className="block font-semibold text-white">{title}</span><span className="mt-1 block text-[13px] leading-relaxed text-white/55">{description}</span></label>)}</div></fieldset>{!window.isOpen ? <p className="mt-5 rounded-xl border border-sky-400/25 bg-sky-500/10 px-3.5 py-3 text-[13px] text-sky-100">{window.message}</p> : null}</div>;
 }
 
 function StepRequisites(props: StepRequisitesProps) { const banks = ["Т-Банк", "Сбербанк", "Альфа-Банк", "Газпромбанк", "Другой банк"]; return <div><h2 className="text-[22px] font-semibold text-white">Реквизиты получателя</h2><p className="mt-2 text-[14px] text-white/55">Выплата выполняется банковским переводом.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-[13px] font-semibold text-white/70 sm:col-span-2">ФИО / Получатель<input value={props.recipientName} onChange={(e) => props.setRecipientName(e.target.value)} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">Банк<select value={props.bankChoice} onChange={(e) => props.setBankChoice(e.target.value)} className={fieldClass}>{banks.map((bank) => <option key={bank}>{bank}</option>)}</select></label>{props.bankChoice === "Другой банк" ? <label className="text-[13px] font-semibold text-white/70">Название банка<input value={props.customBankName} onChange={(e) => props.setCustomBankName(e.target.value)} className={fieldClass} /></label> : <div /> }<label className="text-[13px] font-semibold text-white/70">Номер счета<input inputMode="numeric" value={props.accountNumber} onChange={(e) => props.setAccountNumber(e.target.value)} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">БИК банка<input inputMode="numeric" maxLength={9} value={props.bankBik} onChange={(e) => props.setBankBik(e.target.value.replace(/\D/gu, ""))} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70 sm:col-span-2">ИНН / Налоговый ID<input value={props.taxId} onChange={(e) => props.setTaxId(e.target.value)} className={fieldClass} /></label></div></div>; }
 
 function StepDocuments({ taxStatus, selectedReport, recipientName, receiptDetails, updateReceipt, receiptAcknowledged, setReceiptAcknowledged, supportingDocument, uploading, uploadDocument, downloadReceipt, previewReceipt }: StepDocumentsProps) { const receiptReady = Object.values(receiptDetails).every(Boolean); return <div><h2 className="text-[22px] font-semibold text-white">Документы</h2>{selectedReport ? <a className="mt-4 flex items-center justify-between rounded-2xl border border-white/[0.1] bg-white/[0.03] p-4 text-white hover:border-[#7b3df5]/45" href={`/api/finance/reports/${encodeURIComponent(selectedReport.id)}/statement`} target="_blank" rel="noreferrer"><span><strong className="block">Отчетная ведомость</strong><span className="mt-1 block text-[13px] text-white/55">{selectedReport.quarterLabel}</span></span><span className="flex items-center gap-2 text-[13px] font-semibold"><Download className="h-4 w-4" />Скачать</span></a> : null}{taxStatus === "individual" ? <><div className="mt-5 rounded-2xl border border-white/[0.1] bg-white/[0.02] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold text-white">Расписка о получении вознаграждения</h3><p className="mt-1 text-[13px] text-white/55">Сформируйте, перепишите от руки, подпишите и прикрепите скан или PDF.</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={previewReceipt} disabled={!recipientName.trim() || !receiptReady}>Просмотреть</Button><Button type="button" variant="outline" onClick={downloadReceipt} disabled={!recipientName.trim() || !receiptReady}><Download className="mr-2 h-4 w-4" />Скачать расписку</Button></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-[13px] font-semibold text-white/70">Серия паспорта<input maxLength={4} value={receiptDetails.passportSeries} onChange={(e) => updateReceipt("passportSeries", e.target.value.replace(/\D/gu, ""))} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">Номер паспорта<input maxLength={6} value={receiptDetails.passportNumber} onChange={(e) => updateReceipt("passportNumber", e.target.value.replace(/\D/gu, ""))} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70 sm:col-span-2">Кем выдан<input value={receiptDetails.passportIssuedBy} onChange={(e) => updateReceipt("passportIssuedBy", e.target.value)} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">Дата выдачи<input type="date" value={receiptDetails.passportIssueDate} onChange={(e) => updateReceipt("passportIssueDate", e.target.value)} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70">Дата рождения<input type="date" value={receiptDetails.birthDate} onChange={(e) => updateReceipt("birthDate", e.target.value)} className={fieldClass} /></label><label className="text-[13px] font-semibold text-white/70 sm:col-span-2">Адрес регистрации<input value={receiptDetails.registrationAddress} onChange={(e) => updateReceipt("registrationAddress", e.target.value)} className={fieldClass} /></label></div><label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-300/20 bg-amber-400/[0.06] p-3 text-[13px] leading-relaxed text-amber-50"><input type="checkbox" checked={receiptAcknowledged} onChange={(event) => setReceiptAcknowledged(event.target.checked)} className="mt-0.5 h-4 w-4 accent-[#8b5cf6]" /><span>Подтверждаю: сформированная расписка является примером. Я перепишу ее от руки, подпишу и загружу подписанный скан или PDF.</span></label></div></> : <div className="mt-5 rounded-2xl border border-white/[0.1] bg-white/[0.02] p-4"><h3 className="font-semibold text-white">Чек «Мой налог»</h3><p className="mt-1 text-[13px] text-white/55">Прикрепите чек на сумму текущей выплаты, сформированный в приложении «Мой налог».</p></div>}<label className="mt-5 flex cursor-pointer items-center justify-center gap-3 rounded-2xl border border-dashed border-[#8b5cf6]/45 bg-[#7b3df5]/[0.06] px-5 py-8 text-center"><input className="sr-only" type="file" accept="application/pdf,image/jpeg,image/png" onChange={(event) => void uploadDocument(event.target.files?.[0])} /><Upload className="h-5 w-5 text-[#b9a0ff]" /><span><strong className="block text-white">{supportingDocument ? "Заменить документ" : "Перетащите файл сюда или выберите файл"}</strong><span className="mt-1 block text-[13px] text-white/55">PDF, JPG или PNG до 10 МБ</span></span></label>{uploading ? <p className="mt-3 flex items-center gap-2 text-[13px] text-white/65"><Loader2 className="h-4 w-4 animate-spin" />Загрузка…</p> : null}{supportingDocument ? <div className="mt-3 flex items-center justify-between rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3.5 py-3 text-[13px] text-emerald-100"><span className="flex min-w-0 items-center gap-2"><FileText className="h-4 w-4 shrink-0" /><span className="truncate">{supportingDocument.name} · {(supportingDocument.size / 1024 / 1024).toFixed(2)} МБ</span></span><button type="button" className="ml-3 underline" onClick={() => supportingDocument && (window.open(`/api/finance/payouts/document?key=${encodeURIComponent(supportingDocument.key)}`, "_blank"))}>Открыть</button></div> : null}</div>; }
 
-function StepReview({ report, amount, taxStatus, recipientName, bankName, accountNumber, bankBik, taxId, document, onEdit }: StepReviewProps) { return <div><h2 className="text-[22px] font-semibold text-white">Проверьте заявку</h2><div className="mt-5 rounded-2xl border border-[#8b5cf6]/35 bg-gradient-to-br from-[#7b3df5]/20 to-transparent p-5"><p className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#c7b5ff]">К выплате</p><p className="mt-1 text-[34px] font-semibold text-white">{formatCurrency(amount, "RUB")}</p></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><Summary title="Выплата" edit={() => onEdit(1)} lines={[report.quarterLabel, formatCurrency(amount, "RUB"), taxStatus === "individual" ? "Физическое лицо" : "Самозанятый"]} /><Summary title="Получатель" edit={() => onEdit(2)} lines={[recipientName, bankName, `Счет ${mask(accountNumber)}`, `БИК ${bankBik}`, `ИНН ${mask(taxId)}`]} /><Summary title="Документы" edit={() => onEdit(3)} lines={["✓ Отчетная ведомость", `✓ ${taxStatus === "individual" ? "Расписка" : "Чек «Мой налог»"}`, document?.name ?? "—"]} /></div></div>; }
+function StepReview({ report, amount, taxStatus, recipientName, bankName, accountNumber, bankBik, taxId, document, contractNumber, onEdit }: StepReviewProps) { return <div><h2 className="text-[22px] font-semibold text-white">Проверьте заявку</h2><div className="mt-5 rounded-2xl border border-[#8b5cf6]/35 bg-gradient-to-br from-[#7b3df5]/20 to-transparent p-5"><p className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#c7b5ff]">К выплате</p><p className="mt-1 text-[34px] font-semibold text-white">{formatCurrency(amount, "RUB")}</p></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><Summary title="Выплата" edit={() => onEdit(1)} lines={[report.quarterLabel, formatCurrency(amount, "RUB"), `Договор № ${contractNumber}`, taxStatus === "individual" ? "Физическое лицо" : "Самозанятый"]} /><Summary title="Получатель" edit={() => onEdit(2)} lines={[recipientName, bankName, `Счет ${mask(accountNumber)}`, `БИК ${bankBik}`, `ИНН ${mask(taxId)}`]} /><Summary title="Документы" edit={() => onEdit(3)} lines={["✓ Отчетная ведомость", `✓ ${taxStatus === "individual" ? "Расписка" : "Чек «Мой налог»"}`, document?.name ?? "—"]} /></div></div>; }
 
 function Summary({ title, lines, edit }: { title: string; lines: string[]; edit: () => void }) { return <section className="rounded-2xl border border-white/[0.09] bg-white/[0.025] p-4"><div className="flex items-center justify-between gap-2"><h3 className="font-semibold text-white">{title}</h3><button type="button" onClick={edit} className="text-[12px] font-semibold text-[#c5b3ff] hover:text-white">Изменить</button></div><div className="mt-3 space-y-1 text-[13px] leading-relaxed text-white/62">{lines.map((line) => <p key={line}>{line}</p>)}</div></section>; }
 
-function PayoutCreatedCard({ payout }: { payout: PayoutRequestSummary }) { const status = payout.status === "PROCESSING" ? "В обработке" : payout.status === "PAID" ? "Выплачена" : payout.status === "REJECTED" ? "Отклонена" : "На проверке"; return <section className="mx-auto max-w-2xl rounded-[26px] border border-emerald-400/25 bg-emerald-500/[0.06] p-6"><span className="grid h-10 w-10 place-items-center rounded-full bg-emerald-500/15 text-emerald-200"><Check className="h-5 w-5" /></span><h2 className="mt-4 text-[22px] font-semibold text-white">Заявка №{payout.id.slice(0, 8)}</h2><p className="mt-1 text-white/60">{payout.quarter && payout.year ? quarterLabel(payout.quarter, payout.year) : "Период выплаты"}</p><p className="mt-5 text-[32px] font-semibold text-white">{formatCurrency(payout.amount, "RUB")}</p><p className="mt-4 text-[14px] text-emerald-100">● {status}</p><p className="mt-2 text-[13px] text-white/55">Создана: {new Date(payout.createdAt).toLocaleDateString("ru-RU")}</p></section>; }
+function PayoutRequestHistory({ requests }: { requests: PayoutRequestSummary[] }) {
+  const [openedRequest, setOpenedRequest] = React.useState<PayoutRequestSummary | null>(null);
+  const status = (value: PayoutRequestSummary["status"]) => {
+    if (value === "PROCESSING") return { label: "В обработке", tone: "border-sky-400/25 bg-sky-500/10 text-sky-100" };
+    if (value === "PAID") return { label: "Выплачена", tone: "border-emerald-400/25 bg-emerald-500/10 text-emerald-100" };
+    if (value === "REJECTED") return { label: "Отклонена", tone: "border-rose-400/25 bg-rose-500/10 text-rose-100" };
+    return { label: "На проверке", tone: "border-amber-400/25 bg-amber-500/10 text-amber-100" };
+  };
+
+  const groups = requests.reduce<Array<{ key: string; label: string; requests: PayoutRequestSummary[] }>>((result, request) => {
+    const hasPeriod = Boolean(request.quarter && request.year);
+    const key = hasPeriod ? `${request.year}-${request.quarter}` : "legacy";
+    const label = hasPeriod ? quarterLabel(request.quarter!, request.year!) : "Без привязки к кварталу";
+    const current = result.find((group) => group.key === key);
+    if (current) current.requests.push(request);
+    else result.push({ key, label, requests: [request] });
+    return result;
+  }, []);
+  const requestCountLabel = (count: number) => {
+    if (count % 10 === 1 && count % 100 !== 11) return "заявка";
+    if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)) return "заявки";
+    return "заявок";
+  };
+
+  return <section className="rounded-[26px] border border-white/[0.10] bg-[#11131d]/95 p-4 sm:p-6">
+    <div className="flex items-center justify-between gap-3"><div><h2 className="text-[19px] font-semibold text-white">Заявки на выплаты</h2><p className="mt-1 text-[13px] text-white/55">Каждая заявка привязана к своему квартальному отчету.</p></div><span className="rounded-full border border-white/10 px-3 py-1 text-[12px] font-semibold text-white/60">{requests.length}</span></div>
+    {groups.length ? <div className="mt-4 space-y-3">{groups.map((group) => <section key={group.key} className="overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.025]"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.07] px-4 py-3"><h3 className="font-semibold text-white">{group.label}</h3><span className="text-[12px] text-white/45">{group.requests.length} {requestCountLabel(group.requests.length)}</span></div><div className="divide-y divide-white/[0.07]">{group.requests.map((request) => { const current = status(request.status); return <div key={request.id} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-[12px] text-white/48">Заявка №{request.id.slice(0, 8)} · {new Date(request.createdAt).toLocaleDateString("ru-RU")}</p><div className="flex items-center gap-3"><p className="font-semibold tabular-nums text-white">{formatCurrency(request.amount, "RUB")}</p><span className={cn("rounded-full border px-2.5 py-1 text-[11px] font-semibold", current.tone)}>{current.label}</span><button type="button" onClick={() => setOpenedRequest(request)} className="rounded-lg border border-white/[0.12] px-2.5 py-1 text-[11px] font-semibold text-white/75 hover:border-[#9f7aea]/55 hover:text-white">Открыть</button></div></div>{request.status === "REJECTED" && request.rejectionReason ? <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-500/[0.07] px-3 py-2 text-[12.5px] leading-relaxed text-rose-100"><span className="font-semibold">Причина отклонения:</span> {request.rejectionReason}</div> : null}</div>; })}</div></section>)}</div> : <p className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-4 text-[13px] text-white/55">Заявок пока нет. Выберите согласованный квартальный отчет ниже.</p>}
+    {openedRequest ? <PayoutRequestDetailsModal request={openedRequest} onClose={() => setOpenedRequest(null)} /> : null}
+  </section>;
+}
+
+function PayoutRequestDetailsModal({ request, onClose }: { request: PayoutRequestSummary; onClose: () => void }) {
+  const period = request.quarter && request.year ? quarterLabel(request.quarter, request.year) : "Период не указан";
+  const rows = [["Сумма", formatCurrency(request.amount, "RUB")], ["Период", period], ["Лицензионный договор", request.contractNumber ? `№ ${request.contractNumber}` : "Не указан"], ["Дата заявки", new Date(request.createdAt).toLocaleDateString("ru-RU")], ["Получатель", request.recipientName || "Не указан"], ["Банк", request.bankName || "Не указан"], ["Счёт", request.accountDetails || "Не указан"], ["БИК", request.bankBik || "Не указан"], ["ИНН", request.taxId || "Не указан"]];
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Заявка на выплату"><div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-white/[0.12] bg-[#161720] p-5 shadow-2xl"><div className="flex items-center justify-between gap-3"><div><h2 className="text-[20px] font-semibold text-white">Заявка на выплату</h2><p className="mt-1 text-[13px] text-white/50">№{request.id}</p></div><button type="button" onClick={onClose} className="rounded-lg border border-white/[0.1] px-2.5 py-1 text-[13px] text-white/70 hover:bg-white/[0.06]">Закрыть</button></div><dl className="mt-5 grid gap-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-4 text-[13px] sm:grid-cols-2">{rows.map(([label, value]) => <div key={label}><dt className="text-white/45">{label}</dt><dd className="mt-1 break-words text-white/90">{value}</dd></div>)}</dl>{request.supportingDocument ? <a className="mt-4 inline-flex rounded-lg border border-[#9f7aea]/40 bg-[#7b3df5]/15 px-3 py-2 text-[13px] font-medium text-[#dfd4ff] hover:bg-[#7b3df5]/25" href={`/api/finance/payouts/document?key=${encodeURIComponent(request.supportingDocument.key)}`} target="_blank" rel="noreferrer">Открыть документ: {request.supportingDocument.name}</a> : null}{request.rejectionReason ? <div className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/[0.07] px-3 py-3 text-[13px] leading-relaxed text-rose-100"><p className="font-semibold">Причина отклонения</p><p className="mt-1">{request.rejectionReason}</p></div> : null}</div></div>;
+}

@@ -4,11 +4,12 @@ import { handlePayoutTransition } from "@/lib/payout-transition-route";
 
 type Status = "REQUESTED" | "PROCESSING" | "PAID" | "REJECTED";
 function harness(initial: Status | null = "REQUESTED", failDebit = false) {
-  let row = initial ? { id: "p1", userId: "u1", amount: 3000, status: initial } : null;
+  let row = initial ? { id: "p1", userId: "u1", amount: 3000, status: initial, requisites: {} } : null;
   let debits = 0;
   let notices = 0;
   let debitAttempts = 0;
   let lastDebitData: any = null;
+  let lastNotice: any = null;
   let queue = Promise.resolve();
   const prisma = { $transaction: async (callback: (tx: unknown) => Promise<unknown>) => {
     const run = queue.then(async () => {
@@ -35,10 +36,10 @@ function harness(initial: Status | null = "REQUESTED", failDebit = false) {
     return run;
   } };
   return {
-    run: (status: Exclude<Status, "REQUESTED">, session: any = { user: { role: "ADMIN" } }) => handlePayoutTransition({
-      prisma: prisma as never, id: "p1", status, session, notify: (async () => { notices++; }) as never
+    run: (status: Exclude<Status, "REQUESTED">, session: any = { user: { role: "ADMIN" } }, rejectionReason?: string) => handlePayoutTransition({
+      prisma: prisma as never, id: "p1", status, session, rejectionReason, notify: (async (_prisma: unknown, event: unknown) => { notices++; lastNotice = event; }) as never
     }),
-    state: () => ({ status: row?.status, debits, notices, debitAttempts, lastDebitData })
+    state: () => ({ status: row?.status, requisites: row?.requisites, debits, notices, debitAttempts, lastDebitData, lastNotice })
   };
 }
 
@@ -62,7 +63,12 @@ test("paid versus reject preserves whichever terminal transition wins", async ()
   for (const first of ["PAID", "REJECTED"] as const) {
     const h = harness();
     const second = first === "PAID" ? "REJECTED" : "PAID";
-    assert.deepEqual((await Promise.all([h.run(first), h.run(second)])).map(r => r.status), [200, 409]);
+    const run = (status: "PAID" | "REJECTED") => h.run(
+      status,
+      undefined,
+      status === "REJECTED" ? "Проверка документов не пройдена." : undefined
+    );
+    assert.deepEqual((await Promise.all([run(first), run(second)])).map(r => r.status), [200, 409]);
     const state = h.state();
     assert.equal(state.status, first);
     assert.equal(state.debits, first === "PAID" ? 1 : 0);
@@ -82,4 +88,23 @@ test("processing followed by paid completes; ledger failure rolls back status", 
   assert.equal(state.debits, 0);
   assert.equal(state.notices, 0);
   assert.equal(state.debitAttempts, 1);
+});
+
+test("rejection requires a reason and sends it to the user", async () => {
+  const invalid = harness();
+  assert.equal((await invalid.run("REJECTED")).status, 400);
+
+  const h = harness();
+  assert.equal((await h.run("REJECTED", undefined, "Документ не соответствует заявленной сумме.")).status, 200);
+  const state = h.state();
+  assert.equal((state.requisites as { rejectionReason?: string } | undefined)?.rejectionReason, "Документ не соответствует заявленной сумме.");
+  assert.match(state.lastNotice.message, /Причина: Документ не соответствует/);
+});
+
+test("processing and paid transitions notify the user about the current status", async () => {
+  const h = harness();
+  assert.equal((await h.run("PROCESSING")).status, 200);
+  assert.match(h.state().lastNotice.title, /обработку/);
+  assert.equal((await h.run("PAID")).status, 200);
+  assert.match(h.state().lastNotice.message, /до 48 часов/);
 });

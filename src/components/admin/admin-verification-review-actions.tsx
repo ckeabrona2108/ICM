@@ -10,7 +10,7 @@ export function AdminVerificationReviewActions({
   status
 }: {
   verificationId: string;
-  status: "not_signed" | "pending" | "approved" | "rejected" | "invalid_signature" | "unavailable";
+  status: "not_signed" | "pending" | "approved" | "rejected" | "invalid_signature" | "update_required" | "unavailable";
 }) {
   const router = useRouter();
   const [busy, setBusy] = React.useState<"approve" | "reject" | null>(null);

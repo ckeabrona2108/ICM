@@ -1,9 +1,11 @@
 import Link from "next/link";
 
 import { isVerificationSignatureUnavailable, listContractSignaturesForAdmin } from "@/lib/contract-verification";
+import { CONTRACT_VERSION } from "@/lib/contract-verification-shared";
 import { prisma } from "@/lib/prisma";
 
 function statusView(status: string) {
+  if (status === "update_required") return { label: "Договор обновлён", className: "border-amber-300/30 bg-amber-500/12 text-amber-100" };
   if (status === "invalid_signature") {
     return {
       label: "Требуется повторная подпись",
@@ -42,7 +44,9 @@ export default async function AdminVerificationPage() {
           <div className="divide-y divide-white/[0.06]">
             {items.map((item) => {
               const effectiveStatus =
-                isVerificationSignatureUnavailable(item.signatureImageUrl) &&
+                (item.status === "pending" || item.status === "approved") && item.contractVersion !== CONTRACT_VERSION
+                  ? "update_required"
+                  : isVerificationSignatureUnavailable(item.signatureImageUrl) &&
                 (item.status === "pending" || item.status === "approved")
                   ? "invalid_signature"
                   : item.status;

@@ -88,7 +88,8 @@ export function FinancePageClient({
   initialAccrualSeries,
   minimumPayoutAmount,
   payoutWindow,
-  initialPayoutRequests
+  initialPayoutRequests,
+  contractNumber
 }: {
   initialReports: FinanceReportClientItem[];
   initialTransactions: FinanceTransactionView[];
@@ -99,6 +100,7 @@ export function FinancePageClient({
   minimumPayoutAmount: number;
   payoutWindow: PayoutWindowState;
   initialPayoutRequests: PayoutRequestSummary[];
+  contractNumber: number | null;
 }) {
   const [reports, setReports] = React.useState(initialReports);
   const [agreedBalance, setAgreedBalance] = React.useState(initialAgreedBalance);
@@ -378,6 +380,7 @@ export function FinancePageClient({
                 minimumPayoutAmount={minimumPayoutAmount}
                 payoutWindow={payoutWindow}
                 initialPayoutRequests={initialPayoutRequests}
+                contractNumber={contractNumber}
               />
             </PageSection>
           ) : null}

@@ -202,6 +202,7 @@ test("pending report stores quarter details and line items in payload", async ()
   assert.equal(state.report.amount, 856);
   assert.equal(state.payloadTx.metadata.quarterLabel, "3 квартал 2026");
   assert.equal(state.payloadTx.metadata.items.length, 1);
+  assert.ok(state.notifications.some((item: any) => item.kind === "report_ready" && item.user_id === "user_1"));
 
   const reports = await listUserReports(prisma, "user_1");
   assert.equal(reports[0].lifecycleState, "ready_to_confirm");
@@ -358,6 +359,7 @@ test("rejected report can be updated and agreed once with balance credit", async
   assert.equal(updateResult.ok, true);
   assert.equal(state.payloadTx.metadata.workflowState, "ready_to_confirm");
   assert.equal(state.payloadTx.metadata.userComment, null);
+  assert.ok(state.notifications.some((item: any) => item.kind === "report_ready" && item.user_id === "user_1"));
 
   const agreeResult = await markUserReportAsAgreed({
     prisma,
@@ -368,6 +370,7 @@ test("rejected report can be updated and agreed once with balance credit", async
   assert.equal(state.report.status, FinanceReportStatus.AGREED);
   assert.equal(state.userBalance, 1400);
   assert.equal(state.payloadTx.metadata.workflowState, "agreed");
+  assert.ok(state.notifications.some((item: any) => item.kind === "report_agreed" && item.user_id === "user_1"));
 });
 
 test("admin changes requested list includes rejected reports with user comment", async () => {
@@ -470,12 +473,14 @@ test("creating agreed report credits user balance immediately", async () => {
   assert.equal(result.ok, true);
   assert.equal(state.userBalance, 2200);
   assert.equal(state.payloadTx.metadata.workflowState, "agreed");
+  assert.ok(state.notifications.some((item: any) => item.kind === "report_agreed" && item.user_id === "user_1"));
 });
 
 test("payload-only fallback still lists and agrees reports when financeReport table is missing", async () => {
   const state = {
     userBalance: 0,
-    payloadTx: null as any
+    payloadTx: null as any,
+    notifications: [] as any[]
   };
 
   const prisma = {
@@ -536,12 +541,28 @@ test("payload-only fallback still lists and agrees reports when financeReport ta
     adminLog: {
       create: async ({ data }: any) => data
     },
+    ai_user_notifications: {
+      upsert: async ({ create, update }: any) => {
+        const existingIndex = state.notifications.findIndex((item: any) => item.id === create.id);
+        if (existingIndex >= 0) {
+          state.notifications[existingIndex] = { ...state.notifications[existingIndex], ...update };
+          return state.notifications[existingIndex];
+        }
+        state.notifications.push(create);
+        return create;
+      }
+    },
+    push_subscriptions: {
+      findMany: async () => []
+    },
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
         user: prisma.user,
         financeReport: prisma.financeReport,
         transaction: prisma.transaction,
-        adminLog: prisma.adminLog
+        adminLog: prisma.adminLog,
+        ai_user_notifications: prisma.ai_user_notifications,
+        push_subscriptions: prisma.push_subscriptions
       })
   } as any;
 
@@ -582,6 +603,7 @@ test("payload-only fallback still lists and agrees reports when financeReport ta
   assert.equal(agreed.ok, true);
   assert.equal(state.userBalance, 856);
   assert.equal(state.payloadTx.metadata.workflowState, "agreed");
+  assert.ok(state.notifications.some((item: any) => item.kind === "report_agreed"));
 });
 
 test("admin delete hides agreed report from user and reverses credited balance", async () => {

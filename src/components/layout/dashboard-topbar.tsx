@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import * as React from "react";
+import { signOut } from "next-auth/react";
 import { createPortal } from "react-dom";
 import {
   AlertCircle,
@@ -230,6 +231,13 @@ export function DashboardTopbar({
     items: []
   });
   const [notificationsLoading, setNotificationsLoading] = React.useState(true);
+  const handleLogout = React.useCallback(async () => {
+    try {
+      await signOut({ redirect: false });
+    } finally {
+      window.location.assign("/login");
+    }
+  }, []);
 
   React.useEffect(() => {
     const syncViewport = () => setIsDesktopViewport(window.innerWidth >= 640);
@@ -634,7 +642,7 @@ export function DashboardTopbar({
                       type="button"
                       onClick={() => {
                         setActiveMenu(null);
-                        import("next-auth/react").then((m) => m.signOut({ callbackUrl: "/" }));
+                        void handleLogout();
                       }}
                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] font-medium text-white/80 transition-colors hover:bg-white/[0.05] hover:text-white"
                     >

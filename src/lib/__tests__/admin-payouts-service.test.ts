@@ -26,6 +26,29 @@ test("parsePayoutRequisites reads modern and legacy account fields", () => {
   assert.equal(legacy.accountDetails, "40817811");
 });
 
+test("parsePayoutRequisites preserves admin-only payout documents and rejection reason", () => {
+  const parsed = parsePayoutRequisites({
+    quarter: 3,
+    year: 2026,
+    taxStatus: "individual",
+    contractNumber: 1534,
+    bankBik: "044525225",
+    reportId: "report-1",
+    supportingDocument: { key: "private/payout-documents/u1/check.pdf", name: "check.pdf", size: 100, contentType: "application/pdf" },
+    receiptDetails: { passportSeries: "1234", passportNumber: "567890" },
+    receiptAcknowledged: true,
+    rejectionReason: "Документ нечитаем"
+  });
+  assert.equal(parsed.quarter, 3);
+  assert.equal(parsed.year, 2026);
+  assert.equal(parsed.contractNumber, 1534);
+  assert.equal(parsed.bankBik, "044525225");
+  assert.equal(parsed.supportingDocument?.name, "check.pdf");
+  assert.equal(parsed.receiptDetails?.passportNumber, "567890");
+  assert.equal(parsed.receiptAcknowledged, true);
+  assert.equal(parsed.rejectionReason, "Документ нечитаем");
+});
+
 test("listAdminPayoutRequests returns all payout details for admin card", async () => {
   const prisma = {
     payouts: {

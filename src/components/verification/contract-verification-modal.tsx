@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Loader2, PenLine, X } from "lucide-react";
+import { CheckCircle2, Download, Loader2, PenLine, X } from "lucide-react";
 
 import {
   CONTRACT_VERSION,
@@ -127,12 +127,14 @@ export function ContractVerificationModal({
   open,
   mode = "gate",
   onLater,
-  onSigned
+  onSigned,
+  initialSignerData = null
 }: {
   open: boolean;
   mode?: "gate" | "submit";
   onLater: () => void;
   onSigned: () => void;
+  initialSignerData?: ContractSignerFormData | null;
 }) {
   const [step, setStep] = React.useState<FlowStep>("intro");
   const [form, setForm] = React.useState<ContractSignerFormData>(DEFAULT_FORM);
@@ -144,14 +146,24 @@ export function ContractVerificationModal({
   const [documentAgreed, setDocumentAgreed] = React.useState(false);
   const [penColor, setPenColor] = React.useState<PenColor>("#101114");
   const [hasInk, setHasInk] = React.useState(false);
+  const [signaturePreview, setSignaturePreview] = React.useState<string | null>(null);
 
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const canvasWrapRef = React.useRef<HTMLDivElement | null>(null);
   const drawingRef = React.useRef(false);
   const lastPointRef = React.useRef<{ x: number; y: number } | null>(null);
+  const initialSignerDataRef = React.useRef(initialSignerData);
+  const wasOpenRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!open) return;
+    initialSignerDataRef.current = initialSignerData;
+  }, [initialSignerData]);
+
+  React.useEffect(() => {
+    const becameOpen = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!becameOpen) return;
+
     setStep("intro");
     setIssues([]);
     setError(null);
@@ -161,7 +173,8 @@ export function ContractVerificationModal({
     setDocumentAgreed(false);
     setPenColor("#101114");
     setHasInk(false);
-    setForm(DEFAULT_FORM);
+    setSignaturePreview(null);
+    setForm({ ...DEFAULT_FORM, ...(initialSignerDataRef.current ?? {}), confirmationAccepted: false });
     const canvas = canvasRef.current;
     if (!canvas) return;
     const context = canvas.getContext("2d");
@@ -272,6 +285,7 @@ export function ContractVerificationModal({
     drawingRef.current = false;
     lastPointRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
+    setSignaturePreview(canvasRef.current?.toDataURL("image/png") ?? null);
   }, []);
 
   const clearSignature = React.useCallback(() => {
@@ -281,6 +295,7 @@ export function ContractVerificationModal({
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
     setHasInk(false);
+    setSignaturePreview(null);
   }, []);
 
   const submitSignature = React.useCallback(async () => {
@@ -340,7 +355,7 @@ export function ContractVerificationModal({
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-[#02030a]/88 p-3 backdrop-blur-xl sm:p-5">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(125,95,255,0.18),transparent_55%),radial-gradient(ellipse_at_bottom,rgba(56,189,248,0.10),transparent_52%)]" />
       <Card className="relative w-full max-w-5xl overflow-hidden border border-white/15 bg-[#090d18] p-0 shadow-[0_55px_140px_-80px_rgba(0,0,0,0.98)]">
-        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-7">
+        <div className="flex items-center justify-between border-b border-white/20 bg-white/[0.02] px-5 py-4 sm:px-7">
           <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-[0.16em] text-white/45">Верификация договора</p>
           </div>
@@ -349,7 +364,7 @@ export function ContractVerificationModal({
           </Button>
         </div>
 
-        <div className="max-h-[92vh] overflow-y-auto p-5 sm:p-7">
+        <div className="max-h-[92vh] overflow-y-auto border-t border-white/[0.06] p-5 sm:p-7">
           {step === "intro" ? (
             <div className="space-y-5 text-center">
               <div className="mx-auto max-w-4xl">
@@ -388,19 +403,23 @@ export function ContractVerificationModal({
 
           {step === "document" ? (
             <div className="space-y-5">
-              <div>
+              <div className="border-b border-white/15 pb-5">
                 <h2 className="text-[24px] font-semibold leading-tight text-white [overflow-wrap:anywhere]">Просмотр договора</h2>
                 <p className="mt-2 text-[14px] leading-relaxed text-white/70 [overflow-wrap:anywhere]">
                   Пролистайте договор до конца. Кнопка «Далее» станет активна после полного просмотра.
                 </p>
               </div>
 
-              <ContractViewer onReadStateChange={setScrolledToEnd} />
-              <ContractCheckbox
-                checked={documentAgreed}
-                disabled={!scrolledToEnd}
-                onChange={setDocumentAgreed}
-              />
+              <div className="border-b border-white/15 pb-5">
+                <ContractViewer onReadStateChange={setScrolledToEnd} />
+              </div>
+              <div className="border-b border-white/15 pb-5">
+                <ContractCheckbox
+                  checked={documentAgreed}
+                  disabled={!scrolledToEnd}
+                  onChange={setDocumentAgreed}
+                />
+              </div>
               <ContractControls
                 onBack={() => setStep("intro")}
                 onNext={() => setStep("sign")}
@@ -600,6 +619,20 @@ export function ContractVerificationModal({
                 </div>
               </div>
 
+              <details className="rounded-2xl border border-white/12 bg-white/[0.03] p-4">
+                <summary className="cursor-pointer text-[14px] font-medium text-white/88">Просмотреть заполненный договор</summary>
+                <p className="mt-2 text-[13px] leading-relaxed text-white/62">
+                  Данные и подпись ниже обновляются по мере заполнения формы.
+                </p>
+                <ContractViewer
+                  className="mt-4"
+                  readOnly
+                  allowExternalOpen={false}
+                  signerData={form}
+                  signatureDataUrl={signaturePreview}
+                />
+              </details>
+
               {error ? (
                 <div className="rounded-xl border border-rose-300/35 bg-rose-500/15 px-3 py-2 text-[13px] text-rose-100">
                   {error}
@@ -625,6 +658,12 @@ export function ContractVerificationModal({
               </div>
 
               <div className="flex flex-wrap items-center justify-center gap-3">
+                <Button asChild type="button" variant="outline" className="h-11 min-w-[190px] rounded-full px-8">
+                  <a href="/api/verification/contract/download">
+                    <Download className="h-4 w-4" />
+                    Скачать договор
+                  </a>
+                </Button>
                 <Button type="button" onClick={onSigned} className="h-11 min-w-[190px] rounded-full px-8">
                   {mode === "submit" ? "Продолжить отправку" : "Продолжить"}
                 </Button>

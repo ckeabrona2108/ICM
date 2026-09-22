@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import * as React from "react";
 import {
   AlertCircle,
@@ -281,7 +282,8 @@ export function DashboardSidebar({
   const pathname = usePathname() ?? "";
   const router = useRouter();
   const { user } = useCurrentUser();
-  const effectiveVerification = user?.verification ?? contractStatus;
+  const effectiveVerification =
+    contractStatus.status === "update_required" ? contractStatus : user?.verification ?? contractStatus;
   const [optimisticPath, setOptimisticPath] = React.useState<string | null>(null);
   const [liveCounts, setLiveCounts] = React.useState({
     ...counts,
@@ -294,6 +296,14 @@ export function DashboardSidebar({
   const unavailableToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const nav = React.useMemo(() => buildNav(liveCounts), [liveCounts]);
   const activePath = optimisticPath ?? pathname;
+  const handleLogout = React.useCallback(async () => {
+    try {
+      await signOut({ redirect: false });
+    } finally {
+      // Navigation is explicit so a failed redirect response cannot leave a stale dashboard visible.
+      window.location.assign("/login");
+    }
+  }, []);
 
   const loadReleaseCounts = React.useCallback(async () => {
     try {
@@ -669,9 +679,7 @@ export function DashboardSidebar({
 
         <button
           type="button"
-          onClick={() => {
-            import("next-auth/react").then((module) => module.signOut({ callbackUrl: "/" }));
-          }}
+          onClick={() => void handleLogout()}
           className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium text-white/65 transition-colors hover:bg-white/[0.04] hover:text-white"
         >
           <LogOut className="h-4 w-4 shrink-0" />

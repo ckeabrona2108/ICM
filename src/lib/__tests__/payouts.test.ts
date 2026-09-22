@@ -9,6 +9,7 @@ import {
   canMoveToRejected,
   computeAvailableToWithdraw
 } from "@/lib/payouts";
+import { mapPayoutSummary } from "@/lib/payout-request";
 
 test("computeAvailableToWithdraw subtracts pending payout and clamps at 0", () => {
   assert.equal(
@@ -35,3 +36,25 @@ test("payout status transitions follow manual workflow rules", () => {
   assert.equal(canMoveToRejected(PayoutRequestStatus.PAID), false);
 });
 
+test("payout summary exposes the administrator rejection reason", () => {
+  const summary = mapPayoutSummary({
+    id: "payout-1",
+    amount: 12000,
+    status: "REJECTED",
+    createdAt: new Date("2026-09-21T00:00:00.000Z"),
+    requisites: { rejectionReason: "Прикрепите читаемый чек на сумму выплаты." }
+  });
+  assert.equal(summary.rejectionReason, "Прикрепите читаемый чек на сумму выплаты.");
+});
+
+test("payout summary preserves the signed contract number", () => {
+  const summary = mapPayoutSummary({
+    id: "payout-contract",
+    amount: 12000,
+    status: "REQUESTED",
+    createdAt: new Date("2026-09-22T00:00:00.000Z"),
+    requisites: { contractNumber: 1534 }
+  });
+
+  assert.equal(summary.contractNumber, 1534);
+});

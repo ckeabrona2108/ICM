@@ -72,7 +72,9 @@ export async function POST(request: Request) {
       userId: session.user.id,
       userEmail: email,
       userName: session.user.name ?? null,
-      contractVersion: parsed.data.contractVersion || CONTRACT_VERSION,
+      // The server alone selects the current revision; a stale browser cannot
+      // submit acceptance of an older contract after the terms are updated.
+      contractVersion: CONTRACT_VERSION,
       signatureImage: parsed.data.signatureImage,
       signerData: parsed.data.signerData,
       ipAddress: readIpAddress(request),

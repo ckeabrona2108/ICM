@@ -20,26 +20,24 @@ import {
 import {
   CONTRACT_FILE_NAME,
   CONTRACT_FILE_URL,
+  CONTRACT_NUMBER_START,
   CONTRACT_VERSION,
   type ContractSignerFormData,
   type ContractSignerValidationIssue,
   type ContractSignatureStatus,
   type ContractStatusPayload
 } from "@/lib/contract-verification-shared";
+import { escapeContractHtml, renderContractTextPagesHtml } from "@/lib/contract-document";
 import { sendVerificationDecisionEmail } from "@/lib/user-event-email";
+import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 
-const RELEASE_STATUS_PENDING_VERIFICATION = "pending_verification";
 const RELEASE_STATUS_MODERATION = "moderating";
-const RELEASE_STATUS_CHANGES_REQUIRED = "changes_required";
+const RELEASE_LIFECYCLE_PENDING_VERIFICATION = "pending_verification";
+const RELEASE_LIFECYCLE_CHANGES_REQUIRED = "changes_required";
+const LICENSEE_SIGNATURE_FILE_NAME = "licensee-signature.png";
 
 function isRecordLike(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isReleaseActuallyOnModeration(status: string, confirmed: boolean, roles: unknown): boolean {
-  if (status != RELEASE_STATUS_MODERATION) return false;
-  if (confirmed) return true;
-  return isRecordLike(roles) && roles.submittedToModeration === true;
 }
 
 export interface ContractSignatureListItem {
@@ -47,6 +45,8 @@ export interface ContractSignatureListItem {
   userId: string;
   userEmail: string;
   userName: string | null;
+  pseudonym: string | null;
+  contractNumber: number | null;
   contractVersion: string;
   contractFileName: string;
   contractFileUrl: string;
@@ -74,7 +74,32 @@ export interface ContractSignatureListItem {
   ogrnip: string | null;
   inn: string | null;
   snils: string | null;
+  contractHistory: ContractRevision[];
 }
+
+export type ContractRevision = {
+  contractVersion: string;
+  signedAt: string;
+  contractNumber: number | null;
+  contractFileName: string | null;
+  contractFileUrl: string | null;
+  contractContentType: string | null;
+  signedDocumentHash: string | null;
+  signatureImageUrl: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  pseudonym: string | null;
+  fullName: string | null;
+  birthDate: string | null;
+  passportNumber: string | null;
+  passportIssuedBy: string | null;
+  passportCode: string | null;
+  passportIssueDate: string | null;
+  address: string | null;
+  ogrnip: string | null;
+  inn: string | null;
+  snils: string | null;
+};
 
 interface CreateContractSignatureParams {
   prisma: PrismaClient;
@@ -117,6 +142,8 @@ interface ContractSignatureRecordLike {
 }
 
 interface VerificationContractMeta {
+  contractNumber?: number | null;
+  pseudonym?: string | null;
   contractVersion?: string;
   contractFileName?: string;
   contractFileUrl?: string;
@@ -145,6 +172,7 @@ interface VerificationContractMeta {
   ogrnip?: string | null;
   inn?: string | null;
   snils?: string | null;
+  contractHistory?: ContractRevision[];
 }
 
 type ModelLike = {
@@ -172,8 +200,8 @@ export interface VerificationDownloadAsset {
 
 interface ReleaseMutationLike {
   release: {
-    findMany(args: unknown): Promise<Array<{ id: string }>>;
-    updateMany(args: unknown): Promise<unknown>;
+    findMany(args: unknown): Promise<Array<{ id: string; roles?: unknown }>>;
+    update(args: unknown): Promise<unknown>;
   };
 }
 
@@ -200,16 +228,24 @@ async function createAdminVerificationLogSafe(params: {
     return;
   }
 
-  await createFn({
-    data: {
-      id: randomUUID(),
-      adminId: params.adminId,
+  try {
+    await createFn({
+      data: {
+        id: randomUUID(),
+        adminId: params.adminId,
+        action: params.action,
+        targetType: "UserContractSignature",
+        targetId: params.verificationId,
+        payload: params.payload
+      }
+    });
+  } catch (error) {
+    console.warn("[verification-admin-log-skip]", {
+      verificationId: params.verificationId,
       action: params.action,
-      targetType: "UserContractSignature",
-      targetId: params.verificationId,
-      payload: params.payload
-    }
-  });
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 function deriveArtistNameFromSubmissionData(value: unknown): string {
@@ -369,7 +405,39 @@ function safeParseContractMeta(rawValue: string | null | undefined): Verificatio
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") return {};
+    const contractHistory = Array.isArray(parsed.contractHistory)
+      ? parsed.contractHistory.filter(isRecordLike).map((entry) => ({
+          contractVersion: typeof entry.contractVersion === "string" ? entry.contractVersion : "",
+          signedAt: typeof entry.signedAt === "string" ? entry.signedAt : "",
+          contractNumber: normalizeContractNumber(entry.contractNumber),
+          contractFileName: normalizeNullable(entry.contractFileName as string | null | undefined),
+          contractFileUrl: normalizeNullable(entry.contractFileUrl as string | null | undefined),
+          contractContentType: normalizeNullable(entry.contractContentType as string | null | undefined),
+          signedDocumentHash: normalizeNullable(entry.signedDocumentHash as string | null | undefined),
+          signatureImageUrl: normalizeNullable(entry.signatureImageUrl as string | null | undefined),
+          ipAddress: normalizeNullable(entry.ipAddress as string | null | undefined),
+          userAgent: normalizeNullable(entry.userAgent as string | null | undefined),
+          pseudonym: normalizeNullable(entry.pseudonym as string | null | undefined),
+          fullName: normalizeNullable(entry.fullName as string | null | undefined),
+          birthDate: normalizeNullable(entry.birthDate as string | null | undefined),
+          passportNumber: normalizeNullable(entry.passportNumber as string | null | undefined),
+          passportIssuedBy: normalizeNullable(entry.passportIssuedBy as string | null | undefined),
+          passportCode: normalizeNullable(entry.passportCode as string | null | undefined),
+          passportIssueDate: normalizeNullable(entry.passportIssueDate as string | null | undefined),
+          address: normalizeNullable(entry.address as string | null | undefined),
+          ogrnip: normalizeNullable(entry.ogrnip as string | null | undefined),
+          inn: normalizeNullable(entry.inn as string | null | undefined),
+          snils: normalizeNullable(entry.snils as string | null | undefined)
+        })).filter((entry) => entry.contractVersion && entry.signedAt)
+      : [];
+
     return {
+      contractNumber: normalizeContractNumber(parsed.contractNumber ?? parsed.contract_number),
+      pseudonym: normalizeNullable(
+        (parsed.pseudonym as string | null | undefined) ??
+        (parsed.stageName as string | null | undefined) ??
+        (parsed.stage_name as string | null | undefined)
+      ),
       contractVersion:
         (parsed.contractVersion as string | undefined) ??
         (parsed.contract_version as string | undefined),
@@ -465,10 +533,66 @@ function safeParseContractMeta(rawValue: string | null | undefined): Verificatio
         null,
       snils:
         (parsed.snils as string | null | undefined) ??
-        null
+        null,
+      contractHistory
     };
   } catch {
     return {};
+  }
+}
+
+function normalizeContractNumber(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isInteger(number) && number >= CONTRACT_NUMBER_START ? number : null;
+}
+
+function formatContractShortName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/u).filter(Boolean);
+  if (parts.length === 0) return "—";
+  const initials = parts.slice(1, 3).map((part) => `${part[0]}.`).join(" ");
+  return [parts[0], initials].filter(Boolean).join(" ");
+}
+
+function formatContractHeaderDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const formatted = new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/Kaliningrad"
+  }).format(date);
+  return formatted.replace(/^(\d+)/u, "«$1»") + " г.";
+}
+
+function formatContractSignedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "Europe/Kaliningrad"
+  }).format(date);
+}
+
+export async function getNextContractNumber(params: { prisma: PrismaClient }): Promise<number> {
+  const model = getModel(params.prisma);
+  if (!model) return CONTRACT_NUMBER_START;
+
+  try {
+    const rows = (await model.findMany({ select: { contract: true } })) as Array<{ contract?: string | null }>;
+    const highest = rows.reduce(
+      (max, row) => Math.max(max, safeParseContractMeta(row.contract).contractNumber ?? 0),
+      CONTRACT_NUMBER_START - 1
+    );
+    return highest + 1;
+  } catch (error) {
+    if (isSchemaUnavailableError(error)) return CONTRACT_NUMBER_START;
+    throw error;
   }
 }
 
@@ -550,15 +674,6 @@ async function uploadSignaturePng(params: {
   }
 }
 
-function escapeHtml(value: string | null | undefined): string {
-  return (value ?? "")
-    .replace(/&/gu, "&amp;")
-    .replace(/</gu, "&lt;")
-    .replace(/>/gu, "&gt;")
-    .replace(/"/gu, "&quot;")
-    .replace(/'/gu, "&#039;");
-}
-
 function formatContractDate(value: string | null | undefined): string {
   const normalized = normalizeDate(value);
   if (!normalized) return "—";
@@ -567,20 +682,73 @@ function formatContractDate(value: string | null | undefined): string {
   return `${iso[3]}.${iso[2]}.${iso[1]}`;
 }
 
-function buildSignedContractHtml(params: {
+function buildContractSigningSection(params: {
+  signerData: ContractSignerFormData;
+  pseudonym?: string | null;
+  signatureDataUrl: string;
+  signatureFallbackUrl?: string | null;
+  licenseeSignatureDataUrl?: string | null;
+  signedAt: string;
+}): string {
+  const signatureSrc = params.signatureDataUrl.startsWith("data:image/")
+    ? params.signatureDataUrl
+    : params.signatureFallbackUrl ?? params.signatureDataUrl;
+  const signer = params.signerData;
+  const field = (value: string | null | undefined) => escapeContractHtml(normalizeNullable(value) ?? "—");
+
+  return `<section class="contract-page signing-page">
+      <h2>12.7. Адреса, банковские реквизиты и подписи сторон</h2>
+      <div class="parties">
+        <section>
+          <h3>Лицензиар</h3>
+          <p>Гражданин Российской Федерации</p>
+          <p><strong>${field(signer.fullName)}</strong></p>
+          ${params.pseudonym?.trim() ? `<p>Псевдоним: ${field(params.pseudonym)}</p>` : ""}
+          <p>Дата рождения: ${field(formatContractDate(signer.birthDate))}</p>
+          <p>Паспорт: ${field(signer.passportNumber)}</p>
+          <p>Выдан: ${field(signer.passportIssuedBy)}</p>
+          <p>Код подразделения: ${field(signer.passportCode)}</p>
+          <p>Дата выдачи: ${field(formatContractDate(signer.passportIssueDate))}</p>
+          <p>Адрес места регистрации: ${field(signer.address)}</p>
+          <p>ОГРНИП: ${field(signer.ogrnip)}</p>
+          <p>ИНН: ${field(signer.inn)}</p>
+          <p>СНИЛС: ${field(signer.snils)}</p>
+          <p class="signature-label">Подпись Лицензиара</p>
+          <div class="signature-row"><div class="signature"><img src="${escapeContractHtml(signatureSrc)}" alt="Подпись Лицензиара" /></div><p class="signer-initials">/${escapeContractHtml(formatContractShortName(signer.fullName))}/</p></div>
+          <p class="signed-at">Подписано: ${escapeContractHtml(formatContractSignedAt(params.signedAt))} (Калининград)</p>
+        </section>
+        <section>
+          <h3>Лицензиат</h3>
+          <p>Индивидуальный предприниматель</p>
+          <p><strong>Шманцарь Вячеслав Васильевич</strong></p>
+          <p>ИНН: 391301950740</p>
+          <p>ОГРН: 324390000034601</p>
+          <p>Расчетный счет: 40802810400006347247</p>
+          <p>Банк: АО «ТБанк», г. Москва</p>
+          <p>БИК: 044525974</p>
+          <p>Корр. счет: 30101810145250000974</p>
+          <p class="signature-label">Подпись Лицензиата</p>
+          <div class="licensee-signature-row">${params.licenseeSignatureDataUrl ? `<img src="${escapeContractHtml(params.licenseeSignatureDataUrl)}" alt="Подпись Лицензиата" />` : ""}<p class="licensee-signature">/Шманцарь В. В./</p></div>
+        </section>
+      </div>
+    </section>`;
+}
+
+async function buildSignedContractHtml(params: {
   userId: string;
   userEmail: string;
   userName: string | null;
+  contractNumber: number | null;
   contractVersion: string;
   signerData: ContractSignerFormData;
   signatureDataUrl: string;
   signatureFallbackUrl?: string | null;
-  sourceContractDataUrl?: string | null;
   signedAt: string;
   ipAddress: string | null;
   userAgent: string | null;
-}): string {
+}): Promise<string> {
   const rows: Array<[string, string | null | undefined]> = [
+    ["Номер договора", params.contractNumber ? `№ ${params.contractNumber}` : "Не присвоен"],
     ["ФИО", params.signerData.fullName],
     ["Дата рождения", formatContractDate(params.signerData.birthDate)],
     ["Паспорт", params.signerData.passportNumber],
@@ -592,33 +760,23 @@ function buildSignedContractHtml(params: {
     ["ИНН", params.signerData.inn],
     ["СНИЛС", params.signerData.snils],
     ["Email аккаунта", params.userEmail],
-    ["Имя в кабинете", params.userName],
-    ["ID пользователя", params.userId],
-    ["IP", params.ipAddress],
-    ["User-Agent", params.userAgent]
+    ["Псевдоним", params.userName],
+    ["ID пользователя", params.userId]
   ];
 
   const details = rows
     .map(([label, value]) => {
       const normalized = normalizeNullable(value) ?? "—";
-      return `<div class="row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(normalized)}</dd></div>`;
+      return `<div class="row"><dt>${escapeContractHtml(label)}</dt><dd>${escapeContractHtml(normalized)}</dd></div>`;
     })
     .join("");
-  const sourceContractFrame = params.sourceContractDataUrl
-    ? `<section class="box contract-source">
-      <h2>Договор</h2>
-      <p class="muted">Исходный договор с условиями ICECREAMMUSIC.</p>
-      <iframe title="Договор ICECREAMMUSIC" src="${escapeHtml(params.sourceContractDataUrl)}"></iframe>
-    </section>`
-    : `<section class="box contract-source">
-      <h2>Договор</h2>
-      <p class="muted">
-        Исходный шаблон договора: ${escapeHtml(CONTRACT_FILE_NAME)}.
-      </p>
-    </section>`;
-  const signatureSrc = params.signatureDataUrl.startsWith("data:image/")
-    ? params.signatureDataUrl
-    : params.signatureFallbackUrl ?? params.signatureDataUrl;
+  const contractTextPages = await renderContractTextPagesHtml();
+  const licenseeSignatureDataUrl = await readLicenseeSignatureDataUrl();
+  const signingSection = buildContractSigningSection({
+    ...params,
+    pseudonym: params.userName,
+    licenseeSignatureDataUrl
+  });
 
   return `<!doctype html>
 <html lang="ru">
@@ -631,9 +789,9 @@ function buildSignedContractHtml(params: {
       margin: 0;
       background: #f5f5f7;
       color: #111827;
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: "Times New Roman", Times, serif;
       font-size: 14px;
-      line-height: 1.55;
+      line-height: 1.45;
     }
     main {
       box-sizing: border-box;
@@ -657,6 +815,10 @@ function buildSignedContractHtml(params: {
       font-size: 18px;
     }
     .muted { color: #667085; }
+    .contract-heading { text-align: center; }
+    .contract-heading > p:first-child { text-align: right; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+    .contract-heading > h1 { margin-top: 30px; font-size: 23px; }
+    .contract-place-date { display: flex; justify-content: space-between; margin-top: 28px; text-align: left; font-weight: 700; }
     .box {
       margin-top: 20px;
       padding: 18px;
@@ -699,51 +861,60 @@ function buildSignedContractHtml(params: {
       max-height: 120px;
       object-fit: contain;
     }
+    .signature-row { display: flex; align-items: center; gap: 18px; }
+    .signature-row .signature { min-width: 210px; min-height: 90px; }
+    .signature-row .signature img { max-width: 190px; max-height: 70px; }
+    .signer-initials { margin: 0 !important; white-space: nowrap; font-size: 15px; font-style: italic; }
     .legal {
       font-size: 12px;
       color: #475467;
     }
-    .contract-source iframe {
-      display: block;
-      width: 100%;
-      height: 920px;
-      margin-top: 14px;
+    .contract-page {
+      margin-top: 22px;
+      padding: 25mm 20mm;
       border: 1px solid #e4e7ec;
-      border-radius: 12px;
+      border-radius: 14px;
       background: #ffffff;
     }
+    .contract-page p { margin: 0 0 10px; white-space: pre-wrap; }
+    .contract-page-number { color: #667085; font-size: 12px; font-weight: 700; }
+    .contract-paragraph { text-align: justify; text-indent: 1.25cm; }
+    .contract-section-heading { text-indent: 0; font-weight: 700; text-transform: uppercase; }
+    .signing-page h2 { margin-top: 0; }
+    .parties { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+    .parties h3 { margin: 0 0 14px; }
+    .parties p { margin: 0 0 7px; }
+    .signature-label { margin-top: 24px !important; color: #667085; font-size: 12px; font-weight: 700; }
+    .signed-at { color: #667085; font-size: 12px; }
+    .licensee-signature-row { display: flex; align-items: center; gap: 18px; min-height: 90px; }
+    .licensee-signature-row img { width: 190px; max-height: 70px; object-fit: contain; }
+    .licensee-signature { margin: 0 !important; font-size: 16px; font-style: italic; }
+    @media (max-width: 680px) { .parties { grid-template-columns: 1fr; } }
   </style>
 </head>
-<body>
+<body data-contract-format="text-v2">
   <main>
-    <h1>Подписанный договор ICECREAMMUSIC</h1>
+    <div class="contract-heading"><p>ICECREAMMUSIC | ЛИЦЕНЗИОННЫЙ ДОГОВОР</p><h1>ЛИЦЕНЗИОННЫЙ ДОГОВОР ${params.contractNumber ? `№ ${escapeContractHtml(String(params.contractNumber))}` : ""}</h1><p>на использование объектов авторских и смежных прав и их цифровую дистрибуцию</p><div class="contract-place-date"><span>г. Калининград</span><span>${escapeContractHtml(formatContractHeaderDate(params.signedAt))}</span></div></div>
     <p class="muted">
       Финальная версия создана после электронной подписи пользователем.
-      Версия договора: ${escapeHtml(params.contractVersion)}.
+      Версия договора: ${escapeContractHtml(params.contractVersion)}.
     </p>
 
-    ${sourceContractFrame}
+    <section class="box contract-source">
+      <h2>Текст договора</h2>
+      ${contractTextPages}
+      ${signingSection}
+    </section>
 
     <section class="box">
       <h2>Данные подписанта</h2>
       <dl>${details}</dl>
     </section>
 
-    <section class="box">
-      <h2>Подпись</h2>
-      <p>
-        Подписано: <strong>${escapeHtml(new Date(params.signedAt).toLocaleString("ru-RU"))}</strong>
-      </p>
-      <div class="signature">
-        <img src="${escapeHtml(signatureSrc)}" alt="Подпись пользователя" />
-      </div>
-    </section>
-
     <section class="box legal">
       <p>
         Подписант подтвердил, что ознакомился с договором ICECREAMMUSIC, принимает его условия
-        и подтверждает корректность внесённых данных. Исходный шаблон договора:
-        ${escapeHtml(CONTRACT_FILE_NAME)}.
+        и подтверждает корректность внесённых данных.
       </p>
     </section>
   </main>
@@ -751,11 +922,10 @@ function buildSignedContractHtml(params: {
 </html>`;
 }
 
-async function readSourceContractDataUrl(): Promise<string | null> {
+async function readLicenseeSignatureDataUrl(): Promise<string | null> {
   try {
-    const filePath = path.join(process.cwd(), "public", "docs", CONTRACT_FILE_NAME);
-    const body = await readFile(filePath);
-    return `data:application/pdf;base64,${body.toString("base64")}`;
+    const body = await readFile(path.join(process.cwd(), "public", "docs", LICENSEE_SIGNATURE_FILE_NAME));
+    return `data:image/png;base64,${body.toString("base64")}`;
   } catch {
     return null;
   }
@@ -765,6 +935,7 @@ async function createSignedContractDocument(params: {
   userId: string;
   userEmail: string;
   userName: string | null;
+  contractNumber: number | null;
   contractVersion: string;
   signerData: ContractSignerFormData;
   signatureDataUrl: string;
@@ -778,11 +949,9 @@ async function createSignedContractDocument(params: {
   contractContentType: string;
   signedDocumentHash: string;
 }> {
-  const sourceContractDataUrl = await readSourceContractDataUrl();
-  const html = buildSignedContractHtml({
+  const html = await buildSignedContractHtml({
     ...params,
-    signatureFallbackUrl: "/api/verification/contract/signature?inline=1",
-    sourceContractDataUrl
+    signatureFallbackUrl: "/api/verification/contract/signature?inline=1"
   });
   const body = Buffer.from(html, "utf8");
   const hash = createHash("sha256").update(body).digest("hex");
@@ -855,6 +1024,8 @@ function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem
     userId: row.userId,
     userEmail: row.user?.email ?? "",
     userName: row.user?.name ?? null,
+    pseudonym: contractMeta.pseudonym ?? row.user?.name ?? null,
+    contractNumber: contractMeta.contractNumber ?? null,
     contractVersion: contractMeta.contractVersion ?? CONTRACT_VERSION,
     contractFileName: contractMeta.contractFileName ?? CONTRACT_FILE_NAME,
     contractFileUrl: contractMeta.contractFileUrl ?? CONTRACT_FILE_URL,
@@ -881,7 +1052,34 @@ function toListItem(row: ContractSignatureRecordLike): ContractSignatureListItem
     address: contractMeta.address ?? normalizeNullable(row.registrationAddress),
     ogrnip: contractMeta.ogrnip ?? null,
     inn: contractMeta.inn ?? null,
-    snils: contractMeta.snils ?? null
+    snils: contractMeta.snils ?? null,
+    contractHistory: contractMeta.contractHistory ?? []
+  };
+}
+
+function toContractRevision(item: ContractSignatureListItem): ContractRevision {
+  return {
+    contractVersion: item.contractVersion,
+    signedAt: item.signedAt,
+    contractNumber: item.contractNumber,
+    contractFileName: item.contractFileName,
+    contractFileUrl: item.contractFileUrl,
+    contractContentType: item.contractContentType,
+    signedDocumentHash: item.signedDocumentHash,
+    signatureImageUrl: item.signatureImageUrl,
+    ipAddress: item.ipAddress,
+    userAgent: item.userAgent,
+    pseudonym: item.pseudonym,
+    fullName: item.fullName,
+    birthDate: item.birthDate,
+    passportNumber: item.passportNumber,
+    passportIssuedBy: item.passportIssuedBy,
+    passportCode: item.passportCode,
+    passportIssueDate: item.passportIssueDate,
+    address: item.address,
+    ogrnip: item.ogrnip,
+    inn: item.inn,
+    snils: item.snils
   };
 }
 
@@ -923,6 +1121,9 @@ function buildVerificationReason(
   if (status === "invalid_signature") {
     return "После переноса данных подпись не найдена. Подпишите договор заново.";
   }
+  if (status === "update_required") {
+    return "Договор обновлён, требуется подписать новую версию.";
+  }
   return "Для выпуска релизов необходимо пройти верификацию и подписать договор.";
 }
 
@@ -930,6 +1131,7 @@ function getEffectiveVerificationStatus(item: ContractSignatureListItem | null):
   if (!item) return "not_signed";
   if (item.status === "rejected") return "rejected";
   if (item.status === "approved" || item.status === "pending") {
+    if (item.contractVersion !== CONTRACT_VERSION) return "update_required";
     return isVerificationSignatureUnavailable(item.signatureImageUrl)
       ? "invalid_signature"
       : item.status;
@@ -954,10 +1156,12 @@ function toContractStatusPayload(item: ContractSignatureListItem | null): Contra
       canCreateRelease: false,
       signedAt: null,
       contractVersion: null,
+      contractNumber: null,
       reason: buildVerificationReason(status, item),
       rejectionReason: null,
       rejectionKind,
-      verificationId: null
+      verificationId: null,
+      signerData: null
     };
   }
 
@@ -970,10 +1174,24 @@ function toContractStatusPayload(item: ContractSignatureListItem | null): Contra
     canCreateRelease: status === "approved",
     signedAt: item.signedAt,
     contractVersion: item.contractVersion,
+    contractNumber: item.contractNumber,
     reason: buildVerificationReason(status, item),
     rejectionReason: item.rejectionReason,
     rejectionKind,
-    verificationId: item.id
+    verificationId: item.id,
+    signerData: {
+      fullName: item.fullName,
+      birthDate: item.birthDate,
+      passportNumber: item.passportNumber,
+      passportIssuedBy: item.passportIssuedBy,
+      passportCode: item.passportCode,
+      passportIssueDate: item.passportIssueDate,
+      address: item.address,
+      ogrnip: item.ogrnip,
+      inn: item.inn,
+      snils: item.snils,
+      confirmationAccepted: false
+    }
   };
 }
 
@@ -986,10 +1204,12 @@ export function buildVerificationUnavailableStatus(): ContractStatusPayload {
     canCreateRelease: false,
     signedAt: null,
     contractVersion: null,
+    contractNumber: null,
     reason: "Верификация подписи временно недоступна. Попробуйте позже.",
     rejectionReason: null,
     rejectionKind: null,
-    verificationId: null
+    verificationId: null,
+    signerData: null
   };
 }
 
@@ -1120,14 +1340,15 @@ async function buildGeneratedSignedContractAsset(
   item: ContractSignatureListItem,
   options: { signatureFallbackUrl?: string | null } = {}
 ): Promise<VerificationDownloadAsset | null> {
-  const signatureDataUrl = await resolveSignatureDataUrlForContract(item);
-  if (!signatureDataUrl) return null;
-  const sourceContractDataUrl = await readSourceContractDataUrl();
-
-  const html = buildSignedContractHtml({
+  // Legacy records may not retain the original image. Keep their contract readable
+  // instead of falling back to a storage redirect that cannot render in the modal.
+  const signatureDataUrl =
+    (await resolveSignatureDataUrlForContract(item)) ?? LEGACY_SIGNATURE_PLACEHOLDER_DATA_URL;
+  const html = await buildSignedContractHtml({
     userId: item.userId,
     userEmail: item.userEmail,
-    userName: item.userName,
+    userName: item.pseudonym ?? item.userName,
+    contractNumber: item.contractNumber ?? null,
     contractVersion: item.contractVersion,
     signerData: {
       fullName: item.fullName,
@@ -1144,7 +1365,6 @@ async function buildGeneratedSignedContractAsset(
     },
     signatureDataUrl,
     signatureFallbackUrl: options.signatureFallbackUrl ?? `/api/admin/verification/${encodeURIComponent(item.id)}/signature/download?inline=1`,
-    sourceContractDataUrl,
     signedAt: item.signedAt,
     ipAddress: item.ipAddress,
     userAgent: item.userAgent
@@ -1307,6 +1527,7 @@ export async function createContractSignature(
 ): Promise<ContractStatusPayload> {
   const notify = params.notify ?? notifyAdminContractSigned;
   const logger = params.logger ?? console;
+  const contractVersion = CONTRACT_VERSION;
   const signerData = normalizeSignerData(params.signerData);
   const issues = validateContractSignerData(signerData);
   if (issues.length > 0) {
@@ -1331,6 +1552,8 @@ export async function createContractSignature(
 
   const now = new Date();
   const nowIso = now.toISOString();
+  // Re-signing an updated version keeps the user's original contract number.
+  const contractNumber = current.contractNumber ?? await getNextContractNumber({ prisma: params.prisma });
   const normalizedIp = normalizeNullable(params.ipAddress);
   const normalizedUserAgent = normalizeNullable(params.userAgent);
   const fullNameParts = splitFullName(signerData.fullName);
@@ -1339,7 +1562,8 @@ export async function createContractSignature(
     userId: params.userId,
     userEmail: params.userEmail,
     userName: params.userName,
-    contractVersion: params.contractVersion,
+    contractNumber,
+    contractVersion,
     signerData,
     signatureDataUrl: params.signatureImage.trim(),
     signedAt: nowIso,
@@ -1347,7 +1571,9 @@ export async function createContractSignature(
     userAgent: normalizedUserAgent
   });
   const contractMeta: VerificationContractMeta = {
-    contractVersion: params.contractVersion,
+    contractNumber,
+    pseudonym: params.userName,
+    contractVersion,
     contractFileName: signedDocument.contractFileName,
     contractFileUrl: signedDocument.contractFileUrl,
     contractContentType: signedDocument.contractContentType,
@@ -1381,7 +1607,9 @@ export async function createContractSignature(
     userId: params.userId,
     userEmail: params.userEmail,
     userName: params.userName,
-    contractVersion: params.contractVersion,
+    pseudonym: params.userName,
+    contractNumber,
+    contractVersion,
     contractFileName: signedDocument.contractFileName,
     contractFileUrl: signedDocument.contractFileUrl,
     contractContentType: signedDocument.contractContentType,
@@ -1466,11 +1694,21 @@ export async function createContractSignature(
       }
     })) as ContractSignatureRecordLike[];
     const existing = chooseLatestVerificationRow(existingRows);
+    const existingItem = existing ? toListItem(existing) : null;
+    const nextContractMeta: VerificationContractMeta = {
+      ...contractMeta,
+      contractHistory: existingItem
+        ? [...existingItem.contractHistory, toContractRevision(existingItem)]
+        : []
+    };
 
     const created = (existing
       ? await model.update({
           where: { id: existing.id },
-          data: dbRecordBase,
+          data: {
+            ...dbRecordBase,
+            contract: toVerificationContractMetaString(nextContractMeta)
+          },
           include: {
             user: {
               select: {
@@ -1617,46 +1855,42 @@ async function movePendingVerificationReleasesToModeration(params: {
   prismaLike: ReleaseMutationLike;
   userId: string;
   now: Date;
+  skipModerationTimestamps?: boolean;
 }): Promise<string[]> {
   const releaseModel = params.prismaLike.release;
-  const pending = await releaseModel.findMany({
+  const candidates = await releaseModel.findMany({
     where: {
       userId: params.userId,
-      status: RELEASE_STATUS_PENDING_VERIFICATION
+      // `release.status` is a PostgreSQL enum. Lifecycle stages such as
+      // pending verification are kept in roles.lifecycleState.
+      status: RELEASE_STATUS_MODERATION
     },
-    select: { id: true }
+    select: { id: true, roles: true }
   });
+  const pending = candidates.filter(
+    (release) =>
+      getReleaseLifecycleStatus(RELEASE_STATUS_MODERATION, release.roles) ===
+      RELEASE_LIFECYCLE_PENDING_VERIFICATION
+  );
 
-  const ids = pending.map((item: { id: string }) => item.id);
+  const ids = pending.map((item) => item.id);
   if (ids.length === 0) return [];
 
-  try {
-    await releaseModel.updateMany({
-      where: { id: { in: ids } },
+  for (const release of pending) {
+    await releaseModel.update({
+      where: { id: release.id },
       data: {
         status: RELEASE_STATUS_MODERATION,
-        moderationStartedAt: params.now,
-        moderationCancelledAt: null,
-        moderationReturnedAt: null,
+        roles: withReleaseLifecycleState(release.roles, "moderation"),
         moderatorComment: null,
-        rejectReason: null
-      }
-    });
-  } catch (error) {
-    if (!isReleaseModerationColumnUnavailableError(error)) {
-      throw error;
-    }
-
-    console.warn("[verification] release moderation timestamp fields unavailable; approving without timestamp reset", {
-      userId: params.userId,
-      releaseIds: ids
-    });
-    await releaseModel.updateMany({
-      where: { id: { in: ids } },
-      data: {
-        status: RELEASE_STATUS_MODERATION,
-        moderatorComment: null,
-        rejectReason: null
+        rejectReason: null,
+        ...(params.skipModerationTimestamps
+          ? {}
+          : {
+              moderationStartedAt: params.now,
+              moderationCancelledAt: null,
+              moderationReturnedAt: null
+            })
       }
     });
   }
@@ -1672,26 +1906,34 @@ async function movePendingVerificationReleasesToChangesRequired(params: {
   now: Date;
 }): Promise<string[]> {
   const releaseModel = params.prismaLike.release;
-  const pending = await releaseModel.findMany({
+  const candidates = await releaseModel.findMany({
     where: {
       userId: params.userId,
-      status: RELEASE_STATUS_PENDING_VERIFICATION
+      status: RELEASE_STATUS_MODERATION
     },
-    select: { id: true }
+    select: { id: true, roles: true }
   });
+  const pending = candidates.filter(
+    (release) =>
+      getReleaseLifecycleStatus(RELEASE_STATUS_MODERATION, release.roles) ===
+      RELEASE_LIFECYCLE_PENDING_VERIFICATION
+  );
 
-  const ids = pending.map((item: { id: string }) => item.id);
+  const ids = pending.map((item) => item.id);
   if (ids.length === 0) return [];
 
   const rejectionMessage = buildVerificationRejectedMessage(params.reason);
-  await releaseModel.updateMany({
-    where: { id: { in: ids } },
-    data: {
-      status: RELEASE_STATUS_CHANGES_REQUIRED,
-      moderatorComment: rejectionMessage,
-      rejectReason: rejectionMessage
-    }
-  });
+  for (const release of pending) {
+    await releaseModel.update({
+      where: { id: release.id },
+      data: {
+        status: RELEASE_STATUS_MODERATION,
+        roles: withReleaseLifecycleState(release.roles, RELEASE_LIFECYCLE_CHANGES_REQUIRED),
+        moderatorComment: rejectionMessage,
+        rejectReason: rejectionMessage
+      }
+    });
+  }
 
   return ids;
 }
@@ -1866,10 +2108,12 @@ export async function approveContractSignatureByAdmin(params: {
     });
   }
 
-  try {
-    const result = await params.prisma.$transaction(async (tx) => {
+  const runApprovalTransaction = async (skipModerationTimestamps: boolean) =>
+    params.prisma.$transaction(async (tx) => {
       const verificationModel = getModel(tx as PrismaClient);
-      if (!verificationModel) return { ok: false, error: "Verification storage unavailable" } as VerificationReviewResult;
+      if (!verificationModel) {
+        return { ok: false, error: "Verification storage unavailable" } as VerificationReviewResult;
+      }
       const current = (await verificationModel.findUnique({
         where: { id: params.verificationId },
         include: {
@@ -1910,7 +2154,8 @@ export async function approveContractSignatureByAdmin(params: {
       const movedReleaseIds = await movePendingVerificationReleasesToModeration({
         prismaLike: tx as unknown as PrismaClient,
         userId: current.userId,
-        now
+        now,
+        skipModerationTimestamps
       });
 
       await createAdminVerificationLogSafe({
@@ -1930,6 +2175,21 @@ export async function approveContractSignatureByAdmin(params: {
         movedReleaseIds
       } satisfies VerificationReviewResult;
     });
+
+  try {
+    let result: VerificationReviewResult;
+    try {
+      result = await runApprovalTransaction(false);
+    } catch (error) {
+      if (!isReleaseModerationColumnUnavailableError(error)) {
+        throw error;
+      }
+
+      console.warn("[verification] release moderation timestamp fields unavailable; retrying approval without them", {
+        verificationId: params.verificationId
+      });
+      result = await runApprovalTransaction(true);
+    }
 
     if (result.ok) {
       try {
@@ -2320,6 +2580,17 @@ export async function getContractDocumentDownloadAsset(params: {
   const item = await getContractSignatureById(params);
   if (!item) return null;
 
+  // Historical contracts were stored as PDFs or pre-text-layout HTML. Rebuild their
+  // presentation from the signed requisites without modifying the original record.
+  // Inline views also avoid cross-origin storage redirects that browsers may blank.
+  const shouldRebuildDocument = params.inline || !item.contractNumber || !item.contractContentType.toLowerCase().startsWith("text/html");
+  if (shouldRebuildDocument) {
+    const inlineAsset = await buildGeneratedSignedContractAsset(item, {
+      signatureFallbackUrl: params.signatureFallbackUrl
+    });
+    if (inlineAsset) return inlineAsset;
+  }
+
   const fallbackUrl = item.contractFileUrl?.trim() || CONTRACT_FILE_URL;
   const contentType = item.contractContentType?.trim() || "application/pdf";
   const isSignedHtmlContract = contentType.toLowerCase().startsWith("text/html");
@@ -2330,8 +2601,7 @@ export async function getContractDocumentDownloadAsset(params: {
     if (decoded.contentType.toLowerCase().startsWith("text/html")) {
       const html = decoded.body.toString("utf8");
       if (
-        !html.includes("contract-source") ||
-        !html.includes("data:application/pdf;base64,") ||
+        !html.includes('data-contract-format="text-v2"') ||
         (params.signatureFallbackUrl && html.includes("/api/verification/contract/signature"))
       ) {
         const generatedSignedAsset = await buildGeneratedSignedContractAsset(item, {
@@ -2345,13 +2615,6 @@ export async function getContractDocumentDownloadAsset(params: {
       fileName: buildContractFileName(item),
       body: decoded.body
     };
-  }
-
-  if (isSignedHtmlContract && fallbackUrl !== CONTRACT_FILE_URL) {
-    const generatedSignedAsset = await buildGeneratedSignedContractAsset(item, {
-      signatureFallbackUrl: params.signatureFallbackUrl
-    });
-    if (generatedSignedAsset) return generatedSignedAsset;
   }
 
   const storageLocation = extractStorageLocationFromUrl(fallbackUrl);
@@ -2410,6 +2673,63 @@ export async function getContractDocumentDownloadAsset(params: {
   }
 }
 
+export async function getContractRevisionDocumentDownloadAsset(params: {
+  prisma: PrismaClient;
+  id: string;
+  revisionIndex: number;
+  inline?: boolean;
+}): Promise<VerificationDownloadAsset | null> {
+  const item = await getContractSignatureById(params);
+  const revision = item?.contractHistory[params.revisionIndex];
+  if (!item || !revision?.contractFileUrl) return null;
+
+  const fileName = revision.contractFileName?.trim() || `signed-contract-${item.userId}-${revision.signedAt.slice(0, 10)}.html`;
+  const contentType = fileName.toLowerCase().endsWith(".html") ? "text/html; charset=utf-8" : "application/pdf";
+  const sourceUrl = revision.contractFileUrl.trim();
+
+  if (sourceUrl.startsWith("data:")) {
+    const decoded = decodeDataUrlDocument(sourceUrl);
+    return decoded ? { ...decoded, fileName } : null;
+  }
+
+  const storageLocation = extractStorageLocationFromUrl(sourceUrl);
+  if (storageLocation.key) {
+    const disposition = `${params.inline ? "inline" : "attachment"}; filename="${fileName}"`;
+    try {
+      const signed = await createPresignedDownload({
+        key: storageLocation.key,
+        bucket: storageLocation.bucket ?? undefined,
+        expiresIn: 600,
+        responseContentDisposition: disposition,
+        responseContentType: contentType
+      });
+      return { contentType, fileName, redirectUrl: signed.url };
+    } catch (error) {
+      if (!isVerificationStorageUnavailableError(error)) throw error;
+    }
+  }
+
+  if (/^https?:\/\//u.test(sourceUrl)) return { contentType, fileName, redirectUrl: sourceUrl };
+
+  // Older records only retained the original local PDF path. It is still useful
+  // to administrators as the exact historical wording, even though that legacy
+  // system did not archive the signed rendering itself.
+  if (sourceUrl.startsWith("/docs/")) {
+    try {
+      const body = await readFile(path.join(process.cwd(), "public", "docs", path.basename(sourceUrl)));
+      return {
+        contentType: "application/pdf",
+        fileName: path.basename(sourceUrl),
+        body
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 export async function getAdminVerificationCounts(params: {
   prisma: PrismaClient;
 }): Promise<{
@@ -2431,12 +2751,17 @@ export async function getAdminVerificationCounts(params: {
     let releasesPendingVerification = 0;
 
     for (const release of releases) {
-      if (release.status === "pending_verification") {
+      const lifecycle = getReleaseLifecycleStatus(release.status, release.roles);
+      if (lifecycle === RELEASE_LIFECYCLE_PENDING_VERIFICATION) {
         releasesPendingVerification += 1;
         continue;
       }
 
-      if (isReleaseActuallyOnModeration(release.status, release.confirmed, release.roles)) {
+      if (
+        lifecycle === "moderation" &&
+        release.status === RELEASE_STATUS_MODERATION &&
+        (release.confirmed || (isRecordLike(release.roles) && release.roles.submittedToModeration === true))
+      ) {
         releasesModeration += 1;
       }
     }

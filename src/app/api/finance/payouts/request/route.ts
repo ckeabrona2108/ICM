@@ -27,6 +27,7 @@ import {
 } from "@/lib/prisma-errors";
 import { getCurrentPayoutWindowState } from "@/lib/payout-schedule";
 import { getPayoutPeriod, isActivePayoutStatus } from "@/lib/payout-request";
+import { getUserContractStatus } from "@/lib/contract-verification";
 
 export const dynamic = "force-dynamic";
 
@@ -47,15 +48,6 @@ async function hasPayoutLedgerSchema(): Promise<boolean> {
       AND column_name IN ('status', 'method', 'requisites')
   `;
   return rows[0]?.ready === true;
-}
-
-async function countActivePayoutRequests(tx: typeof prisma, userId: string): Promise<number> {
-  return tx.payouts.count({
-    where: {
-      userId,
-      status: { in: ["REQUESTED", "PROCESSING"] }
-    }
-  });
 }
 
 export async function POST(request: Request) {
@@ -96,6 +88,27 @@ export async function POST(request: Request) {
     return unavailableResponse("Сервис заявок временно недоступен. Попробуйте позже.");
   }
 
+  let contractNumber: number | null = null;
+  try {
+    const contract = await getUserContractStatus({ prisma, userId: session.user.id });
+    if (contract.isVerified && contract.contractNumber) contractNumber = contract.contractNumber;
+  } catch (error) {
+    console.error("Unable to verify user contract for payout request", error);
+    return unavailableResponse("Не удалось проверить договор. Попробуйте позже.");
+  }
+
+  if (!contractNumber) {
+    const response: PayoutRequestFailureResponse = {
+      ok: false,
+      errors: [{
+        code: "contract_required",
+        field: "contract",
+        message: "Для заявки на выплату требуется подтверждённый администратором лицензионный договор."
+      }]
+    };
+    return NextResponse.json(response, { status: 400 });
+  }
+
   let result: { issues: PayoutRequestFailureResponse["errors"]; payoutId: string | null };
   try {
     result = await retryPrismaSerializationConflict(() => prisma.$transaction(
@@ -106,7 +119,6 @@ export async function POST(request: Request) {
       const reports = await listUserReports(tx as typeof prisma, session.user.id);
       const totals = await getUserBalanceTotals(tx as typeof prisma, session.user.id);
       const payoutWindow = await getCurrentPayoutWindowState(tx as typeof prisma);
-      const activePayoutRequestsCount = await countActivePayoutRequests(tx as typeof prisma, session.user.id);
       const existingPayouts = await tx.payouts.findMany({
         where: { userId: session.user.id },
         select: { status: true, confirmed: true, requisites: true }
@@ -127,7 +139,11 @@ export async function POST(request: Request) {
       const duplicateQuarterRequest = existingPayouts.some((payout) => {
         const period = getPayoutPeriod(payout.requisites);
         const matchesSelectedPeriod = period.quarter === parsed.data.quarter && period.year === parsed.data.year;
-        return matchesSelectedPeriod && (isActivePayoutStatus(payout.status) || payout.confirmed === true);
+        return matchesSelectedPeriod && (
+          isActivePayoutStatus(payout.status) ||
+          payout.status === "PAID" ||
+          payout.confirmed === true
+        );
       });
       const documentKeyPrefix = `private/payout-documents/${session.user.id}/`;
       const documentBelongsToUser = parsed.data.documents.supportingDocument.key.startsWith(documentKeyPrefix);
@@ -138,7 +154,6 @@ export async function POST(request: Request) {
         reportStatuses,
         payoutWindowOpen: payoutWindow.isOpen,
         payoutWindowMessage: payoutWindow.message,
-        activePayoutRequestsCount,
         selectedQuarterBalance,
         duplicateQuarterRequest
       });
@@ -172,6 +187,7 @@ export async function POST(request: Request) {
           status: "REQUESTED",
           method: methodByInput[requisites.payoutMethod],
           requisites: {
+            contractNumber,
             recipientName: requisites.recipientName,
             payoutMethod: requisites.payoutMethod,
             accountNumber: requisites.accountNumber,
@@ -184,7 +200,10 @@ export async function POST(request: Request) {
             reportId: parsed.data.documents.reportId,
             supportingDocument: parsed.data.documents.supportingDocument,
             receiptDetails: parsed.data.taxStatus === "individual"
-              ? parsed.data.documents.receiptDetails
+              ? {
+                  ...parsed.data.documents.receiptDetails,
+                  contractNumber: String(contractNumber)
+                }
               : undefined,
             receiptAcknowledged: parsed.data.taxStatus === "individual"
               ? parsed.data.documents.receiptAcknowledged
@@ -240,7 +259,7 @@ export async function POST(request: Request) {
     userId: session.user.id,
     kind: "payout_requested",
     title: "Заявка на вывод отправлена",
-    message: `Сумма: ${formatRubCurrency(parsed.data.amount)}.`,
+    message: `Сумма: ${formatRubCurrency(parsed.data.amount)}. Договор № ${contractNumber}.`,
     href: "/dashboard/finance"
   });
 

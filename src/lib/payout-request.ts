@@ -11,6 +11,14 @@ export type PayoutRequestSummary = {
   createdAt: string;
   quarter: number | null;
   year: number | null;
+  rejectionReason: string | null;
+  recipientName: string | null;
+  bankName: string | null;
+  accountDetails: string | null;
+  bankBik: string | null;
+  taxId: string | null;
+  contractNumber: number | null;
+  supportingDocument: { key: string; name: string } | null;
 };
 
 type PayoutSummaryRow = {
@@ -38,6 +46,29 @@ export function getPayoutPeriod(requisites: unknown): { quarter: number | null; 
   };
 }
 
+export function getPayoutRejectionReason(requisites: unknown): string | null {
+  const value = String(asRecord(requisites).rejectionReason ?? "").trim();
+  return value || null;
+}
+
+function getPayoutDetails(requisites: unknown) {
+  const value = asRecord(requisites);
+  const document = asRecord(value.supportingDocument);
+  const documentKey = String(document?.key ?? "").trim();
+  const documentName = String(document?.name ?? "").trim();
+  const getText = (key: string) => String(value[key] ?? "").trim() || null;
+  const contractNumber = Number(value.contractNumber);
+  return {
+    recipientName: getText("recipientName") ?? getText("recieverName"),
+    bankName: getText("bankName"),
+    accountDetails: getText("accountDetails") ?? getText("accountNumber"),
+    bankBik: getText("bankBik"),
+    taxId: getText("taxId"),
+    contractNumber: Number.isInteger(contractNumber) && contractNumber > 0 ? contractNumber : null,
+    supportingDocument: documentKey && documentName ? { key: documentKey, name: documentName } : null
+  };
+}
+
 export function isActivePayoutStatus(status: unknown): boolean {
   return status === "REQUESTED" || status === "PROCESSING";
 }
@@ -57,7 +88,9 @@ export function mapPayoutSummary(row: PayoutSummaryRow): PayoutRequestSummary {
       ? status as PayoutRequestStatusValue
       : row.confirmed === true ? "PAID" : "REQUESTED",
     createdAt: createdAt.toISOString(),
-    ...period
+    ...period,
+    rejectionReason: getPayoutRejectionReason(row.requisites),
+    ...getPayoutDetails(row.requisites)
   };
 }
 

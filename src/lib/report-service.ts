@@ -32,9 +32,47 @@ async function notifyUserReportReady(params: {
     title: "Новый финансовый отчёт",
     message: `${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}`,
     href: "/dashboard/finance",
-    sendEmail: false,
+    sendEmail: true,
     resetReadState: params.resetReadState
   });
+}
+
+async function notifyUserReportAgreed(params: {
+  prisma: PrismaClient;
+  userId: string;
+  reportId: string;
+  amount: number;
+  quarter?: number | null;
+  year?: number | null;
+  resetReadState?: boolean;
+}) {
+  await deliverUserNotificationSafely(params.prisma, {
+    id: `report-agreed-${params.reportId}`,
+    userId: params.userId,
+    kind: "report_agreed",
+    title: "Финансовый отчёт согласован",
+    message: `${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}`,
+    href: "/dashboard/finance",
+    sendEmail: true,
+    resetReadState: params.resetReadState
+  });
+}
+
+async function notifyUserReportStatus(params: {
+  prisma: PrismaClient;
+  userId: string;
+  reportId: string;
+  amount: number;
+  status: FinanceReportStatus;
+  quarter?: number | null;
+  year?: number | null;
+  resetReadState?: boolean;
+}) {
+  if (params.status === FinanceReportStatus.AGREED) {
+    return notifyUserReportAgreed(params);
+  }
+
+  return notifyUserReportReady(params);
 }
 
 async function notifyAdminsReportChangesRequested(params: {
@@ -80,7 +118,7 @@ async function notifyAdminsReportChangesRequested(params: {
           href: `/admin/users/${params.userId}`,
           sourceType: "finance_report",
           sourceId: params.reportId,
-          sendEmail: false,
+          sendEmail: true,
           resetReadState: true
         })
       )
@@ -1037,11 +1075,12 @@ export async function createUserReportByAdmin(params: {
       return created;
     });
 
-    await notifyUserReportReady({
+    await notifyUserReportStatus({
       prisma: params.prisma,
       userId: params.userId,
       reportId: report.id,
       amount: effectiveAmount,
+      status: params.status,
       quarter: params.quarter,
       year: params.year
     });
@@ -1097,11 +1136,12 @@ export async function createUserReportByAdmin(params: {
       });
     });
 
-    await notifyUserReportReady({
+    await notifyUserReportStatus({
       prisma: params.prisma,
       userId: params.userId,
       reportId,
       amount: effectiveAmount,
+      status: params.status,
       quarter: params.quarter,
       year: params.year
     });
@@ -1270,6 +1310,17 @@ export async function updateUserReportByAdmin(params: {
       });
     });
   }
+
+  await notifyUserReportStatus({
+    prisma: params.prisma,
+    userId: params.userId,
+    reportId: params.reportId,
+    amount: nextAmount,
+    status: params.status,
+    quarter: params.quarter,
+    year: params.year,
+    resetReadState: true
+  });
 
   return { ok: true as const };
 }
@@ -1542,6 +1593,16 @@ export async function markUserReportAsAgreed(params: {
       await applyUserBalanceDelta(tx, params.userId, amount);
     });
   }
+
+  await notifyUserReportAgreed({
+    prisma: params.prisma,
+    userId: params.userId,
+    reportId: params.reportId,
+    amount,
+    quarter: existing.payloadRecord?.payload.quarter,
+    year: existing.payloadRecord?.payload.year,
+    resetReadState: true
+  });
 
   return { ok: true as const };
 }

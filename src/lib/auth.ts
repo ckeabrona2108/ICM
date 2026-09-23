@@ -22,6 +22,11 @@ function normalizeLoginIdentifier(value: string) {
   return value.trim().toLowerCase();
 }
 
+function resolveSessionImage(value: string | null | undefined) {
+  if (value?.trim().startsWith("data:")) return null;
+  return normalizeNextImageSrc(value) ?? null;
+}
+
 function shouldUseLegacyUserStore(error: unknown) {
   return (
     isMissingCanonicalUserTable(error) ||
@@ -111,7 +116,7 @@ export async function authorizeUserCredentials(credentials: unknown) {
     id: user.id,
     email: user.email,
     name: user.name,
-    image: normalizeNextImageSrc(user.avatar) ?? null,
+    image: resolveSessionImage(user.avatar),
     role: resolveUserRole({ email: user.email, isAdmin: user.isAdmin })
   };
 }
@@ -149,7 +154,7 @@ export const authOptions: NextAuthOptions = {
         if (typeof user.name === "string") token.name = user.name;
         if ("image" in user) {
           token.picture =
-            typeof user.image === "string" ? normalizeNextImageSrc(user.image) ?? undefined : undefined;
+            typeof user.image === "string" ? resolveSessionImage(user.image) ?? undefined : undefined;
         }
       }
 

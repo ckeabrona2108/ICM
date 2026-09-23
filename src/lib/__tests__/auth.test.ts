@@ -48,6 +48,31 @@ test("authorizeUserCredentials logs in a seeded-style user with normalized email
   }
 });
 
+test("authorizeUserCredentials excludes data URL avatars from the session user", async () => {
+  const originalFindMany = prisma.user.findMany.bind(prisma.user);
+  const passwordHash = await hashPassword("DevPass123!");
+  const avatar = `data:image/webp;base64,${"a".repeat(25_000)}`;
+  prisma.user.findMany = (async () => [{
+    id: "user-1",
+    email: "artist.a@local.icm",
+    name: "Ckeabrona",
+    password: passwordHash,
+    avatar,
+    isAdmin: false
+  }]) as typeof prisma.user.findMany;
+
+  try {
+    const result = await authorizeUserCredentials({
+      email: "artist.a@local.icm",
+      password: "DevPass123!"
+    });
+
+    assert.equal(result?.image, null);
+  } finally {
+    prisma.user.findMany = originalFindMany;
+  }
+});
+
 test("authorizeUserCredentials rejects invalid password", async () => {
   const originalFindMany = prisma.user.findMany.bind(prisma.user);
   const passwordHash = await hashPassword("DevPass123!");

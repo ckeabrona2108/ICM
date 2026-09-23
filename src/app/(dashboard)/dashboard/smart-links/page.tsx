@@ -73,10 +73,6 @@ export default async function SmartLinksDashboardPage() {
                         <p className="mt-2 truncate text-sm text-white/46">{item.publicUrl}</p>
                       </div>
 
-                      <div className="rounded-2xl border border-violet-400/22 bg-violet-500/10 px-3 py-2 text-right shadow-[0_12px_32px_-22px_rgba(123,61,245,0.9)]">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/42">Дата</p>
-                        <p className="mt-1 text-sm font-semibold text-violet-50">{item.releaseDate}</p>
-                      </div>
                     </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">

@@ -37,6 +37,10 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+# PDF.js is code-split into the standalone Next bundle, but its server-side
+# worker is resolved from node_modules at runtime by contract-document.ts.
+# Keep that worker in the production image so contract previews can render.
+COPY --from=build /app/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs ./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs
 
 EXPOSE 3000
 

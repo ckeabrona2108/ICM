@@ -8,6 +8,7 @@ import { Coins, Percent, Send, Wallet } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { DashboardShell, PageSection } from "@/components/layout/dashboard-shell";
+import { ReportDetailTable } from "@/components/finance/report-detail-table";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/format";
@@ -58,23 +59,6 @@ function getVisibleReportComment(comment: string | null): string | null {
   return normalizedComment;
 }
 
-function formatReportLineDate(value?: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("ru-RU");
-}
-
-function formatReportLineQuantity(value?: number | null): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return value.toLocaleString("ru-RU");
-}
-
-function formatOptionalReportCurrency(value?: number | null): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return formatCurrency(value, "RUB");
-}
-
 function hasReportValue(value: unknown): boolean {
   return value !== null && value !== undefined && value !== "";
 }
@@ -113,9 +97,7 @@ export function FinancePageClient({
   );
   const [transactionFilter, setTransactionFilter] =
     React.useState<TransactionFilter>("Все");
-  const [selectedReportId, setSelectedReportId] = React.useState<string | null>(
-    initialReports.find((report) => report.status === "ready_to_confirm")?.id ?? null
-  );
+  const [selectedReportId, setSelectedReportId] = React.useState<string | null>(null);
   const [reportComment, setReportComment] = React.useState("");
   const [reportActionBusy, setReportActionBusy] = React.useState<null | "agree" | "reject">(null);
 
@@ -261,8 +243,7 @@ export function FinancePageClient({
               </p>
               {pendingReportsCount > 0 ? (
                 <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-amber-100/95">
-                  Сейчас есть несогласованные отчеты: {pendingReportsCount}. Заявка на выплату
-                  временно недоступна.
+                  Сейчас есть несогласованные отчеты.
                 </p>
               ) : null}
               <p
@@ -293,11 +274,17 @@ export function FinancePageClient({
           transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         >
           {activeTab === "Отчеты" ? (
-            <PageSection className="mt-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-[20px] font-semibold text-white">Отчеты</h2>
-                </div>
+      <PageSection className="mt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-[20px] font-semibold text-white">Отчеты</h2>
+            <p className="mt-1 max-w-3xl text-[13px] leading-5 text-white/52">
+              Детализация отражает сведения, доступные по соответствующему отчетному периоду.
+              Состав и последовательность полей могут отличаться в зависимости от содержания
+              отчета; отсутствие отдельных полей не влияет на действительность отчета, сумму
+              начисления или его статус.
+            </p>
+          </div>
                 <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[12px] font-semibold text-white/64">
                   {reports.length} отчет{reports.length === 1 ? "" : reports.length < 5 ? "а" : "ов"}
                 </span>
@@ -641,15 +628,26 @@ function ReportDetailsModal({
   const hasDetailedItems = report.items.some(
     (item) =>
       item.artistName ||
+      item.usagePeriod ||
+      item.rightsType ||
+      item.territory ||
+      item.contentType ||
       item.usageType ||
+      item.albumTitle ||
+      item.lyricsAuthor ||
+      item.musicAuthor ||
+      item.isrc ||
+      item.licenseeCode ||
       hasReportValue(item.quantity) ||
+      hasReportValue(item.streams) ||
+      hasReportValue(item.paidStreams) ||
+      hasReportValue(item.authorRightsShare) ||
+      hasReportValue(item.relatedRightsShare) ||
       hasReportValue(item.authorAmount) ||
       hasReportValue(item.relatedAmount) ||
       item.periodStart ||
       item.periodEnd
   );
-  const showPeriodStartColumn = report.items.some((item) => item.periodStart);
-  const showPeriodEndColumn = report.items.some((item) => item.periodEnd);
   if (typeof document === "undefined") {
     return null;
   }
@@ -723,54 +721,7 @@ function ReportDetailsModal({
               {hasDetailedItems ? "Детализация начислений" : "Релизы и UPC"}
             </h4>
             {hasDetailedItems && report.items.length ? (
-              <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.06] bg-black/20">
-                <table className="w-full min-w-[1120px] text-left text-[13px]">
-                  <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
-                    <tr>
-                      <th className="px-3 py-3 font-semibold">UPC</th>
-                      <th className="px-3 py-3 font-semibold">Название</th>
-                      <th className="px-3 py-3 font-semibold">Исполнитель</th>
-                      <th className="px-3 py-3 font-semibold">Площадка</th>
-                      <th className="px-3 py-3 font-semibold">Вид использования</th>
-                      {showPeriodStartColumn ? <th className="px-3 py-3 font-semibold">Период начала</th> : null}
-                      {showPeriodEndColumn ? <th className="px-3 py-3 font-semibold">Период окончания</th> : null}
-                      <th className="px-3 py-3 text-right font-semibold">Кол-во</th>
-                      <th className="px-3 py-3 text-right font-semibold">Авторские права</th>
-                      <th className="px-3 py-3 text-right font-semibold">Смежные права</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.05]">
-                    {report.items.map((item) => (
-                      <tr key={item.id} className="text-white/72">
-                        <td className="px-3 py-3 text-white/54">{item.upc || "—"}</td>
-                        <td className="max-w-[220px] px-3 py-3 font-semibold text-white">
-                          <span className="block break-words">{item.releaseTitle}</span>
-                        </td>
-                        <td className="max-w-[180px] px-3 py-3">
-                          <span className="block break-words">{item.artistName || "—"}</span>
-                        </td>
-                        <td className="max-w-[170px] px-3 py-3">
-                          <span className="block break-words">{item.platformName || "Без площадки"}</span>
-                        </td>
-                        <td className="px-3 py-3">{item.usageType || "—"}</td>
-                        {showPeriodStartColumn ? (
-                          <td className="px-3 py-3 text-white/58">{formatReportLineDate(item.periodStart)}</td>
-                        ) : null}
-                        {showPeriodEndColumn ? (
-                          <td className="px-3 py-3 text-white/58">{formatReportLineDate(item.periodEnd)}</td>
-                        ) : null}
-                        <td className="px-3 py-3 text-right">{formatReportLineQuantity(item.quantity)}</td>
-                        <td className="px-3 py-3 text-right font-semibold text-white/78">
-                          {formatOptionalReportCurrency(item.authorAmount)}
-                        </td>
-                        <td className="px-3 py-3 text-right font-semibold text-white/78">
-                          {formatOptionalReportCurrency(item.relatedAmount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ReportDetailTable items={report.items} />
             ) : (
               <div className="mt-3 space-y-2">
                 {report.items.length ? (

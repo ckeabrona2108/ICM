@@ -5,7 +5,7 @@
   "scripts": {
     "clean": "rm -rf .next tsconfig.tsbuildinfo",
     "predev": "node scripts/assert-dev-port-free.mjs",
-    "dev": "next dev --port 3000",
+    "dev": "NODE_OPTIONS=--max-http-header-size=262144 next dev --port 3000",
     "dev:clean": "npm run predev && npm run clean && npm run dev",
     "build": "next build",
     "start": "next start",

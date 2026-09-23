@@ -577,7 +577,30 @@ function rowPreviewPayload(
 function numberFromLoose(value: string | number | null | undefined): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   if (!value) return 0;
-  const normalized = String(value).replace(/\s/g, "").replace(",", ".");
+
+  const compact = String(value)
+    .trim()
+    .replace(/[\s\u00a0\u202f]/g, "")
+    .replace(/[^\d,.-]/g, "");
+  if (!compact) return 0;
+
+  const lastComma = compact.lastIndexOf(",");
+  const lastDot = compact.lastIndexOf(".");
+  let normalized = compact;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    // The rightmost separator is decimal: 78.885,00 and 78,885.00 are both valid.
+    normalized = lastComma > lastDot
+      ? compact.replace(/\./g, "").replace(",", ".")
+      : compact.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    normalized = /^-?\d{1,3}(?:,\d{3})+$/.test(compact)
+      ? compact.replace(/,/g, "")
+      : compact.replace(",", ".");
+  } else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(compact)) {
+    normalized = compact.replace(/\./g, "");
+  }
+
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -658,15 +681,185 @@ function parseFinancialSourceRowsData(input: unknown): GroupedFinancialSourceRow
         amount,
         artistName: String(source.artistName ?? "").trim() || null,
         labelName: String(source.labelName ?? "").trim() || null,
+        usagePeriod: String(source.usagePeriod ?? "").trim() || null,
+        rightsType: String(source.rightsType ?? "").trim() || null,
+        territory: String(source.territory ?? "").trim() || null,
+        contentType: String(source.contentType ?? "").trim() || null,
         usageType: String(source.usageType ?? "").trim() || null,
         quantity: numberFromLoose(source.quantity as string | number | null | undefined) || null,
+        streams: numberFromLoose(source.streams as string | number | null | undefined) || null,
+        paidStreams: numberFromLoose(source.paidStreams as string | number | null | undefined) || null,
         authorAmount: optionalNumberFromLoose(source.authorAmount as string | number | null | undefined),
         relatedAmount: optionalNumberFromLoose(source.relatedAmount as string | number | null | undefined),
+        albumTitle: String(source.albumTitle ?? "").trim() || null,
+        lyricsAuthor: String(source.lyricsAuthor ?? "").trim() || null,
+        musicAuthor: String(source.musicAuthor ?? "").trim() || null,
+        authorRightsShare: optionalNumberFromLoose(source.authorRightsShare as string | number | null | undefined),
+        relatedRightsShare: optionalNumberFromLoose(source.relatedRightsShare as string | number | null | undefined),
+        isrc: String(source.isrc ?? "").trim() || null,
+        licenseeCode: String(source.licenseeCode ?? "").trim() || null,
         periodStart: String(source.periodStart ?? "").trim() || null,
         periodEnd: String(source.periodEnd ?? "").trim() || null
       } satisfies GroupedFinancialSourceRow;
     })
     .filter((item): item is GroupedFinancialSourceRow => Boolean(item));
+}
+
+function resolveNetRightsAmounts(params: {
+  netAmount: number;
+  authorAmount: number | null;
+  relatedAmount: number | null;
+}) {
+  const grossRightsAmount = (params.authorAmount ?? 0) + (params.relatedAmount ?? 0);
+  if (grossRightsAmount <= 0) {
+    return { authorAmount: params.authorAmount, relatedAmount: params.relatedAmount };
+  }
+
+  if (params.authorAmount !== null && params.relatedAmount !== null) {
+    const authorAmount = Number((params.authorAmount * params.netAmount / grossRightsAmount).toFixed(2));
+    return {
+      authorAmount,
+      relatedAmount: Number((params.netAmount - authorAmount).toFixed(2))
+    };
+  }
+
+  return params.authorAmount !== null
+    ? { authorAmount: params.netAmount, relatedAmount: null }
+    : { authorAmount: null, relatedAmount: params.netAmount };
+}
+
+export function buildFinancialImportDetailsExportRows(rows: Array<Record<string, unknown>>) {
+  const detailRows = rows.flatMap((row) => {
+    const rawData = row.raw_data as Record<string, unknown> | null;
+    const normalizedData = row.normalized_data as Record<string, unknown> | null;
+    const incoming = (normalizedData?.__preview as Record<string, unknown> | undefined)?.incoming_values as
+      | Record<string, unknown>
+      | undefined;
+    const sourceRows = parseFinancialSourceRowsData(rawData?.SourceRowsData);
+    const grossAmount = Number(numberFromLoose(row.gross_amount as string | number | null | undefined).toFixed(2));
+    const storedNetAmount = Number(numberFromLoose(row.net_amount as string | number | null | undefined).toFixed(2));
+    const commissionAmount = Number(numberFromLoose(row.commission_amount as string | number | null | undefined).toFixed(2));
+    const commissionRate = Number(numberFromLoose(row.commission_rate as string | number | null | undefined).toFixed(4));
+    const canApply = Boolean(row.user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(String(row.action ?? "")));
+    const effectiveGrossAmount = grossAmount || resolveFinancialNetAmount(incoming ?? {});
+    const effectiveNetAmount = canApply ? storedNetAmount : effectiveGrossAmount;
+    const details = sourceRows.length > 0
+      ? sourceRows
+      : [{
+          rowNumber: 1,
+          platformName: String((incoming?.platform as string | undefined) ?? "").trim() || "Без площадки",
+          title: String((incoming?.title as string | undefined) ?? "").trim() || null,
+          amount: effectiveGrossAmount,
+          artistName: String((incoming?.artist as string | undefined) ?? "").trim() || null,
+          labelName: String((incoming?.label as string | undefined) ?? "").trim() || null,
+          usagePeriod: String((incoming?.usage_period as string | undefined) ?? "").trim() || null,
+          rightsType: String((incoming?.rights_type as string | undefined) ?? "").trim() || null,
+          territory: String((incoming?.territory as string | undefined) ?? "").trim() || null,
+          contentType: String((incoming?.content_type as string | undefined) ?? "").trim() || null,
+          usageType: String((incoming?.usage_type as string | undefined) ?? "").trim() || null,
+          quantity: optionalNumberFromLoose(incoming?.quantity as string | number | null | undefined),
+          streams: optionalNumberFromLoose(incoming?.streams as string | number | null | undefined),
+          paidStreams: optionalNumberFromLoose(incoming?.paid_streams as string | number | null | undefined),
+          authorAmount: optionalNumberFromLoose(incoming?.royalty_author as string | number | null | undefined),
+          relatedAmount: optionalNumberFromLoose(incoming?.royalty_related as string | number | null | undefined),
+          albumTitle: String((incoming?.album_title as string | undefined) ?? "").trim() || null,
+          lyricsAuthor: String((incoming?.lyrics_author as string | undefined) ?? "").trim() || null,
+          musicAuthor: String((incoming?.music_author as string | undefined) ?? "").trim() || null,
+          authorRightsShare: optionalNumberFromLoose(incoming?.author_rights_share as string | number | null | undefined),
+          relatedRightsShare: optionalNumberFromLoose(incoming?.related_rights_share as string | number | null | undefined),
+          isrc: String((incoming?.isrc as string | undefined) ?? "").trim() || null,
+          licenseeCode: String((incoming?.licensee_code as string | undefined) ?? "").trim() || null,
+          periodStart: String((incoming?.release_date as string | undefined) ?? "").trim() || null,
+          periodEnd: String((incoming?.end_date as string | undefined) ?? "").trim() || null
+        } satisfies GroupedFinancialSourceRow];
+    const sourceGrossTotal = details.reduce((sum, source) => sum + source.amount, 0);
+    let allocatedNetAmount = 0;
+
+    return details.map((source, index) => {
+      const netAmount = index === details.length - 1
+        ? Number((effectiveNetAmount - allocatedNetAmount).toFixed(2))
+        : Number((sourceGrossTotal > 0 ? effectiveNetAmount * source.amount / sourceGrossTotal : 0).toFixed(2));
+      allocatedNetAmount = Number((allocatedNetAmount + netAmount).toFixed(2));
+      const rowCommissionAmount = Number((source.amount - netAmount).toFixed(2));
+      const rights = resolveNetRightsAmounts({
+        netAmount,
+        authorAmount: source.authorAmount,
+        relatedAmount: source.relatedAmount
+      });
+
+      return {
+        UPC: String((incoming?.upc as string | undefined) ?? "").trim(),
+        Название: source.title ?? "",
+        Исполнитель: source.artistName ?? "",
+        Лейбл: source.labelName ?? "",
+        "Период использования": source.usagePeriod ?? "",
+        "Тип прав": source.rightsType ?? "",
+        Территория: source.territory ?? "",
+        "Тип контента": source.contentType ?? "",
+        Площадка: source.platformName,
+        "Вид использования": source.usageType ?? "",
+        "Период начала": source.periodStart ?? "",
+        "Период окончания": source.periodEnd ?? "",
+        Количество: source.quantity ?? "",
+        "Все прослушивания": source.streams ?? "",
+        "Прослушивания >30 секунд": source.paidStreams ?? "",
+        "Название альбома": source.albumTitle ?? "",
+        "Автор слов": source.lyricsAuthor ?? "",
+        "Автор музыки": source.musicAuthor ?? "",
+        "Доля авторских прав Лицензиара": source.authorRightsShare ?? "",
+        "Доля смежных прав Лицензиара": source.relatedRightsShare ?? "",
+        ISRC: source.isrc ?? "",
+        "Код лицензиара": source.licenseeCode ?? "",
+        "Вознаграждение Лицензиара (Авторские)": rights.authorAmount ?? "",
+        "Вознаграждение Лицензиара (Смежные)": rights.relatedAmount ?? "",
+        "Сумма до комиссии": source.amount,
+        "Комиссия ICECREAMMUSIC": rowCommissionAmount,
+        "Комиссия ICECREAMMUSIC, %": canApply ? Number((commissionRate * 100).toFixed(2)) : 0,
+        "К начислению": netAmount,
+        "Статус сопоставления": String(row.action ?? "")
+      };
+    });
+  });
+
+  const visibleColumns = new Set<string>();
+  for (const row of detailRows) {
+    for (const [column, value] of Object.entries(row)) {
+      if (value !== null && value !== undefined && value !== "") {
+        visibleColumns.add(column);
+      }
+    }
+  }
+
+  return detailRows.map((row) =>
+    Object.fromEntries(Object.entries(row).filter(([column]) => visibleColumns.has(column)))
+  );
+}
+
+export async function buildFinancialImportDetailsWorkbook(params: { importId: string }) {
+  let item = await prisma.financial_imports.findUnique({
+    where: { id: params.importId },
+    include: { rows: { orderBy: { row_number: "asc" } } }
+  });
+  if (!item) throw new Error("Financial import not found");
+
+  if (item.status === "PREVIEW") {
+    item = await recomputeFinancialPreviewSnapshot(params.importId);
+  }
+  if (!item) throw new Error("Financial import not found");
+
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(buildFinancialImportDetailsExportRows(item.rows as Array<Record<string, unknown>>));
+  worksheet["!cols"] = [
+    { wch: 18 }, { wch: 32 }, { wch: 28 }, { wch: 24 }, { wch: 20 }, { wch: 20 },
+    { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 20 },
+    { wch: 24 }, { wch: 26 }, { wch: 18 }, { wch: 22 }
+  ];
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Детализация");
+
+  return {
+    buffer: XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer,
+    fileName: `financial-details-${params.importId}.xlsx`
+  };
 }
 
 async function mapWithConcurrency<TInput, TOutput>(
@@ -928,6 +1121,30 @@ function extractComparableValues(normalized: NormalizedRow) {
   };
 }
 
+function extractFinancialIncomingValues(normalized: NormalizedRow) {
+  return {
+    ...extractComparableValues(normalized),
+    platform: normalized.platform ?? null,
+    usage_period: normalized.usage_period ?? null,
+    rights_type: normalized.rights_type ?? null,
+    territory: normalized.territory ?? null,
+    content_type: normalized.content_type ?? null,
+    usage_type: normalized.usage_type ?? null,
+    quantity: normalized.quantity ?? null,
+    streams: normalized.streams ?? null,
+    paid_streams: normalized.paid_streams ?? null,
+    album_title: normalized.album_title ?? null,
+    lyrics_author: normalized.lyrics_author ?? null,
+    music_author: normalized.music_author ?? null,
+    author_rights_share: normalized.author_rights_share ?? null,
+    related_rights_share: normalized.related_rights_share ?? null,
+    licensee_code: normalized.licensee_code ?? null,
+    royalty_author: normalized.royalty_author ?? null,
+    royalty_related: normalized.royalty_related ?? null,
+    royalty_total: normalized.royalty_total ?? null
+  };
+}
+
 function getExistingComparableValues(match: MatchOutcome) {
   const release = (match.release ?? {}) as Record<string, unknown>;
   const track = (match.track ?? {}) as Record<string, unknown>;
@@ -1141,7 +1358,7 @@ function buildFinancialRowPreview(raw: Record<string, string>, normalized: Norma
     confidence_score: match.confidence,
     raw_data: raw,
     normalized_data: rowPreviewPayload(normalized, match, getExistingComparableValues(match), {
-      ...extractComparableValues(normalized),
+      ...extractFinancialIncomingValues(normalized),
       gross_amount: grossAmount
     }),
     detected_match_rule: match.rule ?? null,
@@ -1291,6 +1508,7 @@ async function writeFinancialPreviewImport(params: {
   parsed: ParsedSheet;
   detectedColumns: DetectedColumnMap;
   rows: PreviewRow[];
+  commissionAlreadyDeducted: boolean;
 }) {
   const financialImportsRepo = requireClientRepo<{
     create: typeof prisma.financial_imports.create;
@@ -1317,8 +1535,11 @@ async function writeFinancialPreviewImport(params: {
             select: { labelName: true }
           })
         : null;
+    const canApplyCommission =
+      !params.commissionAlreadyDeducted &&
+      row.owner_user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action);
     const commissionRate =
-      row.owner_user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action)
+      canApplyCommission
         ? await resolvePlatformCommissionRateCached(
             row.owner_user_id,
             matchedRelease?.labelName ?? null,
@@ -1326,7 +1547,7 @@ async function writeFinancialPreviewImport(params: {
           )
         : 0;
     const commissionAmount =
-      row.owner_user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action)
+      canApplyCommission
         ? Number((grossAmount * commissionRate).toFixed(2))
         : 0;
     const netAmount =
@@ -1374,7 +1595,7 @@ async function writeFinancialPreviewImport(params: {
       net_amount_total: netAmountTotal,
       commission_total: commissionTotal,
       auto_detected_map: params.detectedColumns,
-      summary,
+      summary: { ...summary, commissionAlreadyDeducted: params.commissionAlreadyDeducted },
       started_at: new Date(),
       created_by_admin_id: params.adminId,
       rows: {
@@ -1395,7 +1616,7 @@ async function writeFinancialPreviewImport(params: {
       description: "Financial import preview created",
       metadata: {
         detectedColumns: params.detectedColumns,
-        summary,
+        summary: { ...summary, commissionAlreadyDeducted: params.commissionAlreadyDeducted },
         grossAmountTotal
       }
     }
@@ -1418,6 +1639,11 @@ async function recomputeFinancialPreviewSnapshot(importId: string) {
   }
 
   const previewContext = createFinancialApplyContext();
+  const commissionAlreadyDeducted =
+    Boolean(item.summary) &&
+    typeof item.summary === "object" &&
+    !Array.isArray(item.summary) &&
+    (item.summary as Record<string, unknown>).commissionAlreadyDeducted === true;
   let grossAmountTotal = 0;
   let netAmountTotal = 0;
   let commissionTotal = 0;
@@ -1430,10 +1656,12 @@ async function recomputeFinancialPreviewSnapshot(importId: string) {
       const incoming = (preview?.incoming_values as Record<string, unknown> | undefined) ?? {};
       const grossAmount = resolveFinancialNetAmount(incoming);
       const canApply = Boolean(row.user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action));
-      const commissionRate = canApply
+      const commissionRate = canApply && !commissionAlreadyDeducted
         ? await resolvePlatformCommissionRateCached(row.user_id, row.matched_release?.labelName ?? null, previewContext)
         : 0;
-      const commissionAmount = canApply ? Number((grossAmount * commissionRate).toFixed(2)) : 0;
+      const commissionAmount = canApply && !commissionAlreadyDeducted
+        ? Number((grossAmount * commissionRate).toFixed(2))
+        : 0;
       const netAmount = canApply ? Number((grossAmount - commissionAmount).toFixed(2)) : 0;
 
       grossAmountTotal += grossAmount;
@@ -1521,10 +1749,23 @@ type GroupedFinancialSourceRow = {
   amount: number;
   artistName: string | null;
   labelName: string | null;
+  usagePeriod: string | null;
+  rightsType: string | null;
+  territory: string | null;
+  contentType: string | null;
   usageType: string | null;
   quantity: number | null;
+  streams: number | null;
+  paidStreams: number | null;
   authorAmount: number | null;
   relatedAmount: number | null;
+  albumTitle: string | null;
+  lyricsAuthor: string | null;
+  musicAuthor: string | null;
+  authorRightsShare: number | null;
+  relatedRightsShare: number | null;
+  isrc: string | null;
+  licenseeCode: string | null;
   periodStart: string | null;
   periodEnd: string | null;
 };
@@ -1541,10 +1782,23 @@ function buildGroupedFinancialSourceRow(
     amount: Number(amount.toFixed(2)),
     artistName: normalized.artist?.trim() || null,
     labelName: normalized.label?.trim() || null,
+    usagePeriod: normalized.usage_period?.trim() || null,
+    rightsType: normalized.rights_type?.trim() || null,
+    territory: normalized.territory?.trim() || null,
+    contentType: normalized.content_type?.trim() || null,
     usageType: normalized.usage_type?.trim() || null,
     quantity: numberFromLoose(normalized.quantity) || null,
+    streams: numberFromLoose(normalized.streams) || null,
+    paidStreams: numberFromLoose(normalized.paid_streams) || null,
     authorAmount: optionalNumberFromLoose(normalized.royalty_author),
     relatedAmount: optionalNumberFromLoose(normalized.royalty_related),
+    albumTitle: normalized.album_title?.trim() || null,
+    lyricsAuthor: normalized.lyrics_author?.trim() || null,
+    musicAuthor: normalized.music_author?.trim() || null,
+    authorRightsShare: optionalNumberFromLoose(normalized.author_rights_share),
+    relatedRightsShare: optionalNumberFromLoose(normalized.related_rights_share),
+    isrc: normalized.isrc?.trim() || null,
+    licenseeCode: normalized.licensee_code?.trim() || null,
     periodStart: normalized.release_date?.trim() || null,
     periodEnd: normalized.end_date?.trim() || null
   };
@@ -1674,6 +1928,7 @@ export async function previewFinancialImport(params: {
   adminId: string;
   sourceFileName: string;
   arrayBuffer: ArrayBuffer | Buffer;
+  commissionAlreadyDeducted?: boolean;
 }) {
   const parsed = await parseInputFile(params.sourceFileName, params.arrayBuffer);
   const detectedColumns = detectSmartColumns(parsed.headers);
@@ -1689,7 +1944,8 @@ export async function previewFinancialImport(params: {
     sourceFileName: params.sourceFileName,
     parsed,
     detectedColumns,
-    rows
+    rows,
+    commissionAlreadyDeducted: params.commissionAlreadyDeducted === true
   });
 }
 
@@ -2218,10 +2474,23 @@ export async function applyFinancialImport(params: {
       netAmount: number;
       artistName: string | null;
       labelName: string | null;
+      usagePeriod: string | null;
+      rightsType: string | null;
+      territory: string | null;
+      contentType: string | null;
       usageType: string | null;
       quantity: number | null;
+      streams: number | null;
+      paidStreams: number | null;
       authorAmount: number | null;
       relatedAmount: number | null;
+      albumTitle: string | null;
+      lyricsAuthor: string | null;
+      musicAuthor: string | null;
+      authorRightsShare: number | null;
+      relatedRightsShare: number | null;
+      isrc: string | null;
+      licenseeCode: string | null;
       periodStart: string | null;
       periodEnd: string | null;
       sourceRowsCount: number;
@@ -2492,10 +2761,23 @@ export async function applyFinancialImport(params: {
         netAmount,
         artistName: normalized.artist ?? null,
         labelName: release?.labelName ?? normalized.label ?? null,
+        usagePeriod: normalized.usage_period ?? null,
+        rightsType: normalized.rights_type ?? null,
+        territory: normalized.territory ?? null,
+        contentType: normalized.content_type ?? null,
         usageType: normalized.usage_type ?? null,
         quantity: numberFromLoose(normalized.quantity) || null,
+        streams: numberFromLoose(normalized.streams) || null,
+        paidStreams: numberFromLoose(normalized.paid_streams) || null,
         authorAmount: optionalNumberFromLoose(normalized.royalty_author),
         relatedAmount: optionalNumberFromLoose(normalized.royalty_related),
+        albumTitle: normalized.album_title ?? null,
+        lyricsAuthor: normalized.lyrics_author ?? null,
+        musicAuthor: normalized.music_author ?? null,
+        authorRightsShare: optionalNumberFromLoose(normalized.author_rights_share),
+        relatedRightsShare: optionalNumberFromLoose(normalized.related_rights_share),
+        isrc: normalized.isrc ?? null,
+        licenseeCode: normalized.licensee_code ?? null,
         periodStart: normalized.release_date ?? null,
         periodEnd: normalized.end_date ?? null,
         sourceRowsCount,
@@ -2533,10 +2815,23 @@ export async function applyFinancialImport(params: {
               amount: Number(allocation.netAmount.toFixed(2)),
               artistName: allocation.artistName,
               labelName: allocation.labelName,
+              usagePeriod: allocation.usagePeriod,
+              rightsType: allocation.rightsType,
+              territory: allocation.territory,
+              contentType: allocation.contentType,
               usageType: allocation.usageType,
               quantity: allocation.quantity,
+              streams: allocation.streams,
+              paidStreams: allocation.paidStreams,
               authorAmount: allocation.authorAmount,
               relatedAmount: allocation.relatedAmount,
+              albumTitle: allocation.albumTitle,
+              lyricsAuthor: allocation.lyricsAuthor,
+              musicAuthor: allocation.musicAuthor,
+              authorRightsShare: allocation.authorRightsShare,
+              relatedRightsShare: allocation.relatedRightsShare,
+              isrc: allocation.isrc,
+              licenseeCode: allocation.licenseeCode,
               periodStart: allocation.periodStart,
               periodEnd: allocation.periodEnd
             }];
@@ -2561,10 +2856,23 @@ export async function applyFinancialImport(params: {
                 amount,
                 artistName: sourceRow.artistName ?? allocation.artistName,
                 labelName: sourceRow.labelName ?? allocation.labelName,
+                usagePeriod: sourceRow.usagePeriod,
+                rightsType: sourceRow.rightsType,
+                territory: sourceRow.territory,
+                contentType: sourceRow.contentType,
                 usageType: sourceRow.usageType ?? null,
                 quantity: sourceRow.quantity,
+                streams: sourceRow.streams,
+                paidStreams: sourceRow.paidStreams,
                 authorAmount: sourceRow.authorAmount,
                 relatedAmount: sourceRow.relatedAmount,
+                albumTitle: sourceRow.albumTitle,
+                lyricsAuthor: sourceRow.lyricsAuthor,
+                musicAuthor: sourceRow.musicAuthor,
+                authorRightsShare: sourceRow.authorRightsShare,
+                relatedRightsShare: sourceRow.relatedRightsShare,
+                isrc: sourceRow.isrc,
+                licenseeCode: sourceRow.licenseeCode,
                 periodStart: sourceRow.periodStart,
                 periodEnd: sourceRow.periodEnd
               };

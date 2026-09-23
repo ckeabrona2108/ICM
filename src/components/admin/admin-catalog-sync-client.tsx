@@ -12,6 +12,7 @@ type ImportSummary = {
   conflict_rows?: number;
   skipped_rows?: number;
   error_rows?: number;
+  commissionAlreadyDeducted?: boolean;
 };
 
 type CatalogRow = {
@@ -290,6 +291,7 @@ export function AdminCatalogSyncClient() {
   const [activeKind, setActiveKind] = React.useState<SmartKind>("catalog");
   const [file, setFile] = React.useState<File | null>(null);
   const [createMissing, setCreateMissing] = React.useState(false);
+  const [commissionAlreadyDeducted, setCommissionAlreadyDeducted] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [loadingImports, setLoadingImports] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -480,6 +482,8 @@ export function AdminCatalogSyncClient() {
       formData.set("file", file);
       if (activeKind === "catalog") {
         formData.set("createMissing", String(createMissing));
+      } else {
+        formData.set("commissionAlreadyDeducted", String(commissionAlreadyDeducted));
       }
 
       const response = await fetch(
@@ -501,6 +505,7 @@ export function AdminCatalogSyncClient() {
       setSelectedImport(payload.preview);
       setSuccess("Preview создан. Проверьте совпадения и затем примените импорт.");
       setFile(null);
+      setCommissionAlreadyDeducted(false);
       await loadImports();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : "Не удалось создать preview");
@@ -642,6 +647,18 @@ export function AdminCatalogSyncClient() {
             </label>
           ) : null}
 
+          {activeKind === "finance" ? (
+            <label className="flex items-center gap-2 text-[13px] text-white/70">
+              <input
+                type="checkbox"
+                checked={commissionAlreadyDeducted}
+                onChange={(event) => setCommissionAlreadyDeducted(event.target.checked)}
+                className="h-4 w-4 rounded border-white/20 bg-transparent"
+              />
+              Сумма в файле уже за вычетом комиссии
+            </label>
+          ) : null}
+
           <button
             type="button"
             onClick={() => {
@@ -763,6 +780,11 @@ export function AdminCatalogSyncClient() {
                     {selectedKind === "catalog" ? "Catalog preview" : "Financial preview"} ·{" "}
                     {selectedImport.file_format.toUpperCase()}
                   </p>
+                  {selectedKind === "finance" && selectedImport.summary?.commissionAlreadyDeducted ? (
+                    <p className="mt-1 text-[12px] text-amber-200">
+                      Комиссия не удерживается: сумма в файле уже указана за её вычетом.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -788,6 +810,14 @@ export function AdminCatalogSyncClient() {
                         className="h-9 w-[110px] rounded-xl border border-white/[0.12] bg-[#11131a] px-3 text-[13px] text-white outline-none focus:border-[#7b3df5]/60"
                       />
                     </div>
+                  ) : null}
+                  {selectedKind === "finance" ? (
+                    <a
+                      href={`/api/admin/catalog-sync/imports/finance/${selectedImport.id}/details.xlsx`}
+                      className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[13px] text-white/70 transition-colors hover:text-white"
+                    >
+                      Скачать детализацию Excel
+                    </a>
                   ) : null}
                   <button
                     type="button"

@@ -190,6 +190,19 @@ test("pending report stores quarter details and line items in payload", async ()
         amount: 856,
         artistName: "Шведов Андрей Александрович(YUNG$HVED) Ульянов Иван Иванович(Evianway)",
         usageType: "Подписка",
+        usagePeriod: "2025-11-01",
+        rightsType: "Смежные права",
+        territory: "Россия",
+        contentType: "Трек",
+        albumTitle: "Последний танец",
+        lyricsAuthor: "Автор слов",
+        musicAuthor: "Автор музыки",
+        authorRightsShare: "1" as any,
+        relatedRightsShare: "0.5" as any,
+        isrc: "RUAH62412201",
+        licenseeCode: "RCID28858801",
+        streams: "6032" as any,
+        paidStreams: "2625" as any,
         quantity: "1" as any,
         authorAmount: "0" as any,
         relatedAmount: "21130,03" as any
@@ -214,6 +227,16 @@ test("pending report stores quarter details and line items in payload", async ()
   assert.equal(reports[0].items[0].quantity, 1);
   assert.equal(reports[0].items[0].authorAmount, 0);
   assert.equal(reports[0].items[0].relatedAmount, 21130.03);
+  assert.equal(reports[0].items[0].usagePeriod, "2025-11-01");
+  assert.equal(reports[0].items[0].rightsType, "Смежные права");
+  assert.equal(reports[0].items[0].territory, "Россия");
+  assert.equal(reports[0].items[0].albumTitle, "Последний танец");
+  assert.equal(reports[0].items[0].authorRightsShare, 1);
+  assert.equal(reports[0].items[0].relatedRightsShare, 0.5);
+  assert.equal(reports[0].items[0].isrc, "RUAH62412201");
+  assert.equal(reports[0].items[0].licenseeCode, "RCID28858801");
+  assert.equal(reports[0].items[0].streams, 6032);
+  assert.equal(reports[0].items[0].paidStreams, 2625);
 });
 
 test("report platform totals use exact line item amounts per platform", async () => {

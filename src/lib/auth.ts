@@ -12,6 +12,9 @@ import { normalizeNextImageSrc } from "@/lib/image-src";
 const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
 const nextAuthSecret = process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
 const sessionMaxAgeSeconds = Number(process.env.NEXTAUTH_SESSION_MAX_AGE ?? 60 * 60 * 24 * 30);
+const maxSessionEmailLength = 254;
+const maxSessionNameLength = 160;
+const maxSessionImageLength = 2_048;
 
 const loginSchema = z.object({
   email: z.string().trim().min(1),
@@ -22,9 +25,15 @@ function normalizeLoginIdentifier(value: string) {
   return value.trim().toLowerCase();
 }
 
+function limitSessionText(value: string | null | undefined, maxLength: number) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : null;
+}
+
 function resolveSessionImage(value: string | null | undefined) {
   if (value?.trim().startsWith("data:")) return null;
-  return normalizeNextImageSrc(value) ?? null;
+  return limitSessionText(normalizeNextImageSrc(value), maxSessionImageLength);
 }
 
 function shouldUseLegacyUserStore(error: unknown) {
@@ -114,8 +123,10 @@ export async function authorizeUserCredentials(credentials: unknown) {
 
   return {
     id: user.id,
-    email: user.email,
-    name: user.name,
+    // JWT sessions are stored in cookies. Bound these optional profile fields so
+    // malformed legacy data can never make every request exceed header limits.
+    email: limitSessionText(user.email, maxSessionEmailLength) ?? user.email,
+    name: limitSessionText(user.name, maxSessionNameLength) ?? "",
     image: resolveSessionImage(user.avatar),
     role: resolveUserRole({ email: user.email, isAdmin: user.isAdmin })
   };
@@ -150,8 +161,8 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.role = user.role;
-        if (typeof user.email === "string") token.email = user.email;
-        if (typeof user.name === "string") token.name = user.name;
+        token.email = limitSessionText(user.email, maxSessionEmailLength) ?? undefined;
+        token.name = limitSessionText(user.name, maxSessionNameLength) ?? undefined;
         if ("image" in user) {
           token.picture =
             typeof user.image === "string" ? resolveSessionImage(user.image) ?? undefined : undefined;

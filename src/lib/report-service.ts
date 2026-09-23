@@ -145,10 +145,23 @@ export interface UserReportLineItem {
   amount: number;
   artistName?: string | null;
   labelName?: string | null;
+  usagePeriod?: string | null;
+  rightsType?: string | null;
+  territory?: string | null;
+  contentType?: string | null;
   usageType?: string | null;
   quantity?: number | null;
+  streams?: number | null;
+  paidStreams?: number | null;
   authorAmount?: number | null;
   relatedAmount?: number | null;
+  albumTitle?: string | null;
+  lyricsAuthor?: string | null;
+  musicAuthor?: string | null;
+  authorRightsShare?: number | null;
+  relatedRightsShare?: number | null;
+  isrc?: string | null;
+  licenseeCode?: string | null;
   periodStart?: string | null;
   periodEnd?: string | null;
 }
@@ -298,10 +311,23 @@ function normalizeLineItems(items: unknown): UserReportLineItem[] {
         amount,
         artistName: normalizeText(source.artistName) || null,
         labelName: normalizeText(source.labelName) || null,
+        usagePeriod: normalizeText(source.usagePeriod) || null,
+        rightsType: normalizeText(source.rightsType) || null,
+        territory: normalizeText(source.territory) || null,
+        contentType: normalizeText(source.contentType) || null,
         usageType: normalizeText(source.usageType) || null,
         quantity: normalizeOptionalNumber(source.quantity),
+        streams: normalizeOptionalNumber(source.streams),
+        paidStreams: normalizeOptionalNumber(source.paidStreams),
         authorAmount: normalizeOptionalAmount(source.authorAmount),
         relatedAmount: normalizeOptionalAmount(source.relatedAmount),
+        albumTitle: normalizeText(source.albumTitle) || null,
+        lyricsAuthor: normalizeText(source.lyricsAuthor) || null,
+        musicAuthor: normalizeText(source.musicAuthor) || null,
+        authorRightsShare: normalizeOptionalNumber(source.authorRightsShare),
+        relatedRightsShare: normalizeOptionalNumber(source.relatedRightsShare),
+        isrc: normalizeText(source.isrc) || null,
+        licenseeCode: normalizeText(source.licenseeCode) || null,
         periodStart: normalizeText(source.periodStart) || null,
         periodEnd: normalizeText(source.periodEnd) || null
       };

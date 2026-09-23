@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Eye, Loader2 } from "lucide-react";
 
 import { formatCurrency } from "@/lib/format";
+import { ReportDetailTable } from "@/components/finance/report-detail-table";
 import type { AdminFinanceReportItem } from "@/lib/report-service";
 import { cn } from "@/lib/utils";
 
@@ -12,23 +13,6 @@ function statusLabel(status: AdminFinanceReportItem["lifecycleState"]): string {
   if (status === "agreed") return "Согласован";
   if (status === "changes_requested") return "На доработке";
   return "Ожидает согласования";
-}
-
-function formatLineDate(value?: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("ru-RU");
-}
-
-function formatQuantity(value?: number | null): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return value.toLocaleString("ru-RU");
-}
-
-function formatOptionalCurrency(value?: number | null): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return formatCurrency(value, "RUB");
 }
 
 function hasReportValue(value: unknown): boolean {
@@ -45,16 +29,26 @@ function PreviewModal({
   const hasDetailedItems = report.items.some(
     (item) =>
       item.artistName ||
+      item.usagePeriod ||
+      item.rightsType ||
+      item.territory ||
+      item.contentType ||
       item.usageType ||
+      item.albumTitle ||
+      item.lyricsAuthor ||
+      item.musicAuthor ||
+      item.isrc ||
+      item.licenseeCode ||
       hasReportValue(item.quantity) ||
+      hasReportValue(item.streams) ||
+      hasReportValue(item.paidStreams) ||
+      hasReportValue(item.authorRightsShare) ||
+      hasReportValue(item.relatedRightsShare) ||
       hasReportValue(item.authorAmount) ||
       hasReportValue(item.relatedAmount) ||
       item.periodStart ||
       item.periodEnd
   );
-  const showPeriodStartColumn = report.items.some((item) => item.periodStart);
-  const showPeriodEndColumn = report.items.some((item) => item.periodEnd);
-
   if (typeof document === "undefined") return null;
 
   return createPortal(
@@ -129,54 +123,7 @@ function PreviewModal({
               {hasDetailedItems ? "Детализация начислений" : "Релизы и UPC"}
             </h4>
             {hasDetailedItems && report.items.length ? (
-              <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.06] bg-black/20">
-                <table className="w-full min-w-[1120px] text-left text-[13px]">
-                  <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
-                    <tr>
-                      <th className="px-3 py-3 font-semibold">UPC</th>
-                      <th className="px-3 py-3 font-semibold">Название</th>
-                      <th className="px-3 py-3 font-semibold">Исполнитель</th>
-                      <th className="px-3 py-3 font-semibold">Площадка</th>
-                      <th className="px-3 py-3 font-semibold">Вид использования</th>
-                      {showPeriodStartColumn ? <th className="px-3 py-3 font-semibold">Период начала</th> : null}
-                      {showPeriodEndColumn ? <th className="px-3 py-3 font-semibold">Период окончания</th> : null}
-                      <th className="px-3 py-3 text-right font-semibold">Кол-во</th>
-                      <th className="px-3 py-3 text-right font-semibold">Авторские права</th>
-                      <th className="px-3 py-3 text-right font-semibold">Смежные права</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.05]">
-                    {report.items.map((item) => (
-                      <tr key={item.id} className="text-white/72">
-                        <td className="px-3 py-3 text-white/54">{item.upc || "—"}</td>
-                        <td className="max-w-[220px] px-3 py-3 font-semibold text-white">
-                          <span className="block break-words">{item.releaseTitle}</span>
-                        </td>
-                        <td className="max-w-[180px] px-3 py-3">
-                          <span className="block break-words">{item.artistName || "—"}</span>
-                        </td>
-                        <td className="max-w-[170px] px-3 py-3">
-                          <span className="block break-words">{item.platformName || "Без площадки"}</span>
-                        </td>
-                        <td className="px-3 py-3">{item.usageType || "—"}</td>
-                        {showPeriodStartColumn ? (
-                          <td className="px-3 py-3 text-white/58">{formatLineDate(item.periodStart)}</td>
-                        ) : null}
-                        {showPeriodEndColumn ? (
-                          <td className="px-3 py-3 text-white/58">{formatLineDate(item.periodEnd)}</td>
-                        ) : null}
-                        <td className="px-3 py-3 text-right">{formatQuantity(item.quantity)}</td>
-                        <td className="px-3 py-3 text-right font-semibold text-white/78">
-                          {formatOptionalCurrency(item.authorAmount)}
-                        </td>
-                        <td className="px-3 py-3 text-right font-semibold text-white/78">
-                          {formatOptionalCurrency(item.relatedAmount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ReportDetailTable items={report.items} />
             ) : (
               <div className="mt-3 space-y-2">
                 {report.items.length ? (

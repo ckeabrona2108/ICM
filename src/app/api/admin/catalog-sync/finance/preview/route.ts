@@ -16,6 +16,7 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const file = formData.get("file");
+    const commissionAlreadyDeducted = formData.get("commissionAlreadyDeducted") === "true";
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Expected file in multipart payload." }, { status: 400 });
@@ -24,7 +25,8 @@ export async function POST(request: Request) {
     const preview = await previewFinancialImport({
       adminId: session.user.id,
       sourceFileName: file.name,
-      arrayBuffer: await file.arrayBuffer()
+      arrayBuffer: await file.arrayBuffer(),
+      commissionAlreadyDeducted
     });
 
     return NextResponse.json({ ok: true, preview }, { status: 200 });

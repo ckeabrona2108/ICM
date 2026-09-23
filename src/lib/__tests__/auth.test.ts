@@ -73,6 +73,31 @@ test("authorizeUserCredentials excludes data URL avatars from the session user",
   }
 });
 
+test("authorizeUserCredentials omits oversized profile fields from the session user", async () => {
+  const originalFindMany = prisma.user.findMany.bind(prisma.user);
+  const passwordHash = await hashPassword("DevPass123!");
+  prisma.user.findMany = (async () => [{
+    id: "user-1",
+    email: "artist.a@local.icm",
+    name: "A".repeat(5_000),
+    password: passwordHash,
+    avatar: `https://example.com/${"avatar".repeat(500)}.png`,
+    isAdmin: false
+  }]) as typeof prisma.user.findMany;
+
+  try {
+    const result = await authorizeUserCredentials({
+      email: "artist.a@local.icm",
+      password: "DevPass123!"
+    });
+
+    assert.equal(result?.name, "");
+    assert.equal(result?.image, null);
+  } finally {
+    prisma.user.findMany = originalFindMany;
+  }
+});
+
 test("authorizeUserCredentials rejects invalid password", async () => {
   const originalFindMany = prisma.user.findMany.bind(prisma.user);
   const passwordHash = await hashPassword("DevPass123!");

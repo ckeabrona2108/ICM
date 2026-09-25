@@ -59,10 +59,6 @@ function getVisibleReportComment(comment: string | null): string | null {
   return normalizedComment;
 }
 
-function hasReportValue(value: unknown): boolean {
-  return value !== null && value !== undefined && value !== "";
-}
-
 export function FinancePageClient({
   initialReports,
   initialTransactions,
@@ -625,29 +621,6 @@ function ReportDetailsModal({
   busy: null | "agree" | "reject";
 }) {
   const visibleAdminComment = getVisibleReportComment(report.adminComment);
-  const hasDetailedItems = report.items.some(
-    (item) =>
-      item.artistName ||
-      item.usagePeriod ||
-      item.rightsType ||
-      item.territory ||
-      item.contentType ||
-      item.usageType ||
-      item.albumTitle ||
-      item.lyricsAuthor ||
-      item.musicAuthor ||
-      item.isrc ||
-      item.licenseeCode ||
-      hasReportValue(item.quantity) ||
-      hasReportValue(item.streams) ||
-      hasReportValue(item.paidStreams) ||
-      hasReportValue(item.authorRightsShare) ||
-      hasReportValue(item.relatedRightsShare) ||
-      hasReportValue(item.authorAmount) ||
-      hasReportValue(item.relatedAmount) ||
-      item.periodStart ||
-      item.periodEnd
-  );
   if (typeof document === "undefined") {
     return null;
   }
@@ -694,7 +667,7 @@ function ReportDetailsModal({
           ) : null}
         </div>
 
-        <div className={cn("mt-5 grid gap-4", hasDetailedItems ? "lg:grid-cols-1" : "lg:grid-cols-[0.95fr,1.05fr]")}>
+        <div className="mt-5 grid gap-4">
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
             <h4 className="text-[15px] font-semibold text-white">По площадкам</h4>
             <div className="mt-3 space-y-2">
@@ -717,34 +690,11 @@ function ReportDetailsModal({
           </div>
 
           <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-            <h4 className="text-[15px] font-semibold text-white">
-              {hasDetailedItems ? "Детализация начислений" : "Релизы и UPC"}
-            </h4>
-            {hasDetailedItems && report.items.length ? (
+            <h4 className="text-[15px] font-semibold text-white">Детализация начислений</h4>
+            {report.items.length ? (
               <ReportDetailTable items={report.items} />
             ) : (
-              <div className="mt-3 space-y-2">
-                {report.items.length ? (
-                  report.items.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-white/[0.06] bg-black/20 px-3 py-3"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-[14px] font-semibold text-white">{item.releaseTitle}</p>
-                          <p className="mt-1 text-[12px] text-white/52">UPC: {item.upc || "—"}</p>
-                        </div>
-                        <span className="text-[14px] font-semibold text-white">
-                          {formatCurrency(item.amount, "RUB")}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-[14px] text-white/58">Детализация по релизам не добавлена.</p>
-                )}
-              </div>
+              <p className="mt-3 text-[14px] text-white/58">Детализация по релизам не добавлена.</p>
             )}
           </div>
         </div>

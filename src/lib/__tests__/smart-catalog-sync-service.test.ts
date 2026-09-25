@@ -60,6 +60,25 @@ test("finance report csv columns detect artist, quantity and royalty detail fiel
   assert.equal(columns.royalty_related, "Вознаграждение Лицензиара (Смежные)");
 });
 
+test("compact finance report columns detect pre-commission and accrued amounts", () => {
+  const columns = detectSmartColumns([
+    "UPC",
+    "Название",
+    "Площадка",
+    "Сумма до комиссии",
+    "Комиссия ICECREAMMUSIC",
+    "Комиссия ICECREAMMUSIC, %",
+    "К начислению",
+    "Статус сопоставления"
+  ]);
+
+  assert.equal(columns.upc, "UPC");
+  assert.equal(columns.title, "Название");
+  assert.equal(columns.platform, "Площадка");
+  assert.equal(columns.gross_amount, "Сумма до комиссии");
+  assert.equal(columns.royalty_total, "К начислению");
+});
+
 test("finance detail headings from distributor and streaming reports are detected", () => {
   const columns = detectSmartColumns([
     "Период использования",

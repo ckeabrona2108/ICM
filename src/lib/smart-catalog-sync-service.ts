@@ -1141,6 +1141,7 @@ function extractFinancialIncomingValues(normalized: NormalizedRow) {
     quantity: normalized.quantity ?? null,
     streams: normalized.streams ?? null,
     paid_streams: normalized.paid_streams ?? null,
+    gross_amount: normalized.gross_amount ?? null,
     album_title: normalized.album_title ?? null,
     lyrics_author: normalized.lyrics_author ?? null,
     music_author: normalized.music_author ?? null,

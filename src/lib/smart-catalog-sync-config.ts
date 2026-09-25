@@ -70,7 +70,7 @@ export const SMART_COLUMN_SYNONYMS: Record<SmartCanonicalColumn, string[]> = {
   quantity: ["Quantity", "Count", "Streams", "Количество", "Прослушивания"],
   streams: ["All Streams", "Все прослушивания"],
   paid_streams: ["Pay Streams", "Paid Streams", "Прослушивания >30 секунд", "Платные прослушивания"],
-  gross_amount: ["Gross Amount", "Собранная сумма", "Revenue", "Доход"],
+  gross_amount: ["Gross Amount", "Собранная сумма", "Сумма до комиссии", "Revenue", "Доход"],
   royalty_author: [
     "Вознаграждение Лицензиара (Авторские)",
     "Вознаграждение ЛИЦЕНЗИАРА за авторские права",
@@ -91,6 +91,7 @@ export const SMART_COLUMN_SYNONYMS: Record<SmartCanonicalColumn, string[]> = {
     "Total Royalty",
     "Net Royalty",
     "К выплате",
+    "К начислению",
     "Всего"
   ],
   album_title: ["Album", "Album Title", "Название альбома", "Альбом"],

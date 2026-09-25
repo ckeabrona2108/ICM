@@ -21,6 +21,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:push": "prisma db push",
     "prisma:seed": "tsx prisma/seed.ts",
+    "seed:collab-market-demo": "tsx scripts/seed-collab-market-demo.ts",
+    "cleanup:collab-market-demo": "tsx scripts/seed-collab-market-demo.ts --cleanup",
     "gallery:all-images": "tsx scripts/build-all-image-gallery.ts",
     "gallery:previews": "tsx scripts/build-previews-gallery.ts",
     "audit:s3-buckets": "tsx scripts/audit-s3-buckets.ts",

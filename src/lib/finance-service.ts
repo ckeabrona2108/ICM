@@ -12,7 +12,7 @@ import {
   isPrismaColumnMissingError,
   isPrismaTableMissingError
 } from "@/lib/prisma-errors";
-import { listUserReports } from "@/lib/report-service";
+import { listUserReports, type UserReportItem } from "@/lib/report-service";
 
 function toNumber(value: Prisma.Decimal | number | null | undefined): number {
   return Number(value ?? 0);
@@ -36,12 +36,13 @@ export interface UserFinanceView {
   reportsCount: number;
   transactions: Array<{
     id: string;
-    type: TransactionType;
-    status: TransactionStatus;
+    type: TransactionType | "REPORT";
+    status: TransactionStatus | "PENDING";
     amount: number;
     description: string | null;
     createdAt: string;
     processedAt: string | null;
+    reportLifecycleState?: UserReportItem["lifecycleState"];
   }>;
 }
 
@@ -67,6 +68,16 @@ const financeColumnAvailabilityCache = new WeakMap<object, Map<string, Promise<b
 function getRepo<T = unknown>(prisma: PrismaClient, key: string): T | null {
   const repo = (prisma as unknown as Record<string, unknown>)[key];
   return repo ? (repo as T) : null;
+}
+
+function isTechnicalImportedRoyaltyTransaction(item: {
+  type: string;
+  metadata?: Prisma.JsonValue | null;
+}): boolean {
+  if (item.type !== TX_TYPE_ROYALTY || !item.metadata || typeof item.metadata !== "object" || Array.isArray(item.metadata)) {
+    return false;
+  }
+  return typeof (item.metadata as Record<string, unknown>).importId === "string";
 }
 
 async function hasIcecreamTable(prisma: PrismaClient, tableName: string): Promise<boolean> {
@@ -336,7 +347,6 @@ export async function getUserFinanceView(
   prisma: PrismaClient,
   userId: string
 ): Promise<UserFinanceView> {
-  const financeReportRepo = getRepo<{ count: (args: unknown) => Promise<number> }>(prisma, "financeReport");
   const transactionRepo = getRepo<
     {
       findMany: (
@@ -356,17 +366,18 @@ export async function getUserFinanceView(
 
   const totals = await getUserBalanceTotals(prisma, userId);
   let reportsCount = 0;
+  let reports: UserReportItem[] = [];
   let transactions = [];
 
   try {
-    reportsCount = financeReportRepo
-      ? await financeReportRepo.count({ where: { userId } })
-      : (await listUserReports(prisma, userId, { strict: true })).length;
+    reports = await listUserReports(prisma, userId, { strict: true });
+    reportsCount = reports.length;
   } catch (error) {
     if (!isAnyPrismaTableMissingError(error, FINANCE_TABLE_FALLBACKS)) {
       throw error;
     }
-    reportsCount = (await listUserReports(prisma, userId, { strict: true })).length;
+    reports = await listUserReports(prisma, userId);
+    reportsCount = reports.length;
   }
 
   if (!transactionRepo) throw new Error("Финансовые данные временно недоступны.");
@@ -383,9 +394,40 @@ export async function getUserFinanceView(
       amount: true,
       description: true,
       createdAt: true,
-      processedAt: true
+      processedAt: true,
+      metadata: true
     }
   });
+
+  const ledgerTransactions = transactions
+    // Import rows are source data for a financial report, not settled money.
+    // Their state is represented by the report and must not be shown as a
+    // completed financial operation.
+    .filter(
+      (item) =>
+        item.description !== REPORT_PAYLOAD_DESCRIPTION &&
+        !isTechnicalImportedRoyaltyTransaction(item)
+    )
+    .map((item) => ({
+      id: item.id,
+      type: item.type as any,
+      status: item.status as any,
+      amount: toNumber(item.amount),
+      description: item.description,
+      createdAt: item.createdAt.toISOString(),
+      processedAt: item.processedAt?.toISOString() ?? null
+    }));
+
+  const reportTransactions = reports.map((report) => ({
+    id: `report:${report.id}`,
+    type: "REPORT" as const,
+    status: report.lifecycleState === "agreed" ? "COMPLETED" as const : "PENDING" as const,
+    amount: report.amount,
+    description: report.quarterLabel,
+    createdAt: report.createdAt,
+    processedAt: report.agreedAt,
+    reportLifecycleState: report.lifecycleState
+  }));
 
   return {
     agreedBalance: totals.agreedBalance,
@@ -395,17 +437,9 @@ export async function getUserFinanceView(
     settlementDelta: totals.settlementDelta,
     availableToWithdraw: totals.availableToWithdraw,
     reportsCount,
-    transactions: transactions
-      .filter((item) => item.description !== REPORT_PAYLOAD_DESCRIPTION)
-      .map((item) => ({
-        id: item.id,
-        type: item.type as any,
-        status: item.status as any,
-        amount: toNumber(item.amount),
-        description: item.description,
-        createdAt: item.createdAt.toISOString(),
-        processedAt: item.processedAt?.toISOString() ?? null
-      }))
+    transactions: [...ledgerTransactions, ...reportTransactions].sort(
+      (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    )
   };
 }
 

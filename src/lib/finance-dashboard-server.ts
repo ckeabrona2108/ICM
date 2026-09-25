@@ -217,8 +217,8 @@ export async function getFinanceDashboardViewData(
   const transactions: FinanceTransactionView[] = balanceTransactionsRaw
     .filter((transaction) => {
       const royalty = transaction.royalty_transaction;
-      // Financial ledger entries are valid only while their source import remains confirmed.
-      return !royalty || royalty.financial_import_id && royalty.import?.status === "CONFIRMED";
+      // Imported royalties are source rows for a report, not completed payments.
+      return !royalty || !royalty.financial_import_id;
     })
     .map((transaction) => {
     const amount = decimalToNumber(transaction.amount);

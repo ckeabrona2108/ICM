@@ -98,7 +98,6 @@ type FinancialApplyState = {
 
 type FinancialApplyContext = {
   commissionRates: Map<string, number>;
-  currentBalances: Map<string, number>;
 };
 
 type FinancialAllocationAdjustment = {
@@ -140,6 +139,16 @@ export function resolveSelectedReportQuarterPeriod(input: {
     periodStart: new Date(Date.UTC(year, startMonth, 1, 0, 0, 0, 0)),
     periodEnd: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59, 999))
   };
+}
+
+export function getDuplicateFinancialReportUserIds(
+  importedUserIds: string[],
+  existingReports: Array<{ userId: string }>
+): string[] {
+  const importedIds = new Set(importedUserIds);
+  return Array.from(
+    new Set(existingReports.map((report) => report.userId).filter((userId) => importedIds.has(userId)))
+  );
 }
 
 function readFinancialReportSelection(metadata: unknown): FinancialReportSelection | null {
@@ -233,8 +242,7 @@ function createSmartMatchContext(): SmartMatchContext {
 
 function createFinancialApplyContext(): FinancialApplyContext {
   return {
-    commissionRates: new Map(),
-    currentBalances: new Map()
+    commissionRates: new Map()
   };
 }
 
@@ -2453,6 +2461,36 @@ export async function applyFinancialImport(params: {
     quarter: reportQuarter,
     year: reportYear
   });
+  if (!selectedReportPeriod) {
+    throw new Error("Для финансового импорта выберите отчетный квартал и год.");
+  }
+
+  // A report period may be imported only once per user. Reapplying the same
+  // source period otherwise creates a second set of technical accrual rows.
+  const matchedUserIds = Array.from(
+    new Set(
+      importJob.rows
+        .filter((row) => row.user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action))
+        .map((row) => row.user_id as string)
+    )
+  );
+  if (matchedUserIds.length) {
+    const existingReports = await prisma.financeReport.findMany({
+      where: {
+        userId: { in: matchedUserIds },
+        periodStart: selectedReportPeriod.periodStart,
+        periodEnd: selectedReportPeriod.periodEnd
+      },
+      select: { userId: true }
+    });
+    const duplicateUserIds = getDuplicateFinancialReportUserIds(matchedUserIds, existingReports);
+    if (duplicateUserIds.length) {
+      throw new Error(
+        `За выбранный период уже есть отчет для ${duplicateUserIds.length} ${duplicateUserIds.length === 1 ? "пользователя" : "пользователей"}. Перед повторной загрузкой откатите прежний импорт.`
+      );
+    }
+  }
+
   for (const item of params.allocations ?? []) {
     if (!item?.rowId) continue;
     allocationOverrides.set(item.rowId, numberFromLoose(item.netAmount));
@@ -2514,15 +2552,9 @@ export async function applyFinancialImport(params: {
     const releaseRepo = requireClientRepo<{
       findUnique: typeof tx.release.findUnique;
     }>(tx, "release", "financial import apply release lookup");
-    const userRepo = requireClientRepo<{
-      update: typeof tx.user.update;
-    }>(tx, "user", "financial import apply balance update");
     const royaltyTransactionsRepo = requireClientRepo<{
       create: typeof tx.royalty_transactions.create;
     }>(tx, "royalty_transactions", "financial import apply royalty transactions");
-    const balanceTransactionsRepo = requireClientRepo<{
-      create: typeof tx.balance_transactions.create;
-    }>(tx, "balance_transactions", "financial import apply balance transactions");
     const transactionRepo = getTransactionRepo<{
       create?: typeof tx.transaction.create;
     }>(tx, "transaction");
@@ -2618,18 +2650,6 @@ export async function applyFinancialImport(params: {
       const periodStart = parseDateLoose(String(normalized.release_date || "")) ?? statementDate;
       const periodEnd = parseDateLoose(String(normalized.end_date || "")) ?? statementDate;
 
-      let previousBalance = applyContext.currentBalances.get(row.user_id);
-      if (previousBalance === undefined) {
-        const initialBalance = Number(row.user?.balance ?? 0);
-        previousBalance = initialBalance;
-        applyContext.currentBalances.set(row.user_id, initialBalance);
-        if (!(row.user_id in state.previousBalances)) {
-          state.previousBalances[row.user_id] = initialBalance;
-        }
-      }
-      const nextBalance = Number((previousBalance + netAmount).toFixed(2));
-      applyContext.currentBalances.set(row.user_id, nextBalance);
-
       const upc = typeof normalized.upc === "string" ? normalized.upc : null;
       const rawData = row.raw_data as Record<string, unknown> | null;
       const sourceRows = parseFinancialSourceRowsData(rawData?.SourceRowsData);
@@ -2659,52 +2679,6 @@ export async function applyFinancialImport(params: {
         }
       });
       state.royaltyTransactionIds.push(royaltyTransaction.id);
-
-      const balanceTransaction = await balanceTransactionsRepo.create({
-        data: {
-          user_id: row.user_id,
-          royalty_transaction_id: royaltyTransaction.id,
-          amount: netAmount,
-          direction: "CREDIT",
-          balance_before: previousBalance,
-          balance_after: nextBalance,
-          description: `Royalty import ${importJob.source_file_name}`,
-          metadata: {
-            importId: importJob.id,
-            rowId: row.id,
-            upc,
-            grossAmount,
-            commissionAmount,
-            commissionRate,
-            netAmount
-          }
-        }
-      });
-      state.balanceTransactionIds.push(balanceTransaction.id);
-
-      if (hasLegacyTransactionTable && transactionRepo?.create) {
-        const txRecord = await transactionRepo.create({
-          data: {
-            userId: row.user_id,
-            amount: netAmount,
-            type: "ROYALTY",
-            status: "COMPLETED",
-            description: `Royalty added from ${importJob.source_file_name}`,
-            processedAt: new Date(),
-            metadata: {
-              importId: importJob.id,
-              rowId: row.id,
-              upc,
-              grossAmount,
-              commissionAmount,
-              commissionRate,
-              netAmount
-            }
-          },
-          select: { id: true }
-        });
-        state.transactionIds.push(txRecord.id);
-      }
 
       if (hasLegacyRoyaltyTable && royaltyRepo?.create) {
         const royalty = await royaltyRepo.create({

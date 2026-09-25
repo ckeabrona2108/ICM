@@ -1173,7 +1173,7 @@ export function PublicFeedPage({
         options.state,
         options.append ? options.cursor : null,
         lockedAuthorSlug
-      )}`, { signal: controller.signal });
+      )}`, { cache: "no-store", signal: controller.signal });
       const next = await readJsonResponse<PublicFeedPayload & ErrorPayload>(response, "Не удалось загрузить ленту");
       if (!shouldAcceptFeedResponse({ requestId, activeRequestId: loadRequestRef.current, aborted: controller.signal.aborted })) return;
       if (response.status === 401) {

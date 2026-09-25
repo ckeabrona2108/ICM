@@ -32,7 +32,11 @@ export async function GET(request: NextRequest) {
       author: request.nextUrl.searchParams.get("author"),
       search: query.search
     });
-    return NextResponse.json(payload);
+    return NextResponse.json(payload, {
+      headers: {
+        "Cache-Control": "no-store, max-age=0"
+      }
+    });
   } catch (error) {
     if (error instanceof FeedAuthRequiredError) return NextResponse.json({ error: error.message }, { status: 401 });
     if (error instanceof FeedCursorError) return NextResponse.json({ error: error.message }, { status: 400 });

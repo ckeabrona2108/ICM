@@ -19,7 +19,7 @@ import type { UserArtistProfileSettings } from "@/lib/artist-profile-service";
 type FinanceReportStatusValue = "READY_TO_CONFIRM" | "AGREED";
 type ReleaseStatusFilterValue = "moderating" | "approved" | "rejected";
 type TransactionStatusValue = "COMPLETED" | "FAILED" | "PENDING" | "PROCESSING";
-type TransactionTypeValue = "ROYALTY" | "PAYOUT" | "REFUND" | "FEE";
+type TransactionTypeValue = "ROYALTY" | "PAYOUT" | "REFUND" | "FEE" | "REPORT";
 
 type UserReleasesPayload = {
   items: Array<{
@@ -84,13 +84,20 @@ function sumReportLines(items: EditableReportLine[]): number {
 }
 
 function transactionTypeLabel(type: TransactionTypeValue): string {
+  if (type === "REPORT") return "Начисление по отчету";
   if (type === "ROYALTY") return "Начисление";
   if (type === "PAYOUT") return "Выплата";
   if (type === "REFUND") return "Возврат";
   return "Комиссия";
 }
 
-function transactionStatusLabel(status: TransactionStatusValue): string {
+function transactionStatusLabel(
+  status: TransactionStatusValue,
+  reportLifecycleState?: "ready_to_confirm" | "changes_requested" | "agreed"
+): string {
+  if (reportLifecycleState === "changes_requested") return "На доработке";
+  if (reportLifecycleState === "ready_to_confirm") return "Ожидает согласования";
+  if (reportLifecycleState === "agreed") return "Начислено";
   if (status === "COMPLETED") return "Выполнено";
   if (status === "FAILED") return "Ошибка";
   return "В обработке";
@@ -664,7 +671,8 @@ export function AdminUserDetailClient({
               >
                 <p className="text-[13px] text-white/85">
                   {transactionTypeLabel(transaction.type)} · {formatRubCurrency(transaction.amount)} ·{" "}
-                  {transactionStatusLabel(transaction.status)}
+                  {transactionStatusLabel(transaction.status, transaction.reportLifecycleState)}
+                  {transaction.description ? ` · ${transaction.description}` : ""}
                 </p>
                 <p className="text-[12px] text-white/55">
                   {new Date(transaction.createdAt).toLocaleString("ru-RU")}

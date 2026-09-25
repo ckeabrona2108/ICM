@@ -7,6 +7,87 @@ import { TransactionStatus, TransactionType } from "@prisma/client";
 
 import { getUserBalanceTotals, getUserFinanceView, topUpUserBalanceByAdmin } from "@/lib/finance-service";
 
+test("technical royalty import rows are excluded from the financial operation history", async () => {
+  const now = new Date("2026-09-11T19:03:59.000Z");
+  const prisma = {
+    financeReport: {
+      findMany: async () => [],
+      count: async () => 0
+    },
+    payouts: {
+      aggregate: async () => ({ _sum: { amount: 0 } })
+    },
+    transaction: {
+      findMany: async ({ where }: any) => {
+        if (where.description) return [];
+        return [
+          {
+            id: "technical-import",
+            type: "ROYALTY",
+            status: "COMPLETED",
+            amount: 5015.38,
+            description: "Royalty added from Q2.xlsx",
+            metadata: { importId: "import-1" },
+            createdAt: now,
+            processedAt: now
+          },
+          {
+            id: "payout",
+            type: "PAYOUT",
+            status: "COMPLETED",
+            amount: 2000,
+            description: "Payout completed",
+            metadata: null,
+            createdAt: now,
+            processedAt: now
+          }
+        ];
+      }
+    }
+  } as any;
+
+  const finance = await getUserFinanceView(prisma, "u1");
+
+  assert.deepEqual(finance.transactions.map((item) => item.id), ["payout"]);
+});
+
+test("financial operation history shows the report amount and its lifecycle state", async () => {
+  const now = new Date("2026-09-24T20:00:00.000Z");
+  const prisma = {
+    financeReport: {
+      findMany: async () => [
+        {
+          id: "report-rework",
+          periodStart: new Date("2026-04-01T00:00:00.000Z"),
+          periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+          amount: 5508.26,
+          status: "READY_TO_CONFIRM",
+          currency: "RUB",
+          createdAt: now,
+          agreedAt: null
+        }
+      ]
+    },
+    payouts: { aggregate: async () => ({ _sum: { amount: 0 } }) },
+    transaction: { findMany: async () => [] }
+  } as any;
+
+  const finance = await getUserFinanceView(prisma, "u1");
+
+  assert.deepEqual(finance.transactions, [
+    {
+      id: "report:report-rework",
+      type: "REPORT",
+      status: "PENDING",
+      amount: 5508.26,
+      description: "2 квартал 2026",
+      createdAt: now.toISOString(),
+      processedAt: null,
+      reportLifecycleState: "ready_to_confirm"
+    }
+  ]);
+});
+
 test("top up increases balance", async () => {
   const prisma = {
     financeReport: {
@@ -408,8 +489,8 @@ test("finance view selects only legacy transaction columns", async () => {
     "amount",
     "description",
     "createdAt",
-    "processedAt"
+    "processedAt",
+    "metadata"
   ]);
-  assert.equal(view.transactions.length, 1);
-  assert.equal(view.transactions[0].id, "tx_1");
+  assert.deepEqual(view.transactions.map((item) => item.id).sort(), ["report:report_1", "tx_1"]);
 });

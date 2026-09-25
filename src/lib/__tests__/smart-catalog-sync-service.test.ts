@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   buildFinancialImportDetailsExportRows,
   detectSmartColumns,
+  getDuplicateFinancialReportUserIds,
   resolveSelectedReportQuarterPeriod,
   shouldRollbackFinancialImportBeforeDelete
 } from "@/lib/smart-catalog-sync-service";
@@ -22,6 +23,16 @@ test("selected finance report quarter resolves to quarter date range", () => {
 test("invalid finance report quarter selection returns null", () => {
   assert.equal(resolveSelectedReportQuarterPeriod({ quarter: 5, year: 2026 }), null);
   assert.equal(resolveSelectedReportQuarterPeriod({ quarter: 2, year: 1999 }), null);
+});
+
+test("duplicate report users are detected before reapplying an import period", () => {
+  assert.deepEqual(
+    getDuplicateFinancialReportUserIds(
+      ["user-1", "user-2"],
+      [{ userId: "user-1" }, { userId: "other-user" }, { userId: "user-1" }]
+    ),
+    ["user-1"]
+  );
 });
 
 test("finance report csv columns detect artist, quantity and royalty detail fields", () => {

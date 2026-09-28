@@ -438,6 +438,16 @@ test("admin changes requested list includes rejected reports with user comment",
   assert.equal(reports[0].userComment, "Не совпадает сумма по Apple");
   assert.equal(reports[0].platformTotals[0].platformName, "Apple");
   assert.equal(reports[0].platformTotals[0].amount, 678.02);
+
+  const userReports = await listUserReports(prisma, "user_1");
+  assert.equal(userReports.length, 1);
+  assert.equal(userReports[0].lifecycleState, "changes_requested");
+  assert.equal(userReports[0].userComment, "Не совпадает сумма по Apple");
+  assert.ok(
+    state.notifications.some(
+      (item: any) => item.kind === "admin_report_changes_requested" && item.user_id === "admin_1"
+    )
+  );
 });
 
 test("changes requested report can be resent to user without re-crediting balance", async () => {

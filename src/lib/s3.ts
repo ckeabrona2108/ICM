@@ -1346,6 +1346,21 @@ export async function resolveFirstReachableStoredFileCandidateFromCandidates(
     }
 
     if (url.startsWith("/api/uploads/object/") || url.startsWith("api/uploads/object/")) {
+      const storageExists = await checkStorageKeyExists(key);
+      if (storageExists === true) {
+        const result = { url, failedReason: null };
+        if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+          const firstKey = reachableImageCandidateCache.keys().next().value;
+          if (firstKey) reachableImageCandidateCache.delete(firstKey);
+        }
+        reachableImageCandidateCache.set(cacheKey, result);
+        return result;
+      }
+      if (storageExists === false) {
+        errors.push(`not-found:${key}`);
+        continue;
+      }
+
       const exists = await checkAbsoluteUrlExists(toAbsoluteAppRouteUrl(url.startsWith("api/uploads/object/") ? `/${url}` : url));
       if (exists) {
         const result = { url, failedReason: null };

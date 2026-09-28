@@ -86,7 +86,7 @@ export function FinancePageClient({
   const [agreedBalance, setAgreedBalance] = React.useState(initialAgreedBalance);
   const [pendingPayout] = React.useState<number>(initialPendingPayout);
   const [accruals, setAccruals] = React.useState(initialAccruals);
-  const [, setError] = React.useState<string | null>(null);
+  const [reportError, setError] = React.useState<string | null>(null);
   const [reportNotice, setReportNotice] = React.useState<string | null>(null);
   const [activeTab, setActiveTab] = React.useState<FinanceTab>(
     initialReports.some((report) => report.status === "ready_to_confirm") ? "Отчеты" : "Запрос выплаты"
@@ -170,6 +170,7 @@ export function FinancePageClient({
             ? "Отчет согласован, баланс обновлен."
             : "Отчет отправлен администратору на доработку.")
       );
+      setError(null);
       setReportComment("");
     } catch (submitError) {
       setError(
@@ -295,6 +296,12 @@ export function FinancePageClient({
               {reportNotice ? (
                 <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/10 px-4 py-3 text-[13px] font-medium text-emerald-100">
                   {reportNotice}
+                </div>
+              ) : null}
+
+              {reportError ? (
+                <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-[13px] font-medium text-rose-100">
+                  {reportError}
                 </div>
               ) : null}
 

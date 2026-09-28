@@ -269,7 +269,9 @@ async function resolveCandidateGroups(
     if (group.candidates.length === 0) continue;
     const resolved = await resolveFirstReachableStoredFileCandidateFromCandidates(group.candidates);
     if (resolved.url) {
-      const storageKey = isAbsoluteHttpUrl(resolved.url) ? null : normalizeStoredFileKey(resolved.url);
+      // An absolute application object URL still identifies a stored file. Keep
+      // its key so submission validation does not reject a successfully uploaded track.
+      const storageKey = normalizeStoredFileKey(resolved.url);
       const finalUrl = storageKey ? buildStoredFileRouteUrl(storageKey) ?? resolved.url : resolved.url;
       return {
         storageKey,

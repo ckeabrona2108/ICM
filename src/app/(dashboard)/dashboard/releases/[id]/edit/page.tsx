@@ -14,5 +14,11 @@ export default async function EditReleasePage({ params }: { params: { id: string
   const release = await getCabinetReleaseByIdForUser(session.user.id, params.id);
   if (!release) notFound();
 
+  // A release in moderation must never reopen its editable wizard after a
+  // refresh. The details page is the single source of truth for its status.
+  if (release.status === "moderation") {
+    redirect(`/dashboard/releases/${params.id}`);
+  }
+
   return <ReleaseEditClient release={release} />;
 }

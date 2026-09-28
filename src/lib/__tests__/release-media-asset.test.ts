@@ -73,6 +73,34 @@ test("resolveTrackAudioAsset can require a confirmed file for public playback", 
   }
 });
 
+test("resolveTrackAudioAsset retains the storage key for an absolute object URL", async () => {
+  const absoluteObjectUrl = "https://www.icecreammusic.net/api/uploads/object/uploads/user_1/track-4.wav";
+  const fetchMock = mock.method(globalThis, "fetch", async (input: RequestInfo | URL) =>
+    new Response("", { status: String(input) === absoluteObjectUrl ? 200 : 404 })
+  );
+
+  try {
+    const asset = await resolveTrackAudioAsset({
+      trackId: "track-4",
+      track: "track-4.wav",
+      audioUrl: null,
+      audioFile: {
+        storageKey: "uploads/user_1/track-4.wav",
+        url: absoluteObjectUrl
+      },
+      audioUpload: null,
+      audio: null,
+      releaseId: "rel_4",
+      requireReachable: true
+    });
+
+    assert.equal(asset.storageKey, "uploads/user_1/track-4.wav");
+    assert.equal(asset.url, "/api/uploads/object/uploads/user_1/track-4.wav");
+  } finally {
+    fetchMock.mock.restore();
+  }
+});
+
 test("resolveTrackAudioAsset preserves an external audio URL before its proxy fallback", async () => {
   const externalUrl = "https://media.example.com/tracks/track-4.mp3";
   const fetchMock = mock.method(globalThis, "fetch", async (input: RequestInfo | URL) =>

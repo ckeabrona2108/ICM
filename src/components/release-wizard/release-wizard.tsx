@@ -1184,6 +1184,10 @@ function WizardInner({
         // optional refresh for sidebar counters; ignore failure
       }
 
+      // The submitted release is no longer editable. Replace the wizard URL so a
+      // refresh or repeated click cannot reopen the form and submit it again.
+      router.replace(`/dashboard/releases/${draftResult.releaseId}?submitted=1`);
+
     } catch (error) {
       setStep("review");
       if (error instanceof Error && error.message === "submit_failed") {
@@ -1223,7 +1227,8 @@ function WizardInner({
     setStep,
     submissionDataSnapshot,
     sourceReleaseId,
-    submissionMode
+    submissionMode,
+    router
   ]);
 
   const handleSubmit = React.useCallback(async () => {
@@ -1326,7 +1331,7 @@ function WizardInner({
     if (step === "upload") {
       return;
     }
-    if (submitting) {
+    if (submitting || hasSubmittedToModeration) {
       return;
     }
     if (!hasDraftContent(data)) {
@@ -1362,7 +1367,7 @@ function WizardInner({
         autosaveTimerRef.current = null;
       }
     };
-  }, [data, saveDraft, step, submissionMode, submitting]);
+  }, [data, hasSubmittedToModeration, saveDraft, step, submissionMode, submitting]);
 
   const proceedPendingNavigation = React.useCallback(() => {
     if (!pendingNavigation) return;

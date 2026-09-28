@@ -29,7 +29,7 @@ export function StepUpload({
       ? "Релиз ожидает подтверждения верификации"
       : sentToModeration
         ? submissionMode === "edit"
-          ? "Версия отправлена на модерацию"
+          ? "Релиз отправлен на модерацию"
           : "Релиз отправлен на модерацию"
         : "Изменения сохранены";
   const description = submitResult?.message ? (

@@ -21,12 +21,13 @@ export default async function ReleaseDetailsPage({
   searchParams
 }: {
   params: { id: string };
-  searchParams?: { pay_order?: string };
+  searchParams?: { pay_order?: string; submitted?: string };
 }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
   const payOrderId = searchParams?.pay_order?.trim();
+  const wasJustSubmitted = searchParams?.submitted === "1";
   const paymentResult = payOrderId
     ? await confirmYooKassaOrderAfterReturn({
         prisma,
@@ -73,6 +74,10 @@ export default async function ReleaseDetailsPage({
             {paymentResult?.applied ? (
               <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
                 Оплата подтверждена. Релиз отправлен на модерацию.
+              </p>
+            ) : wasJustSubmitted ? (
+              <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
+                Релиз отправлен на модерацию. Повторная отправка не требуется.
               </p>
             ) : paymentResult && paymentResult.status !== "already_confirmed" ? (
               <p className="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-amber-100">

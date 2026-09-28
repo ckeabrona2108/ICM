@@ -153,6 +153,38 @@ test("strict stored-file candidate resolver skips broken storage urls and keeps 
   }
 });
 
+test("strict stored-file candidate resolver checks absolute object routes through storage before HTTP", async () => {
+  const originalEndpoint = process.env.S3_ENDPOINT;
+  const originalBucket = process.env.S3_BUCKET;
+  const originalAccessKey = process.env.S3_ACCESS_KEY_ID;
+  const originalSecret = process.env.S3_SECRET_ACCESS_KEY;
+  process.env.S3_ENDPOINT = "http://127.0.0.1:9";
+  process.env.S3_BUCKET = "uploads";
+  process.env.S3_ACCESS_KEY_ID = "test";
+  process.env.S3_SECRET_ACCESS_KEY = "test";
+
+  const fetchMock = mock.method(globalThis, "fetch", async () => new Response("", { status: 200 }));
+
+  try {
+    const result = await resolveFirstReachableStoredFileCandidateFromCandidates([
+      "https://icmdistro.example.com/api/uploads/object/uploads/user_1/track-01.wav"
+    ]);
+
+    assert.equal(result.url, "https://icmdistro.example.com/api/uploads/object/uploads/user_1/track-01.wav");
+    assert.equal(fetchMock.mock.callCount(), 1);
+  } finally {
+    fetchMock.mock.restore();
+    if (originalEndpoint === undefined) delete process.env.S3_ENDPOINT;
+    else process.env.S3_ENDPOINT = originalEndpoint;
+    if (originalBucket === undefined) delete process.env.S3_BUCKET;
+    else process.env.S3_BUCKET = originalBucket;
+    if (originalAccessKey === undefined) delete process.env.S3_ACCESS_KEY_ID;
+    else process.env.S3_ACCESS_KEY_ID = originalAccessKey;
+    if (originalSecret === undefined) delete process.env.S3_SECRET_ACCESS_KEY;
+    else process.env.S3_SECRET_ACCESS_KEY = originalSecret;
+  }
+});
+
 test("strict stored-file candidate resolver does not fall back to a broken storage url", async () => {
   const fetchMock = mock.method(globalThis, "fetch", async () => new Response("", { status: 404 }));
 

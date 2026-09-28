@@ -1316,6 +1316,31 @@ export async function resolveFirstReachableStoredFileCandidateFromCandidates(
   const probeUrls = urls.slice(0, MAX_REACHABLE_PROBE_CANDIDATES);
   for (const url of probeUrls) {
     if (/^https?:\/\//u.test(url)) {
+      const absoluteRouteKey = normalizeStorageKey(url);
+      let isAbsoluteAppObjectRoute = false;
+      try {
+        isAbsoluteAppObjectRoute = new URL(url).pathname.startsWith("/api/uploads/object/");
+      } catch {
+        isAbsoluteAppObjectRoute = false;
+      }
+
+      if (isAbsoluteAppObjectRoute && absoluteRouteKey) {
+        const storageExists = await checkStorageKeyExists(absoluteRouteKey);
+        if (storageExists === true) {
+          const result = { url, failedReason: null };
+          if (reachableImageCandidateCache.size >= MAX_REACHABLE_CANDIDATE_CACHE_SIZE) {
+            const firstKey = reachableImageCandidateCache.keys().next().value;
+            if (firstKey) reachableImageCandidateCache.delete(firstKey);
+          }
+          reachableImageCandidateCache.set(cacheKey, result);
+          return result;
+        }
+        if (storageExists === false) {
+          errors.push(`not-found:${absoluteRouteKey}`);
+          continue;
+        }
+      }
+
       const exists = await checkAbsoluteUrlExists(url);
       if (exists) {
         const result = { url, failedReason: null };

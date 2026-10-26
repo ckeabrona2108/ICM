@@ -23,6 +23,7 @@ import { HowItWorks } from "@/components/landing/how-it-works";
 import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingSubscriptionSection } from "@/components/landing/landing-subscription-section";
 import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
+import { TestimonialsColumns } from "@/components/landing/testimonials-columns";
 import { StandaloneSessionRedirect } from "@/components/pwa/standalone-session-redirect";
 import { authOptions } from "@/lib/auth";
 import {
@@ -136,49 +137,6 @@ const PLATFORM_MARQUEE_ITEMS = [
   { name: "YouTube Music", Logo: YouTubeMusicLogo, logoSize: 38 },
   { name: "TikTok", Logo: TikTokLogo, logoSize: 37 },
   { name: "МТС Музыка", imageSrc: "/landing/platforms/mts-music-user.png", imageClassName: "h-[36px] w-[36px]" }
-] as const;
-
-const REVIEW_SCREENSHOTS = [
-  {
-    src: "/landing/reviews/review-01.png",
-    alt: "Отзыв Михаила Бегункова",
-    className: "md:rotate-[-5deg] md:translate-y-8 md:translate-x-2"
-  },
-  {
-    src: "/landing/reviews/review-02.png",
-    alt: "Отзыв Egor Potapov",
-    className: "md:rotate-[4deg] md:-translate-y-2 md:translate-x-8"
-  },
-  {
-    src: "/landing/reviews/review-03.png",
-    alt: "Отзыв Егора Русакова",
-    className: "md:rotate-[-2deg] md:translate-y-3 md:-translate-x-6"
-  },
-  {
-    src: "/landing/reviews/review-04.png",
-    alt: "Отзыв Никиты Полтинина",
-    className: "md:rotate-[3deg] md:translate-y-12"
-  },
-  {
-    src: "/landing/reviews/review-05.png",
-    alt: "Отзыв Maksim Selivanov",
-    className: "md:rotate-[-4deg] md:-translate-y-6 md:translate-x-6"
-  },
-  {
-    src: "/landing/reviews/review-06.png",
-    alt: "Отзыв Марка Карих",
-    className: "md:rotate-[2deg] md:translate-y-4 md:-translate-x-4"
-  },
-  {
-    src: "/landing/reviews/review-07.png",
-    alt: "Отзыв Марселя Рахматуллина",
-    className: "md:rotate-[-3deg] md:translate-y-10 md:translate-x-10"
-  },
-  {
-    src: "/landing/reviews/review-08.png",
-    alt: "Отзыв Сени Кислицина",
-    className: "md:rotate-[5deg] md:-translate-y-1 md:translate-x-2"
-  }
 ] as const;
 
 const PROMO_CARDS = [
@@ -628,42 +586,19 @@ export default async function HomePage() {
       </section>
 
       <section id="reviews" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
-        <div className="grid gap-12 lg:grid-cols-[0.32fr_0.68fr] lg:items-start">
-          <Reveal className="text-center lg:sticky lg:top-24">
-            <SectionEyebrow>Отзывы</SectionEyebrow>
-            <h2 className="mt-4 text-[34px] font-bold tracking-tight sm:text-[42px] lg:text-[54px]">
-              Нам доверяют артисты
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl text-[15px] leading-relaxed text-white/58 sm:text-[16px]">
-              Живые отзывы всегда говорят лучше любых цитат. Поэтому в этом блоке мы показываем реальные скриншоты — как дополнительное подтверждение опыта наших клиентов.
-            </p>
-          </Reveal>
+        <Reveal className="text-center">
+          <SectionEyebrow>Отзывы</SectionEyebrow>
+          <h2 className="mt-4 text-[34px] font-bold tracking-tight sm:text-[42px] lg:text-[54px]">
+            Нам доверяют артисты
+          </h2>
+          <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-relaxed text-white/58 sm:text-[16px]">
+            Настоящие отзывы артистов, которые выпускают музыку с ICECREAMMUSIC.
+          </p>
+        </Reveal>
 
-          <div className="relative lg:pt-24">
-            <div className="pointer-events-none absolute inset-0 rounded-[40px] bg-[radial-gradient(circle_at_30%_20%,rgba(123,97,255,0.2),transparent_42%),radial-gradient(circle_at_70%_70%,rgba(255,59,92,0.12),transparent_38%)] blur-3xl" />
-
-            <Stagger className="relative grid gap-6 md:grid-cols-2" stagger={0.06}>
-              {REVIEW_SCREENSHOTS.map((review, index) => (
-                <StaggerItem key={review.src} className={review.className}>
-                  <div
-                    className={`overflow-hidden rounded-[30px] border border-white/[0.08] bg-[#111217] shadow-[0_24px_60px_-30px_rgba(0,0,0,0.75)] transition-transform duration-300 hover:scale-[1.01] ${
-                      index % 3 === 0 ? "md:col-span-2" : ""
-                    }`}
-                    style={{ animation: `float-soft ${7.4 + index * 0.35}s ease-in-out ${index * 0.45}s infinite` }}
-                  >
-                    <Image
-                      src={review.src}
-                      alt={review.alt}
-                      width={1544}
-                      height={232}
-                      className="h-auto w-full scale-[1.07] object-cover"
-                    />
-                  </div>
-                </StaggerItem>
-              ))}
-            </Stagger>
-          </div>
-        </div>
+        <Reveal delay={0.08} className="mt-10">
+          <TestimonialsColumns />
+        </Reveal>
       </section>
 
       <section className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
@@ -798,8 +733,7 @@ export default async function HomePage() {
               <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-white/60 sm:text-[16px]">
                 <span className="font-semibold text-white/85">GLAZE Vocal</span> — тюн, чистка и
                 характер вокала одной ручкой. <span className="font-semibold text-white/85">GLAZE Downloader</span> —
-                бит с YouTube сразу в DAW с BPM и тональностью. VST3/AU для macOS и Windows, покупка
-                без регистрации.
+                бит с YouTube сразу в DAW с BPM и тональностью. VST3/AU для macOS и Windows.
               </p>
               <Link
                 href="/plugins"

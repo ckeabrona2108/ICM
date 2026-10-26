@@ -279,6 +279,13 @@ html {
   animation: float-soft 6s ease-in-out infinite;
 }
 
+@keyframes testimonials-scroll {
+  to { transform: translateY(calc(-50% - 0.625rem)); }
+}
+.testimonials-scroll {
+  animation: testimonials-scroll 48s linear infinite;
+}
+
 @keyframes spin-slow {
   to { transform: rotate(360deg); }
 }
@@ -384,7 +391,7 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .blob-a, .blob-b, .blob-c, .float-soft, .gradient-shift, .spin-slow,
+  .blob-a, .blob-b, .blob-c, .float-soft, .testimonials-scroll, .gradient-shift, .spin-slow,
   .ambient-orbit-left, .ambient-orbit-right, .beam-sweep-x, .beam-sweep-y,
   .auth-bg-video {
     animation: none !important;

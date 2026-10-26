@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Headset,
   HelpCircle,
+  LayoutDashboard,
   LayoutGrid,
   LogOut,
   MessageSquare,
@@ -103,7 +104,8 @@ function buildNav(counts: {
   aiEnabled: boolean;
 }): NavItem[] {
   const base: NavItem[] = [
-    { type: "leaf", href: "/dashboard", label: "Новости", icon: Bell },
+    { type: "leaf", href: "/dashboard", label: "Обзор", icon: LayoutDashboard },
+    { type: "leaf", href: "/dashboard/news", label: "Новости", icon: Bell },
     {
       type: "group",
       id: "music",
@@ -550,7 +552,7 @@ export function DashboardSidebar({
   }, []);
   const mobileNavItems = React.useMemo(
     () => [
-      { href: "/dashboard", label: "Новости", icon: Bell },
+      { href: "/dashboard", label: "Обзор", icon: LayoutDashboard },
       { href: "/dashboard/releases", label: "Релизы", icon: Package },
       { href: "/dashboard/statistics", label: "Аналитика", icon: BarChart3 },
       { href: "/dashboard/finance", label: "Кошелёк", icon: Wallet },
@@ -743,7 +745,8 @@ export function DashboardSidebar({
         <div className="mx-auto grid max-w-xl grid-cols-5 gap-1">
           {mobileNavItems.map((item) => {
             const Icon = item.icon;
-            const active = activePath === item.href || activePath.startsWith(`${item.href}/`);
+            const active =
+              activePath === item.href || (item.href !== "/dashboard" && activePath.startsWith(`${item.href}/`));
             return (
               <Link
                 key={item.href}

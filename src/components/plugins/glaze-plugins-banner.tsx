@@ -31,12 +31,12 @@ export function GlazePluginsBanner() {
   if (!visible) return null;
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       <Link
         href="/dashboard/plugins"
-        className="group relative flex flex-col overflow-hidden rounded-[28px] border border-[#3b82f6]/20 bg-[linear-gradient(120deg,rgba(10,16,34,0.96),rgba(12,13,22,0.94))] shadow-[0_24px_80px_-50px_rgba(59,130,246,0.7)] transition-colors hover:border-[#3b82f6]/40 sm:flex-row sm:items-center"
+        className="group relative flex h-full flex-col overflow-hidden rounded-[24px] border border-[#3b82f6]/20 bg-[linear-gradient(120deg,rgba(10,16,34,0.96),rgba(12,13,22,0.94))] shadow-[0_24px_80px_-50px_rgba(59,130,246,0.7)] transition-colors hover:border-[#3b82f6]/40 sm:flex-row"
       >
-        <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden sm:aspect-auto sm:h-40 sm:w-72">
+        <div className="relative aspect-[16/9] w-full shrink-0 overflow-hidden sm:aspect-auto sm:min-h-40 sm:w-[44%]">
           <Image
             src="/plugins/glaze-vocal.webp"
             alt="GLAZE Vocal"
@@ -45,7 +45,7 @@ export function GlazePluginsBanner() {
             className="object-cover transition-transform duration-700 group-hover:scale-105"
           />
         </div>
-        <div className="flex flex-1 flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6 sm:pr-14">
+        <div className="flex flex-1 flex-col justify-center gap-4 p-5 sm:p-6 sm:pr-12">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#93c5fd]">
               Новинка · GLAZE Plugins
@@ -57,7 +57,7 @@ export function GlazePluginsBanner() {
               Вокал одной ручкой и биты с YouTube прямо в DAW. VST3/AU для macOS и Windows.
             </p>
           </div>
-          <span className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-[linear-gradient(90deg,#2563eb,#6d5dfc)] px-5 py-3 text-[14px] font-semibold text-white sm:self-auto">
+          <span className="inline-flex shrink-0 items-center gap-2 self-start rounded-xl bg-[linear-gradient(90deg,#2563eb,#6d5dfc)] px-5 py-3 text-[14px] font-semibold text-white">
             Смотреть
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </span>

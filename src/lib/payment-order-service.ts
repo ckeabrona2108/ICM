@@ -48,6 +48,7 @@ interface PaymentOrderResult {
     bonusTokens: number;
     totalTokens: number;
   } | null;
+  cancellationReason?: string | null;
   error?: string;
 }
 
@@ -691,6 +692,7 @@ export async function confirmYooKassaOrderAfterReturn(params: {
       applied: false,
       orderId: order.id,
       paymentSummary,
+      cancellationReason: verifiedPayment.cancellationReason,
       aiStudioStatus: await getAiStudioSystemStatus(params.prisma)
     };
   }

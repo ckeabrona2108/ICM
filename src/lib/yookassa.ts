@@ -26,6 +26,7 @@ export interface YooKassaPaymentDetails {
   currency: string | null;
   metadata: Record<string, string>;
   rawStatus: string | null;
+  cancellationReason: string | null;
 }
 
 interface YooKassaWebhookPayload {
@@ -199,6 +200,7 @@ export async function getYooKassaPayment(providerPaymentId: string): Promise<Yoo
         amount?: { value?: string | number; currency?: string };
         metadata?: Record<string, string>;
         description?: string;
+        cancellation_details?: { party?: string; reason?: string };
       }
     | null;
 
@@ -217,7 +219,8 @@ export async function getYooKassaPayment(providerPaymentId: string): Promise<Yoo
     amountRub: parseAmountRub(json?.amount?.value),
     currency: typeof json?.amount?.currency === "string" ? json.amount.currency.trim().toUpperCase() : null,
     metadata: normalizeMetadata(json?.metadata),
-    rawStatus: typeof json?.status === "string" ? json.status : null
+    rawStatus: typeof json?.status === "string" ? json.status : null,
+    cancellationReason: json?.cancellation_details?.reason?.trim() || null
   };
 }
 

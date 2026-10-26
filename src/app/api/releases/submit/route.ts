@@ -36,6 +36,7 @@ import {
 } from "@/lib/release-quota";
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
 import { findPaidPredecessorRelease, withReleaseResubmission } from "@/lib/release-resubmission";
+import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
 import {
   buildSubmitTrackDiagnostics,
   buildTrackCreateManyInput,
@@ -566,9 +567,9 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     await updateReleaseAndSyncTracks({
       confirmed: false,
       status: "moderating",
-      roles: withReleaseLifecycleState(
-        mergeSubmissionData(existing.roles, submissionData),
-        "moderation"
+      // Payment reminders (1h / 24h / 3d) count from this moment.
+      roles: withReleasePaymentWaitingSince(
+        withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation")
       ) as Prisma.InputJsonValue
     });
     notifications.push({

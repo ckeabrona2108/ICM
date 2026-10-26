@@ -13,6 +13,8 @@ import { prisma } from "@/lib/prisma";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
 import Link from "next/link";
 import { ReleaseSceneSettingsClient } from "@/components/releases/release-scene-settings-client";
+import { ReleasePaymentPanel } from "@/components/releases/release-payment-panel";
+import { describeYooKassaCancellation } from "@/lib/release-payment-followup";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,7 @@ export default async function ReleaseDetailsPage({
   searchParams
 }: {
   params: { id: string };
-  searchParams?: { pay_order?: string; submitted?: string };
+  searchParams?: { pay_order?: string; submitted?: string; pay?: string };
 }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
@@ -45,6 +47,13 @@ export default async function ReleaseDetailsPage({
     notFound();
   }
   const timeline = getReleaseTimelineState(release.status, release.paid);
+  const awaitingPayment = !release.paid && release.status === "moderation";
+  const paymentReturnState =
+    paymentResult?.status === "canceled"
+      ? { kind: "failed" as const, message: describeYooKassaCancellation(paymentResult.cancellationReason) }
+      : paymentResult && !paymentResult.applied && paymentResult.status !== "already_confirmed"
+        ? { kind: "pending" as const }
+        : { kind: "none" as const };
 
   return (
     <div className="pb-8">
@@ -75,13 +84,15 @@ export default async function ReleaseDetailsPage({
               <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
                 Оплата подтверждена. Релиз отправлен на модерацию.
               </p>
+            ) : awaitingPayment ? (
+              <ReleasePaymentPanel
+                releaseId={release.id}
+                autoStart={searchParams?.pay === "1" && !payOrderId}
+                returnState={paymentReturnState}
+              />
             ) : wasJustSubmitted ? (
               <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
                 Релиз отправлен на модерацию. Повторная отправка не требуется.
-              </p>
-            ) : paymentResult && paymentResult.status !== "already_confirmed" ? (
-              <p className="rounded-xl border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-amber-100">
-                Платёж ещё не подтверждён YooKassa. Если деньги списались, обновите страницу через несколько секунд.
               </p>
             ) : null}
             <div className="pt-2">

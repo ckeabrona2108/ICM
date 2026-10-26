@@ -15,6 +15,12 @@ import {
   getReleaseCoverAsset
 } from "@/lib/release-cover";
 import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
+import { getReleaseDeletionState } from "@/lib/release-deletion-state";
+import {
+  findPaidPredecessorRelease,
+  getReleaseResubmission,
+  readReleaseUpc
+} from "@/lib/release-resubmission";
 
 interface AdminReleaseDetailsResponse {
   id: string;
@@ -24,6 +30,8 @@ interface AdminReleaseDetailsResponse {
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
+  hidden?: boolean;
+  resubmission?: { source_release_id?: string; source_release_title?: string } | null;
   media_health?: {
     broken_cover: boolean;
     broken_audio_tracks: number;
@@ -1281,6 +1289,25 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
 
   if (!release) return null;
   const details = mapAdminReleaseDetails(release);
+  details.hidden = getReleaseDeletionState(release.roles)?.status === "deleted";
+  if (details.status === "moderation") {
+    const marker = getReleaseResubmission(release.roles);
+    const predecessor = await findPaidPredecessorRelease(prisma, {
+      userId: release.userId,
+      releaseId: release.id,
+      upc: readReleaseUpc(release)
+    });
+    if (marker || predecessor) {
+      details.resubmission = {
+        source_release_id: marker?.sourceReleaseId ?? predecessor?.id,
+        source_release_title: predecessor?.title
+      };
+      if (!release.confirmed && details.resubmission.source_release_id) {
+        details.payment_status = "paid";
+        details.payment_label = "Оплачен ранее";
+      }
+    }
+  }
   const cover = await resolveAdminDetailCoverAsset({
     id: release.id,
     preview: asString(release.preview),

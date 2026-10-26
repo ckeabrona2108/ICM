@@ -132,14 +132,14 @@ export function AdminReleasesClient({
         body: JSON.stringify({ upc })
       });
       const payload = (await response.json().catch(() => null)) as
-        | { error?: string }
+        | { error?: string; message?: string }
         | null;
       if (!response.ok) {
         throw new Error(payload?.error ?? "Не удалось принять релиз.");
       }
 
       setApproveModal({ open: false, release: null, upc: "", error: null });
-      setToast("Релиз принят.");
+      setToast(payload?.message ?? "Релиз принят.");
       await loadReleases(tab);
     } catch (approveError) {
       const message = approveError instanceof Error ? approveError.message : "Не удалось принять релиз.";
@@ -389,9 +389,14 @@ export function AdminReleasesClient({
                           Запрошено удаление
                         </span>
                       ) : null}
-                      {release.deletionStatus === "deleted" ? (
+                      {release.hidden ? (
                         <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 text-[11px] font-semibold text-white/70">
-                          Удален у пользователя
+                          Скрыт
+                        </span>
+                      ) : null}
+                      {release.resubmission ? (
+                        <span className="inline-flex items-center rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-200">
+                          Повторная модерация
                         </span>
                       ) : null}
                       {release.rejectedAt ? (
@@ -429,9 +434,21 @@ export function AdminReleasesClient({
                         </p>
                       </div>
                     ) : null}
-                    {release.deletionStatus === "deleted" ? (
+                    {release.resubmission?.sourceReleaseId ? (
+                      <div className="mt-3 rounded-lg border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-[13px] text-sky-100">
+                        Повторная отправка ранее оплаченного релиза{" "}
+                        <Link
+                          href={`/admin/releases/${release.resubmission.sourceReleaseId}`}
+                          className="underline-offset-2 hover:underline"
+                        >
+                          «{release.resubmission.sourceReleaseTitle || "исходный релиз"}»
+                        </Link>
+                        .
+                      </div>
+                    ) : null}
+                    {release.hidden ? (
                       <div className="mt-3 rounded-lg border border-white/[0.12] bg-white/[0.04] px-3 py-2 text-[13px] text-white/70">
-                        <p>Релиз скрыт у пользователя и помечен как удалённый. Его можно восстановить без потери данных.</p>
+                        <p>Релиз скрыт: его нет в рабочих очередях и в кабинете пользователя. Восстановление вернёт его в прежний статус без потери данных.</p>
                         <p className="mt-1 text-white/82">
                           Комментарий: {release.deletionComment || "Не указан"}
                         </p>

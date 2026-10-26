@@ -35,6 +35,7 @@ import {
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
+import { findPaidPredecessorRelease, withReleaseResubmission } from "@/lib/release-resubmission";
 import {
   buildSubmitTrackDiagnostics,
   buildTrackCreateManyInput,
@@ -384,15 +385,20 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     const currentLifecycle =
       getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus;
     const shouldResubmit = shouldResubmitEditedRelease(currentLifecycle);
+    const editedRoles = withReleaseLifecycleState(
+      mergeSubmissionData(existing.roles, submissionData),
+      shouldResubmit
+        ? "moderation"
+        : (getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus ?? "draft")
+    );
     await updateReleaseAndSyncTracks({
+      // Resubmission keeps the existing payment: no new charge for an already paid release.
       confirmed: existing.confirmed,
       status: shouldResubmit ? "moderating" : existing.status,
-      roles: withReleaseLifecycleState(
-        mergeSubmissionData(existing.roles, submissionData),
-        shouldResubmit
-          ? "moderation"
-          : (getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus ?? "draft")
-      ) as Prisma.InputJsonValue,
+      // Only an already approved release goes to "repeat moderation"; a fixed rejected one is a normal submission.
+      roles: (shouldResubmit && (currentLifecycle === "approved" || currentLifecycle === "distributed")
+        ? withReleaseResubmission(editedRoles, { previousStatus: currentLifecycle })
+        : editedRoles) as Prisma.InputJsonValue,
       afterSync: shouldResubmit
         ? async (tx) => {
             await tx.release.update({
@@ -421,6 +427,38 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       message: shouldResubmit
         ? "Релиз повторно отправлен на модерацию."
         : "Изменения релиза сохранены."
+    };
+
+    return NextResponse.json(response, { status: 200 });
+  }
+
+  const paidPredecessor = existing.confirmed
+    ? null
+    : await findPaidPredecessorRelease(db, {
+        userId: session.user.id,
+        releaseId: existing.id,
+        upc: submissionData.upc
+      });
+  if (paidPredecessor) {
+    await updateReleaseAndSyncTracks({
+      confirmed: true,
+      status: "moderating",
+      roles: withReleaseResubmission(
+        withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation"),
+        { sourceReleaseId: paidPredecessor.id }
+      ) as Prisma.InputJsonValue
+    });
+    notifications.push({
+      releaseId: existing.id,
+      releaseTitle: baseReleaseData.title,
+      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+    });
+
+    const response: ReleaseSubmitSuccessResponse = {
+      ok: true,
+      releaseId: existing.id,
+      nextStatus: "moderation",
+      message: "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
     };
 
     return NextResponse.json(response, { status: 200 });

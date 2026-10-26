@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { addMonths } from "date-fns";
 
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import { getReleaseResubmission } from "@/lib/release-resubmission";
 
 export type ReleaseQuotaPlan = "STANDARD" | "PRO" | "ENTERPRISE";
 export type ReleaseUsageType = "subscription" | "standalone_payment" | "partner_code";
@@ -341,6 +342,8 @@ export async function getUserReleaseQuota(
     if (usage?.type === "standalone_payment") continue;
     if (usage?.type === "partner_code") continue;
     if (standalonePaidReleaseIds.has(release.id)) continue;
+    // A resubmitted copy reuses the payment of its source release.
+    if (getReleaseResubmission(release.roles)?.sourceReleaseId) continue;
 
     if (usage?.type === "subscription") {
       const usedAt = parseDate(usage.usedAt) ?? release.date;

@@ -4,6 +4,12 @@ import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/rele
 import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import type { ModerationRemark } from "@/lib/cabinet-types";
+import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
+import {
+  findPaidPredecessorRelease,
+  getReleaseResubmission,
+  readReleaseUpc
+} from "@/lib/release-resubmission";
 
 export const upcSchema = z
   .string()
@@ -142,6 +148,118 @@ export function withAdminReleaseChangesRequiredState(
   return next;
 }
 
+/** Applies an approved copy of a release to its original, so the artist keeps one release.
+ * The original keeps its id, tracks ids and payment; the copy is hidden, not deleted. */
+async function mergeResubmittedCopyIntoSource(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  copyId: string;
+  sourceId: string;
+  upc: string;
+}): Promise<boolean> {
+  const [copy, source] = await Promise.all([
+    params.prisma.release.findUnique({
+      where: { id: params.copyId },
+      include: { track: { orderBy: { index: "asc" } } }
+    }),
+    params.prisma.release.findUnique({
+      where: { id: params.sourceId },
+      select: { id: true, userId: true, roles: true, track: { select: { id: true }, orderBy: { index: "asc" } } }
+    })
+  ]);
+  if (!copy || !source || copy.userId !== source.userId) return false;
+
+  const copySubmission = asRecord(asRecord(copy.roles)?.submissionData);
+  const sourceRoles: Record<string, unknown> = { ...(asRecord(source.roles) ?? {}) };
+  if (copySubmission) sourceRoles.submissionData = { ...copySubmission, upc: params.upc };
+  delete sourceRoles.resubmission;
+  const mergedRoles = resetNeedsChangesFlags(sourceRoles);
+
+  const copyRoles = withReleaseDeletionApproved(copy.roles, { adminId: params.adminId }) as Record<string, unknown>;
+  copyRoles.deletionRequest = {
+    ...(asRecord(copyRoles.deletionRequest) ?? {}),
+    comment: "Повторная модерация принята: изменения перенесены в исходный релиз."
+  };
+  copyRoles.mergedIntoReleaseId = source.id;
+
+  await params.prisma.$transaction(async (tx) => {
+    await tx.release.update({
+      where: { id: source.id },
+      data: {
+        title: copy.title,
+        subtitle: copy.subtitle,
+        performer: copy.performer,
+        feat: copy.feat,
+        remixer: copy.remixer,
+        genre: copy.genre,
+        labelName: copy.labelName,
+        preview: copy.preview,
+        language: copy.language,
+        date: copy.date,
+        startDate: copy.startDate,
+        preorderDate: copy.preorderDate,
+        type: copy.type,
+        platforms: copy.platforms ?? undefined,
+        area: copy.area ?? undefined,
+        earlyStartInRussia: copy.earlyStartInRussia,
+        realTimeDelivery: copy.realTimeDelivery,
+        yandexSoonNewRelease: copy.yandexSoonNewRelease,
+        status: "approved",
+        confirmed: true,
+        upc: params.upc,
+        rejectReason: null,
+        moderatorComment: null,
+        roles: mergedRoles ?? (sourceRoles as Prisma.InputJsonValue)
+      }
+    });
+
+    // Tracks are updated in place to keep ids that reports and royalties point to.
+    for (const [index, track] of copy.track.entries()) {
+      const data = {
+        title: track.title,
+        subtitle: track.subtitle,
+        isrc: track.isrc,
+        partner_code: track.partner_code,
+        roles: track.roles ?? undefined,
+        preview_start: track.preview_start,
+        instant_gratification_date: track.instant_gratification_date,
+        focus: track.focus,
+        explicit: track.explicit,
+        live: track.live,
+        cover: track.cover,
+        remix: track.remix,
+        instrumental: track.instrumental,
+        language: track.language,
+        text: track.text,
+        track: track.track,
+        text_sync: track.text_sync,
+        ringtone: track.ringtone,
+        video: track.video,
+        author_rights: track.author_rights,
+        video_shot: track.video_shot,
+        index: track.index
+      };
+      const existingTrackId = source.track[index]?.id;
+      if (existingTrackId) {
+        await tx.track.update({ where: { id: existingTrackId }, data });
+      } else {
+        await tx.track.create({ data: { ...data, releaseId: source.id } });
+      }
+    }
+    const extraTrackIds = source.track.slice(copy.track.length).map((track) => track.id);
+    if (extraTrackIds.length > 0) {
+      await tx.track.deleteMany({ where: { id: { in: extraTrackIds } } });
+    }
+
+    await tx.release.update({
+      where: { id: copy.id },
+      data: { roles: copyRoles as Prisma.InputJsonValue }
+    });
+  });
+
+  return true;
+}
+
 export async function approveReleaseByAdmin(params: {
   prisma: PrismaClient;
   adminId: string;
@@ -160,6 +278,7 @@ export async function approveReleaseByAdmin(params: {
       title: true,
       status: true,
       roles: true,
+      upc: true,
       userId: true,
       user: {
         select: {
@@ -176,12 +295,49 @@ export async function approveReleaseByAdmin(params: {
   }
 
   const normalizedUpc = upcParsed.data;
+  // A resubmitted copy of the artist's own release keeps the original UPC.
   const existingByUpc = await params.prisma.release.findFirst({
-    where: { upc: normalizedUpc, id: { not: params.releaseId } },
+    where: { upc: normalizedUpc, id: { not: params.releaseId }, userId: { not: release.userId } },
     select: { id: true }
   });
   if (existingByUpc) {
     return { releaseId: params.releaseId, error: "UPC_ALREADY_EXISTS" } as const;
+  }
+
+  // A copy of an approved release is merged into the original instead of becoming a duplicate.
+  const sourceReleaseId =
+    getReleaseResubmission(release.roles)?.sourceReleaseId ??
+    (await findPaidPredecessorRelease(params.prisma, {
+      userId: release.userId,
+      releaseId: release.id,
+      upc: readReleaseUpc(release)
+    }))?.id;
+  if (sourceReleaseId) {
+    const merged = await mergeResubmittedCopyIntoSource({
+      prisma: params.prisma,
+      adminId: params.adminId,
+      copyId: release.id,
+      sourceId: sourceReleaseId,
+      upc: normalizedUpc
+    });
+    if (merged) {
+      await deliverUserNotificationSafely(params.prisma, {
+        id: `release-resubmission-approved-${release.id}`,
+        userId: release.userId,
+        kind: "release_approved",
+        title: "Изменения релиза приняты",
+        message: `Изменения релиза «${release.title ?? "Без названия"}» приняты и применены к опубликованному релизу.`,
+        href: "/dashboard/releases",
+        sendEmail: false,
+        resetReadState: true
+      });
+      return {
+        releaseId: sourceReleaseId,
+        mergedFromReleaseId: release.id,
+        userId: release.userId,
+        releaseTitle: release.title ?? "Без названия"
+      } as const;
+    }
   }
 
   await params.prisma.release.update({

@@ -105,7 +105,8 @@ export async function POST(request: Request) {
       const duplicate = await prisma.release.findFirst({
         where: {
           upc,
-          id: { not: release.id }
+          id: { not: release.id },
+          userId: { not: release.userId }
         },
         select: { id: true }
       });

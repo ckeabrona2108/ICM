@@ -8,6 +8,7 @@ import {
 } from "@/lib/release-counts";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
+import { getReleaseResubmission, readReleaseUpc } from "@/lib/release-resubmission";
 
 export type AdminReleaseStatusFilter =
   | "moderation"
@@ -91,15 +92,16 @@ function matchStatus(source: {
   upc: string | null;
   roles: unknown;
 }, filter: AdminReleaseStatusFilter): boolean {
+  if (filter === "all") return true;
+
+  // Hidden releases leave every working queue and stay visible only in "all".
   const deletionState = getReleaseDeletionState(source.roles);
-  if (filter === "deletion_requests") {
-    return deletionState?.status === "requested" || deletionState?.status === "deleted";
-  }
+  if (deletionState?.status === "deleted") return false;
+  if (filter === "deletion_requests") return deletionState?.status === "requested";
 
   const status = source.status;
   const accepted = isAcceptedForAdminView(source);
 
-  if (filter === "all") return true;
   if (filter === "approved") return accepted;
   if (filter === "rejected") return status === "rejected";
   if (filter === "pending_verification") return status === "pending_verification";
@@ -141,6 +143,10 @@ function emptyTrack(id: string): AdminReleaseDetails["tracks"][number] {
   };
 }
 
+
+export function isAdminReleaseHidden(roles: unknown): boolean {
+  return getReleaseDeletionState(roles)?.status === "deleted";
+}
 
 export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promise<AdminReleaseDetails[]> {
   const releases = await prisma.release.findMany({
@@ -195,6 +201,14 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
     },
     orderBy: { date: "desc" }
   });
+
+  // Approved paid releases by artist + UPC: a copy re-sent with the same UPC is a repeat moderation.
+  const paidReleaseByUserUpc = new Map<string, { id: string; title: string }>();
+  for (const release of releases) {
+    const upc = release.confirmed ? readReleaseUpc(release) : null;
+    if (!upc || !isAcceptedForAdminView({ ...release, upc })) continue;
+    paidReleaseByUserUpc.set(`${release.userId}:${upc}`, { id: release.id, title: release.title });
+  }
 
   const mapped = await Promise.all(
     releases
@@ -276,10 +290,22 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
           coverStorageKey: resolvedCover.storageKey
         });
       }
+      const deletionState = getReleaseDeletionState(source.roles);
+      const onModeration = isActuallyOnModeration(source);
+      const resubmissionMarker = getReleaseResubmission(source.roles);
+      const predecessor = resolvedUpc ? paidReleaseByUserUpc.get(`${source.userId}:${resolvedUpc}`) : undefined;
+      const sourceRelease = predecessor && predecessor.id !== source.id ? predecessor : null;
+      const resubmission = onModeration && (resubmissionMarker || sourceRelease)
+        ? {
+            sourceReleaseId: resubmissionMarker?.sourceReleaseId ?? sourceRelease?.id,
+            sourceReleaseTitle: sourceRelease?.title
+          }
+        : null;
+      const paidEarlier = !source.confirmed && Boolean(resubmission?.sourceReleaseId);
+      const paid = Boolean(source.confirmed) || paidEarlier;
       const paymentDisplay = source.confirmed
         ? getReleasePaymentDisplayFromRoles(source.roles)
         : null;
-      const deletionState = getReleaseDeletionState(source.roles);
 
       return {
         id: source.id,
@@ -310,9 +336,13 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         deletionStatus: deletionState?.status,
         deletionRequestedAt: deletionState?.requestedAt,
         deletionComment: deletionState?.comment,
-        paid: Boolean(source.confirmed),
-        paymentKind: source.confirmed ? paymentDisplay?.kind ?? "paid" : "unpaid",
-        paymentLabel: source.confirmed
+        hidden: deletionState?.status === "deleted",
+        resubmission,
+        paid,
+        paymentKind: paid ? paymentDisplay?.kind ?? "paid" : "unpaid",
+        paymentLabel: paidEarlier
+          ? "Оплачен ранее"
+          : source.confirmed
           ? paymentDisplay?.label ?? "Оплачен/Подтверждён"
           : "Не оплачен/Не подтверждён",
         paymentUsage: null,

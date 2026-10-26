@@ -31,6 +31,8 @@ interface AdminReleaseDetailsResponse {
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   priority: boolean;
+  hidden?: boolean;
+  resubmission?: { source_release_id?: string; source_release_title?: string } | null;
   media_health?: {
     broken_cover: boolean;
     broken_audio_tracks: number;
@@ -154,7 +156,7 @@ interface FileItem {
   diagnosis?: MediaDiagnosisSummary;
 }
 
-type ActionKind = "approve" | "reject" | "delete" | "payment" | "edit";
+type ActionKind = "approve" | "reject" | "delete" | "payment" | "edit" | "restore";
 type RepairTarget = "cover" | "track_audio";
 
 interface MediaDiagnosisSummary {
@@ -260,10 +262,10 @@ function formatDuration(value: number | null | undefined): string {
 
 export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDetailsResponse }) {
   const router = useRouter();
-  const canApprove = ["moderation", "changes_required", "approved", "rejected"].includes(
+  const canApprove = !details.hidden && ["moderation", "changes_required", "approved", "rejected"].includes(
     details.status
   );
-  const canReject = details.status === "moderation";
+  const canReject = !details.hidden && details.status === "moderation";
   const [busy, setBusy] = React.useState<ActionKind | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [approveOpen, setApproveOpen] = React.useState(false);
@@ -523,6 +525,21 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
     setEditingTrackId(null);
   };
 
+  const restoreHiddenRelease = async () => {
+    setBusy("restore");
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${details.id}/delete-request/restore`, { method: "POST" });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Не удалось восстановить релиз.");
+      router.refresh();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Не удалось восстановить релиз.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const togglePaymentStatus = async (paid: boolean) => {
     setBusy("payment");
     setError(null);
@@ -656,7 +673,29 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                   Приоритетный
                 </span>
               ) : null}
+              {details.resubmission ? (
+                <span className="inline-flex items-center rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-200">
+                  Повторная модерация
+                </span>
+              ) : null}
+              {details.hidden ? (
+                <span className="inline-flex items-center rounded-full border border-white/15 bg-white/[0.06] px-2 py-0.5 text-[11px] font-semibold text-white/70">
+                  Скрыт
+                </span>
+              ) : null}
             </div>
+            {details.resubmission?.source_release_id ? (
+              <p className="text-[12px] text-white/55">
+                Повторная отправка ранее оплаченного релиза{" "}
+                <Link
+                  href={`/admin/releases/${details.resubmission.source_release_id}`}
+                  className="text-sky-200 underline-offset-2 hover:underline"
+                >
+                  «{details.resubmission.source_release_title || "исходный релиз"}»
+                </Link>
+                .
+              </p>
+            ) : null}
             <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -907,6 +946,18 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
           <X className="h-4 w-4" />
           Отклонить
         </button>
+        {details.hidden ? (
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => {
+              void restoreHiddenRelease();
+            }}
+            className="inline-flex h-10 items-center gap-1 rounded-lg border border-white/[0.14] bg-white/[0.04] px-3 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:opacity-50"
+          >
+            Восстановить релиз
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={busy !== null}

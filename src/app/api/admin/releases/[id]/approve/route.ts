@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { approveReleaseByAdmin, canManageReleases, canManageReleasesSession } from "@/lib/admin-release-service";
+import { approveReleaseByAdmin, canManageReleasesSession } from "@/lib/admin-release-service";
 
 export async function POST(
   request: Request,
@@ -65,12 +65,16 @@ export async function POST(
   // Approval means the internal review is complete. Public release posts and
   // follower notices are created only by a future trusted DSP confirmation.
 
+  const mergedFromReleaseId = "mergedFromReleaseId" in approved ? approved.mergedFromReleaseId : null;
   return NextResponse.json(
     {
       ok: true,
-      releaseId,
+      releaseId: approved.releaseId,
+      mergedFromReleaseId,
       status: "approved",
-      message: "Релиз принят."
+      message: mergedFromReleaseId
+        ? "Повторная модерация принята: изменения перенесены в исходный релиз."
+        : "Релиз принят."
     },
     { status: 200 }
   );

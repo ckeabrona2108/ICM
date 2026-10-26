@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCurrency } from "@/lib/format";
+import { formatRubCurrency } from "@/lib/currency-format";
 import { resolveNetReportRightsAmounts } from "@/lib/finance-client";
 
 type ReportDetailItem = {
@@ -47,7 +47,7 @@ function formatValue(value: unknown, format?: DetailColumn["format"]): string {
   if (!hasValue(value)) return "";
 
   if (format === "currency" && typeof value === "number" && Number.isFinite(value)) {
-    return formatCurrency(value, "RUB");
+    return formatRubCurrency(value);
   }
   if (format === "number" && typeof value === "number" && Number.isFinite(value)) {
     return value.toLocaleString("ru-RU");

@@ -4,14 +4,24 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Coins, Percent, Send, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUpRight,
+  CalendarDays,
+  Check,
+  Coins,
+  FileCheck,
+  FileText,
+  Hourglass,
+  IdCard,
+  Wallet
+} from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { DashboardShell, PageSection } from "@/components/layout/dashboard-shell";
 import { ReportDetailTable } from "@/components/finance/report-detail-table";
 import { Button } from "@/components/ui/button";
-import { Tabs } from "@/components/ui/tabs";
-import { formatCurrency } from "@/lib/format";
+import { formatRubCurrency } from "@/lib/currency-format";
 import { cn } from "@/lib/utils";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { FinanceReportStatus } from "@/lib/finance-policy";
@@ -33,6 +43,11 @@ const RevenueChart = dynamic(
 
 const financeTabs = ["Отчеты", "Запрос выплаты", "Начисления"] as const;
 type FinanceTab = (typeof financeTabs)[number];
+const financeTabLabels: Record<FinanceTab, string> = {
+  Отчеты: "Отчёты",
+  "Запрос выплаты": "Выплаты",
+  Начисления: "Начисления"
+};
 const transactionFilters = ["Все", "Начисления", "Списания", "Выплаты"] as const;
 type TransactionFilter = (typeof transactionFilters)[number];
 
@@ -111,6 +126,17 @@ export function FinancePageClient({
     pendingPayout
   });
 
+  const minimumReached = availableToWithdraw >= minimumPayoutAmount;
+  const minimumProgress =
+    minimumPayoutAmount > 0 ? Math.min(100, Math.round((availableToWithdraw / minimumPayoutAmount) * 100)) : 100;
+  const payoutWindowLabel = (payoutWindow.currentWindow ?? payoutWindow.nextWindow)?.label ?? null;
+  const tabsRef = React.useRef<HTMLDivElement>(null);
+
+  function openPayoutTab() {
+    setActiveTab("Запрос выплаты");
+    tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   const filteredTransactions = initialTransactions.filter((transaction) => {
     if (transactionFilter === "Все") return true;
     if (transactionFilter === "Начисления") return transaction.type === "Royalty";
@@ -185,81 +211,141 @@ export function FinancePageClient({
     <DashboardShell>
       <PageHeader
         title="Кошелёк"
-        description="Доступные средства без НДС по согласованным отчетам, статусы выплат и ограничения."
+        description="Доходы по согласованным отчётам, заявки на выплату и история начислений."
+        actions={
+          <button
+            type="button"
+            onClick={openPayoutTab}
+            className="ux-button-primary inline-flex h-11 items-center gap-2 rounded-[18px] px-4 text-[15px] font-semibold text-white"
+          >
+            <ArrowUpRight className="h-4 w-4" />
+            Вывести средства
+          </button>
+        }
       />
 
-      <motion.div
-        initial="hidden"
-        animate="show"
-        variants={{
-          hidden: { opacity: 0, y: 10 },
-          show: {
-            opacity: 1,
-            y: 0,
-            transition: { staggerChildren: 0.06, delayChildren: 0.02 }
-          }
-        }}
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:auto-rows-fr"
-      >
-        <MetricCard
-          icon={<Wallet className="h-4 w-4" />}
-          label="Доступные средства"
-          value={formatCurrency(availableToWithdraw, "RUB")}
-          hint="Доступно к выводу"
-        />
-        <MetricCard
-          icon={<Send className="h-4 w-4" />}
-          label="Заявки на выплату"
-          value={formatCurrency(pendingPayout, "RUB")}
-          hint="На рассмотрении"
-          tone="violet"
-        />
-        <MetricCard
-          icon={<Coins className="h-4 w-4" />}
-          label="Начисления"
-          value={formatCurrency(accruals, "RUB")}
-          hint="Ожидает согласования"
-          tone="cyan"
-        />
-      </motion.div>
+      <div className="grid gap-4 xl:grid-cols-[1.55fr_1fr]">
+        <div className="relative overflow-hidden rounded-[26px] border border-[#7b61ff]/35 bg-[radial-gradient(circle_at_85%_0%,rgba(123,97,255,0.35),transparent_50%),linear-gradient(160deg,#1a1730,#111220_60%)] p-6 sm:p-7">
+          <p className="flex items-center gap-2 text-[13px] font-medium text-[#c4b5fd]">
+            <Wallet className="h-4 w-4" /> Доступно к выводу
+          </p>
+          <p className="mt-2 text-[40px] font-extrabold leading-none tracking-[-0.04em] text-white tabular-nums sm:text-[52px]">
+            {formatRubCurrency(availableToWithdraw)}
+          </p>
+          <p className="mt-2 text-[13.5px] font-medium text-white/60">Без НДС, по согласованным отчётам</p>
 
-      <PageSection className="mt-6">
-        <div className="flex items-start gap-4">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-[#7b3df5]/35 bg-[#7b3df5]/15 text-[#c4b5fd] shadow-[0_0_0_1px_rgba(123,61,245,0.18),0_10px_30px_-18px_rgba(123,61,245,0.55)]">
-            <Percent className="h-5 w-5" />
-          </span>
-          <div className="min-w-0">
-            <h2 className="text-[18px] font-semibold text-white sm:text-[20px]">
-              Ограничения перед выплатой
-            </h2>
-            <div className="mt-2 space-y-2 text-[15px] font-medium leading-relaxed text-white/75">
-              <p>Выплата доступна только по согласованным отчетам.</p>
-              <p>
-                Минимальная сумма выплаты: {formatCurrency(minimumPayoutAmount, "RUB")}. Проверьте
-                инструкцию менеджера по реквизитам и способу перечисления.
-              </p>
-              {pendingReportsCount > 0 ? (
-                <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-3.5 py-2.5 text-amber-100/95">
-                  Сейчас есть несогласованные отчеты.
-                </p>
-              ) : null}
-              <p
-                className={cn(
-                  "rounded-xl border px-3.5 py-2.5",
-                  payoutWindow.isOpen
-                    ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-100/95"
-                    : "border-sky-400/25 bg-sky-400/10 text-sky-100/95"
-                )}
-              >
-                {payoutWindow.message}
-              </p>
+          <div className="mt-6">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[12.5px] font-semibold text-white/60">
+              <span>Минимум для вывода — {formatRubCurrency(minimumPayoutAmount)}</span>
+              {minimumReached ? (
+                <span className="inline-flex items-center gap-1 text-emerald-400">
+                  <Check className="h-3.5 w-3.5" /> можно выводить
+                </span>
+              ) : (
+                <span>ещё {formatRubCurrency(minimumPayoutAmount - availableToWithdraw)}</span>
+              )}
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.08]">
+              <div
+                className="h-full rounded-full bg-[linear-gradient(90deg,#7b61ff,#a78bfa)]"
+                style={{ width: `${minimumProgress}%` }}
+              />
             </div>
           </div>
-        </div>
-      </PageSection>
 
-      <div className="mt-6 flex flex-wrap items-center gap-3">
-        <Tabs tabs={[...financeTabs]} active={activeTab} onChange={(v) => setActiveTab(v as FinanceTab)} />
+          <div className="mt-6 flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={openPayoutTab}
+              className="inline-flex h-11 items-center rounded-2xl bg-white px-5 text-[15px] font-semibold text-[#14121f] transition hover:bg-white/90"
+            >
+              {minimumReached ? `Вывести ${formatRubCurrency(availableToWithdraw)}` : "Запросить выплату"}
+            </button>
+            {payoutWindowLabel ? (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[13px] font-semibold",
+                  payoutWindow.isOpen ? "bg-emerald-500/15 text-emerald-300" : "bg-[#7b61ff]/20 text-[#c4b5fd]"
+                )}
+              >
+                <CalendarDays className="h-4 w-4" />
+                {payoutWindow.isOpen ? "Окно выплат открыто" : "Окно выплат"}: {payoutWindowLabel}
+              </span>
+            ) : null}
+          </div>
+          <Wallet className="pointer-events-none absolute -bottom-8 right-6 h-44 w-44 text-[#a78bfa]/[0.07]" strokeWidth={1.2} />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+          <SideMetric
+            icon={<Hourglass className="h-5 w-5" />}
+            label="Заявки на рассмотрении"
+            value={formatRubCurrency(pendingPayout)}
+            hint={pendingPayout > 0 ? "Ждут проверки менеджером" : "Активных заявок нет"}
+            tone="amber"
+          />
+          <SideMetric
+            icon={<FileText className="h-5 w-5" />}
+            label="Ожидает согласования"
+            value={formatRubCurrency(accruals)}
+            hint={pendingReportsCount > 0 ? "Проверьте и согласуйте отчёт" : "Новые отчёты появятся здесь"}
+            tone="violet"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        <RuleChip icon={<FileCheck className="h-5 w-5" />}>
+          Выплата только по <b className="text-white">согласованным</b> отчётам
+        </RuleChip>
+        <RuleChip icon={<Coins className="h-5 w-5" />}>
+          Минимальная сумма — <b className="text-white">{formatRubCurrency(minimumPayoutAmount)}</b>
+        </RuleChip>
+        <RuleChip icon={<IdCard className="h-5 w-5" />}>Физлицо — расписка, самозанятый — чек «Мой налог»</RuleChip>
+      </div>
+
+      {pendingReportsCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setActiveTab("Отчеты")}
+          className="flex w-full items-center gap-3 rounded-2xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-left text-[14px] font-medium text-amber-100"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
+          Есть несогласованные отчёты — проверьте их, чтобы сумма попала в доступные средства.
+        </button>
+      ) : null}
+
+      <div ref={tabsRef} className="flex flex-wrap items-center justify-between gap-3 scroll-mt-24">
+        <div className="inline-flex gap-1 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-1">
+          {financeTabs.map((tab) => {
+            const count =
+              tab === "Отчеты" ? reports.length : tab === "Запрос выплаты" ? initialPayoutRequests.length : 0;
+            const active = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-[14px] font-semibold transition-colors",
+                  active ? "bg-white/10 text-white" : "text-white/60 hover:text-white"
+                )}
+              >
+                {financeTabLabels[tab]}
+                {count > 0 ? (
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 text-[11px] font-bold",
+                      active ? "bg-[#7b61ff] text-white" : "bg-white/10 text-white/60"
+                    )}
+                  >
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <AnimatePresence mode="wait">
@@ -339,7 +425,7 @@ export function FinancePageClient({
                             </span>
                           </div>
                           <p className="mt-3 text-[22px] font-semibold text-white">
-                            {formatCurrency(report.amount, "RUB")}
+                            {formatRubCurrency(report.amount)}
                           </p>
                         </div>
                         <div className="shrink-0 text-right">
@@ -363,7 +449,7 @@ export function FinancePageClient({
           ) : null}
 
           {activeTab === "Запрос выплаты" ? (
-            <PageSection className="mt-4">
+            <div className="mt-4">
               <PayoutRequestWizard
                 reports={reports}
                 availableToWithdraw={availableToWithdraw}
@@ -372,7 +458,7 @@ export function FinancePageClient({
                 initialPayoutRequests={initialPayoutRequests}
                 contractNumber={contractNumber}
               />
-            </PageSection>
+            </div>
           ) : null}
 
           {activeTab === "Начисления" ? (
@@ -484,7 +570,7 @@ export function FinancePageClient({
                             <div className="shrink-0 text-right">
                               <p className={cn("text-[17px] font-semibold tabular-nums", amountTone)}>
                                 {amountPrefix}
-                                {formatCurrency(Math.abs(transaction.amount), "RUB")}
+                                {formatRubCurrency(Math.abs(transaction.amount))}
                               </p>
                               <p className="mt-1 text-[12px] font-semibold text-white/45">
                                 {transaction.status === "Completed"
@@ -533,54 +619,44 @@ export function FinancePageClient({
   );
 }
 
-function MetricCard({
+function SideMetric({
   icon,
   label,
   value,
   hint,
-  tone = "violet"
+  tone
 }: {
   icon: React.ReactNode;
   label: string;
   value: string;
-  hint?: string;
-  tone?: "violet" | "cyan" | "amber" | "slate";
+  hint: string;
+  tone: "amber" | "violet";
 }) {
-  const ring =
-    tone === "cyan"
-      ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100"
-      : tone === "amber"
-        ? "border-amber-400/20 bg-amber-400/10 text-amber-100"
-        : tone === "slate"
-          ? "border-white/15 bg-white/5 text-white/80"
-          : "border-[#7b3df5]/25 bg-[#7b3df5]/15 text-[#c4b5fd]";
-
   return (
-    <motion.div
-      variants={{
-        hidden: { opacity: 0, y: 10 },
-        show: { opacity: 1, y: 0 }
-      }}
-      className="group relative flex h-full min-w-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-[#13151d]/85 p-4 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-white/[0.14] sm:p-5"
-    >
-      <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full bg-[#7b3df5]/[0.10] blur-[24px] transition-opacity duration-300 group-hover:opacity-90" />
-      <div className="grid min-w-0 flex-1 grid-cols-[auto,minmax(0,1fr)] items-start gap-x-3 gap-y-2.5">
-        <span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-2xl border", ring)}>
-          {icon}
-        </span>
-        <p className="min-h-[2.75rem] min-w-0 text-[12px] font-semibold uppercase leading-[1.25] tracking-[0.12em] text-white/56 break-words [hyphens:auto] [overflow-wrap:anywhere]">
-          {label}
-        </p>
-        <p className="col-span-2 min-w-0 text-[clamp(1.125rem,2.2vw,1.625rem)] font-semibold leading-[1.15] tracking-[-0.01em] text-white tabular-nums break-words [overflow-wrap:anywhere]">
-          {value}
-        </p>
-        {hint ? (
-          <p className="col-span-2 min-w-0 text-[13px] font-medium leading-[1.35] tracking-[0.01em] text-white/62 break-words [hyphens:auto] [overflow-wrap:anywhere]">
-            {hint}
-          </p>
-        ) : null}
+    <div className="flex items-center justify-between gap-4 rounded-[24px] border border-white/[0.09] bg-[#13151d] p-5">
+      <div className="min-w-0">
+        <p className="text-[13px] font-medium text-white/55">{label}</p>
+        <p className="mt-2 text-[26px] font-bold tracking-[-0.02em] text-white tabular-nums">{value}</p>
+        <p className="mt-1 text-[13px] font-medium text-white/45">{hint}</p>
       </div>
-    </motion.div>
+      <span
+        className={cn(
+          "grid h-12 w-12 shrink-0 place-items-center rounded-2xl",
+          tone === "amber" ? "bg-amber-400/10 text-amber-300" : "bg-[#7b61ff]/15 text-[#c4b5fd]"
+        )}
+      >
+        {icon}
+      </span>
+    </div>
+  );
+}
+
+function RuleChip({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 rounded-[18px] border border-white/[0.07] bg-white/[0.02] px-4 py-3.5 text-[13.5px] font-medium text-white/60">
+      <span className="shrink-0 text-[#a78bfa]">{icon}</span>
+      <span>{children}</span>
+    </div>
   );
 }
 
@@ -667,7 +743,7 @@ function ReportDetailsModal({
             Сумма за квартал
           </p>
           <p className="mt-2 text-[30px] font-semibold text-white">
-            {formatCurrency(report.amount, "RUB")}
+            {formatRubCurrency(report.amount)}
           </p>
           {visibleAdminComment ? (
             <p className="mt-3 text-[14px] leading-6 text-white/70">{visibleAdminComment}</p>
@@ -686,7 +762,7 @@ function ReportDetailsModal({
                   >
                     <span className="text-[14px] text-white/78">{item.platformName}</span>
                     <span className="text-[14px] font-semibold text-white">
-                      {formatCurrency(item.amount, "RUB")}
+                      {formatRubCurrency(item.amount)}
                     </span>
                   </div>
                 ))

@@ -103,6 +103,11 @@ function toDateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+// Подпись окна уже может заканчиваться на «г.», вторую точку не добавляем.
+function withSentenceEnd(label: string): string {
+  return label.endsWith(".") ? label : `${label}.`;
+}
+
 function formatWindowLabel(start: Date, endExclusive: Date): string {
   const end = new Date(endExclusive.getTime() - 1);
   const formatFull = (date: Date) =>
@@ -225,7 +230,7 @@ export function getPayoutWindowState(
         isOpen: true,
         currentWindow: manualWindow.info,
         nextWindow: null,
-        message: `Окно выплат открыто: ${manualWindow.info.label}.`
+        message: `Окно выплат открыто: ${withSentenceEnd(manualWindow.info.label)}`
       };
     }
 
@@ -235,7 +240,7 @@ export function getPayoutWindowState(
         isOpen: false,
         currentWindow: null,
         nextWindow: manualWindow.info,
-        message: `Следующее окно выплат: ${manualWindow.info.label}.`
+        message: `Следующее окно выплат: ${withSentenceEnd(manualWindow.info.label)}`
       };
     }
 
@@ -260,7 +265,7 @@ export function getPayoutWindowState(
       isOpen: true,
       currentWindow: current.info,
       nextWindow: next?.info ?? null,
-      message: `Окно выплат открыто: ${current.info.label}.`
+      message: `Окно выплат открыто: ${withSentenceEnd(current.info.label)}`
     };
   }
 
@@ -269,7 +274,7 @@ export function getPayoutWindowState(
     isOpen: false,
     currentWindow: null,
     nextWindow: next?.info ?? null,
-    message: next ? `Следующее окно выплат: ${next.info.label}.` : "Окно выплат сейчас закрыто."
+    message: next ? `Следующее окно выплат: ${withSentenceEnd(next.info.label)}` : "Окно выплат сейчас закрыто."
   };
 }
 

@@ -1680,3 +1680,86 @@ export async function getAnalyticsReleaseDetails(
     chart: snapshotOverview?.chart ?? []
   };
 }
+
+export interface AnalyticsCountriesResponse {
+  latestReportDate: string | null;
+  countriesBreakdown: Array<{
+    country: string;
+    streams: number;
+    pay_streams: number;
+  }>;
+}
+
+/** Country breakdown of the latest report across accessible releases (or one release), like release details. */
+export async function getAnalyticsCountries(
+  prisma: PrismaClient,
+  params: {
+    user_id: string;
+    release_id?: string;
+    days?: number;
+  }
+): Promise<AnalyticsCountriesResponse> {
+  const days = clampDays(params.days);
+  const releaseIds = await listAnalyticsAccessibleReleaseIds(prisma, {
+    user_id: params.user_id,
+    ...(params.release_id ? { release_id: params.release_id } : {})
+  });
+  if (releaseIds.length === 0) return { latestReportDate: null, countriesBreakdown: [] };
+
+  const where: Prisma.analytics_report_snapshotsWhereInput = {
+    user_id: params.user_id,
+    release_id: { in: releaseIds },
+    period_days: days
+  };
+  const latest = await prisma.analytics_report_snapshots.aggregate({
+    where,
+    _max: { report_date: true }
+  });
+  const latestReportDate = latest._max.report_date ?? null;
+  if (!latestReportDate) return { latestReportDate: null, countriesBreakdown: [] };
+
+  const dayStart = new Date(`${toDateKey(latestReportDate)}T00:00:00.000Z`);
+  const grouped = await prisma.analytics_report_snapshots.groupBy({
+    by: ["country"],
+    where: {
+      ...where,
+      report_date: { gte: dayStart, lt: new Date(dayStart.getTime() + 24 * 60 * 60 * 1000) }
+    },
+    _sum: { streams: true, pay_streams: true },
+    orderBy: { _sum: { streams: "desc" } }
+  });
+
+  const rows =
+    grouped.length > 0 || !hasRawQueryClient(prisma)
+      ? grouped.map((item) => ({
+          country: item.country,
+          streams: item._sum.streams ?? 0,
+          pay_streams: item._sum.pay_streams ?? 0
+        }))
+      : (
+          await prisma.$queryRaw<
+            Array<{ country: string; streams: bigint | number | null; pay_streams: bigint | number | null }>
+          >(Prisma.sql`
+            SELECT
+              "country" AS "country",
+              SUM("streams")::bigint AS "streams",
+              SUM("pay_streams")::bigint AS "pay_streams"
+            FROM "analytics_report_snapshots"
+            WHERE "user_id" = ${sqlUuid(params.user_id)}
+              AND "release_id" IN (${sqlUuidList(releaseIds)})
+              AND DATE("report_date") = DATE(${dayStart})
+              AND ${buildLegacyPeriodHourCondition(days)}
+            GROUP BY "country"
+            ORDER BY SUM("streams") DESC
+          `)
+        ).map((row) => ({
+          country: row.country,
+          streams: toNumber(row.streams),
+          pay_streams: toNumber(row.pay_streams)
+        }));
+
+  return {
+    latestReportDate: toDateKey(latestReportDate),
+    countriesBreakdown: rows.filter((row) => row.streams > 0 || row.pay_streams > 0)
+  };
+}

@@ -2,10 +2,9 @@
 
 import * as React from "react";
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -19,7 +18,8 @@ const ANALYTICS_GREEN = "#4fffd2";
 
 export interface AnalyticsLineChartProps {
   data: AnalyticsOverviewChartPointResponse[];
-  days?: number;
+  /** Color of the "all streams" series, e.g. a focused platform color. */
+  primaryColor?: string;
 }
 
 interface TooltipDatum {
@@ -90,12 +90,14 @@ function AnalyticsTooltip({ active, payload, label }: TooltipContentInput) {
       className="rounded-xl border border-white/20 bg-[#0a1120]/80 px-3 py-2.5 text-white shadow-[0_10px_30px_rgba(5,15,30,0.55)] backdrop-blur-[10px]"
       style={{ transition: "opacity 180ms ease, transform 180ms ease" }}
     >
-      <div className="text-[12px] text-white/90">Прослушивания:</div>
-      <div className="text-[15px] font-semibold text-white">{formatMetricValue(streams)}</div>
-      <div className="mt-2 text-[12px] text-white/90">Прослушивания &gt; 30 сек:</div>
-      <div className="text-[15px] font-semibold text-white">{formatMetricValue(payStreams)}</div>
-      <div className="mt-2 text-[12px] text-white/70">
-        Дата: {typeof label === "string" ? formatDateToDayMonthYear(label) : "—"}
+      <div className="text-[12px] text-white/60">
+        {typeof label === "string" ? formatDateToDayMonthYear(label) : "—"}
+      </div>
+      <div className="mt-1.5 text-[13px] text-white/80">
+        Все: <span className="font-semibold text-white">{formatMetricValue(streams)}</span>
+      </div>
+      <div className="text-[13px] text-white/80">
+        Больше 30 сек: <span className="font-semibold text-white">{formatMetricValue(payStreams)}</span>
       </div>
     </div>
   );
@@ -131,11 +133,19 @@ function ActiveDotGlow({ cx, cy, stroke, glowFilterId }: ActiveDotInput & { glow
   );
 }
 
-function AnalyticsLineChartBase({ data }: AnalyticsLineChartProps) {
+function formatAxisDate(value: string): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short", timeZone: "UTC" }).replace(".", "");
+}
+
+function AnalyticsLineChartBase({ data, primaryColor = ANALYTICS_PURPLE }: AnalyticsLineChartProps) {
   const dotFilterId = "analytics-dot-glow";
+  const streamsFillId = "analytics-streams-fill";
+  const payFillId = "analytics-pay-fill";
 
   return (
-    <div className="h-[310px] w-full rounded-2xl border border-white/10 bg-black/20 p-3 sm:h-[340px] sm:p-4">
+    <div className="h-[260px] w-full sm:h-[300px]">
       <style>{`
         @keyframes analyticsDotPulse {
           from { opacity: 0.8; transform: scale(0.86); }
@@ -144,70 +154,73 @@ function AnalyticsLineChartBase({ data }: AnalyticsLineChartProps) {
       `}</style>
 
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 10, right: 14, left: 14, bottom: 14 }}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <defs>
             <filter id={dotFilterId} x="-300%" y="-300%" width="700%" height="700%">
               <feGaussianBlur stdDeviation="3.4" />
             </filter>
+            <linearGradient id={streamsFillId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={primaryColor} stopOpacity={0.42} />
+              <stop offset="100%" stopColor={primaryColor} stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id={payFillId} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={ANALYTICS_GREEN} stopOpacity={0.26} />
+              <stop offset="100%" stopColor={ANALYTICS_GREEN} stopOpacity={0} />
+            </linearGradient>
           </defs>
 
-          <CartesianGrid stroke="rgba(255,255,255,0.08)" strokeDasharray="3 3" />
+          <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
           <XAxis
             dataKey="date"
-            stroke="rgba(255,255,255,0.45)"
+            stroke="rgba(255,255,255,0.4)"
             tickLine={false}
             axisLine={false}
-            tick={{ fontSize: 12 }}
-            minTickGap={20}
-            padding={{ left: 10, right: 10 }}
+            tick={{ fontSize: 11 }}
+            tickFormatter={formatAxisDate}
+            minTickGap={28}
+            tickMargin={10}
           />
           <YAxis
-            stroke="rgba(255,255,255,0.45)"
+            stroke="rgba(255,255,255,0.4)"
             tickLine={false}
             axisLine={false}
-            width={62}
-            tickMargin={8}
-            tick={{ fontSize: 12 }}
+            width={44}
+            allowDecimals={false}
+            tick={{ fontSize: 11 }}
             tickFormatter={formatYAxisValue}
           />
 
           <Tooltip
-            cursor={false}
+            cursor={{ stroke: "rgba(255,255,255,0.12)" }}
             content={<AnalyticsTooltip />}
             isAnimationActive
             animationDuration={180}
             wrapperStyle={{ outline: "none" }}
           />
 
-          <Line
-            type="monotone"
+          <Area
+            type="linear"
+            dataKey="streams"
+            stroke={primaryColor}
+            strokeWidth={2.4}
+            fill={`url(#${streamsFillId})`}
+            dot={false}
+            activeDot={(props: ActiveDotInput) => (
+              <ActiveDotGlow {...props} glowFilterId={dotFilterId} />
+            )}
+          />
+          <Area
+            type="linear"
             dataKey="pay_streams"
             stroke={ANALYTICS_GREEN}
-            strokeWidth={2.2}
-            dot={{ r: 2.8 }}
+            strokeWidth={2.4}
+            fill={`url(#${payFillId})`}
+            dot={false}
             activeDot={(props: ActiveDotInput) => (
               <ActiveDotGlow {...props} glowFilterId={dotFilterId} />
             )}
           />
-          <Line
-            type="monotone"
-            dataKey="streams"
-            stroke={ANALYTICS_PURPLE}
-            strokeWidth={2.2}
-            dot={{ r: 2.8 }}
-            activeDot={(props: ActiveDotInput) => (
-              <ActiveDotGlow {...props} glowFilterId={dotFilterId} />
-            )}
-          />
-          <Legend
-            verticalAlign="bottom"
-            align="left"
-            wrapperStyle={{ paddingTop: 10 }}
-            formatter={(value) =>
-              value === "pay_streams" ? "Прослушивания больше 30 секунд" : "Все прослушивания"
-            }
-          />
-        </LineChart>
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );

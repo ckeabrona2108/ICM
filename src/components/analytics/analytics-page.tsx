@@ -2,18 +2,31 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { BarChart3, Clock3 } from "lucide-react";
 
-import { DashboardShell, PageSection } from "@/components/layout/dashboard-shell";
-import { PageHeader } from "@/components/layout/page-header";
+import { cn } from "@/lib/utils";
+import { DashboardShell } from "@/components/layout/dashboard-shell";
 import {
   AnalyticsFilters,
+  DEFAULT_ANALYTICS_FILTERS,
   type AnalyticsFilterState
 } from "@/components/analytics/analytics-filters";
 import { AnalyticsOverviewCard } from "@/components/analytics/analytics-overview-card";
 import { AnalyticsReleaseTable } from "@/components/analytics/analytics-release-table";
+import {
+  ANALYTICS_MINT,
+  ANALYTICS_PURPLE,
+  AnalyticsCard,
+  ShareRow,
+  SkeletonBlock,
+  formatCountryName,
+  formatReportDate,
+  getPlatformColor
+} from "@/components/analytics/analytics-ui";
 import type {
+  AnalyticsCountriesResponse,
+  AnalyticsOverviewChartPointResponse,
   AnalyticsOverviewResponse,
-  AnalyticsReleaseDetailsResponse,
   AnalyticsReleaseListItemResponse
 } from "@/lib/api/contracts";
 
@@ -24,404 +37,296 @@ const AnalyticsLineChart = dynamic(
     ),
   {
     ssr: false,
-    loading: () => <p className="text-[14px] font-medium text-white/70">Готовим график…</p>
+    loading: () => <SkeletonBlock className="h-[260px] w-full sm:h-[300px]" />
   }
 );
 
-const AnalyticsPlatformsChart = dynamic(
-  () =>
-    import("@/components/analytics/analytics-platforms-chart").then(
-      (module) => module.AnalyticsPlatformsChart
-    ),
-  {
-    ssr: false,
-    loading: () => <p className="text-[14px] font-medium text-white/70">Готовим график площадок…</p>
-  }
-);
+const STALE_REPORT_DAYS = 7;
 
-function buildOverviewUrl(filters: AnalyticsFilterState): string {
+function buildQuery(filters: AnalyticsFilterState, options: { withRelease: boolean }): string {
   const params = new URLSearchParams();
   params.set("days", String(filters.days));
-  if (filters.releaseId) params.set("release_id", filters.releaseId);
+  if (options.withRelease && filters.releaseId) params.set("release_id", filters.releaseId);
   if (filters.country.trim()) params.set("country", filters.country.trim());
   if (filters.upc.trim()) params.set("upc", filters.upc.trim());
   if (filters.platform.trim()) params.set("platform", filters.platform.trim());
-  return `/api/analytics/overview?${params.toString()}`;
+  return params.toString();
 }
 
-function buildReleasesUrl(filters: AnalyticsFilterState): string {
-  const params = new URLSearchParams();
-  params.set("days", String(filters.days));
-  if (filters.country.trim()) params.set("country", filters.country.trim());
-  if (filters.upc.trim()) params.set("upc", filters.upc.trim());
-  if (filters.platform.trim()) params.set("platform", filters.platform.trim());
-  return `/api/analytics/releases?${params.toString()}`;
-}
-
-function buildReleaseDetailsUrl(releaseId: string, days: number): string {
-  const params = new URLSearchParams();
-  params.set("days", String(days));
-  return `/api/analytics/releases/${releaseId}?${params.toString()}`;
-}
-
-export function AnalyticsPage() {
-  const [filters, setFilters] = React.useState<AnalyticsFilterState>({
-    releaseId: "",
-    country: "",
-    upc: "",
-    platform: "",
-    days: 30
-  });
-  const [focusedPlatform, setFocusedPlatform] = React.useState("");
-
-  const [overview, setOverview] = React.useState<AnalyticsOverviewResponse | null>(null);
-  const [releases, setReleases] = React.useState<AnalyticsReleaseListItemResponse[]>([]);
-  const [releaseDetails, setReleaseDetails] = React.useState<AnalyticsReleaseDetailsResponse | null>(
-    null
-  );
-
-  const [loadingOverview, setLoadingOverview] = React.useState(true);
-  const [loadingReleases, setLoadingReleases] = React.useState(true);
-  const [loadingDetails, setLoadingDetails] = React.useState(false);
-
-  const [overviewError, setOverviewError] = React.useState<string | null>(null);
-  const [releasesError, setReleasesError] = React.useState<string | null>(null);
-  const [detailsError, setDetailsError] = React.useState<string | null>(null);
-  const releasesUrl = React.useMemo(
-    () => buildReleasesUrl(filters),
-    [filters.country, filters.days, filters.platform, filters.upc]
-  );
-  const overviewUrl = React.useMemo(
-    () => buildOverviewUrl(filters),
-    [filters.country, filters.days, filters.platform, filters.releaseId, filters.upc]
-  );
-  const detailsUrl = React.useMemo(
-    () =>
-      filters.releaseId
-        ? buildReleaseDetailsUrl(filters.releaseId, filters.days)
-        : null,
-    [filters.days, filters.releaseId]
-  );
-  const handleSelectRelease = React.useCallback((releaseId: string) => {
-    setFilters((prev) => {
-      const nextReleaseId = prev.releaseId === releaseId ? "" : releaseId;
-      if (prev.releaseId === nextReleaseId) return prev;
-      return {
-        ...prev,
-        releaseId: nextReleaseId
-      };
-    });
-  }, []);
-  const handleSelectPlatform = React.useCallback((platform: string) => {
-    setFocusedPlatform((prev) => (prev === platform ? "" : platform));
-  }, []);
-  const platformOptions = React.useMemo(
-    () => overview?.platforms_breakdown.map((item) => item.platform) ?? [],
-    [overview]
-  );
+/** Loads JSON with a timeout; keeps the previous fetch logic of the page in one place. */
+function useAnalyticsResource<T>(url: string | null, validate: (payload: unknown) => payload is T, errorText: string) {
+  const [data, setData] = React.useState<T | null>(null);
+  const [loading, setLoading] = React.useState(Boolean(url));
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!focusedPlatform) return;
-    if (platformOptions.includes(focusedPlatform)) return;
-    setFocusedPlatform("");
-  }, [focusedPlatform, platformOptions]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      setLoadingReleases(true);
-      setReleasesError(null);
-      setReleases([]);
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
-      try {
-        const response = await fetch(releasesUrl, {
-          method: "GET",
-          signal: controller.signal
-        });
-        const payload = (await response.json().catch(() => null)) as
-          | AnalyticsReleaseListItemResponse[]
-          | { error?: string }
-          | null;
-
-        if (!response.ok || !Array.isArray(payload)) {
-          throw new Error("Не удалось загрузить список релизов");
-        }
-
-        if (cancelled) return;
-        setReleases(payload);
-      } catch (error) {
-        if (cancelled) return;
-        setReleasesError(
-          error instanceof DOMException && error.name === "AbortError"
-            ? "Загрузка списка релизов заняла слишком много времени"
-            : error instanceof Error
-              ? error.message
-              : "Ошибка загрузки релизов"
-        );
-      } finally {
-        window.clearTimeout(timeoutId);
-        if (!cancelled) setLoadingReleases(false);
-      }
-    };
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [releasesUrl]);
-
-  React.useEffect(() => {
-    if (!filters.releaseId) return;
-    if (releases.some((release) => release.release_id === filters.releaseId)) return;
-    setFilters((prev) => {
-      if (!prev.releaseId) return prev;
-      return {
-        ...prev,
-        releaseId: ""
-      };
-    });
-  }, [filters.releaseId, releases]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      setLoadingOverview(true);
-      setOverviewError(null);
-      setOverview(null);
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
-
-      try {
-        const response = await fetch(overviewUrl, {
-          method: "GET",
-          signal: controller.signal
-        });
-        const payload = (await response.json().catch(() => null)) as
-          | AnalyticsOverviewResponse
-          | { error?: string }
-          | null;
-        if (!payload || Array.isArray(payload) || !("chart" in payload)) {
-          throw new Error("Не удалось загрузить аналитику");
-        }
-        if (!response.ok) {
-          throw new Error("Не удалось загрузить аналитику");
-        }
-
-        if (cancelled) return;
-        setOverview(payload);
-      } catch (error) {
-        if (cancelled) return;
-        setOverviewError(
-          error instanceof DOMException && error.name === "AbortError"
-            ? "Загрузка аналитики заняла слишком много времени"
-            : error instanceof Error
-              ? error.message
-              : "Ошибка загрузки аналитики"
-        );
-      } finally {
-        window.clearTimeout(timeoutId);
-        if (!cancelled) setLoadingOverview(false);
-      }
-    };
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [overviewUrl]);
-
-  React.useEffect(() => {
-    if (!detailsUrl) {
-      setReleaseDetails(null);
-      setDetailsError(null);
+    if (!url) {
+      setData(null);
+      setLoading(false);
+      setError(null);
       return;
     }
 
     let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
+    setLoading(true);
+    setError(null);
+    setData(null);
 
-    const run = async () => {
-      setLoadingDetails(true);
-      setDetailsError(null);
-      setReleaseDetails(null);
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 15_000);
+    void (async () => {
       try {
-        const response = await fetch(detailsUrl, {
-          method: "GET",
-          signal: controller.signal
-        });
-        const payload = (await response.json().catch(() => null)) as
-          | AnalyticsReleaseDetailsResponse
-          | { error?: string }
-          | null;
-        if (!payload || Array.isArray(payload) || !("release_id" in payload)) {
-          throw new Error("Не удалось загрузить детали релиза");
-        }
-        if (!response.ok) {
-          throw new Error("Не удалось загрузить детали релиза");
-        }
-
+        const response = await fetch(url, { method: "GET", signal: controller.signal });
+        const payload: unknown = await response.json().catch(() => null);
+        if (!response.ok || !validate(payload)) throw new Error(errorText);
+        if (!cancelled) setData(payload);
+      } catch (fetchError) {
         if (cancelled) return;
-        setReleaseDetails(payload);
-      } catch (error) {
-        if (cancelled) return;
-        setDetailsError(
-          error instanceof DOMException && error.name === "AbortError"
-            ? "Загрузка деталей релиза заняла слишком много времени"
-            : error instanceof Error
-              ? error.message
-              : "Ошибка загрузки деталей релиза"
+        setError(
+          fetchError instanceof DOMException && fetchError.name === "AbortError"
+            ? "Загрузка заняла слишком много времени. Обновите страницу."
+            : errorText
         );
       } finally {
         window.clearTimeout(timeoutId);
-        if (!cancelled) setLoadingDetails(false);
+        if (!cancelled) setLoading(false);
       }
-    };
+    })();
 
-    void run();
     return () => {
       cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeoutId);
     };
-  }, [detailsUrl]);
+  }, [errorText, url, validate]);
+
+  return { data, loading, error };
+}
+
+const isOverview = (payload: unknown): payload is AnalyticsOverviewResponse =>
+  Boolean(payload && typeof payload === "object" && !Array.isArray(payload) && "chart" in payload);
+const isReleaseList = (payload: unknown): payload is AnalyticsReleaseListItemResponse[] => Array.isArray(payload);
+const isCountries = (payload: unknown): payload is AnalyticsCountriesResponse =>
+  Boolean(payload && typeof payload === "object" && "countries_breakdown" in payload);
+
+function daysSince(dateKey: string | null | undefined): number | null {
+  if (!dateKey) return null;
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.floor((Date.now() - date.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+export function AnalyticsPage() {
+  const [filters, setFilters] = React.useState<AnalyticsFilterState>(DEFAULT_ANALYTICS_FILTERS);
+  const [focusedPlatform, setFocusedPlatform] = React.useState("");
+
+  const overviewUrl = `/api/analytics/overview?${buildQuery(filters, { withRelease: true })}`;
+  const releasesUrl = `/api/analytics/releases?${buildQuery(filters, { withRelease: false })}`;
+  const countriesUrl = `/api/analytics/countries?${buildQuery(
+    { ...DEFAULT_ANALYTICS_FILTERS, days: filters.days, releaseId: filters.releaseId },
+    { withRelease: true }
+  )}`;
+
+  const overviewState = useAnalyticsResource(overviewUrl, isOverview, "Не удалось загрузить аналитику");
+  const releasesState = useAnalyticsResource(releasesUrl, isReleaseList, "Не удалось загрузить список релизов");
+  const countriesState = useAnalyticsResource(countriesUrl, isCountries, "Не удалось загрузить страны");
+
+  const overview = overviewState.data;
+  const releases = React.useMemo(() => releasesState.data ?? [], [releasesState.data]);
+  const platforms = React.useMemo(() => overview?.platforms_breakdown ?? [], [overview]);
+
+  React.useEffect(() => {
+    if (!filters.releaseId || releasesState.loading) return;
+    if (releases.some((release) => release.release_id === filters.releaseId)) return;
+    setFilters((prev) => (prev.releaseId ? { ...prev, releaseId: "" } : prev));
+  }, [filters.releaseId, releases, releasesState.loading]);
+
+  React.useEffect(() => {
+    if (focusedPlatform && !platforms.some((item) => item.platform === focusedPlatform)) {
+      setFocusedPlatform("");
+    }
+  }, [focusedPlatform, platforms]);
+
+  const handleSelectRelease = React.useCallback((releaseId: string) => {
+    setFilters((prev) => ({ ...prev, releaseId: prev.releaseId === releaseId ? "" : releaseId }));
+  }, []);
+
+  const platformColor = React.useCallback(
+    (platform: string) => getPlatformColor(platform, Math.max(0, platforms.findIndex((item) => item.platform === platform))),
+    [platforms]
+  );
+
+  const chartData = React.useMemo<AnalyticsOverviewChartPointResponse[]>(() => {
+    if (!overview) return [];
+    if (!focusedPlatform) return overview.chart;
+    return overview.platforms_chart.map((point) => {
+      const value = point.values.find((item) => item.platform === focusedPlatform);
+      return { date: point.date, streams: value?.streams ?? 0, pay_streams: value?.pay_streams ?? 0 };
+    });
+  }, [focusedPlatform, overview]);
+
+  const countryRows = countriesState.data?.countries_breakdown ?? [];
+  const countryTotal = countryRows.reduce((sum, item) => sum + item.streams, 0);
+  const reportAge = daysSince(overview?.latest_report_date);
+  const latestReportLabel = formatReportDate(overview?.latest_report_date);
+  const hasData = Boolean(overview && (overview.total_streams > 0 || overview.chart.length > 0));
 
   return (
     <DashboardShell>
-      <PageHeader
-        title="Аналитика"
-        description="История ежедневных snapshot-отчётов агрегатора по прослушиваниям."
-      />
-
-      <AnalyticsFilters
-        value={filters}
-        releases={releases}
-        onChange={setFilters}
-      />
-
-      <div className="mt-4 space-y-4">
-        <AnalyticsOverviewCard data={overview} loading={loadingOverview} />
-
-        <PageSection>
-          {loadingOverview ? (
-            <p className="text-[14px] font-medium text-white/70">Загружаем график…</p>
-          ) : overviewError ? (
-            <p className="text-[14px] font-medium text-rose-300">{overviewError}</p>
-          ) : !overview || overview.chart.length === 0 ? (
-            <p className="text-[14px] font-medium text-white/65">Данные аналитики пока не загружены.</p>
-          ) : (
-            <>
-              <AnalyticsLineChart data={overview.chart} days={filters.days} />
-              {overview.chart.length < 2 ? (
-                <p className="mt-3 text-[13px] font-medium text-white/60">
-                  История графика появится после нескольких ежедневных импортов.
-                </p>
-              ) : null}
-            </>
-          )}
-        </PageSection>
-
-        <AnalyticsReleaseTable
-          releases={releases}
-          selectedReleaseId={filters.releaseId}
-          onSelectRelease={handleSelectRelease}
-        />
-
-        {loadingReleases ? (
-          <p className="text-[14px] font-medium text-white/65">Загружаем список релизов…</p>
-        ) : null}
-        {releasesError ? (
-          <p className="text-[14px] font-medium text-rose-300">{releasesError}</p>
-        ) : null}
-
-        <PageSection>
-          <h3 className="text-[18px] font-semibold text-white">Площадки</h3>
-          {!overview || overview.platforms_breakdown.length === 0 ? (
-            <p className="mt-2 text-[14px] text-white/65">По площадкам пока нет данных.</p>
-          ) : (
-            <div className="mt-3 space-y-4">
-              {overview.platforms_chart.length > 0 ? (
-                <AnalyticsPlatformsChart
-                  data={overview.platforms_chart}
-                  platforms={overview.platforms_breakdown.map((item) => item.platform)}
-                  selectedPlatform={focusedPlatform}
-                  onSelectPlatform={handleSelectPlatform}
-                />
-              ) : null}
-              <div className="grid gap-2 lg:grid-cols-2">
-                {overview.platforms_breakdown.map((item) => {
-                  const active = focusedPlatform === item.platform;
-                  return (
-                    <button
-                      key={item.platform}
-                      type="button"
-                      onClick={() => handleSelectPlatform(active ? "" : item.platform)}
-                      className={`rounded-xl border p-3 text-left transition ${
-                        active
-                          ? "border-[#7b3df5]/40 bg-[#7b3df5]/12"
-                          : "border-white/10 bg-black/20 hover:bg-black/28"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[14px] font-semibold text-white">{item.platform}</p>
-                        <span className="text-[11px] font-medium text-white/55">
-                          {active ? "Выбрано" : "Открыть"}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[12px] text-white/70">
-                        {item.streams.toLocaleString("ru-RU")} streams ·{" "}
-                        {item.pay_streams.toLocaleString("ru-RU")} pay streams
-                      </p>
-                      <p className="mt-1 text-[12px] text-white/60">{item.share_percent.toFixed(1)}%</p>
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                        <div
-                          className="h-full rounded-full bg-[#7b3df5]"
-                          style={{ width: `${Math.max(0, Math.min(100, item.share_percent))}%` }}
-                        />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </PageSection>
-
-        {filters.releaseId ? (
-          <PageSection>
-            <h3 className="text-[18px] font-semibold text-white">Страны (текущий отчёт)</h3>
-            {loadingDetails ? (
-              <p className="mt-2 text-[14px] text-white/70">Загружаем детализацию релиза…</p>
-            ) : detailsError ? (
-              <p className="mt-2 text-[14px] text-rose-300">{detailsError}</p>
-            ) : !releaseDetails || releaseDetails.countries_breakdown.length === 0 ? (
-              <p className="mt-2 text-[14px] text-white/65">По выбранному релизу пока нет данных по странам.</p>
-            ) : (
-              <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
-                <table className="w-full border-collapse text-left text-[14px]">
-                  <thead className="bg-white/[0.03] text-white/65">
-                    <tr>
-                      <th className="px-3 py-2.5 font-semibold">Страна</th>
-                      <th className="px-3 py-2.5 text-right font-semibold">Streams</th>
-                      <th className="px-3 py-2.5 text-right font-semibold">Pay streams</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {releaseDetails.countries_breakdown.map((item) => (
-                      <tr key={item.country} className="border-t border-white/10">
-                        <td className="px-3 py-2.5">{item.country}</td>
-                        <td className="px-3 py-2.5 text-right">{item.streams.toLocaleString("ru-RU")}</td>
-                        <td className="px-3 py-2.5 text-right">{item.pay_streams.toLocaleString("ru-RU")}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </PageSection>
-        ) : null}
+      {/* Filters live on their own row so the header does not jump when "Сбросить" appears. */}
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-[28px] font-bold tracking-tight text-white">Аналитика</h1>
+          <p className="mt-1 text-[14px] text-white/55">Прослушивания ваших релизов на всех площадках</p>
+          {latestReportLabel ? (
+            <p
+              className={cn(
+                "mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[12px] font-medium",
+                reportAge != null && reportAge > STALE_REPORT_DAYS
+                  ? "border-amber-300/30 bg-amber-400/10 text-amber-200"
+                  : "border-white/[0.08] bg-white/[0.04] text-white/60"
+              )}
+            >
+              <Clock3 className="h-3.5 w-3.5" />
+              Последний отчёт площадок — {latestReportLabel}. Отчёты приходят с задержкой 2–5 дней
+            </p>
+          ) : null}
+        </div>
+        <AnalyticsFilters value={filters} releases={releases} onChange={setFilters} />
       </div>
+
+      {overviewState.error ? (
+        <p className="rounded-xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-[14px] text-rose-200">
+          {overviewState.error}
+        </p>
+      ) : null}
+
+      {!overviewState.loading && !overviewState.error && !hasData ? (
+        <AnalyticsCard className="py-12 text-center">
+          <BarChart3 className="mx-auto h-10 w-10 text-white/30" />
+          <p className="mt-4 text-[18px] font-semibold text-white">Данных пока нет</p>
+          <p className="mx-auto mt-2 max-w-md text-[14px] text-white/55">
+            Статистика появится после первого отчёта площадок. Обычно это 2–5 дней после выхода релиза.
+          </p>
+        </AnalyticsCard>
+      ) : (
+        <>
+          <AnalyticsOverviewCard data={overview} countries={countriesState.data} loading={overviewState.loading} />
+
+          <AnalyticsCard
+            title={focusedPlatform ? `Динамика · ${focusedPlatform}` : "Динамика прослушиваний"}
+            hint={
+              <span className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: focusedPlatform ? platformColor(focusedPlatform) : ANALYTICS_PURPLE }}
+                  />
+                  Все
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ANALYTICS_MINT }} />
+                  Больше 30 сек
+                </span>
+                {focusedPlatform ? (
+                  <button
+                    type="button"
+                    onClick={() => setFocusedPlatform("")}
+                    className="font-semibold text-[#b79bff] hover:text-white"
+                  >
+                    Все площадки
+                  </button>
+                ) : null}
+              </span>
+            }
+          >
+            {overviewState.loading ? (
+              <SkeletonBlock className="h-[260px] w-full sm:h-[300px]" />
+            ) : chartData.length < 2 ? (
+              <p className="py-16 text-center text-[14px] text-white/55">
+                График появится после нескольких ежедневных отчётов.
+              </p>
+            ) : (
+              <AnalyticsLineChart
+                data={chartData}
+                primaryColor={focusedPlatform ? platformColor(focusedPlatform) : ANALYTICS_PURPLE}
+              />
+            )}
+          </AnalyticsCard>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <AnalyticsCard title="Площадки" hint="Нажмите, чтобы показать на графике">
+              {overviewState.loading ? (
+                <div className="space-y-2">
+                  <SkeletonBlock className="h-3 w-full rounded-full" />
+                  <SkeletonBlock className="h-9 w-full" />
+                  <SkeletonBlock className="h-9 w-full" />
+                </div>
+              ) : platforms.length === 0 ? (
+                <p className="text-[14px] text-white/55">По площадкам пока нет данных.</p>
+              ) : (
+                <>
+                  <div className="mb-3 flex h-3 gap-[3px] overflow-hidden rounded-full">
+                    {platforms.map((item) => (
+                      <span
+                        key={item.platform}
+                        className={cn(
+                          "h-full transition-opacity",
+                          focusedPlatform && focusedPlatform !== item.platform && "opacity-30"
+                        )}
+                        style={{ flexGrow: Math.max(item.share_percent, 0.5), backgroundColor: platformColor(item.platform) }}
+                      />
+                    ))}
+                  </div>
+                  {platforms.map((item) => (
+                    <ShareRow
+                      key={item.platform}
+                      label={item.platform}
+                      value={item.streams}
+                      share={item.share_percent}
+                      color={platformColor(item.platform)}
+                      active={focusedPlatform === item.platform}
+                      onClick={() => setFocusedPlatform((prev) => (prev === item.platform ? "" : item.platform))}
+                    />
+                  ))}
+                </>
+              )}
+            </AnalyticsCard>
+
+            <AnalyticsCard title="Страны" hint="Доля прослушиваний по последнему отчёту">
+              {countriesState.loading ? (
+                <div className="space-y-2">
+                  <SkeletonBlock className="h-9 w-full" />
+                  <SkeletonBlock className="h-9 w-full" />
+                </div>
+              ) : countriesState.error ? (
+                <p className="text-[14px] text-rose-300">{countriesState.error}</p>
+              ) : countryRows.length === 0 ? (
+                <p className="text-[14px] text-white/55">По странам пока нет данных.</p>
+              ) : (
+                countryRows.slice(0, 8).map((item) => (
+                  <ShareRow
+                    key={item.country}
+                    label={formatCountryName(item.country)}
+                    value={item.streams}
+                    share={countryTotal > 0 ? (item.streams / countryTotal) * 100 : 0}
+                    color={ANALYTICS_PURPLE}
+                    hideValue
+                  />
+                ))
+              )}
+            </AnalyticsCard>
+          </div>
+
+          <AnalyticsReleaseTable
+            releases={releases}
+            selectedReleaseId={filters.releaseId}
+            onSelectRelease={handleSelectRelease}
+            loading={releasesState.loading}
+            error={releasesState.error}
+          />
+        </>
+      )}
     </DashboardShell>
   );
 }

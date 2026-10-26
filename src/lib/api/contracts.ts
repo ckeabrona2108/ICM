@@ -763,6 +763,15 @@ export interface AnalyticsReleaseListItemResponse {
   trend: "up" | "down" | "flat" | "new";
 }
 
+export interface AnalyticsCountriesResponse {
+  latest_report_date: string | null;
+  countries_breakdown: Array<{
+    country: string;
+    streams: number;
+    pay_streams: number;
+  }>;
+}
+
 export interface AnalyticsReleaseDetailsResponse {
   release_id: string;
   title: string;

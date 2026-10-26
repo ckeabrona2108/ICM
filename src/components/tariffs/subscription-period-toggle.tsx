@@ -29,7 +29,7 @@ export function SubscriptionPeriodToggle({
         <span
           className={cn(
             "ml-2 rounded-full px-2 py-0.5 text-[11px] font-bold",
-            value === "yearly" ? "bg-emerald-500 text-white" : "bg-emerald-500/15 text-emerald-300"
+            value === "yearly" ? "bg-[#7b61ff] text-white" : "bg-[#7b61ff]/20 text-[#c4b5fd]"
           )}
         >
           до −20%

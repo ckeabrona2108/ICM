@@ -17,6 +17,7 @@ import {
   MessageSquareText,
   Music2,
   PanelLeft,
+  Plus,
   Sparkles,
   UserRound,
   Wallet
@@ -417,43 +418,30 @@ export function DashboardTopbar({
         <PanelLeft className="h-4.5 w-4.5" />
       </button>
 
-      <ServiceWorkStatus className="order-1 flex min-w-0 items-center gap-2.5" />
+      <ServiceWorkStatus pill className="order-1 flex min-w-0 items-center gap-2.5" />
 
       <div
-        className="order-2 ml-auto flex w-full min-w-0 items-center justify-end gap-2 sm:w-auto sm:gap-3"
+        className="order-2 ml-auto flex min-w-0 items-center gap-0.5 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-1 shadow-[0_10px_30px_-20px_rgba(0,0,0,0.9)]"
         ref={menuRef}
       >
-        {hasSubscription && effectivePlan ? (
-          <div className="hidden shrink-0 flex-col items-end sm:flex">
-            <span className="whitespace-nowrap rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-white/88 sm:text-[11px]">
-              {effectivePlan}
-            </span>
-            {subscriptionExpiresLabel ? (
-              <span className="mt-1 whitespace-nowrap text-[11px] font-medium text-white/55">
-                {subscriptionExpiresLabel}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-
+        {/* One capsule: wallet · AI · notifications · profile, separated by thin dividers. */}
+        <div className="relative flex shrink-0 items-center">
         <Link
           href="/dashboard/finance"
-          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-white/[0.12] bg-white/[0.03] px-2.5 py-1.5 text-[13px] font-medium text-white/88 transition-colors hover:border-white/[0.20] hover:bg-white/[0.05] sm:gap-2 sm:px-3 sm:py-2 sm:text-[14px]"
+          className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-xl px-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-white/[0.06] sm:gap-2 sm:px-3 sm:text-[14px]"
         >
-          <Wallet className="h-3.5 w-3.5 text-white/70" />
-          <span>{effectiveRoyaltyBalance}</span>
+          <Wallet className="h-4 w-4 text-white/50" />
+          <span className="tabular-nums">{effectiveRoyaltyBalance}</span>
         </Link>
+        <span aria-hidden className="mx-0.5 h-5 w-px bg-white/[0.08]" />
 
-        <div className="relative">
           <button
             ref={aiButtonRef}
             type="button"
             onClick={() => setActiveMenu((prev) => (prev === "ai" ? null : "ai"))}
             className={cn(
-              "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border px-2.5 py-1.5 text-[13px] font-medium transition-colors sm:px-3 sm:py-2 sm:text-[14px]",
-              activeMenu === "ai"
-                ? "border-[#7b3df5]/40 bg-[#7b3df5]/10 text-white"
-                : "border-white/[0.12] bg-white/[0.03] text-white/88 hover:border-white/[0.20] hover:bg-white/[0.05]"
+              "flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl px-2.5 text-[13px] font-semibold transition-colors sm:text-[14px]",
+              activeMenu === "ai" ? "bg-white/[0.07] text-white" : "text-white/90 hover:bg-white/[0.06]"
             )}
           >
             <span className="relative h-4 w-4 overflow-hidden rounded-full border border-cyan-300/35 bg-[#0f1a2d] shadow-[0_0_0_1px_rgba(0,0,0,0.2),0_0_12px_rgba(85,203,255,0.18)]">
@@ -467,8 +455,17 @@ export function DashboardTopbar({
               />
             </span>
             <span>AI: {effectiveAiBalance}</span>
-            <ChevronDown className="h-3.5 w-3.5 text-white/50" />
+            <ChevronDown className="h-3.5 w-3.5 text-white/40" />
           </button>
+          <Link
+            href="/dashboard/ai-studio/image?buyTokens=1"
+            aria-label="Пополнить AI-токены"
+            title="Пополнить AI-токены"
+            className="hidden h-7 w-7 place-items-center rounded-full bg-white/[0.06] text-white/70 transition hover:bg-[#7b61ff] hover:text-white sm:grid"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2.4} />
+          </Link>
+          <span aria-hidden className="mx-1 h-5 w-px bg-white/[0.08]" />
 
           {activeMenu === "ai" && menuPosition.ai
             ? createPortal(
@@ -495,10 +492,8 @@ export function DashboardTopbar({
             type="button"
             onClick={() => setActiveMenu((prev) => (prev === "notifications" ? null : "notifications"))}
             className={cn(
-              "relative inline-flex h-9 w-9 items-center justify-center rounded-md border transition-colors sm:h-10 sm:w-10",
-              activeMenu === "notifications"
-                ? "border-[#7b3df5]/40 bg-[#7b3df5]/10 text-white"
-                : "border-white/[0.12] bg-white/[0.03] text-white/82 hover:border-white/[0.20] hover:bg-white/[0.05]"
+              "relative inline-flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+              activeMenu === "notifications" ? "bg-white/[0.07] text-white" : "text-white/75 hover:bg-white/[0.06] hover:text-white"
             )}
             aria-label="Открыть уведомления"
             aria-haspopup="menu"
@@ -506,7 +501,7 @@ export function DashboardTopbar({
           >
             <Bell className="h-4 w-4" />
             {notifications.unreadCount > 0 ? (
-              <span className="absolute -right-1.5 -top-1.5 inline-flex min-w-[20px] items-center justify-center rounded-full border border-[#0d0f16] bg-emerald-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[#05120b]">
+              <span className="absolute right-0.5 top-0.5 inline-flex min-w-[17px] items-center justify-center rounded-full bg-[#ff4f8b] px-1 py-0.5 text-[9.5px] font-bold leading-none text-white shadow-[0_0_0_2px_#12141b]">
                 {notifications.unreadCount > 99 ? "99+" : notifications.unreadCount}
               </span>
             ) : null}
@@ -516,7 +511,7 @@ export function DashboardTopbar({
             ? createPortal(
                 <div
                   ref={notificationsMenuRef}
-                  className="ux-floating fixed left-3 right-3 z-[120] w-auto rounded-xl p-1.5 sm:left-auto sm:w-[min(380px,calc(100vw-24px))]"
+                  className="fixed left-3 right-3 z-[120] w-auto overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141624]/98 shadow-[0_30px_70px_-24px_rgba(0,0,0,0.85)] backdrop-blur-xl sm:left-auto sm:w-[min(390px,calc(100vw-24px))]"
                   style={{
                     top: menuPosition.notifications.top,
                     ...(isDesktopViewport
@@ -524,32 +519,32 @@ export function DashboardTopbar({
                       : {})
                   }}
                 >
-                  <div className="ux-surface-soft flex items-center justify-between rounded-lg px-3 py-2.5">
-                    <div>
-                      <div className="text-[14px] font-semibold text-white">Уведомления</div>
-                      <div className="text-[12px] text-white/50">
-                        {notifications.unreadCount > 0
-                          ? `${notifications.unreadCount} новых`
-                          : "Новых уведомлений нет"}
-                      </div>
+                  <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[15px] font-semibold text-white">Уведомления</span>
+                      {notifications.unreadCount > 0 ? (
+                        <span className="rounded-full bg-[#ff4f8b]/15 px-2 py-0.5 text-[11px] font-bold text-[#ff8db5]">
+                          {notifications.unreadCount} новых
+                        </span>
+                      ) : null}
                     </div>
                     <button
                       type="button"
                       onClick={markAllNotificationsAsRead}
                       disabled={notifications.unreadCount === 0}
-                      className="text-[12px] font-medium text-white/55 transition-colors hover:text-white disabled:cursor-default disabled:text-white/30"
+                      className="text-[12px] font-semibold text-[#b9a8ff] transition-colors hover:text-white disabled:cursor-default disabled:text-white/30"
                     >
                       Прочитать все
                     </button>
                   </div>
 
-                  <div className="mt-1.5 max-h-[420px] overflow-y-auto pr-1">
+                  <div className="max-h-[440px] overflow-y-auto p-1.5">
                     {notificationsLoading ? (
                       <div className="rounded-lg px-3 py-6 text-center text-[13px] text-white/55">
                         Загружаем уведомления...
                       </div>
                     ) : notifications.items.length > 0 ? (
-                      <div className="grid gap-1">
+                      <div className="grid gap-0.5">
                         {notifications.items.map((item) => (
                           <NotificationMenuItem
                             key={item.id}
@@ -560,8 +555,9 @@ export function DashboardTopbar({
                         ))}
                       </div>
                     ) : (
-                      <div className="rounded-lg px-3 py-6 text-center text-[13px] text-white/55">
-                        Пока ничего нет.
+                      <div className="px-3 py-8 text-center">
+                        <Bell className="mx-auto h-6 w-6 text-white/25" />
+                        <p className="mt-2 text-[13px] text-white/55">Пока ничего нет</p>
                       </div>
                     )}
                   </div>
@@ -571,12 +567,17 @@ export function DashboardTopbar({
             : null}
         </div>
 
+        <span aria-hidden className="mx-1 h-5 w-px bg-white/[0.08]" />
+
         <div className="relative">
           <button
             ref={userButtonRef}
             type="button"
             onClick={() => setActiveMenu((prev) => (prev === "user" ? null : "user"))}
-            className="flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05] sm:gap-3 sm:px-3 sm:py-2"
+            className={cn(
+              "flex h-9 min-w-0 items-center gap-2 rounded-xl pl-1 pr-1 text-left transition-colors sm:gap-2.5 sm:pr-2.5",
+              activeMenu === "user" ? "bg-white/[0.07]" : "hover:bg-white/[0.06]"
+            )}
             aria-haspopup="menu"
             aria-expanded={activeMenu === "user"}
           >
@@ -587,8 +588,8 @@ export function DashboardTopbar({
               className="border-white/[0.10] bg-white/[0.08]"
             />
             <span className="hidden min-w-0 sm:block">
-              <span className="flex max-w-[120px] items-center gap-2 sm:max-w-[160px]">
-                <span className="truncate text-[13px] font-medium text-white sm:text-[14px]">
+              <span className="flex max-w-[120px] items-center gap-1.5 leading-tight sm:max-w-[160px]">
+                <span className="truncate text-[13px] font-semibold text-white">
                   {displayName}
                 </span>
                 {effectiveVerification.status === "approved" ? (
@@ -600,9 +601,14 @@ export function DashboardTopbar({
                   />
                 ) : null}
               </span>
-              <span className="hidden items-center gap-2 sm:flex">
-                <span className="max-w-[220px] truncate text-[12px] font-medium text-white/60">
-                  {displayEmail}
+              <span className="hidden items-center gap-2 leading-tight sm:flex">
+                <span
+                  className={cn(
+                    "max-w-[180px] truncate text-[11px] font-medium",
+                    hasSubscription && effectivePlan ? "font-semibold text-[#b9a8ff]" : "text-white/45"
+                  )}
+                >
+                  {hasSubscription && effectivePlan ? `Тариф ${effectivePlan}` : "Без подписки"}
                 </span>
                 {effectiveVerification.status !== "approved" ? (
                   <VerificationStatusBadge
@@ -619,7 +625,7 @@ export function DashboardTopbar({
             ? createPortal(
                 <div
                   ref={userMenuRef}
-                  className="ux-floating fixed z-[120] min-w-[260px] rounded-xl p-1.5"
+                  className="fixed z-[120] min-w-[270px] rounded-2xl border border-white/[0.09] bg-[#141624]/98 p-1.5 shadow-[0_30px_70px_-24px_rgba(0,0,0,0.85)] backdrop-blur-xl"
                   style={{
                     top: menuPosition.user.top,
                     right: menuPosition.user.right
@@ -627,7 +633,13 @@ export function DashboardTopbar({
                 >
                   <div className="ux-surface-soft rounded-lg px-3 py-3">
                     <div className="text-[15px] font-semibold text-white">{displayName}</div>
-                    <div className="mt-1 text-[12px] font-medium text-white/52">{effectivePlan}</div>
+                    <div className="mt-0.5 truncate text-[12px] font-medium text-white/50">{displayEmail}</div>
+                    <div className="mt-1.5 text-[12px] font-semibold text-[#b9a8ff]">
+                      {effectivePlan}
+                      {subscriptionExpiresLabel ? (
+                        <span className="font-medium text-white/45"> · {subscriptionExpiresLabel}</span>
+                      ) : null}
+                    </div>
                     <div className="mt-3 grid gap-2">
                       <MenuStat label="AI-токены" value={effectiveAiBalance} />
                       <MenuStat label="Роялти" value={effectiveRoyaltyBalance} />
@@ -715,7 +727,10 @@ function NotificationMenuItem({
         onNavigate();
         window.location.assign(item.href);
       }}
-      className="flex items-start gap-3 rounded-lg px-2.5 py-2.5 transition-colors hover:bg-white/[0.05]"
+      className={cn(
+        "relative flex items-start gap-3 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-white/[0.05]",
+        item.isUnread && "bg-[#7b61ff]/[0.07]"
+      )}
     >
       <span
         className={cn(
@@ -729,7 +744,7 @@ function NotificationMenuItem({
         <span className="flex items-start justify-between gap-3">
           <span className="block text-[13px] font-semibold text-white">{item.title}</span>
           {item.isUnread ? (
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#7b61ff] shadow-[0_0_8px_rgba(123,97,255,0.9)]" />
           ) : null}
         </span>
         <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-white/58">

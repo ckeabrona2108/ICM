@@ -129,7 +129,7 @@ export function AnalyticsCard({
   return (
     <section
       className={cn(
-        "rounded-2xl border border-white/[0.08] bg-[#13151d]/85 p-4 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)] backdrop-blur-xl sm:p-5",
+        "rounded-[24px] border border-white/[0.09] bg-[#13151d] p-4 shadow-[0_16px_44px_-28px_rgba(11,14,24,0.95)] sm:p-5",
         className
       )}
     >

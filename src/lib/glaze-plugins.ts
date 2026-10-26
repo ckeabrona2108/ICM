@@ -36,7 +36,7 @@ export const GLAZE_PLUGINS: GlazePlugin[] = [
     name: "GLAZE Downloader",
     tagline: "Бит с YouTube — сразу в проект",
     description:
-      "Вставляешь ссылку на бит, плагин скачивает его, определяет BPM и тональность, и ты перетаскиваешь аудио прямо в DAW.",
+      "Вставьте ссылку на бит — плагин скачает его, определит BPM и тональность, а аудио можно сразу перетащить в DAW.",
     image: { src: "/plugins/glaze-downloader.webp", width: 1672, height: 941 },
     features: [
       "Импорт по ссылке или поиск бита прямо в плагине",

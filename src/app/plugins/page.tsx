@@ -5,7 +5,7 @@ import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock"
 import { GlazePluginShowcase } from "@/components/plugins/glaze-plugin-showcase";
 
 const DESCRIPTION =
-  "GLAZE Vocal и GLAZE Downloader — плагины для артистов и битмейкеров. VST3/AU для macOS и Windows. Покупка без регистрации.";
+  "GLAZE Vocal и GLAZE Downloader — плагины для артистов и битмейкеров. VST3/AU для macOS и Windows.";
 
 export const metadata: Metadata = {
   title: "Плагины GLAZE",

@@ -52,7 +52,7 @@ export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
               : "border-white/[0.08] bg-[rgba(10,10,15,0.62)]"
           }`}
         >
-          <Link href="/" className="group flex shrink-0 items-center">
+          <Link href="/" className="group flex shrink-0 items-center xl:flex-1 xl:basis-0">
             <span className="relative flex h-11 shrink-0 items-center transition-transform duration-300 group-hover:scale-[1.03] sm:h-12">
               <Image
                 src="/brand/logo.png"
@@ -65,7 +65,8 @@ export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
             </span>
           </Link>
 
-          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-0.5 text-center xl:flex">
+          {/* Лого и кнопки делят остаток поровну, поэтому меню стоит ровно по центру шапки. */}
+          <nav className="hidden shrink-0 items-center justify-center gap-1 text-center xl:flex">
             {NAV.map((link) => (
               link.href.startsWith("/") ? (
                 <Link
@@ -87,7 +88,7 @@ export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
             ))}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <div className="flex shrink-0 items-center justify-end gap-2 sm:gap-3 xl:flex-1 xl:basis-0">
             <Link
               href="/login"
               className="hidden rounded-full px-3 py-2 text-[14px] font-medium tracking-[-0.01em] text-white/[0.70] transition-colors duration-200 hover:text-white sm:inline-block"

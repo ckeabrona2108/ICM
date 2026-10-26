@@ -34,7 +34,7 @@ export interface IcmTariffTier {
 }
 
 function formatRub(value: number): string {
-  return `₽${new Intl.NumberFormat("ru-RU").format(value)}`;
+  return `${new Intl.NumberFormat("ru-RU").format(value)} ₽`;
 }
 
 export function getIcmTariffs(
@@ -57,7 +57,7 @@ export function getIcmTariffs(
     iconColor: "#a78bfa",
     description: "🎧 Твой первый шаг в индустрию — просто, быстро, без стресса.",
     price: formatRub(standardTariff.amountRub),
-    period: billingPeriod === "yearly" ? "/ Год" : "/ Мес",
+    period: billingPeriod === "yearly" ? "в год" : "в месяц",
     secondaryPrice:
       billingPeriod === "yearly"
         ? `или ${formatRub(standardTariff.yearlyMonthlyEquivalentRub)}/мес`
@@ -98,7 +98,7 @@ export function getIcmTariffs(
       tone: "emerald"
     },
     price: formatRub(proTariff.amountRub),
-    period: billingPeriod === "yearly" ? "/ Год" : "/ Мес",
+    period: billingPeriod === "yearly" ? "в год" : "в месяц",
     secondaryPrice:
       billingPeriod === "yearly"
         ? `или ${formatRub(proTariff.yearlyMonthlyEquivalentRub)}/мес`
@@ -143,7 +143,7 @@ export function getIcmTariffs(
       tone: "violet"
     },
     price: formatRub(enterpriseTariff.amountRub),
-    period: billingPeriod === "yearly" ? "/ Год" : "/ Мес",
+    period: billingPeriod === "yearly" ? "в год" : "в месяц",
     secondaryPrice:
       billingPeriod === "yearly"
         ? `или ${formatRub(enterpriseTariff.yearlyMonthlyEquivalentRub)}/мес`

@@ -26,6 +26,14 @@ export function SubscriptionPeriodToggle({
       </ToggleButton>
       <ToggleButton active={value === "yearly"} onClick={() => onChange("yearly")}>
         Ежегодно
+        <span
+          className={cn(
+            "ml-2 rounded-full px-2 py-0.5 text-[11px] font-bold",
+            value === "yearly" ? "bg-emerald-500 text-white" : "bg-emerald-500/15 text-emerald-300"
+          )}
+        >
+          до −20%
+        </span>
       </ToggleButton>
     </div>
   );
@@ -45,7 +53,7 @@ function ToggleButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full px-4 py-2 text-[13px] font-semibold transition-colors",
+        "inline-flex items-center rounded-full px-4 py-2 text-[13px] font-semibold transition-colors",
         active
           ? "bg-white text-[#111318]"
           : "text-white/72 hover:bg-white/[0.06] hover:text-white"

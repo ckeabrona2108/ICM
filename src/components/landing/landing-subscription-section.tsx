@@ -26,8 +26,7 @@ export function LandingSubscriptionSection() {
           Выберите тариф под свой ритм релизов
         </h2>
         <p className="mx-auto mt-4 max-w-3xl text-[15px] leading-relaxed text-white/64 sm:text-[16px]">
-          Переключайтесь между помесячной и годовой оплатой. При оплате за год цены ниже,
-          а кнопки и состав тарифов остаются на своих местах.
+          Платите помесячно или сразу за год — годовая оплата выгоднее до 20%.
         </p>
       </Reveal>
 
@@ -35,8 +34,8 @@ export function LandingSubscriptionSection() {
         <SubscriptionPeriodToggle value={billingPeriod} onChange={setBillingPeriod} />
       </Reveal>
 
-      <Reveal delay={0.08} className="mt-10">
-        <div className="grid gap-6 lg:grid-cols-3">
+      <Reveal delay={0.08} className="mt-12">
+        <div className="grid gap-6 lg:grid-cols-3 lg:gap-5 lg:py-4">
           {tiers.map((tier) => (
             <IcmTariffCard
               key={`${billingPeriod}-${tier.id}`}

@@ -87,7 +87,7 @@ export function SubscriptionTiersClient({
         <SubscriptionPeriodToggle value={billingPeriod} onChange={setBillingPeriod} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-3 lg:gap-5 lg:py-4">
         {tiers.map((tier) => {
           const tariffId = tier.id as TariffId;
           const isCurrent = hasActiveSubscription && tariffId === currentTariffId;

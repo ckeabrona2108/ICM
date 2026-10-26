@@ -1,5 +1,5 @@
-import { DashboardSectionUnavailable } from "@/components/layout/section-unavailable";
+import { redirect } from "next/navigation";
 
 export default function MarketplacePage() {
-  return <DashboardSectionUnavailable title="Beat Market" />;
+  redirect("/dashboard/plugins");
 }

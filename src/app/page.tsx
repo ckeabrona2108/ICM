@@ -784,6 +784,56 @@ export default async function HomePage() {
         </Reveal>
       </section>
 
+      <section id="plugins" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
+        <Reveal className="relative overflow-hidden rounded-[34px] border border-[#3b82f6]/20 bg-[linear-gradient(135deg,rgba(10,16,34,0.96),rgba(9,10,18,0.94))] p-8 shadow-[0_30px_120px_-50px_rgba(59,130,246,0.6)] sm:p-10 lg:p-12">
+          <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 h-[360px] w-[560px] rounded-full bg-[#2563eb]/20 blur-[120px]" />
+          <div className="relative grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
+            <div>
+              <span className="inline-flex items-center rounded-full border border-[#3b82f6]/30 bg-[#3b82f6]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.26em] text-[#93c5fd]">
+                Новинка · GLAZE Plugins
+              </span>
+              <h2 className="mt-4 text-[34px] font-bold leading-[1.04] tracking-tight sm:text-[42px] lg:text-[50px]">
+                Плагины для вокала и битов
+              </h2>
+              <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-white/60 sm:text-[16px]">
+                <span className="font-semibold text-white/85">GLAZE Vocal</span> — тюн, чистка и
+                характер вокала одной ручкой. <span className="font-semibold text-white/85">GLAZE Downloader</span> —
+                бит с YouTube сразу в DAW с BPM и тональностью. VST3/AU для macOS и Windows, покупка
+                без регистрации.
+              </p>
+              <Link
+                href="/plugins"
+                className="group mt-8 inline-flex items-center gap-2 rounded-xl bg-[linear-gradient(90deg,#2563eb,#6d5dfc)] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_14px_40px_-12px_rgba(59,130,246,0.8)] transition-all duration-200 hover:-translate-y-0.5 hover:brightness-110"
+              >
+                Смотреть плагины
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </div>
+            <Link href="/plugins" className="grid grid-cols-2 gap-3 py-4 sm:gap-5" aria-label="Плагины GLAZE">
+              {[
+                { src: "/plugins/glaze-vocal.webp", alt: "GLAZE Vocal", width: 1536, height: 1024, tilt: "-rotate-[3deg]", offset: "" },
+                { src: "/plugins/glaze-downloader.webp", alt: "GLAZE Downloader", width: 1672, height: 941, tilt: "rotate-[3deg]", offset: "sm:mt-8" }
+              ].map((shot, index) => (
+                <div
+                  key={shot.src}
+                  className={`${shot.tilt} ${shot.offset}`}
+                  style={{ animation: `float-soft ${6.8 + index}s ease-in-out ${index * 0.6}s infinite` }}
+                >
+                  <Image
+                    src={shot.src}
+                    alt={shot.alt}
+                    width={shot.width}
+                    height={shot.height}
+                    sizes="(min-width: 1024px) 28vw, 50vw"
+                    className="aspect-[4/3] h-full w-full rounded-[22px] border border-white/10 object-cover shadow-[0_28px_72px_-34px_rgba(59,130,246,0.85)]"
+                  />
+                </div>
+              ))}
+            </Link>
+          </div>
+        </Reveal>
+      </section>
+
       <LandingSubscriptionSection />
 
       <section id="faq" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">

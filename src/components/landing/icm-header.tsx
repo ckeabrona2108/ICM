@@ -8,12 +8,12 @@ import { Menu, X } from "lucide-react";
 
 const NAV = [
   { label: "Главная", href: "/#hero" },
-  { label: "Сообщество", href: "/feed" },
   { label: "Отзывы", href: "/#reviews" },
   { label: "Дистрибуция", href: "/#how" },
   { label: "Платформы", href: "/#platforms" },
   { label: "Тарифы", href: "/#subscriptions" },
   { label: "AI Студия", href: "/dashboard/ai-studio" },
+  { label: "Плагины", href: "/plugins" },
   { label: "FAQ", href: "/#faq" }
 ];
 

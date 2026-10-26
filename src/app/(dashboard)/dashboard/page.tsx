@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageHeader } from "@/components/layout/page-header";
 import { NewsListClient } from "@/components/news/news-list-client";
+import { GlazePluginsBanner } from "@/components/plugins/glaze-plugins-banner";
 import { authOptions } from "@/lib/auth";
 
 export default async function DashboardPage() {
@@ -34,6 +35,8 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+
+      <GlazePluginsBanner />
 
       <NewsListClient />
     </DashboardShell>

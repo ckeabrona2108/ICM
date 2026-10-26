@@ -188,10 +188,10 @@ function buildNav(counts: {
     { type: "leaf", href: "/dashboard/faq", label: "FAQ", icon: HelpCircle },
     {
       type: "leaf",
-      href: "/dashboard/marketplace",
-      label: "Beat Market",
+      href: "/dashboard/plugins",
+      label: "Плагины GLAZE",
       icon: Store,
-      badge: "Скоро",
+      badge: "NEW",
       badgeTone: "soon"
     },
     { type: "leaf", href: "/dashboard/finance", label: "Кошелёк", icon: Wallet },

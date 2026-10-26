@@ -14,7 +14,8 @@ import {
   FileText,
   Hourglass,
   IdCard,
-  Wallet
+  Wallet,
+  X
 } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
@@ -710,70 +711,110 @@ function ReportDetailsModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-[#05060b]/80 px-4 py-4 backdrop-blur-sm">
-      <div className="max-h-[calc(100dvh-32px)] w-full max-w-[min(1180px,calc(100vw-24px))] overflow-y-auto overflow-x-hidden rounded-[28px] border border-white/10 bg-[#11131a] p-5 shadow-[0_30px_90px_-42px_rgba(0,0,0,0.95)] sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[24px] font-semibold text-white">{report.quarterLabel}</h3>
+      <div className="max-h-[calc(100dvh-32px)] w-full max-w-[min(1180px,calc(100vw-24px))] overflow-y-auto overflow-x-hidden rounded-[28px] border border-white/[0.09] bg-[#11131b] p-5 shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)] sm:p-7">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h3 className="text-[24px] font-bold tracking-[-0.02em] text-white sm:text-[26px]">{report.quarterLabel}</h3>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-semibold",
+                report.status === "agreed"
+                  ? "bg-emerald-400/12 text-emerald-200"
+                  : report.status === "changes_requested"
+                    ? "bg-rose-400/12 text-rose-200"
+                    : "bg-amber-400/12 text-amber-200"
+              )}
+            >
               <span
                 className={cn(
-                  "rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]",
+                  "h-1.5 w-1.5 rounded-full",
                   report.status === "agreed"
-                    ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-100"
+                    ? "bg-emerald-400"
                     : report.status === "changes_requested"
-                      ? "border-rose-400/25 bg-rose-500/10 text-rose-100"
-                      : "border-amber-400/25 bg-amber-500/10 text-amber-100"
+                      ? "bg-rose-400"
+                      : "bg-amber-400"
                 )}
-              >
-                {reportStatusLabel(report.status)}
-              </span>
-            </div>
+              />
+              {reportStatusLabel(report.status)}
+            </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-[12px] font-semibold text-white/72 hover:border-white/20 hover:text-white"
+            aria-label="Закрыть"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
           >
-            Закрыть
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.12em] text-white/40">
-            Сумма за квартал
-          </p>
-          <p className="mt-2 text-[30px] font-semibold text-white">
+        <div className="relative mt-5 overflow-hidden rounded-[22px] border border-white/[0.08] bg-[#151824] p-5">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-[#7b61ff]/25 blur-3xl"
+          />
+          <p className="relative text-[13px] font-medium text-white/50">Сумма за квартал</p>
+          <p className="relative mt-1 text-[36px] font-bold leading-tight tracking-[-0.02em] text-white tabular-nums">
             {formatRubCurrency(report.amount)}
           </p>
+          <div className="relative mt-3 flex flex-wrap gap-2 text-[12px] font-medium text-white/60">
+            <span className="rounded-full bg-white/[0.06] px-2.5 py-1">Площадок: {report.platformTotals.length}</span>
+            <span className="rounded-full bg-white/[0.06] px-2.5 py-1">Строк в отчёте: {report.items.length}</span>
+          </div>
           {visibleAdminComment ? (
-            <p className="mt-3 text-[14px] leading-6 text-white/70">{visibleAdminComment}</p>
+            <p className="relative mt-4 border-t border-white/[0.07] pt-3 text-[14px] leading-6 text-white/70">
+              {visibleAdminComment}
+            </p>
           ) : null}
         </div>
 
-        <div className="mt-5 grid gap-4">
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-            <h4 className="text-[15px] font-semibold text-white">По площадкам</h4>
-            <div className="mt-3 space-y-2">
+        <div className="mt-5 grid min-w-0 gap-4">
+          <div className="min-w-0 rounded-[22px] border border-white/[0.08] bg-[#151824] p-5">
+            <h4 className="text-[16px] font-semibold text-white">По площадкам</h4>
+            <div className="mt-3">
               {report.platformTotals.length ? (
-                report.platformTotals.map((item) => (
-                  <div
-                    key={item.platformName}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2"
-                  >
-                    <span className="text-[14px] text-white/78">{item.platformName}</span>
-                    <span className="text-[14px] font-semibold text-white">
-                      {formatRubCurrency(item.amount)}
-                    </span>
-                  </div>
-                ))
+                [...report.platformTotals]
+                  .sort((a, b) => b.amount - a.amount)
+                  .map((item) => {
+                    const share = report.amount > 0 ? (item.amount / report.amount) * 100 : 0;
+                    return (
+                      <div
+                        key={item.platformName}
+                        className="flex items-center gap-3 border-t border-white/[0.06] py-3 first:border-t-0"
+                      >
+                        <span className="w-32 shrink-0 truncate text-[14px] font-semibold text-white sm:w-44">
+                          {item.platformName}
+                        </span>
+                        <span className="hidden h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.07] sm:block">
+                          <span
+                            className="block h-full rounded-full bg-[#7b61ff]"
+                            style={{ width: `${Math.max(2, Math.min(100, share))}%` }}
+                          />
+                        </span>
+                        <span className="ml-auto w-28 shrink-0 text-right text-[14px] font-semibold tabular-nums text-white">
+                          {formatRubCurrency(item.amount)}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-[12px] font-medium tabular-nums text-white/45">
+                          {Math.round(share)}%
+                        </span>
+                      </div>
+                    );
+                  })
               ) : (
                 <p className="text-[14px] text-white/58">Площадки не указаны.</p>
               )}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-            <h4 className="text-[15px] font-semibold text-white">Детализация начислений</h4>
+          <div className="min-w-0 rounded-[22px] border border-white/[0.08] bg-[#151824] p-5">
+            <div className="flex items-center gap-2">
+              <h4 className="text-[16px] font-semibold text-white">Детализация начислений</h4>
+              {report.items.length ? (
+                <span className="rounded-full bg-white/[0.07] px-2 py-0.5 text-[12px] font-semibold text-white/60">
+                  {report.items.length}
+                </span>
+              ) : null}
+            </div>
             {report.items.length ? (
               <ReportDetailTable items={report.items} />
             ) : (

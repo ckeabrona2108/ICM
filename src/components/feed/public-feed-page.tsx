@@ -6,10 +6,13 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import {
+  ArrowUpDown,
   Bookmark,
   Check,
+  CircleDot,
   ChevronDown,
   ExternalLink,
+  Globe2,
   Heart,
   Headphones,
   ImagePlus,
@@ -24,6 +27,7 @@ import {
   Send,
   Share2,
   Trash2,
+  Users,
   Video,
   X
 } from "lucide-react";
@@ -2598,7 +2602,7 @@ export function PublicFeedPage({
   }
 
   return (
-    <div className={`${detailMode ? "feed-skin grid gap-5 pt-16 sm:pt-20" : primaryView === "collaborations" ? "feed-skin grid gap-5 pt-16 sm:pt-20" : "feed-skin grid gap-5 pt-16 sm:pt-20 xl:grid-cols-[minmax(0,820px)_300px] xl:items-start xl:justify-center xl:gap-6"} ${activeRelease ? "pb-[176px] sm:pb-[188px]" : ""}`}>
+    <div className={`${detailMode ? "feed-skin grid gap-5 pt-16 sm:pt-20" : primaryView === "collaborations" ? (surface === "dashboard" ? "feed-skin grid gap-5 pt-2 sm:pt-4" : "feed-skin grid gap-5 pt-16 sm:pt-20") : "feed-skin grid gap-5 pt-16 sm:pt-20 xl:grid-cols-[minmax(0,820px)_300px] xl:items-start xl:justify-center xl:gap-6"} ${activeRelease ? "pb-[176px] sm:pb-[188px]" : ""}`}>
       <div className={`mx-auto grid w-full gap-4 ${primaryView === "collaborations" && !detailMode ? "max-w-[1180px]" : "max-w-[820px]"}`}>
         {(detailMode || primaryView !== "collaborations") ? (
           <FeedHeader
@@ -2614,8 +2618,11 @@ export function PublicFeedPage({
                 <div className="glass-card flex flex-col gap-4 rounded-[26px] p-4 sm:p-5">
                   <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_252px] xl:items-end">
                     <div className="min-w-0 flex-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/38">Collab Market</p>
-	                      <div className="relative z-20 mt-3">
+                      <h1 className="text-[26px] font-bold tracking-[-0.02em] text-white sm:text-[30px]">Collab Market</h1>
+                      <p className="mt-1 text-sm text-white/55">
+                        Найдите вокалиста, битмейкера или продюсера для совместного трека — или предложите свои услуги.
+                      </p>
+	                      <div className="relative z-20 mt-4">
 	                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_132px]">
 	                          <label className="group flex h-[52px] items-center gap-3 rounded-[18px] border border-white/10 bg-[#111522]/88 px-4 text-white/74 transition focus-within:border-[#7b61ff]/55 focus-within:ring-0">
 	                            <Search className="h-4 w-4 shrink-0 text-white/34" />
@@ -2670,9 +2677,9 @@ export function PublicFeedPage({
                           {item.label}
                         </FilterButton>
                       ))}
-                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-[260px]">
+                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-auto">
                         <ComposerSelect
-                          icon={<Reply className="h-4 w-4 text-[#9d8dff]" />}
+                          icon={<Users className="h-4 w-4 text-[#9d8dff]" />}
                           label="Роль"
 	                          value={draftCollaborationRole ?? ""}
                           options={COLLABORATION_ROLE_FILTER_OPTIONS}
@@ -2680,11 +2687,9 @@ export function PublicFeedPage({
                           minWidthClass="min-w-0"
                         />
                       </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-[270px]">
+                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-auto">
                         <ComposerSelect
-                          icon={<Search className="h-4 w-4 text-cyan-300" />}
+                          icon={<Globe2 className="h-4 w-4 text-cyan-300" />}
                           label="Формат"
 	                          value={draftCollaborationPreference ?? ""}
                           options={COLLABORATION_PREFERENCE_FILTER_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
@@ -2693,7 +2698,7 @@ export function PublicFeedPage({
                         />
                       </div>
 	                      {draftCollaborationPreference === "local" ? (
-                        <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-[270px]">
+                        <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-auto">
                           <ComposerSelect
                             icon={<MapPin className="h-4 w-4 text-cyan-300" />}
                             label="Город"
@@ -2704,9 +2709,9 @@ export function PublicFeedPage({
                           />
                         </div>
                       ) : null}
-                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-[270px]">
+                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-auto">
                         <ComposerSelect
-                          icon={<Check className="h-4 w-4 text-emerald-300" />}
+                          icon={<CircleDot className="h-4 w-4 text-emerald-300" />}
                           label="Статус"
 	                          value={draftCollaborationStatus ?? ""}
                           options={COLLABORATION_STATUS_FILTER_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
@@ -2714,9 +2719,9 @@ export function PublicFeedPage({
                           minWidthClass="min-w-0"
                         />
                       </div>
-                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-[330px]">
+                      <div className="w-full min-w-0 sm:w-[calc(50%-4px)] xl:w-auto">
                         <ComposerSelect
-                          icon={<span className="text-base leading-none text-[#9b7cff]">≡</span>}
+                          icon={<ArrowUpDown className="h-4 w-4 text-[#9b7cff]" />}
                           label="Сортировка"
 	                          value={draftSort}
                           options={COLLABORATION_SORT_OPTIONS}
@@ -4186,7 +4191,7 @@ function ComposerSelect({
       >
         <span className="shrink-0">{icon}</span>
         <span className="shrink-0 text-white/92">{label}</span>
-        <span className="min-w-0 flex-1 truncate pl-2 text-white/80">{selected?.label ?? ""}</span>
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap pl-1 font-medium text-white/70">{selected?.label ?? ""}</span>
         <span className="ml-auto inline-flex shrink-0 items-center">
           <ChevronDown className={`h-4 w-4 text-white/56 transition ${open ? "rotate-180" : ""}`} />
         </span>
@@ -4948,6 +4953,37 @@ type FeedPostCardProps = {
   showcaseOnly?: boolean;
 };
 
+const COLLABORATION_ROLE_TILE_COLORS: Array<[RegExp, string]> = [
+  [/vocal|singer|вокал/iu, "from-[#ff5fa2] to-[#7b61ff]"],
+  [/beat|бит/iu, "from-[#7b61ff] to-[#22d3ee]"],
+  [/produc|продюс/iu, "from-[#8b5cf6] to-[#4f46e5]"],
+  [/engineer|mix|master|звукореж|свед|мастер/iu, "from-[#06b6d4] to-[#3b82f6]"],
+  [/song|lyric|текст|автор/iu, "from-[#f59e0b] to-[#ef4444]"],
+  [/video|видео|design|дизайн/iu, "from-[#10b981] to-[#06b6d4]"],
+  [/artist|артист|dj|диджей/iu, "from-[#a855f7] to-[#ec4899]"]
+];
+
+function sentenceCase(value: string): string {
+  const lower = value.toLocaleLowerCase("ru-RU");
+  return lower.charAt(0).toLocaleUpperCase("ru-RU") + lower.slice(1);
+}
+
+/** Colored role tile used when the announcement has no image of its own. */
+function CollaborationRoleTile({ role, label }: { role: string | null; label: string }) {
+  const source = `${role ?? ""} ${label}`;
+  const gradient = COLLABORATION_ROLE_TILE_COLORS.find(([pattern]) => pattern.test(source))?.[1] ?? "from-[#7b61ff] to-[#3b2a8f]";
+  const letter = label.replace(/^[^\p{L}\p{N}]+/u, "").trim().charAt(0).toLocaleUpperCase("ru-RU") || "?";
+  return (
+    <div
+      className={`relative grid h-16 w-16 place-items-center overflow-hidden rounded-[20px] bg-gradient-to-br ${gradient} shadow-[0_14px_30px_-16px_rgba(123,97,255,0.9)] xl:h-[72px] xl:w-[72px]`}
+      aria-hidden
+    >
+      <span className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.35),transparent_55%)]" />
+      <span className="relative text-[26px] font-black text-white/95 drop-shadow">{letter}</span>
+    </div>
+  );
+}
+
 function CollaborationCard({
   item,
   anchorId,
@@ -4993,6 +5029,11 @@ function CollaborationCard({
   replyDrafts
 }: FeedPostCardProps) {
   const [activeVisualIndex, setActiveVisualIndex] = React.useState<number | null>(null);
+  const handleSpotlightMove = React.useCallback((event: React.MouseEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.style.setProperty("--spot-x", `${event.clientX - rect.left}px`);
+    event.currentTarget.style.setProperty("--spot-y", `${event.clientY - rect.top}px`);
+  }, []);
 
   if (!item.collaboration) {
     return <PostCard
@@ -5047,7 +5088,6 @@ function CollaborationCard({
   const visualMedia = item.mediaItems.filter((media) => media.mediaType !== "audio");
   const primaryVisualMedia = visualMedia.find((media) => media.mediaType === "image") ?? null;
   const secondaryVisualMedia = primaryVisualMedia ? visualMedia.filter((media) => media.id !== primaryVisualMedia.id) : visualMedia;
-  const thumbnailSrc = primaryVisualMedia?.mediaUrl ?? item.linkedRelease?.coverUrl ?? null;
   const primaryVisualIndex = primaryVisualMedia ? visualMedia.findIndex((media) => media.id === primaryVisualMedia.id) : -1;
   const reactionMeta = `${item.reactionSummary.total}`;
   const commentMeta = `${item.commentsCount}`;
@@ -5075,13 +5115,20 @@ function CollaborationCard({
     <>
       <article
         id={anchorId}
-        className={`group glass-card rounded-[22px] border shadow-[0_30px_90px_-72px_rgba(123,97,255,0.75)] ${
+        onMouseMove={handleSpotlightMove}
+        className={`group glass-card relative overflow-hidden rounded-[24px] border shadow-[0_30px_90px_-72px_rgba(123,97,255,0.75)] transition-colors hover:border-[#7b61ff]/30 ${
           isClosed
             ? "border-[#7b61ff]/14 bg-[linear-gradient(180deg,rgba(18,22,35,0.78),rgba(12,15,26,0.88))] opacity-[0.72]"
             : "border-white/10 bg-[linear-gradient(180deg,rgba(18,23,38,0.9),rgba(12,16,28,0.94))]"
         }`}
       >
-      <div className="flex flex-col">
+      {/* Spotlight Card (21st.dev): a soft glow follows the cursor. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        style={{ background: "radial-gradient(420px circle at var(--spot-x, 50%) var(--spot-y, 50%), rgba(123,97,255,0.13), transparent 65%)" }}
+      />
+      <div className="relative flex flex-col">
         <div className="grid gap-4 px-4 py-4 sm:px-5 md:grid-cols-[64px_minmax(0,1fr)_auto] md:items-center xl:grid-cols-[72px_minmax(0,1fr)_210px_88px]">
           {primaryVisualMedia ? (
             <button
@@ -5099,7 +5146,7 @@ function CollaborationCard({
               />
             </button>
           ) : (
-            <FeedImage src={thumbnailSrc} alt={item.linkedRelease?.title ?? item.author.displayName} ratio="thumb" />
+            <CollaborationRoleTile role={collaboration.rawRole} label={displayRole} />
           )}
 
           <div className="min-w-0">
@@ -5125,16 +5172,30 @@ function CollaborationCard({
                 {isClosed ? "Закрыто" : "Открыто"}
               </span>
             </div>
-            <h3 className="truncate text-lg font-semibold leading-tight text-white sm:text-xl">
-              {`${displayIntent.replace(/^[^\p{L}\p{N}]+/u, "").trim()} · ${displayRole.replace(/^[^\p{L}\p{N}]+/u, "").trim()}`}
+            <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] text-[#b9a8ff]/80">
+              {sentenceCase(displayIntent.replace(/^[^\p{L}\p{N}]+/u, "").trim())}
+            </p>
+            <h3 className="mt-1 truncate text-xl font-bold leading-tight tracking-[-0.01em] text-white sm:text-[22px]">
+              {displayRole.replace(/^[^\p{L}\p{N}]+/u, "").trim()}
             </h3>
-            <p className="mt-1 line-clamp-2 text-sm leading-6 text-white/68 sm:max-w-[680px]">
+            <p className="mt-1.5 line-clamp-2 text-sm leading-6 text-white/68 sm:max-w-[680px]">
               {description}
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/46">
-              <span>{formatLabel}</span>
-              {collaboration.preference === "local" && collaboration.city ? <span>{collaboration.city}</span> : null}
-              {collaboration.genres.slice(0, 2).map((genre) => <span key={genre}>{genre}</span>)}
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              {[
+                formatLabel,
+                collaboration.preference === "local" ? collaboration.city : null,
+                ...collaboration.genres.slice(0, 3)
+              ]
+                .filter((value): value is string => Boolean(value))
+                .map((value) => (
+                  <span
+                    key={value}
+                    className="inline-flex h-6 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 text-[11px] font-medium text-white/62"
+                  >
+                    {value}
+                  </span>
+                ))}
             </div>
           </div>
 
@@ -5693,30 +5754,26 @@ function LinkedReleaseCard({ release }: { release: FeedPostItem["linkedRelease"]
     </div>
   );
   return (
-    <div className="mt-4 rounded-[22px] border border-white/8 bg-white/[0.045] px-4 py-4">
-      <div className="flex items-start gap-3">
+    <div className="mt-4 max-w-[560px] rounded-[18px] border border-white/8 bg-white/[0.035] px-3.5 py-3">
+      <div className="flex items-center gap-3">
         {preview}
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-white/42">Портфолио / релиз</p>
-          <p className="mt-2 truncate text-sm font-semibold text-white">{release.title}</p>
+          <p className="mt-1 truncate text-sm font-semibold text-white">{release.title}</p>
           <p className="mt-1 text-xs text-white/52">
             {[release.artistName, formatReleaseDate(release.releaseDate)].filter(Boolean).join(" • ")}
           </p>
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        {musicPlatformLinks.length ? (
-          <>
-            {musicPlatformLinks.slice(0, 3).map((platform) => (
-              <a key={platform.code} href={platform.href} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-full border border-white/10 bg-white/[0.03] px-4 text-sm text-white/72 transition hover:border-white/18 hover:text-white">
-                {platform.label}
-              </a>
-            ))}
-          </>
-        ) : (
-          <span className="text-sm text-white/48">Площадочные ссылки пока не добавлены.</span>
-        )}
-      </div>
+      {musicPlatformLinks.length ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {musicPlatformLinks.slice(0, 3).map((platform) => (
+            <a key={platform.code} href={platform.href} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center rounded-full border border-white/10 bg-white/[0.03] px-4 text-sm text-white/72 transition hover:border-white/18 hover:text-white">
+              {platform.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

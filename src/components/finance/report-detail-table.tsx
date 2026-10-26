@@ -103,12 +103,16 @@ export function ReportDetailTable({ items }: { items: ReportDetailItem[] }) {
   const visibleColumns = detailColumns.filter((column) => items.some((item) => hasValue(column.value(item))));
 
   return (
-    <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.06] bg-black/20">
+    // Scrolls inside its own box (both ways) with a sticky header, so long reports stay readable.
+    <div className="mt-3 max-h-[460px] overflow-auto rounded-2xl border border-white/[0.07] bg-black/20">
       <table className="w-full text-left text-[13px]" style={{ minWidth: `${Math.max(960, visibleColumns.length * 150)}px` }}>
-        <thead className="border-b border-white/[0.06] text-[11px] uppercase tracking-[0.12em] text-white/40">
+        <thead className="sticky top-0 z-[1] bg-[#181b27] text-[12px] text-white/50">
           <tr>
             {visibleColumns.map((column) => (
-              <th key={column.label} className={`px-3 py-3 font-semibold ${column.align === "right" ? "text-right" : ""}`}>
+              <th
+                key={column.label}
+                className={`whitespace-nowrap border-b border-white/[0.07] px-3.5 py-3 font-semibold ${column.align === "right" ? "text-right" : ""}`}
+              >
                 {column.label}
               </th>
             ))}
@@ -116,11 +120,11 @@ export function ReportDetailTable({ items }: { items: ReportDetailItem[] }) {
         </thead>
         <tbody className="divide-y divide-white/[0.05]">
           {items.map((item, index) => (
-            <tr key={item.id ?? `report-line-${index}`} className="text-white/72">
+            <tr key={item.id ?? `report-line-${index}`} className="text-white/75 transition-colors hover:bg-white/[0.03]">
               {visibleColumns.map((column) => (
                 <td
                   key={column.label}
-                  className={`px-3 py-3 ${column.align === "right" ? "text-right" : ""} ${column.className ?? ""}`}
+                  className={`px-3.5 py-3 ${column.align === "right" ? "text-right tabular-nums" : ""} ${column.className ?? ""}`}
                 >
                   {formatValue(column.value(item), column.format)}
                 </td>

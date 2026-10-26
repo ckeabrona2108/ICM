@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import {
   Archive,
   AudioLines,
@@ -18,7 +19,8 @@ import {
   Settings2,
   Sparkles,
   UploadCloud,
-  Video
+  Video,
+  X
 } from "lucide-react";
 
 import type { AiStudioWorkspaceTab } from "@/app/(dashboard)/dashboard/ai-studio/page-data";
@@ -63,6 +65,30 @@ const SECTION_LABELS: Record<AiStudioSection, string> = {
   image: "Изображения",
   video: "Видео",
   audio: "Аудио"
+};
+
+const SECTION_EMPTY_HINTS: Record<AiStudioSection, string> = {
+  chat: "Задайте вопрос или попросите помочь с текстом.",
+  image: "Опишите обложку или промо-арт — результат появится здесь.",
+  video: "Опишите сцену для клипа или сниппета — видео появится здесь.",
+  audio: "Опишите звучание, жанр и настроение — трек появится здесь."
+};
+
+const SECTION_EXAMPLE_PROMPTS: Record<AiStudioSection, string[]> = {
+  chat: [],
+  image: [
+    "Обложка для сингла: ночной город, неон, фиолетовые тона",
+    "Минималистичная обложка, силуэт артиста на закате",
+    "Промо-арт для релиза в стиле аниме"
+  ],
+  video: [
+    "Медленный пролёт над ночным городом в неоне, 10 секунд",
+    "Абстрактные жидкие формы в ритм музыки"
+  ],
+  audio: [
+    "Мелодичный поп-бит, 100 BPM, лёгкая гитара",
+    "Тёмный трэп-бит с глубоким басом, 140 BPM"
+  ]
 };
 
 const TAB_TO_SECTION: Partial<Record<AiStudioWorkspaceTab, AiStudioSection>> = {
@@ -287,11 +313,9 @@ interface AiStudioMediaConversationItem {
 
 export function AiStudioPage({
   activeTab,
-  userName,
   aiStudioStatus,
   aiTokenBalance,
   pendingAiTokenBalance,
-  royaltyBalance,
   entitlements,
   initialModelCatalog,
   chatThreads,
@@ -1155,7 +1179,7 @@ export function AiStudioPage({
     ) : null;
   return (
     <>
-      <div className="grid gap-5 pb-28 motion-safe:animate-[aiStudioEnter_160ms_cubic-bezier(0.22,1,0.36,1)] xl:grid-cols-[300px_minmax(0,1fr)]">
+      <div className="grid gap-5 pb-28 motion-safe:animate-[aiStudioEnter_160ms_cubic-bezier(0.22,1,0.36,1)] xl:grid-cols-[240px_minmax(0,1fr)]">
         <AiStudioSidebar
           activeTab={activeTab}
           chatThreads={chatThreadsState}
@@ -1165,42 +1189,43 @@ export function AiStudioPage({
         />
         <div className="space-y-5">
           <section className="perf-content-auto perf-paint-contain rounded-[28px] border border-white/[0.08] bg-[#10131a]/95 px-5 py-4 shadow-[0_14px_40px_-30px_rgba(11,14,24,0.82)] sm:px-6">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <Badge
-                  variant="muted"
-                  className="mb-2 border-emerald-400/30 bg-emerald-500/12 text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]"
-                >
-                  AI Студия V1
-                </Badge>
-                <h1 className="font-display text-[28px] font-bold leading-tight text-white sm:text-[34px]">
+                <h1 className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em] text-white sm:text-[32px]">
                   AI Студия
                 </h1>
-                <p className="mt-1 max-w-2xl text-[15px] font-medium text-white/66">
-                  Создавайте изображения, видео, музыку и контент для продвижения артиста.
+                <p className="mt-1 max-w-2xl text-[14px] font-medium text-white/55">
+                  Изображения, видео, музыка и тексты для продвижения артиста.
                 </p>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] font-medium text-white/44">
-                  <span>{userName}</span>
-                  <span>•</span>
-                  <span>{formatRubCurrency(royaltyBalance)}</span>
-                </div>
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <div className="rounded-2xl border border-white/[0.10] bg-white/[0.03] px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/40">AI-токены</div>
-                  <div className="mt-1 text-[20px] font-semibold text-white">{formatAiTokenAmount(aiTokenBalanceValue)}</div>
+                <div className="flex items-center rounded-2xl border border-white/[0.08] bg-white/[0.03]">
+                  <div className="px-4 py-2">
+                    <div className="text-[11px] font-medium text-white/45">AI-токены</div>
+                    <div className="text-[18px] font-bold tabular-nums text-white">{formatAiTokenAmount(aiTokenBalanceValue)}</div>
+                  </div>
+                  {pendingAiTokenBalanceValue > 0 ? (
+                    <>
+                      <span aria-hidden className="h-8 w-px bg-white/[0.08]" />
+                      <div className="px-4 py-2">
+                        <div className="text-[11px] font-medium text-white/45">Ожидают</div>
+                        <div className="text-[18px] font-bold tabular-nums text-amber-200">{formatAiTokenAmount(pendingAiTokenBalanceValue)}</div>
+                      </div>
+                    </>
+                  ) : null}
+                  <span aria-hidden className="h-8 w-px bg-white/[0.08]" />
+                  <div className="px-4 py-2">
+                    <div className="text-[11px] font-medium text-white/45">Тариф</div>
+                    <div className="text-[18px] font-bold text-white">{entitlements.plan}</div>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-white/[0.10] bg-white/[0.03] px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/40">Ожидают</div>
-                  <div className="mt-1 text-[20px] font-semibold text-amber-200">{formatAiTokenAmount(pendingAiTokenBalanceValue)}</div>
-                </div>
-                <div className="rounded-2xl border border-white/[0.10] bg-white/[0.03] px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/40">Тариф</div>
-                  <div className="mt-1 text-[20px] font-semibold text-white">{entitlements.plan}</div>
-                </div>
-                <Button size="sm" className="h-12 px-5" onClick={openPurchaseModal}>
-                  Купить токены
-                </Button>
+                <button
+                  type="button"
+                  onClick={openPurchaseModal}
+                  className="inline-flex h-12 items-center rounded-2xl bg-[#7b61ff] px-5 text-[14px] font-semibold text-white shadow-[0_14px_30px_-14px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff]"
+                >
+                  Пополнить токены
+                </button>
               </div>
             </div>
           </section>
@@ -1247,7 +1272,7 @@ export function AiStudioPage({
 
           {showModelWorkspace ? (
             <section className="perf-content-auto perf-paint-contain flex min-h-[calc(100vh-220px)] flex-col rounded-[28px] border border-white/[0.08] bg-[#10131a]/95 px-5 py-5">
-              <div className="min-h-[520px] flex-1 rounded-[24px] border border-dashed border-white/[0.08] bg-white/[0.02] p-5">
+              <div className="min-h-[480px] flex-1 rounded-[24px] bg-[radial-gradient(ellipse_at_top,rgba(123,97,255,0.10),transparent_60%)] p-5">
                 {shouldShowPreparingState ? (
                   <AiStudioPreparingState
                     pendingTokens={pendingAiTokenBalanceValue}
@@ -1257,17 +1282,33 @@ export function AiStudioPage({
                 ) : currentMediaConversation.length > 0 ? (
                   <MediaWorkspace conversation={currentMediaConversation} modelLabelLookup={modelLabelLookup} />
                 ) : (
-                  <div className="flex min-h-[450px] items-center justify-center rounded-[24px] text-center">
-                    <div className="max-w-md space-y-3">
-                      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/60">
-                        <Sparkles className="h-6 w-6" />
-                      </div>
-                      <div className="text-[18px] font-semibold text-white">
+                  <div className="flex min-h-[420px] items-center justify-center rounded-[24px] text-center">
+                    <div className="max-w-lg">
+                      <div className="text-[22px] font-bold tracking-[-0.01em] text-white">
                         {SECTION_LABELS[modelWorkspaceSection ?? "image"]}
                       </div>
-                      <p className="text-[14px] font-medium leading-6 text-white/50">
-                        Введите prompt и выберите модель в нижней панели. Результат появится здесь сразу после генерации.
+                      <p className="mt-2 text-[14px] font-medium leading-6 text-white/50">
+                        {SECTION_EMPTY_HINTS[modelWorkspaceSection ?? "image"]}
                       </p>
+                      {SECTION_EXAMPLE_PROMPTS[modelWorkspaceSection ?? "image"].length > 0 ? (
+                        <div className="mt-5 flex flex-wrap justify-center gap-2">
+                          {SECTION_EXAMPLE_PROMPTS[modelWorkspaceSection ?? "image"].map((example) => (
+                            <button
+                              key={example}
+                              type="button"
+                              onClick={() =>
+                                setPromptBySection((current) => ({
+                                  ...current,
+                                  [modelWorkspaceSection ?? "image"]: example
+                                }))
+                              }
+                              className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-[13px] font-medium text-white/70 transition hover:border-[#7b61ff]/40 hover:bg-[#7b61ff]/12 hover:text-white"
+                            >
+                              {example}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 )}
@@ -2006,6 +2047,29 @@ function SelectionPopover({
   );
 }
 
+/** True after the first client render: portals must not render during SSR/hydration. */
+function useMounted(): boolean {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+  return mounted;
+}
+
+const TOKEN_TIER_GRADIENTS = [
+  "from-[#7b61ff]/45 via-[#7b61ff]/10",
+  "from-[#a855f7]/45 via-[#a855f7]/10",
+  "from-[#ec4899]/40 via-[#ec4899]/10",
+  "from-[#6366f1]/45 via-[#6366f1]/10",
+  "from-[#06b6d4]/40 via-[#06b6d4]/10",
+  "from-[#f59e0b]/40 via-[#f59e0b]/10"
+];
+
+/** Price per 1 000 tokens including the bonus, so packages are comparable. */
+function pricePerThousandTokens(tokenPackage: AiTokenPackageResponse): number {
+  const total = tokenPackage.tokenAmount + tokenPackage.bonusTokens;
+  return total > 0 ? (tokenPackage.priceRub / total) * 1000 : 0;
+}
+
+/** Pricing cards in the spirit of 21st.dev "Gradient Tiers" / "Pricing Cards". */
 function TokenPurchaseModal({
   balance,
   packages,
@@ -2021,41 +2085,83 @@ function TokenPurchaseModal({
   onClose: () => void;
   onChoosePackage: (tokenPackage: AiTokenPackageResponse) => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/70 p-4 backdrop-blur-[2px]" onClick={onClose}>
+  const mounted = useMounted();
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const sortedPackages = React.useMemo(
+    () => [...packages].sort((a, b) => a.priceRub - b.priceRub),
+    [packages]
+  );
+  const baseRate = sortedPackages.length > 0 ? pricePerThousandTokens(sortedPackages[0]) : 0;
+  const bestValueCode = sortedPackages.reduce<{ code: string | null; rate: number }>(
+    (best, item) => {
+      const rate = pricePerThousandTokens(item);
+      return rate > 0 && rate < best.rate ? { code: item.code, rate } : best;
+    },
+    { code: null, rate: Number.POSITIVE_INFINITY }
+  ).code;
+
+  // Rendered into <body> so the overlay also covers the dashboard top bar.
+  if (!mounted) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] overflow-y-auto bg-black/75 px-4 py-6 backdrop-blur-sm sm:py-10"
+      onClick={onClose}
+    >
       <div
-        className="mx-auto mt-20 w-full max-w-4xl rounded-[28px] border border-white/[0.10] bg-[#10131a]/98 p-5 shadow-[0_18px_50px_-30px_rgba(0,0,0,0.84)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="token-purchase-title"
+        className="relative mx-auto w-full max-w-5xl overflow-hidden rounded-[28px] border border-white/[0.09] bg-[#11131b] shadow-[0_40px_120px_-40px_rgba(0,0,0,0.95)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/40">
-              AI-токены
-            </div>
-            <h3 className="mt-1 text-[24px] font-semibold text-white">Купить AI-токены</h3>
-            <p className="mt-1 max-w-2xl text-[14px] text-white/58">
-              Используйте токены для генерации изображений, видео, аудио и работы с AI-чатами.
-            </p>
-            <div className="mt-4 inline-flex rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-[14px] text-white/80">
-              Ваш баланс: <span className="ml-1 font-semibold text-white">{formatAiTokenAmount(balance)} AI-токенов</span>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-[radial-gradient(ellipse_at_top,rgba(123,97,255,0.28),transparent_70%)]"
+        />
+
+        <div className="relative flex flex-wrap items-start justify-between gap-4 px-5 pb-2 pt-6 sm:px-7">
+          <div className="flex items-start gap-3.5">
+            <div>
+              <h3 id="token-purchase-title" className="text-[24px] font-bold tracking-[-0.02em] text-white sm:text-[26px]">
+                Пополнить AI-токены
+              </h3>
+              <p className="mt-1 max-w-xl text-[14px] text-white/55">
+                Токены тратятся на генерацию изображений, видео, аудио и AI-чаты. Чем больше пакет — тем дешевле токен.
+              </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform,color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-white/[0.06] motion-reduce:transition-none"
-          >
-            Закрыть
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-right">
+              <div className="text-[11px] font-medium text-white/45">Ваш баланс</div>
+              <div className="text-[16px] font-bold tabular-nums text-white">
+                {formatAiTokenAmount(balance)} <span className="text-[13px] font-medium text-white/50">токенов</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Закрыть"
+              className="grid h-10 w-10 place-items-center rounded-xl border border-white/[0.08] bg-white/[0.04] text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        <div className="mt-5">
+        <div className="relative px-5 pb-6 pt-4 sm:px-7 sm:pb-7">
           {loading ? (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, index) => (
                 <div
                   key={index}
-                  className="h-[172px] animate-[pulse_1.6s_ease-in-out_infinite] rounded-[24px] border border-white/[0.08] bg-white/[0.03]"
+                  className="h-[270px] animate-pulse rounded-[24px] border border-white/[0.07] bg-white/[0.03]"
                 />
               ))}
             </div>
@@ -2063,46 +2169,93 @@ function TokenPurchaseModal({
             <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-[14px] text-rose-100">
               {error}
             </div>
-          ) : packages.length === 0 ? (
+          ) : sortedPackages.length === 0 ? (
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-6 text-[14px] text-white/58">
               Пакеты токенов пока недоступны. Попробуйте открыть окно ещё раз через несколько секунд.
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {packages.map((tokenPackage) => (
-                <button
-                  key={tokenPackage.code}
-                  type="button"
-                  onClick={() => onChoosePackage(tokenPackage)}
-                  className="group rounded-[24px] border border-white/[0.08] bg-white/[0.03] p-4 text-left transition-[background-color,border-color,transform,opacity] duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.01] hover:border-white/[0.14] hover:bg-white/[0.05] motion-reduce:transition-none"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[16px] font-semibold text-white">{tokenPackage.name}</div>
-                      <div className="mt-1 text-[13px] text-white/55">{formatAiTokenAmount(tokenPackage.tokenAmount)} токенов</div>
-                      {tokenPackage.bonusTokens > 0 ? (
-                        <div className="mt-1 text-[12px] font-medium text-emerald-300">
-                          🎁 +{formatAiTokenAmount(tokenPackage.bonusTokens)} бонусных токенов
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {sortedPackages.map((tokenPackage, index) => {
+                const total = tokenPackage.tokenAmount + tokenPackage.bonusTokens;
+                const rate = pricePerThousandTokens(tokenPackage);
+                const savings = baseRate > 0 ? Math.round((1 - rate / baseRate) * 100) : 0;
+                const isBest = tokenPackage.code === bestValueCode && index > 0;
+
+                return (
+                  <button
+                    key={tokenPackage.code}
+                    type="button"
+                    onClick={() => onChoosePackage(tokenPackage)}
+                    className={cn(
+                      "group relative flex flex-col overflow-hidden rounded-[24px] border bg-[#151824] text-left transition duration-200 hover:-translate-y-1 motion-reduce:transition-none",
+                      isBest
+                        ? "border-[#7b61ff]/60 shadow-[0_24px_60px_-28px_rgba(123,97,255,0.85)]"
+                        : "border-white/[0.08] hover:border-white/[0.16]"
+                    )}
+                  >
+                    <div className={cn("bg-gradient-to-b to-transparent px-5 pb-4 pt-5", TOKEN_TIER_GRADIENTS[index % TOKEN_TIER_GRADIENTS.length])}>
+                      <div className="flex min-h-[26px] items-center justify-between gap-2">
+                        <span className="text-[15px] font-semibold text-white/85">{tokenPackage.name}</span>
+                        {isBest ? (
+                          <span className="rounded-full bg-[#7b61ff] px-2.5 py-1 text-[11px] font-bold text-white">
+                            Выгоднее всего
+                          </span>
+                        ) : savings > 0 ? (
+                          <span className="rounded-full bg-emerald-400/15 px-2.5 py-1 text-[11px] font-bold text-emerald-300">
+                            −{savings}% за токен
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 text-[30px] font-bold leading-none tracking-[-0.02em] text-white tabular-nums">
+                        {formatRubCurrency(tokenPackage.priceRub)}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-1 flex-col px-5 pb-5">
+                      <div className="border-t border-white/[0.07] pt-4">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[20px] font-bold tabular-nums text-white">{formatAiTokenAmount(total)}</span>
+                          <span className="text-[13px] text-white/50">токенов</span>
                         </div>
-                      ) : null}
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px]">
+                          <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-white/65">
+                            {formatAiTokenAmount(tokenPackage.tokenAmount)} основных
+                          </span>
+                          {tokenPackage.bonusTokens > 0 ? (
+                            <span className="rounded-full bg-emerald-400/12 px-2 py-0.5 font-semibold text-emerald-300">
+                              +{formatAiTokenAmount(tokenPackage.bonusTokens)} в подарок
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-3 text-[12px] text-white/40">
+                          ≈ {formatRubCurrency(Math.round(rate))} за 1 000 токенов
+                        </div>
+                      </div>
+
+                      <span
+                        className={cn(
+                          "mt-5 inline-flex h-11 w-full items-center justify-center rounded-xl text-[14px] font-semibold transition",
+                          isBest
+                            ? "bg-[#7b61ff] text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.95)] group-hover:bg-[#8f7bff]"
+                            : "bg-white/[0.06] text-white group-hover:bg-[#7b61ff]"
+                        )}
+                      >
+                        Купить
+                      </span>
                     </div>
-                    <div className="rounded-full border border-white/[0.08] bg-black/20 px-3 py-1 text-[12px] text-white/70">
-                      {formatRubCurrency(tokenPackage.priceRub)}
-                    </div>
-                  </div>
-                  <div className="mt-4 text-[13px] text-white/52">
-                    Доступно для генерации изображений, видео, аудио и AI-чатов.
-                  </div>
-                  <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#7b3df5] px-4 py-2 text-[13px] font-semibold text-white transition-[background-color,transform] duration-150 ease-out group-hover:-translate-y-0.5 group-hover:bg-[#8b4ff7] motion-reduce:transition-none">
-                    Купить
-                  </div>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
+
+          <p className="mt-5 text-center text-[12px] text-white/40">
+            Оплата картой через YooKassa. Токены доступны во всех AI-инструментах.
+          </p>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2123,8 +2276,11 @@ function PurchaseConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-[90] overflow-y-auto bg-black/72 p-4 pt-[max(env(safe-area-inset-top),1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur-[4px] sm:grid sm:place-items-center">
+  const mounted = useMounted();
+  // Portal + higher layer: it opens on top of the token packages modal.
+  if (!mounted) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[210] overflow-y-auto bg-black/72 p-4 pt-[max(env(safe-area-inset-top),1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] backdrop-blur-[4px] sm:grid sm:place-items-center">
       <div className="flex min-h-full items-end sm:min-h-0 sm:items-center sm:justify-center">
         <div className="relative w-full max-w-md rounded-[24px] border border-white/[0.10] bg-[#10131a] p-5 shadow-[0_16px_42px_-28px_rgba(0,0,0,0.82)]">
         <div className="flex items-center gap-2 text-white">
@@ -2160,7 +2316,8 @@ function PurchaseConfirmModal({
         </div>
       </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2186,14 +2343,10 @@ function AiStudioSidebar({
   onSelectChatThread: (threadId: string) => void;
 }) {
   return (
-    <aside className="perf-paint-contain h-fit rounded-[32px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(16,19,26,0.98),rgba(10,13,18,0.98))] p-4 shadow-[0_26px_80px_-46px_rgba(0,0,0,0.82)] xl:sticky xl:top-4">
-      <div className="mb-5 rounded-[26px] border border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(194,160,255,0.16),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] px-4 py-4">
-        <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/38">AI Studio</div>
-        <div className="mt-1 text-[18px] font-semibold text-white">Инструменты</div>
-        <div className="mt-1 text-[13px] text-white/50">Чаты, изображения, видео, аудио и архив.</div>
-      </div>
+    <aside className="perf-paint-contain h-fit rounded-[24px] border border-white/[0.08] bg-[#11131b] p-3 xl:sticky xl:top-24">
+      <div className="mb-2 px-2 text-[12px] font-semibold text-white/40">Инструменты</div>
 
-      <div className="space-y-2">
+      <div className="space-y-1">
         {WORKSPACE_TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -2202,21 +2355,13 @@ function AiStudioSidebar({
               key={tab.id}
               href={`/dashboard/ai-studio/${tab.id}`}
               className={cn(
-                "flex items-center gap-3 rounded-[22px] border px-4 py-3 transition-[background-color,border-color,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
-                isActive
-                  ? "border-[#d8c5ff]/24 bg-[radial-gradient(circle_at_top_left,rgba(201,171,255,0.16),transparent_40%),linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03))] text-white shadow-[0_22px_36px_-24px_rgba(123,61,245,0.34)]"
-                  : "border-white/[0.08] bg-white/[0.03] text-white/72 hover:-translate-y-0.5 hover:border-white/[0.14] hover:bg-white/[0.05]"
+                "flex h-11 items-center gap-3 rounded-xl px-3 transition-colors duration-150 motion-reduce:transition-none",
+                isActive ? "bg-[#7b61ff]/16 text-white" : "text-white/65 hover:bg-white/[0.05] hover:text-white"
               )}
             >
-              <span
-                className={cn(
-                  "grid h-9 w-9 place-items-center rounded-xl border transition-colors duration-200",
-                  isActive ? "border-[#7b3df5]/35 bg-[#7b3df5]/12 text-[#c7b2ff]" : "border-white/[0.08] bg-black/20 text-white/60"
-                )}
-              >
-                <Icon className="h-4.5 w-4.5" />
-              </span>
+              <Icon className={cn("h-[18px] w-[18px]", isActive ? "text-[#b9a8ff]" : "text-white/45")} />
               <span className="text-[14px] font-medium">{tab.label}</span>
+              {isActive ? <span aria-hidden className="ml-auto h-1.5 w-1.5 rounded-full bg-[#7b61ff]" /> : null}
             </Link>
           );
         })}

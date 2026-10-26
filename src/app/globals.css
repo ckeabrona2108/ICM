@@ -557,7 +557,8 @@ html {
   border-color: var(--feed-border-strong);
 }
 
-.feed-skin :is(p, span, label, div) {
+/* `text-wrap` also resets white-space wrapping, so it must skip elements meant to stay on one line. */
+.feed-skin :is(p, span, label, div):not(.truncate):not(.whitespace-nowrap) {
   text-wrap: pretty;
 }
 

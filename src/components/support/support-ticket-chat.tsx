@@ -1,7 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, MessageSquarePlus, RotateCw, Send } from "lucide-react";
+import Image from "next/image";
+import {
+  CircleDollarSign,
+  Disc3,
+  FileText,
+  Loader2,
+  MessageSquarePlus,
+  RotateCw,
+  Search,
+  Send,
+  UserCog
+} from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { cn } from "@/lib/utils";
@@ -11,6 +22,20 @@ import type {
   SupportTicketMutationResponse
 } from "@/lib/api/contracts";
 import { SUPPORT_STATUS_LABEL, formatSupportDate } from "@/lib/support-ui";
+
+const SUPPORT_TOPICS = [
+  { title: "Релиз и модерация", hint: "Статусы, правки, UPC", icon: Disc3, tone: "bg-[#7b61ff]/16 text-[#c4b5fd]" },
+  { title: "Выплаты и отчёты", hint: "Начисления, вывод", icon: CircleDollarSign, tone: "bg-emerald-500/12 text-emerald-300" },
+  { title: "Договор и документы", hint: "Подписание, реквизиты", icon: FileText, tone: "bg-amber-400/12 text-amber-300" },
+  { title: "Аккаунт и доступ", hint: "Вход, профиль, тариф", icon: UserCog, tone: "bg-sky-500/14 text-sky-300" }
+] as const;
+
+const TICKET_FILTERS = [
+  { id: "all", label: "Все" },
+  { id: "open", label: "Открытые" },
+  { id: "closed", label: "Закрытые" }
+] as const;
+type TicketFilter = (typeof TICKET_FILTERS)[number]["id"];
 
 function publishSupportUnreadCount(count: number) {
   window.dispatchEvent(
@@ -31,9 +56,39 @@ export function SupportTicketChat() {
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [retryMode, setRetryMode] = React.useState<"load" | "details" | "create" | "message" | null>(null);
+  const [search, setSearch] = React.useState("");
+  const [filter, setFilter] = React.useState<TicketFilter>("all");
   const listEndRef = React.useRef<HTMLDivElement>(null);
+  const newBodyRef = React.useRef<HTMLTextAreaElement>(null);
 
   const active = tickets.find((t) => t.id === activeId) ?? null;
+  const openCount = tickets.filter((ticket) => ticket.status !== "CLOSED").length;
+  const filterCounts: Record<TicketFilter, number> = {
+    all: tickets.length,
+    open: openCount,
+    closed: tickets.length - openCount
+  };
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleTickets = tickets.filter((ticket) => {
+    if (filter === "open" && ticket.status === "CLOSED") return false;
+    if (filter === "closed" && ticket.status !== "CLOSED") return false;
+    if (!normalizedSearch) return true;
+    return (
+      ticket.subject.toLowerCase().includes(normalizedSearch) ||
+      (ticket.lastMessage ?? "").toLowerCase().includes(normalizedSearch)
+    );
+  });
+
+  const startNewTicket = (topic?: string) => {
+    setCreating(true);
+    setActiveId(null);
+    setError(null);
+    setRetryMode(null);
+    if (topic) {
+      setNewSubject(`${topic}: `);
+      window.setTimeout(() => newBodyRef.current?.focus(), 50);
+    }
+  };
 
   const refreshUnreadCount = React.useCallback(async () => {
     try {
@@ -229,23 +284,40 @@ export function SupportTicketChat() {
     <div className="space-y-6 pb-8">
       <PageHeader
         title="Поддержка"
-        description="Создавайте обращения, следите за ответами администратора и продолжайте переписку без перезагрузки страницы."
+        description="Напишите нам — команда отвечает прямо здесь, в рабочее время сервиса."
         actions={
           <button
             type="button"
-            onClick={() => {
-              setCreating(true);
-              setActiveId(null);
-              setError(null);
-              setRetryMode(null);
-            }}
+            onClick={() => startNewTicket()}
             className="ux-button-primary inline-flex h-11 items-center gap-2 rounded-[18px] px-4 text-[15px] font-semibold text-white"
           >
             <MessageSquarePlus className="h-4 w-4" />
-            Новый тикет
+            Новое обращение
           </button>
         }
       />
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {SUPPORT_TOPICS.map((topic) => {
+          const Icon = topic.icon;
+          return (
+            <button
+              key={topic.title}
+              type="button"
+              onClick={() => startNewTicket(topic.title)}
+              className="flex items-center gap-3 rounded-[22px] border border-white/[0.09] bg-[#13151d] px-4 py-3.5 text-left transition hover:-translate-y-0.5 hover:border-white/[0.16]"
+            >
+              <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-2xl", topic.tone)}>
+                <Icon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[14.5px] font-semibold text-white">{topic.title}</span>
+                <span className="block text-[12.5px] text-white/45">{topic.hint}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       {error ? (
         <div className="ux-error flex flex-wrap items-center justify-between gap-3 rounded-[22px] px-4 py-3 text-sm text-rose-100" role="alert" aria-live="assertive">
@@ -263,13 +335,18 @@ export function SupportTicketChat() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-stretch">
+      <section className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-stretch">
         <aside className="ux-surface flex min-h-[260px] flex-col rounded-[28px] p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c7bcff]">Ваши обращения</p>
-              <p className="mt-2 text-sm leading-6 text-white/60">Все тикеты и статусы поддержки в одном месте.</p>
-            </div>
+          <div className="flex items-center gap-2">
+            <label className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 text-white/45 focus-within:border-[#7b61ff]/50">
+              <Search className="h-4 w-4 shrink-0" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Поиск по обращениям"
+                className="min-w-0 flex-1 bg-transparent text-[14px] text-white outline-none placeholder:text-white/40"
+              />
+            </label>
             <button
               type="button"
               onClick={() => void loadTickets()}
@@ -280,18 +357,36 @@ export function SupportTicketChat() {
             </button>
           </div>
 
-          <div className="mt-4 flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+          <div className="mt-3 flex flex-wrap gap-1">
+            {TICKET_FILTERS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setFilter(item.id)}
+                className={cn(
+                  "rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors",
+                  filter === item.id ? "bg-white/10 text-white" : "text-white/55 hover:text-white"
+                )}
+              >
+                {item.label} <span className="text-white/45">{filterCounts[item.id]}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-3 flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
             {loading ? (
               <div className="ux-loading flex items-center gap-2 rounded-[22px] px-4 py-4 text-[14px] font-medium text-white/65">
                 <Loader2 className="h-4 w-4 animate-spin text-[#a78bfa]" />
                 Загружаем тикеты...
               </div>
-            ) : tickets.length === 0 ? (
+            ) : visibleTickets.length === 0 ? (
               <div className="ux-empty rounded-[22px] border-dashed px-4 py-5 text-[14px] leading-6 text-white/52">
-                Тикетов пока нет. Создайте первое обращение, и переписка появится здесь.
+                {tickets.length === 0
+                  ? "Обращений пока нет. Выберите тему выше или создайте новое обращение."
+                  : "Ничего не нашлось. Попробуйте другой запрос или фильтр."}
               </div>
             ) : (
-              tickets.map((ticket) => {
+              visibleTickets.map((ticket) => {
                 const activeTicket = activeId === ticket.id && !creating;
                 return (
                   <button
@@ -310,10 +405,13 @@ export function SupportTicketChat() {
                     )}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-[14px] font-semibold text-white">{ticket.subject}</p>
-                        <p className="mt-1 text-[12px] text-white/48">{formatSupportDate(ticket.updatedAt)}</p>
-                      </div>
+                      <p className="min-w-0 truncate text-[14.5px] font-semibold text-white">{ticket.subject}</p>
+                      <span className="shrink-0 text-[12px] text-white/45">{formatSupportDate(ticket.updatedAt)}</span>
+                    </div>
+                    {ticket.lastMessage ? (
+                      <p className="mt-1 truncate text-[13px] text-white/55">{ticket.lastMessage}</p>
+                    ) : null}
+                    <div className="mt-2">
                       <SupportStatusPill status={ticket.status} />
                     </div>
                   </button>
@@ -346,6 +444,7 @@ export function SupportTicketChat() {
 
                 <Field label="Сообщение">
                   <textarea
+                    ref={newBodyRef}
                     value={newBody}
                     onChange={(event) => setNewBody(event.target.value)}
                     placeholder="Опишите вопрос максимально подробно"
@@ -364,7 +463,7 @@ export function SupportTicketChat() {
                   disabled={!newSubject.trim() || !newBody.trim() || saving}
                   className="ux-button-primary inline-flex h-11 items-center rounded-[18px] px-5 text-[15px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  {saving ? "Создаём..." : "Открыть тикет"}
+                  {saving ? "Создаём..." : "Отправить обращение"}
                 </button>
                 <button
                   type="button"
@@ -385,9 +484,10 @@ export function SupportTicketChat() {
               <header className="border-b border-white/[0.08] px-5 py-5 sm:px-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c7bcff]">Переписка по тикету</p>
-                    <h2 className="mt-3 truncate text-[26px] font-semibold tracking-[-0.03em] text-white sm:text-[30px]">{active.subject}</h2>
-                    <p className="mt-2 text-[14px] text-white/54">Последнее обновление {formatSupportDate(active.updatedAt)}</p>
+                    <h2 className="truncate text-[22px] font-semibold tracking-[-0.02em] text-white">{active.subject}</h2>
+                    <p className="mt-1 text-[13px] text-white/50">
+                      Обращение №{active.id.slice(0, 8)} · обновлено {formatSupportDate(active.updatedAt)}
+                    </p>
                   </div>
                   <SupportStatusPill status={active.status} />
                 </div>
@@ -400,21 +500,33 @@ export function SupportTicketChat() {
                       <article
                         key={message.id}
                         className={cn(
-                          "flex",
+                          "flex items-end gap-2.5",
                           message.senderType === "USER" ? "justify-end" : "justify-start"
                         )}
                       >
-                        <div
-                          className={cn(
-                            "max-w-[min(100%,620px)] rounded-[22px] px-4 py-3 text-[15px] leading-6",
-                            message.senderType === "USER"
-                              ? "ux-pill-active rounded-br-[10px] text-white"
-                              : "ux-surface-soft rounded-bl-[10px] text-white/86"
-                          )}
-                        >
-                          <p className="whitespace-pre-wrap">{message.body}</p>
-                          <p className={cn("mt-2 text-[11px] font-medium", message.senderType === "USER" ? "text-white/56" : "text-white/42")}>
-                            {message.senderType === "ADMIN" ? "Администратор" : "Вы"} · {formatSupportDate(message.createdAt)}
+                        {message.senderType === "USER" ? null : (
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/10 bg-[#1d1f2a]">
+                            <Image src="/brand/logo.png" alt="" width={317} height={400} className="h-5 w-auto" />
+                          </span>
+                        )}
+                        <div className="max-w-[min(100%,620px)]">
+                          <div
+                            className={cn(
+                              "rounded-[20px] px-4 py-3 text-[15px] leading-6",
+                              message.senderType === "USER"
+                                ? "rounded-br-[6px] bg-[#7b61ff] text-white"
+                                : "rounded-bl-[6px] border border-white/[0.07] bg-[#1c1e29] text-white/88"
+                            )}
+                          >
+                            <p className="whitespace-pre-wrap">{message.body}</p>
+                          </div>
+                          <p
+                            className={cn(
+                              "mt-1.5 text-[11.5px] font-medium text-white/42",
+                              message.senderType === "USER" && "text-right"
+                            )}
+                          >
+                            {message.senderType === "USER" ? "Вы" : "Поддержка ICECREAMMUSIC"} · {formatSupportDate(message.createdAt)}
                           </p>
                         </div>
                       </article>
@@ -438,7 +550,7 @@ export function SupportTicketChat() {
                         event.preventDefault();
                         void sendMessage();
                       }}
-                      className="ux-control flex items-end gap-2 rounded-[24px] p-2"
+                      className="ux-control flex items-end gap-2 rounded-[20px] p-2"
                     >
                       <textarea
                         value={composer}
@@ -450,7 +562,7 @@ export function SupportTicketChat() {
                           }
                         }}
                         rows={1}
-                        placeholder="Написать сообщение..."
+                        placeholder="Напишите сообщение…"
                         className="max-h-40 min-h-[40px] flex-1 resize-none bg-transparent px-3 py-2 text-[15px] leading-6 text-white outline-none placeholder:text-white/30"
                       />
                       <button
@@ -462,6 +574,12 @@ export function SupportTicketChat() {
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                       </button>
                     </form>
+                  )}
+                  {active.status === "CLOSED" ? null : (
+                    <p className="mt-2 flex items-center gap-1.5 text-[12px] text-white/45">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      Команда на связи · Enter — отправить, Shift+Enter — новая строка
+                    </p>
                   )}
                 </div>
               </div>
@@ -498,7 +616,7 @@ function SupportStatusPill({ status }: { status: SupportTicketResponse["status"]
   return (
     <span
       className={cn(
-        "inline-flex h-9 shrink-0 items-center rounded-full px-3 text-[11px] font-semibold uppercase tracking-[0.16em]",
+        "inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-[11.5px] font-semibold",
         status === "OPEN" && "border border-amber-400/24 bg-amber-500/10 text-amber-100",
         status === "IN_PROGRESS" && "border border-sky-400/24 bg-sky-500/10 text-sky-100",
         status === "WAITING_USER" && "border border-violet-400/24 bg-violet-500/10 text-violet-100",

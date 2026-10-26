@@ -1,9 +1,11 @@
 import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
 
 import { PublicFeedPage } from "@/components/feed/public-feed-page";
 import { authOptions } from "@/lib/auth";
 import { normalizeLockedAuthorFeedQueryState } from "@/lib/feed-client-state";
 import { resolveDashboardCommunityFeedQueryState } from "@/lib/feed-query-state";
+import { COLLAB_MARKET_ENABLED } from "@/lib/feature-flags";
 import { prisma } from "@/lib/prisma";
 import { getPublicFeedPayload } from "@/lib/public-feed-service";
 
@@ -16,6 +18,7 @@ function first(value: string | string[] | undefined) {
 }
 
 export default async function DashboardCommunityPage({ searchParams = {} }: { searchParams?: FeedPageSearchParams }) {
+  if (!COLLAB_MARKET_ENABLED) redirect("/dashboard");
   const session = await getServerSession(authOptions);
   const author = first(searchParams.author)?.trim() || null;
   const query = normalizeLockedAuthorFeedQueryState(resolveDashboardCommunityFeedQueryState({

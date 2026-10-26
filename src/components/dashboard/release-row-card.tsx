@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Diamond,
   ExternalLink,
+  Music2,
   Loader2,
   Pause,
   Pencil,
@@ -613,7 +614,7 @@ function ReleaseRowCardBase({
 
         <div className="flex flex-col gap-5 sm:flex-row">
           {/* cover */}
-          <div className="relative h-[88px] w-[88px] shrink-0 overflow-hidden rounded-xl border border-white/[0.06] sm:h-[100px] sm:w-[100px]">
+          <div className="relative h-[96px] w-[96px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.08] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.9)] sm:h-[120px] sm:w-[120px]">
             {isRenderableCover ? (
               // Keep release cards stable even when remote host is not configured in next/image.
               <img
@@ -626,8 +627,8 @@ function ReleaseRowCardBase({
                 }}
               />
             ) : (
-              <div className="grid h-full w-full place-items-center bg-white/[0.02] px-2 text-center text-[12px] font-medium text-white/45">
-                Обложка недоступна
+              <div className="grid h-full w-full place-items-center bg-[radial-gradient(circle_at_30%_20%,rgba(123,61,245,0.35),transparent_60%),linear-gradient(135deg,#1a1b26,#101118)]">
+                <Music2 className="h-7 w-7 text-white/30" strokeWidth={1.6} />
               </div>
             )}
           </div>
@@ -654,11 +655,14 @@ function ReleaseRowCardBase({
                   <p className="mt-0.5 truncate text-[14px] font-medium text-white/70">
                     {artist}
                   </p>
+                  <div className="mt-2.5">
+                    <StatusFieldValue release={release} />
+                  </div>
                 </div>
               )}
             </div>
 
-            <div className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[14px] font-medium">
+            <div className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] font-medium">
               <Field label="UPC" value={release.upc?.trim() ? release.upc : "Н/А"} />
               <Field label="Название лейбла" value={label} valueClass="text-white" />
             </div>
@@ -693,7 +697,6 @@ function ReleaseRowCardBase({
                 }
               />
               <MetaField label="Жанр" value={genre} />
-              <MetaField label="Статус" value={<StatusFieldValue release={release} />} />
             </div>
 
             {showPay ? (
@@ -742,9 +745,21 @@ function ReleaseRowCardBase({
         <button
           type="button"
           onClick={() => setOpen((s) => !s)}
-          className="mt-4 inline-flex items-center gap-1.5 text-[12.5px] text-white/55 transition-colors hover:text-white"
+          aria-expanded={open}
+          className={cn(
+            "mt-3 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
+            open
+              ? "border-[#7b3df5]/35 bg-[#7b3df5]/15 text-white"
+              : "border-white/[0.08] bg-white/[0.03] text-white/65 hover:bg-white/[0.06] hover:text-white"
+          )}
         >
+          <Music2 className="h-3.5 w-3.5" />
           Трек-лист
+          {displayTracks.length > 0 ? (
+            <span className="rounded-full bg-white/[0.08] px-1.5 text-[11px] font-bold text-white/70">
+              {displayTracks.length}
+            </span>
+          ) : null}
           <ChevronDown
             className={cn(
               "h-3.5 w-3.5 transition-transform duration-300",
@@ -762,16 +777,16 @@ function ReleaseRowCardBase({
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
               className="overflow-hidden"
             >
-              <div className="mt-3 overflow-x-auto rounded-xl border border-white/[0.05] bg-black/20">
+              <div className="mt-3 overflow-x-auto rounded-2xl border border-white/[0.06] bg-black/25">
                 {displayTracks.length === 0 ? (
                   <p className="px-4 py-4 text-center text-[12.5px] text-white/40">
                     Треков пока нет
                   </p>
                 ) : (
                   <div className="min-w-[900px]">
-                    <div className="grid grid-cols-[44px_52px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.07] px-4 py-2 text-[12px] font-semibold text-white/48">
+                    <div className="grid grid-cols-[44px_52px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.06] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-white/40">
                       <span>#</span>
-                      <span className="text-center">▶</span>
+                      <span aria-hidden />
                       <span>Название</span>
                       <span className="text-center">Исполнитель</span>
                       <span className="text-center">Длительность</span>
@@ -1010,7 +1025,7 @@ function Field({
 function MetaField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <p className="text-[12px] font-medium text-white/48">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/40">{label}</p>
       <div className="mt-1 min-w-0 text-[14px] font-medium leading-snug text-white/88">{value}</div>
     </div>
   );
@@ -1326,7 +1341,7 @@ function TrackAudioButton({ audioUrl }: { audioUrl?: string | null }) {
     return (
       <span
         title="Аудио не загружено"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.12] bg-white/[0.03] text-white/30"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.1] bg-white/[0.03] text-white/30"
       >
         <Play className="h-3.5 w-3.5" />
       </span>
@@ -1346,7 +1361,7 @@ function TrackAudioButton({ audioUrl }: { audioUrl?: string | null }) {
           audio.pause();
         }
       }}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-300/35 bg-cyan-500/10 text-cyan-200 transition-colors hover:bg-cyan-500/20"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#7b3df5] text-white shadow-[0_6px_16px_-6px_rgba(123,61,245,0.8)] transition hover:bg-[#8f5bf7]"
       title={playing ? "Пауза" : "Воспроизвести"}
       aria-label={playing ? "Пауза" : "Воспроизвести"}
     >

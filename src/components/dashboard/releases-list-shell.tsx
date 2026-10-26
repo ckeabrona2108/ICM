@@ -202,17 +202,17 @@ export function ReleasesListShell({
 
       {/* filters bar */}
       <FilterPanel>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Поиск по UPC, ISRC, треку, исполнителю, лейблу, коду партнёра"
-            className="ux-control h-11 w-full rounded-[18px] pl-10 pr-3.5 text-[15px] font-medium text-white placeholder:text-white/40 outline-none focus:border-[#7b3df5]/60 focus:bg-white/[0.04]"
-          />
-        </div>
-
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        {/* One row on wide screens: search takes the free space, the rest stay compact. */}
+        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-[minmax(0,1fr)_200px_180px_180px]">
+          <div className="relative sm:col-span-3 xl:col-span-1">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Поиск: название, исполнитель, UPC, ISRC, лейбл"
+              className="ux-control h-11 w-full rounded-[18px] pl-10 pr-3.5 text-[14px] font-medium text-white placeholder:text-white/40 outline-none focus:border-[#7b3df5]/60 focus:bg-white/[0.04]"
+            />
+          </div>
           <SelectInput
             value={platform}
             onChange={setPlatform}
@@ -245,8 +245,11 @@ export function ReleasesListShell({
 
       {/* meta + sort */}
       <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-        <h2 className="text-[22px] font-semibold text-white">
-          Всего релизов: <span className="text-white/85">{total}</span>
+        <h2 className="flex items-center gap-2.5 text-[17px] font-semibold text-white">
+          Всего релизов
+          <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-[#7b3df5]/18 px-2.5 text-[13px] font-bold text-[#c4b0ff]">
+            {total}
+          </span>
         </h2>
 
         <div className="ml-auto flex flex-wrap items-center gap-4 text-[14px] font-medium text-white/65">
@@ -326,7 +329,7 @@ function SelectInput({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className={cn(
-          "ux-control h-11 w-full appearance-none rounded-[18px] px-3.5 pr-9 text-[15px] font-medium outline-none focus:border-[#7b3df5]/60",
+          "ux-control h-11 w-full appearance-none rounded-[18px] px-3.5 pr-9 text-[14px] font-medium outline-none focus:border-[#7b3df5]/60",
           value ? "text-white" : "text-white/45",
           disabled && "cursor-not-allowed opacity-60"
         )}
@@ -359,7 +362,7 @@ function DateInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "icm-date-input h-11 w-full rounded-xl border border-white/[0.12] bg-black/25 px-3.5 pr-9 text-[15px] font-medium outline-none transition-colors focus:border-[#7b3df5]/60",
+          "icm-date-input ux-control h-11 w-full rounded-[18px] px-3.5 pr-9 text-[14px] font-medium outline-none transition-colors focus:border-[#7b3df5]/60",
           value ? "text-white" : "text-white/45"
         )}
       />

@@ -32,6 +32,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
+import { COLLAB_MARKET_ENABLED } from "@/lib/feature-flags";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/components/user/user-provider";
 import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
@@ -161,20 +162,24 @@ function buildNav(counts: {
       label: "Сообщения",
       icon: MessageSquare
     },
-    {
-      type: "leaf",
-      href: "/dashboard/community",
-      label: "Collab Market",
-      icon: UserRound,
-      badge: "BETA",
-      badgeTone: "soon"
-    },
-    {
-      type: "leaf",
-      href: "/dashboard/community?view=collaborations&tab=favorites",
-      label: "Избранное",
-      icon: Bookmark
-    },
+    ...(COLLAB_MARKET_ENABLED
+      ? ([
+          {
+            type: "leaf",
+            href: "/dashboard/community",
+            label: "Collab Market",
+            icon: UserRound,
+            badge: "BETA",
+            badgeTone: "soon"
+          },
+          {
+            type: "leaf",
+            href: "/dashboard/community?view=collaborations&tab=favorites",
+            label: "Избранное",
+            icon: Bookmark
+          }
+        ] satisfies NavItem[])
+      : []),
     {
       type: "leaf",
       href: "/dashboard/smart-links",

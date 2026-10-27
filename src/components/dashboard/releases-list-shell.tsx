@@ -269,12 +269,7 @@ export function ReleasesListShell({
 
       {/* meta + sort */}
       <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
-        <h2 className="flex items-center gap-2.5 text-[17px] font-semibold text-white">
-          Всего релизов
-          <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-[#7b3df5]/18 px-2.5 text-[13px] font-bold text-[#c4b0ff]">
-            {total}
-          </span>
-        </h2>
+        <h2 className="text-[17px] font-semibold text-white">Ваши релизы</h2>
 
         <div className="ml-auto flex flex-wrap items-center gap-4 text-[14px] font-medium text-white/65">
           <div className="inline-flex rounded-xl border border-white/[0.08] bg-white/[0.03] p-1" role="group" aria-label="Вид списка">

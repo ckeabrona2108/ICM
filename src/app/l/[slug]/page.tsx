@@ -13,7 +13,7 @@ import { SmartLinkShareButton } from "@/components/smart-link/smart-link-share-b
 import { SmartLinkViewTracker } from "@/components/smart-link/smart-link-view-tracker";
 import { getSmartLinkAccentColors, getSmartLinkShapeRadius } from "@/lib/smart-link-appearance";
 import { getSmartLinkPublicView } from "@/lib/smart-link-service";
-import { parseSmartLinkPixelIds, safeSmartLinkHref } from "@/lib/smart-link-urls";
+import { decodeSmartLinkSlug, parseSmartLinkPixelIds, safeSmartLinkHref } from "@/lib/smart-link-urls";
 import {
   formatSmartLinkReleaseDate,
   getSmartLinkReleaseMoment,
@@ -70,7 +70,7 @@ export async function generateMetadata({
 }: {
   params: { slug: string };
 }): Promise<Metadata> {
-  const data = await getPublicView(params.slug);
+  const data = await getPublicView(decodeSmartLinkSlug(params.slug));
   if (!data) {
     return {
       title: "Релиз не найден"
@@ -109,7 +109,7 @@ export default async function SmartLinkPublicPage({
   params: { slug: string };
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const data = await getPublicView(params.slug);
+  const data = await getPublicView(decodeSmartLinkSlug(params.slug));
   if (!data) {
     notFound();
   }

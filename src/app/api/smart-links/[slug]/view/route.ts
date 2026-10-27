@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 import { runSmartLinkAutofillInBackground, trackSmartLinkView } from "@/lib/smart-link-service";
-import { readSmartLinkGeo } from "@/lib/smart-link-urls";
+import { decodeSmartLinkSlug, readSmartLinkGeo } from "@/lib/smart-link-urls";
 
 export async function POST(
   request: Request,
   context: { params: { slug: string } }
 ) {
-  const slug = context.params.slug?.trim();
+  const slug = decodeSmartLinkSlug(context.params.slug);
   if (!slug) {
     return NextResponse.json({ error: "Slug is required" }, { status: 400 });
   }

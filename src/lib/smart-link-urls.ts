@@ -97,3 +97,17 @@ export function readSmartLinkGeo(headers: Headers): { country: string | null; ci
     city
   };
 }
+
+/**
+ * Route params for non-ASCII slugs ("олег-jijo") arrive percent-encoded, so lookups by the raw param miss.
+ * Decodes once and falls back to the raw value for malformed input.
+ */
+export function decodeSmartLinkSlug(input: string | null | undefined): string {
+  const raw = (input ?? "").trim();
+  if (!raw.includes("%")) return raw;
+  try {
+    return decodeURIComponent(raw).trim();
+  } catch {
+    return raw;
+  }
+}

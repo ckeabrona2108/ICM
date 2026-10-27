@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 
 import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
 import { resolveSmartLinkRedirect } from "@/lib/smart-link-service";
-import { readSmartLinkGeo } from "@/lib/smart-link-urls";
+import { decodeSmartLinkSlug, readSmartLinkGeo } from "@/lib/smart-link-urls";
 
 export async function GET(
   request: Request,
   context: { params: { slug: string; platform: string } }
 ) {
-  const slug = context.params.slug?.trim();
+  const slug = decodeSmartLinkSlug(context.params.slug);
   const platform = context.params.platform?.trim();
 
   if (!slug || !platform) {

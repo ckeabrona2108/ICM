@@ -5,6 +5,7 @@ import {
   normalizeSmartLinkHref,
   parseSmartLinkPixelIds,
   readSmartLinkGeo,
+  decodeSmartLinkSlug,
   safeSmartLinkHref
 } from "@/lib/smart-link-urls";
 
@@ -54,4 +55,11 @@ test("readSmartLinkGeo reads Vercel and Cloudflare headers", () => {
   );
   assert.deepEqual(readSmartLinkGeo(new Headers({ "cf-ipcountry": "KZ" })), { country: "KZ", city: null });
   assert.deepEqual(readSmartLinkGeo(new Headers({ "cf-ipcountry": "XX" })), { country: null, city: null });
+});
+
+test("decodeSmartLinkSlug decodes percent-encoded Cyrillic slugs", () => {
+  assert.equal(decodeSmartLinkSlug("%D0%BE%D0%BB%D0%B5%D0%B3-jijo"), "олег-jijo");
+  assert.equal(decodeSmartLinkSlug("nosleep"), "nosleep");
+  assert.equal(decodeSmartLinkSlug("олег-jijo"), "олег-jijo");
+  assert.equal(decodeSmartLinkSlug("bad%E0%A4%A"), "bad%E0%A4%A");
 });

@@ -5,14 +5,28 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import {
+  Barcode,
+  Building2,
+  CalendarClock,
+  CalendarDays,
+  CalendarPlus,
+  Check,
   ChevronDown,
+  Copy,
+  CreditCard,
   Diamond,
   ExternalLink,
+  Globe2,
+  Link2,
+  ListMusic,
+  Hash,
   Music2,
   Loader2,
   Pause,
   Pencil,
   Play,
+  Radio,
+  Rocket,
   ScrollText,
   Smartphone,
   Trash2,
@@ -311,6 +325,19 @@ function ReleaseRowCardBase({
     [artist, displayTracks]
   );
 
+  // Smart Link создаётся только для принятых релизов с UPC — у остальных кнопка вела бы в никуда.
+  const hasSmartLink =
+    ["approved", "distributed", "dsp_confirmed"].includes(release.status) && Boolean(release.upc?.trim());
+
+  const totalDurationLabel = React.useMemo(() => {
+    const totalSeconds = trackServices.reduce((sum, track) => {
+      const [minutes, seconds] = (track.duration ?? "").split(":").map(Number);
+      return Number.isFinite(minutes) && Number.isFinite(seconds) ? sum + minutes * 60 + seconds : sum;
+    }, 0);
+    if (totalSeconds <= 0) return null;
+    return `${Math.floor(totalSeconds / 60)}:${String(totalSeconds % 60).padStart(2, "0")}`;
+  }, [trackServices]);
+
   React.useEffect(() => {
     setCoverBroken(false);
   }, [release.id]);
@@ -538,13 +565,24 @@ function ReleaseRowCardBase({
         openDraftForEditing();
       }}
       className={cn(
-        "group relative overflow-hidden rounded-2xl border border-white/[0.05] bg-[#13141a]/80 transition-colors hover:border-white/[0.10]",
+        "group relative overflow-hidden rounded-[26px] border border-white/[0.07] bg-[#13141c] transition-colors hover:border-white/[0.12]",
         isDraftCardClickable && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50"
       )}
     >
       <div className="pointer-events-none absolute -right-32 -top-32 h-64 w-64 rounded-full bg-[#7b3df5]/0 blur-3xl transition-all duration-500 group-hover:bg-[#7b3df5]/10" />
+      {isRenderableCover ? (
+        // Размытая обложка за шапкой окрашивает карточку в цвета релиза.
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-[220px] overflow-hidden">
+          <img
+            src={activeCoverSrc ?? ""}
+            alt=""
+            className="h-full w-full scale-125 object-cover opacity-30 blur-[60px] saturate-150"
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(19,20,28,0.2),#13141c_92%)]" />
+        </div>
+      ) : null}
 
-      <div className="relative p-5 sm:p-6">
+      <div className="relative p-4">
         {/* action icons */}
         <div className="absolute right-5 top-5 flex items-center gap-1 sm:right-6 sm:top-6">
           {editLocked ? (
@@ -612,116 +650,132 @@ function ReleaseRowCardBase({
           <p className="mb-3 pr-32 text-[13px] font-medium text-rose-300">{deleteError}</p>
         ) : null}
 
-        <div className="flex flex-col gap-5 sm:flex-row">
-          {/* cover */}
-          <div className="relative h-[96px] w-[96px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.08] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.9)] sm:h-[120px] sm:w-[120px]">
-            {isRenderableCover ? (
-              // Keep release cards stable even when remote host is not configured in next/image.
-              <img
-                src={activeCoverSrc ?? ""}
-                alt=""
-                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                loading="lazy"
-                onError={() => {
-                  setCoverBroken(true);
-                }}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          {/* cover + vinyl peeking out from behind it */}
+          <div className="relative shrink-0 self-start sm:mr-[38px] sm:self-center">
+            <div
+              aria-hidden
+              className="absolute left-[52px] top-[7px] hidden h-[86px] w-[86px] place-items-center rounded-full bg-[repeating-radial-gradient(circle,#111_0_2px,#1c1c21_2px_4px)] shadow-[0_20px_40px_-20px_#000] transition-transform duration-700 group-hover:translate-x-3 group-hover:rotate-45 sm:grid"
+            >
+              <span
+                className="h-[34%] w-[34%] rounded-full border-[3px] border-[#13141c] bg-[#2a2c38] bg-cover bg-center"
+                style={isRenderableCover ? { backgroundImage: `url("${activeCoverSrc}")` } : undefined}
               />
-            ) : (
-              <div className="grid h-full w-full place-items-center bg-[radial-gradient(circle_at_30%_20%,rgba(123,61,245,0.35),transparent_60%),linear-gradient(135deg,#1a1b26,#101118)]">
-                <Music2 className="h-7 w-7 text-white/30" strokeWidth={1.6} />
-              </div>
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex items-baseline gap-3 pr-32">
-              {showNumber ? (
-                <span className="text-[34px] font-bold leading-none text-white sm:text-[40px]">
-                  {release.number}
-                </span>
+            </div>
+            <div className="relative h-[88px] w-[88px] overflow-hidden rounded-[16px] border border-white/[0.1] shadow-[0_20px_40px_-20px_rgba(0,0,0,0.95)] sm:h-[100px] sm:w-[100px]">
+              {isRenderableCover ? (
+                // Keep release cards stable even when remote host is not configured in next/image.
+                <img
+                  src={activeCoverSrc ?? ""}
+                  alt=""
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+                  loading="lazy"
+                  onError={() => {
+                    setCoverBroken(true);
+                  }}
+                />
               ) : (
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="truncate text-[18px] font-semibold uppercase tracking-wide text-white">
-                      {title}
-                    </h3>
-                    {priorityBadge ? (
-                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-300/95">
-                        <Diamond className="h-2.5 w-2.5 fill-emerald-400/80 text-emerald-400" />
-                        {priorityBadge.label}
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="mt-0.5 truncate text-[14px] font-medium text-white/70">
-                    {artist}
-                  </p>
-                  <div className="mt-2.5">
-                    <StatusFieldValue release={release} />
-                  </div>
+                <div className="grid h-full w-full place-items-center bg-[radial-gradient(circle_at_30%_20%,rgba(123,61,245,0.35),transparent_60%),linear-gradient(135deg,#1a1b26,#101118)]">
+                  <Music2 className="h-7 w-7 text-white/30" strokeWidth={1.6} />
                 </div>
               )}
             </div>
+          </div>
 
-            <div className="mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] font-medium">
-              <Field label="UPC" value={release.upc?.trim() ? release.upc : "Н/А"} />
-              <Field label="Название лейбла" value={label} valueClass="text-white" />
-            </div>
-
-            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-white/[0.05] pt-4 sm:grid-cols-2 lg:grid-cols-4">
-              {release.releaseCatalogId ? (
-                <MetaField label="ID" value={release.releaseCatalogId} />
+          <div className="min-w-0 flex-1 sm:pr-20">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusFieldValue release={release} />
+              {priorityBadge ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-300/95">
+                  <Diamond className="h-3 w-3 fill-emerald-400/80 text-emerald-400" />
+                  {priorityBadge.label}
+                </span>
               ) : null}
-              {variant === "compact" ? (
-                <MetaField label="Дата создания" value={createdAt} />
-              ) : (
-                <MetaField label="Дата предзаказа" value={preorderDate} />
-              )}
-              <MetaField label="Дата релиза" value={releaseDate} />
-              <MetaField label="Дата старта" value={startDate} />
-              <MetaField
-                label="Территории"
-                value={
-                  <span className="inline-flex items-center gap-1 text-white/85">
-                    {release.territoriesCount ? `${release.territoriesCount}` : release.territories}
-                    <ExternalLink className="h-3 w-3 text-white/40" />
-                  </span>
-                }
-              />
-              <MetaField
-                label="Площадки"
-                value={
-                  <span className="inline-flex items-center gap-1 text-white/85">
-                    {release.platformsCount ? `${release.platformsCount}` : release.platforms}
-                    <ExternalLink className="h-3 w-3 text-white/40" />
-                  </span>
-                }
-              />
-              <MetaField label="Жанр" value={genre} />
             </div>
-
-            {showPay ? (
-              <div className="mt-4 flex items-center justify-end border-t border-white/[0.05] pt-4">
-                {timelineState.showPayButton ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void startReleasePayment();
-                    }}
-                    disabled={paying}
-                    className="rounded-lg bg-[#7b3df5] px-4 py-2 text-[14px] font-semibold text-white transition-colors hover:bg-[#8b4ff7]"
-                  >
-                    {paying ? "Переход к оплате..." : "Оплатить"}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-            {payError ? (
-              <p className="mt-2 text-right text-[12px] font-medium text-rose-300">
-                {payError}
-              </p>
-            ) : null}
+            <h3 className="mt-1.5 truncate text-[18px] font-bold leading-tight tracking-[-0.02em] text-white sm:text-[21px]">
+              {showNumber ? <span className="mr-3 text-white/35">#{release.number}</span> : null}
+              {title}
+            </h3>
+            <p className="mt-0.5 truncate text-[13px] font-semibold text-white/60">{artist}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] font-medium text-white/50">
+              <span className="inline-flex items-center gap-1.5">
+                <CalendarDays className="h-4 w-4" />
+                {releaseDate}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Radio className="h-4 w-4" />
+                {release.platformsCount ? `${release.platformsCount} площадок` : release.platforms || "Площадки не выбраны"}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Globe2 className="h-4 w-4" />
+                {release.territoriesCount ? `${release.territoriesCount} территорий` : release.territories || "—"}
+              </span>
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {hasSmartLink ? (
+                <Link
+                  href={`/dashboard/releases/${release.id}/smart-link`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[10px] bg-[#7b61ff] px-3.5 text-[12.5px] font-semibold text-white shadow-[0_14px_40px_-14px_rgba(123,97,255,0.9)] transition hover:bg-[#8b74ff]"
+                >
+                  <Link2 className="h-4 w-4" />
+                  Smart Link
+                </Link>
+              ) : null}
+              <Link
+                href={release.status === "draft" ? `/dashboard/releases/${release.id}/edit` : `/dashboard/releases/${release.id}`}
+                className="inline-flex h-8 items-center gap-1.5 rounded-[10px] border border-white/[0.14] px-3.5 text-[12.5px] font-semibold text-white/85 transition hover:border-white/25 hover:text-white"
+              >
+                {release.status === "draft" ? <Pencil className="h-4 w-4" /> : <ExternalLink className="h-4 w-4" />}
+                {release.status === "draft" ? "Продолжить" : "Подробнее"}
+              </Link>
+            </div>
           </div>
         </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          <MetaField
+            icon={<Barcode className="h-3.5 w-3.5" />}
+            label="UPC"
+            value={release.upc?.trim() ? <CopyableValue value={release.upc.trim()} /> : "Н/А"}
+          />
+          <MetaField icon={<Building2 className="h-3.5 w-3.5" />} label="Лейбл" value={label} />
+          {variant === "compact" ? (
+            <MetaField icon={<CalendarPlus className="h-3.5 w-3.5" />} label="Создан" value={createdAt} />
+          ) : (
+            <MetaField icon={<CalendarClock className="h-3.5 w-3.5" />} label="Предзаказ" value={preorderDate} />
+          )}
+          <MetaField icon={<Rocket className="h-3.5 w-3.5" />} label="Старт" value={startDate} />
+          {release.releaseCatalogId ? (
+            <MetaField icon={<Hash className="h-3.5 w-3.5" />} label="Номер в каталоге" value={release.releaseCatalogId} />
+          ) : null}
+          <MetaField icon={<Music2 className="h-3.5 w-3.5" />} label="Жанр" value={genre} />
+        </div>
+
+        {showPay && timelineState.showPayButton ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-400/30 bg-amber-400/[0.08] px-4 py-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <CreditCard className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold text-amber-100">Релиз ждёт оплаты</p>
+                <p className="text-[12.5px] text-amber-100/70">
+                  Модерация начнётся сразу после оплаты. Если оплата не прошла — попробуйте ещё раз.
+                </p>
+                {payError ? <p className="mt-1 text-[12px] font-medium text-rose-300">{payError}</p> : null}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void startReleasePayment();
+              }}
+              disabled={paying}
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-[10px] bg-amber-400 px-4 text-[13px] font-bold text-[#1a1300] transition hover:bg-amber-300 disabled:opacity-60"
+            >
+              {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+              {paying ? "Переход к оплате..." : "Оплатить релиз"}
+            </button>
+          </div>
+        ) : null}
 
         <ReleaseModerationStepper
           steps={timelineState.steps}
@@ -741,33 +795,28 @@ function ReleaseRowCardBase({
           />
         ) : null}
 
-        {/* tracklist toggle */}
+        {/* tracklist */}
+        <div className="mt-3 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#13151d]">
         <button
           type="button"
           onClick={() => setOpen((s) => !s)}
           aria-expanded={open}
-          className={cn(
-            "mt-3 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
-            open
-              ? "border-[#7b3df5]/35 bg-[#7b3df5]/15 text-white"
-              : "border-white/[0.08] bg-white/[0.03] text-white/65 hover:bg-white/[0.06] hover:text-white"
-          )}
+          className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left outline-none transition-colors hover:bg-white/[0.02] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7b3df5]/50"
         >
-          <Music2 className="h-3.5 w-3.5" />
-          Трек-лист
-          {displayTracks.length > 0 ? (
-            <span className="rounded-full bg-white/[0.08] px-1.5 text-[11px] font-bold text-white/70">
-              {displayTracks.length}
-            </span>
-          ) : null}
-          <ChevronDown
-            className={cn(
-              "h-3.5 w-3.5 transition-transform duration-300",
-              open && "rotate-180"
-            )}
-          />
+          <span className="flex items-center gap-2 text-[14px] font-semibold text-white">
+            <ListMusic className="h-4 w-4 text-[#a78bfa]" />
+            Трек-лист
+            {displayTracks.length > 0 ? (
+              <span className="rounded-full bg-white/[0.08] px-2 text-[12px] font-bold text-white/70">
+                {displayTracks.length}
+              </span>
+            ) : null}
+          </span>
+          <span className="flex items-center gap-3 text-[13px] font-medium text-white/45">
+            {totalDurationLabel ? <span className="hidden sm:inline">Общая длительность {totalDurationLabel}</span> : null}
+            <ChevronDown className={cn("h-4 w-4 transition-transform duration-300", open && "rotate-180")} />
+          </span>
         </button>
-
         <AnimatePresence initial={false}>
           {open ? (
             <motion.div
@@ -777,88 +826,46 @@ function ReleaseRowCardBase({
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
               className="overflow-hidden"
             >
-              <div className="mt-3 overflow-x-auto rounded-2xl border border-white/[0.06] bg-black/25">
+              <div className="border-t border-white/[0.06]">
                 {displayTracks.length === 0 ? (
                   <p className="px-4 py-4 text-center text-[12.5px] text-white/40">
                     Треков пока нет
                   </p>
                 ) : (
-                  <div className="min-w-[900px]">
-                    <div className="grid grid-cols-[44px_52px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.06] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-white/40">
-                      <span>#</span>
-                      <span aria-hidden />
-                      <span>Название</span>
-                      <span className="text-center">Исполнитель</span>
-                      <span className="text-center">Длительность</span>
-                      <span className="text-center">Доля прав</span>
-                      <span className="text-center">Сервисы</span>
-                    </div>
+                  <>
                     {displayTracks.map((t) => {
                       const extra = trackServices.find((item) => item.trackNum === t.num);
                       return (
-                        <div
+                        <TrackRow
                           key={t.num}
-                          role="button"
-                          tabIndex={0}
-                          onClick={(event) => openTrackQuickPreview(t.num, event)}
-                          onKeyDown={(event) => openTrackQuickPreview(t.num, event)}
-                          className={cn(
-                            "grid grid-cols-[44px_52px_1.8fr_1.2fr_120px_120px_220px] items-center gap-2 border-b border-white/[0.04] px-4 py-2.5 text-[13px] transition-colors last:border-b-0 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7b3df5]/50",
-                            isQuickPreviewOpen &&
-                              quickPreviewTrackNum === t.num &&
-                              "bg-[#7b3df5]/12 ring-1 ring-inset ring-[#7b3df5]/40"
-                          )}
-                        >
-                          <span className="tabular-nums text-white/42">{t.num}</span>
-                          <div className="flex justify-center">
-                            <TrackAudioButton audioUrl={extra?.audioUrl} />
-                          </div>
-                          <div className="min-w-0 truncate font-medium text-white/88">
-                            <span>{t.title}</span>
-                            {extra?.subtitle ? (
-                              <span className="ml-1 text-white/45">{extra.subtitle}</span>
-                            ) : null}
-                          </div>
-                          <span className="justify-self-stretch truncate text-center text-white/72">
-                            {extra?.artists ?? artist}
-                          </span>
-                          <span className="justify-self-stretch text-center tabular-nums text-white/62">
-                            {extra?.duration ?? t.duration}
-                          </span>
-                          <span className="justify-self-stretch text-center tabular-nums text-white/62">
-                            {extra?.rightsShare ?? "100%"}
-                          </span>
-                          <div className="flex items-center justify-center gap-2">
-                            <TrackServiceIndicator
-                              label="Рингтон"
-                              enabled={Boolean(extra?.services.ringtone)}
-                              icon={<Smartphone className="h-4 w-4" />}
-                            />
-                            <TrackServiceIndicator
-                              label="Текст"
-                              enabled={Boolean(extra?.services.plainText)}
-                              icon={<Type className="h-4 w-4" />}
-                            />
-                            <TrackServiceIndicator
-                              label="Синх. текст"
-                              enabled={Boolean(extra?.services.syncedText)}
-                              icon={<ScrollText className="h-4 w-4" />}
-                            />
-                            <TrackServiceIndicator
-                              label="Видео"
-                              enabled={Boolean(extra?.services.video)}
-                              icon={<Video className="h-4 w-4" />}
-                            />
-                          </div>
-                        </div>
+                          num={t.num}
+                          title={t.title}
+                          subtitle={extra?.subtitle}
+                          artists={extra?.artists ?? artist}
+                          isrc={t.submissionTrack?.isrc?.trim() || undefined}
+                          duration={extra?.duration ?? t.duration}
+                          rightsShare={extra?.rightsShare ?? "100%"}
+                          audioUrl={extra?.audioUrl}
+                          services={extra?.services}
+                          selected={isQuickPreviewOpen && quickPreviewTrackNum === t.num}
+                          onOpen={(event) => openTrackQuickPreview(t.num, event)}
+                        />
                       );
                     })}
-                  </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-white/[0.05] px-4 py-2.5 text-[11.5px] text-white/40">
+                      <span className="inline-flex items-center gap-1.5"><Smartphone className="h-3.5 w-3.5" />Рингтон</span>
+                      <span className="inline-flex items-center gap-1.5"><Type className="h-3.5 w-3.5" />Текст</span>
+                      <span className="inline-flex items-center gap-1.5"><ScrollText className="h-3.5 w-3.5" />Синхронный текст</span>
+                      <span className="inline-flex items-center gap-1.5"><Video className="h-3.5 w-3.5" />Видео</span>
+                      <span className="ml-auto">Подсвечено — добавлено к треку</span>
+                    </div>
+                  </>
                 )}
               </div>
             </motion.div>
           ) : null}
         </AnimatePresence>
+        </div>
       </div>
 
       <ReleaseDeleteDialog
@@ -1005,29 +1012,40 @@ function StatusFieldValue({ release }: { release: CabinetRelease }) {
   );
 }
 
-function Field({
-  label,
-  value,
-  valueClass
-}: {
-  label: string;
-  value: React.ReactNode;
-  valueClass?: string;
-}) {
+function MetaField({ label, value, icon }: { label: string; value: React.ReactNode; icon?: React.ReactNode }) {
   return (
-    <div className="flex items-baseline gap-2">
-      <span className="text-[13px] font-medium text-white/50">{label}</span>
-      <span className={cn("text-[14px] font-medium text-white/78", valueClass)}>{value}</span>
+    <div className="min-w-0 rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-1.5">
+      <p className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-white/40">
+        {icon}
+        {label}
+      </p>
+      <div className="min-w-0 truncate text-[12.5px] font-semibold leading-snug text-white/90">{value}</div>
     </div>
   );
 }
 
-function MetaField({ label, value }: { label: string; value: React.ReactNode }) {
+function CopyableValue({ value }: { value: string }) {
+  const [copied, setCopied] = React.useState(false);
   return (
-    <div className="min-w-0">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/40">{label}</p>
-      <div className="mt-1 min-w-0 text-[14px] font-medium leading-snug text-white/88">{value}</div>
-    </div>
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        void navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      title="Скопировать"
+      className="inline-flex max-w-full items-center gap-1.5 hover:text-white"
+    >
+      <span className="truncate tabular-nums">{value}</span>
+      {copied ? (
+        <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+      ) : (
+        <Copy className="h-3.5 w-3.5 shrink-0 text-white/40" />
+      )}
+    </button>
   );
 }
 
@@ -1322,10 +1340,10 @@ function TrackServiceIndicator({
     <span
       title={enabled ? `${label}: добавлен` : `${label}: не добавлен`}
       className={cn(
-        "inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors",
+        "inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors",
         enabled
-          ? "border-cyan-300/35 bg-cyan-500/12 text-cyan-200"
-          : "border-white/[0.12] bg-white/[0.03] text-white/35"
+          ? "border-[#7b61ff]/35 bg-[#7b61ff]/18 text-[#c4b5fd]"
+          : "border-white/[0.08] bg-white/[0.02] text-white/25"
       )}
     >
       {icon}
@@ -1333,48 +1351,155 @@ function TrackServiceIndicator({
   );
 }
 
-function TrackAudioButton({ audioUrl }: { audioUrl?: string | null }) {
+// Волна декоративная: высоты столбиков стабильно выводятся из названия трека,
+// а закрашивается она по реальному прогрессу воспроизведения.
+function buildWaveform(seed: string, bars: number): number[] {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return Array.from({ length: bars }, (_, index) => {
+    hash = (hash * 1103515245 + 12345) >>> 0;
+    const noise = (hash % 1000) / 1000;
+    const envelope = 0.55 + 0.45 * Math.sin((index / bars) * Math.PI);
+    return Math.round(22 + 78 * envelope * (0.35 + 0.65 * noise));
+  });
+}
+
+function TrackRow({
+  num,
+  title,
+  subtitle,
+  artists,
+  isrc,
+  duration,
+  rightsShare,
+  audioUrl,
+  services,
+  selected,
+  onOpen
+}: {
+  num: number;
+  title: string;
+  subtitle?: string;
+  artists: string;
+  isrc?: string;
+  duration: string;
+  rightsShare: string;
+  audioUrl?: string | null;
+  services?: { ringtone: boolean; plainText: boolean; syncedText: boolean; video: boolean };
+  selected: boolean;
+  onOpen: (event: React.MouseEvent | React.KeyboardEvent) => void;
+}) {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const waveform = React.useMemo(() => buildWaveform(`${num}-${title}`, 64), [num, title]);
+  const active = playing || progress > 0;
 
-  if (!audioUrl) {
-    return (
-      <span
-        title="Аудио не загружено"
-        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.1] bg-white/[0.03] text-white/30"
-      >
-        <Play className="h-3.5 w-3.5" />
-      </span>
-    );
-  }
+  const togglePlayback = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) void audio.play();
+    else audio.pause();
+  };
+
+  const seek = (event: React.MouseEvent<HTMLDivElement>) => {
+    const audio = audioRef.current;
+    if (!audio || !audio.duration) return;
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    audio.currentTime = ((event.clientX - rect.left) / rect.width) * audio.duration;
+    if (audio.paused) void audio.play();
+  };
 
   return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (audio.paused) {
-          void audio.play();
-        } else {
-          audio.pause();
-        }
-      }}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#7b3df5] text-white shadow-[0_6px_16px_-6px_rgba(123,61,245,0.8)] transition hover:bg-[#8f5bf7]"
-      title={playing ? "Пауза" : "Воспроизвести"}
-      aria-label={playing ? "Пауза" : "Воспроизвести"}
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={onOpen}
+      className={cn(
+        "flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-l-[3px] border-b-white/[0.05] border-l-transparent px-4 py-2 transition-colors last:border-b-0 hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7b3df5]/50 sm:flex-nowrap",
+        active && "border-l-[#7b61ff] bg-[#7b61ff]/[0.07]",
+        selected && "bg-[#7b3df5]/12"
+      )}
     >
-      <audio
-        ref={audioRef}
-        src={audioUrl}
-        preload="none"
-        className="hidden"
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-      />
-      {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 fill-current" />}
-    </button>
+      <span className="w-5 shrink-0 text-center text-[13px] tabular-nums text-white/40">{num}</span>
+      {audioUrl ? (
+        <button
+          type="button"
+          onClick={togglePlayback}
+          className={cn(
+            "grid h-8 w-8 shrink-0 place-items-center rounded-full transition",
+            playing
+              ? "bg-[#7b61ff] text-white shadow-[0_10px_28px_-10px_rgba(123,97,255,1)]"
+              : "border border-white/15 text-white hover:border-[#7b61ff]/60 hover:bg-[#7b61ff]/15"
+          )}
+          title={playing ? "Пауза" : "Воспроизвести"}
+          aria-label={playing ? "Пауза" : "Воспроизвести"}
+        >
+          <audio
+            ref={audioRef}
+            src={audioUrl}
+            preload="none"
+            className="hidden"
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => {
+              setPlaying(false);
+              setProgress(0);
+            }}
+            onTimeUpdate={(event) => {
+              const audio = event.currentTarget;
+              setProgress(audio.duration ? audio.currentTime / audio.duration : 0);
+            }}
+          />
+          {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="ml-0.5 h-3.5 w-3.5 fill-current" />}
+        </button>
+      ) : (
+        <span
+          title="Аудио не загружено"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-white/[0.08] text-white/25"
+        >
+          <Play className="ml-0.5 h-4 w-4" />
+        </span>
+      )}
+      <div className="min-w-0 flex-1 sm:w-[220px] sm:flex-none">
+        <p className="truncate text-[14px] font-semibold text-white">
+          {title}
+          {subtitle ? <span className="ml-1 font-medium text-white/45">{subtitle}</span> : null}
+        </p>
+        <p className="truncate text-[12.5px] text-white/45">
+          {artists}
+          {isrc ? ` · ISRC ${isrc}` : ""}
+        </p>
+      </div>
+      <div
+        onClick={audioUrl ? seek : undefined}
+        className={cn("order-last flex h-7 w-full items-center gap-[2px] sm:order-none sm:w-auto sm:flex-1", audioUrl && "cursor-pointer")}
+        aria-hidden
+      >
+        {waveform.map((height, index) => (
+          <span
+            key={index}
+            className={cn(
+              "flex-1 rounded-full transition-colors",
+              index / waveform.length < progress ? "bg-[#8b7bff]" : "bg-white/[0.14]"
+            )}
+            style={{ height: `${height}%` }}
+          />
+        ))}
+      </div>
+      <span className="shrink-0 text-[13px] font-semibold tabular-nums text-white/60">{duration}</span>
+      <span className="hidden shrink-0 rounded-full bg-white/[0.06] px-2.5 py-1 text-[12px] font-semibold text-white/70 md:inline">
+        {rightsShare} прав
+      </span>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <TrackServiceIndicator label="Рингтон" enabled={Boolean(services?.ringtone)} icon={<Smartphone className="h-3.5 w-3.5" />} />
+        <TrackServiceIndicator label="Текст" enabled={Boolean(services?.plainText)} icon={<Type className="h-3.5 w-3.5" />} />
+        <TrackServiceIndicator label="Синх. текст" enabled={Boolean(services?.syncedText)} icon={<ScrollText className="h-3.5 w-3.5" />} />
+        <TrackServiceIndicator label="Видео" enabled={Boolean(services?.video)} icon={<Video className="h-3.5 w-3.5" />} />
+      </div>
+    </div>
   );
 }

@@ -6,6 +6,8 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  LayoutGrid,
+  List,
   Search,
   SlidersHorizontal
 } from "lucide-react";
@@ -23,7 +25,11 @@ import {
   FilterPanel
 } from "@/components/layout/dashboard-shell";
 
+import { ReleaseGridCard } from "./release-grid-card";
 import { ReleaseRowCard } from "./release-row-card";
+
+type ReleasesView = "list" | "grid";
+const VIEW_STORAGE_KEY = "icm:releases-view";
 
 type SortKey = "createdAt" | "releaseDate" | "title";
 
@@ -66,6 +72,24 @@ export function ReleasesListShell({
   const [sort, setSort] = React.useState<SortKey>("createdAt");
   const [perPage, setPerPage] = React.useState(20);
   const [page, setPage] = React.useState(1);
+  const [view, setView] = React.useState<ReleasesView>("grid");
+
+  React.useEffect(() => {
+    try {
+      if (window.localStorage.getItem(VIEW_STORAGE_KEY) === "list") setView("list");
+    } catch {
+      // без localStorage остаёмся на списке
+    }
+  }, []);
+
+  const changeView = (next: ReleasesView) => {
+    setView(next);
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // выбор просто не запомнится
+    }
+  };
   const isDraftSection = title.toLowerCase().includes("чернов");
 
   const filtered = React.useMemo(() => {
@@ -253,6 +277,28 @@ export function ReleasesListShell({
         </h2>
 
         <div className="ml-auto flex flex-wrap items-center gap-4 text-[14px] font-medium text-white/65">
+          <div className="inline-flex rounded-xl border border-white/[0.08] bg-white/[0.03] p-1" role="group" aria-label="Вид списка">
+            {(
+              [
+                { id: "list", label: "Список", icon: <List className="h-3.5 w-3.5" /> },
+                { id: "grid", label: "Сетка", icon: <LayoutGrid className="h-3.5 w-3.5" /> }
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => changeView(option.id)}
+                aria-pressed={view === option.id}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors",
+                  view === option.id ? "bg-white/10 text-white" : "text-white/55 hover:text-white"
+                )}
+              >
+                {option.icon}
+                {option.label}
+              </button>
+            ))}
+          </div>
           <DropdownButton
             icon={<SlidersHorizontal className="h-3 w-3" />}
             label="Сортировать по"
@@ -284,6 +330,12 @@ export function ReleasesListShell({
               >
                 Сбросить фильтры
               </button>
+            </div>
+          ) : view === "grid" ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {pageItems.map((release) => (
+                <ReleaseGridCard key={release.id} release={release} />
+              ))}
             </div>
           ) : (
             renderedCards

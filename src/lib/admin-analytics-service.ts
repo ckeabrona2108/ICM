@@ -486,6 +486,113 @@ export async function recalculateAnalyticsImportJobSummaries(params: {
   return recalculated;
 }
 
+// Строки отчёта сохраняются со своими датами (за неделю или месяц), а не с датой из имени файла.
+// Поэтому данные файла удаляем по source_file_name целиком и пересчитываем итоги за каждую затронутую дату.
+async function removeAnalyticsDataForSourceFile(params: {
+  prisma: PrismaClient;
+  source_file_name: string;
+  import_job_id?: string;
+}) {
+  const snapshotsToDelete = await params.prisma.analytics_report_snapshots.findMany({
+    where: { source_file_name: params.source_file_name },
+    select: { user_id: true, release_id: true, report_date: true }
+  });
+
+  const touchedByDate = new Map<string, { userIds: Set<string>; releaseIds: Set<string> }>();
+  for (const snapshot of snapshotsToDelete) {
+    const key = snapshot.report_date.toISOString();
+    const touched = touchedByDate.get(key) ?? { userIds: new Set<string>(), releaseIds: new Set<string>() };
+    touched.userIds.add(snapshot.user_id);
+    touched.releaseIds.add(snapshot.release_id);
+    touchedByDate.set(key, touched);
+  }
+
+  await params.prisma.$transaction(async (tx) => {
+    await tx.analytics_report_snapshots.deleteMany({
+      where: { source_file_name: params.source_file_name }
+    });
+
+    await tx.unmatched_analytics_imports.deleteMany({
+      where: {
+        OR: [
+          ...(params.import_job_id ? [{ import_job_id: params.import_job_id }] : []),
+          { source_file_name: params.source_file_name }
+        ]
+      }
+    });
+
+    if (params.import_job_id) {
+      await tx.analytics_import_jobs.delete({
+        where: { id: params.import_job_id }
+      });
+    }
+  });
+
+  for (const [reportTimestamp, touched] of touchedByDate.entries()) {
+    const report_date = new Date(reportTimestamp);
+    const remaining = await params.prisma.analytics_report_snapshots.count({ where: { report_date } });
+    if (remaining === 0) {
+      // За эту дату данных больше нет — убираем итоги целиком, а не оставляем нулевые.
+      await params.prisma.analytics_daily_summaries.deleteMany({ where: { report_date } });
+      const platformSummaryRepo = getAnalyticsPlatformSummaryRepo(params.prisma);
+      if (platformSummaryRepo) {
+        await platformSummaryRepo.deleteMany({ where: { report_date } });
+      }
+      continue;
+    }
+    await recomputeSummariesForReportDate({
+      prisma: params.prisma,
+      report_date,
+      touchedUserIds: Array.from(touched.userIds),
+      touchedReleaseIds: Array.from(touched.releaseIds)
+    });
+  }
+
+  return {
+    deletedRows: snapshotsToDelete.length,
+    reportDates: touchedByDate.size
+  };
+}
+
+export async function listOrphanedAnalyticsSources(params: { prisma: PrismaClient }) {
+  const jobsRepo = requireAnalyticsImportJobsRepo(params.prisma);
+  const [groups, jobs] = await Promise.all([
+    params.prisma.analytics_report_snapshots.groupBy({
+      by: ["source_file_name"],
+      _count: { _all: true },
+      _sum: { streams: true },
+      _min: { report_date: true },
+      _max: { report_date: true }
+    }),
+    jobsRepo.findMany({ select: { source_file_name: true } }) as Promise<Array<{ source_file_name: string }>>
+  ]);
+  const jobFileNames = new Set(jobs.map((job) => job.source_file_name));
+
+  return groups
+    .filter((group) => !jobFileNames.has(group.source_file_name))
+    .map((group) => ({
+      source_file_name: group.source_file_name,
+      rows: group._count._all,
+      streams: group._sum.streams ?? 0,
+      from: group._min.report_date?.toISOString().slice(0, 10) ?? null,
+      to: group._max.report_date?.toISOString().slice(0, 10) ?? null
+    }))
+    .sort((a, b) => String(b.to).localeCompare(String(a.to)));
+}
+
+export async function cleanupOrphanedAnalyticsSources(params: { prisma: PrismaClient }) {
+  const orphans = await listOrphanedAnalyticsSources(params);
+  let deletedRows = 0;
+  for (const orphan of orphans) {
+    const result = await removeAnalyticsDataForSourceFile({
+      prisma: params.prisma,
+      source_file_name: orphan.source_file_name
+    });
+    deletedRows += result.deletedRows;
+  }
+  return { files: orphans.length, deletedRows };
+}
+
 export async function deleteAnalyticsImportJob(params: {
   prisma: PrismaClient;
   jobId: string;
@@ -505,65 +612,10 @@ export async function deleteAnalyticsImportJob(params: {
     throw new Error("Import job not found");
   }
 
-  const snapshotsToDelete = await params.prisma.analytics_report_snapshots.findMany({
-    where: {
-      source_file_name: job.source_file_name,
-      report_date: job.report_date
-    },
-    select: {
-      user_id: true,
-      release_id: true
-    }
-  });
-
-  const touchedUserIds = Array.from(new Set(snapshotsToDelete.map((item) => item.user_id)));
-  const touchedReleaseIds = Array.from(new Set(snapshotsToDelete.map((item) => item.release_id)));
-
-  await params.prisma.$transaction(async (tx) => {
-    await tx.analytics_report_snapshots.deleteMany({
-      where: {
-        source_file_name: job.source_file_name,
-        report_date: job.report_date
-      }
-    });
-
-    const platformSummaryRepo = getAnalyticsPlatformSummaryRepo(tx as unknown as PrismaClient);
-    if (platformSummaryRepo) {
-      await platformSummaryRepo.deleteMany({
-        where: {
-          report_date: job.report_date
-        }
-      });
-    }
-
-    await tx.analytics_daily_summaries.deleteMany({
-      where: {
-        report_date: job.report_date
-      }
-    });
-
-    await tx.unmatched_analytics_imports.deleteMany({
-      where: {
-        OR: [
-          { import_job_id: job.id },
-          {
-            source_file_name: job.source_file_name,
-            report_date: job.report_date
-          }
-        ]
-      }
-    });
-
-    await tx.analytics_import_jobs.delete({
-      where: { id: job.id }
-    });
-  });
-
-  await recomputeSummariesForReportDate({
+  await removeAnalyticsDataForSourceFile({
     prisma: params.prisma,
-    report_date: job.report_date,
-    touchedUserIds,
-    touchedReleaseIds
+    source_file_name: job.source_file_name,
+    import_job_id: job.id
   });
 
   if (job.stored_file_path) {

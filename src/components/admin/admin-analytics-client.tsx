@@ -87,6 +87,14 @@ function normalizeImportJob(input: Record<string, unknown>): ImportJobItem {
   };
 }
 
+type OrphanSource = {
+  source_file_name: string;
+  rows: number;
+  streams: number;
+  from: string | null;
+  to: string | null;
+};
+
 function statusLabel(status: ImportJobItem["status"]): string {
   if (status === "PENDING") return "pending";
   if (status === "PROCESSING") return "processing";
@@ -109,6 +117,39 @@ export function AdminAnalyticsClient() {
   const [error, setError] = React.useState<string | null>(null);
   const [jobs, setJobs] = React.useState<ImportJobItem[]>([]);
   const [lastResult, setLastResult] = React.useState<ImportResultView | null>(null);
+  const [orphans, setOrphans] = React.useState<OrphanSource[]>([]);
+  const [cleaning, setCleaning] = React.useState(false);
+
+  const loadOrphans = React.useCallback(async () => {
+    const response = await fetch("/api/admin/analytics/imports/orphans", { method: "GET", cache: "no-store" });
+    const payload = (await response.json().catch(() => null)) as { orphans?: OrphanSource[] } | null;
+    if (response.ok && payload?.orphans) setOrphans(payload.orphans);
+  }, []);
+
+  React.useEffect(() => {
+    void loadOrphans().catch(() => undefined);
+  }, [loadOrphans]);
+
+  async function cleanupOrphans() {
+    const totalStreams = orphans.reduce((sum, item) => sum + item.streams, 0);
+    const confirmed = window.confirm(
+      `Удалить из аналитики данные ${orphans.length} удалённых отчётов (${totalStreams.toLocaleString("ru-RU")} прослушиваний)? Это действие нельзя отменить.`
+    );
+    if (!confirmed) return;
+
+    setCleaning(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/analytics/imports/orphans", { method: "POST" });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Не удалось очистить данные удалённых отчётов");
+      await loadOrphans();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось очистить данные удалённых отчётов");
+    } finally {
+      setCleaning(false);
+    }
+  }
 
   const loadJobs = React.useCallback(async () => {
     const response = await fetch("/api/admin/analytics/imports?limit=200", { method: "GET" });
@@ -255,6 +296,7 @@ export function AdminAnalyticsClient() {
         throw new Error(payload?.error ?? "Не удалось удалить импорт");
       }
       await loadJobs();
+      await loadOrphans();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось удалить импорт");
     }
@@ -262,10 +304,44 @@ export function AdminAnalyticsClient() {
 
   return (
     <div className="space-y-6 pb-10">
+      {orphans.length > 0 ? (
+        <section className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.08] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[17px] font-semibold text-amber-100">
+                В аналитике остались данные удалённых отчётов: {orphans.length}
+              </h2>
+              <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-amber-100/75">
+                Эти файлы удалены из истории импортов, но их прослушивания всё ещё видны артистам. Раньше удаление
+                убирало данные только за дату из названия файла.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={cleaning}
+              onClick={() => {
+                void cleanupOrphans();
+              }}
+              className="rounded-lg border border-amber-300/40 bg-amber-400/15 px-3.5 py-2 text-[13px] font-semibold text-amber-50 hover:bg-amber-400/25 disabled:opacity-50"
+            >
+              {cleaning ? "Удаляем..." : "Убрать эти данные из аналитики"}
+            </button>
+          </div>
+          <ul className="mt-3 grid gap-1.5 text-[12.5px] text-amber-50/80 sm:grid-cols-2">
+            {orphans.map((item) => (
+              <li key={item.source_file_name} className="truncate">
+                {item.source_file_name} · {item.from} → {item.to} · {item.streams.toLocaleString("ru-RU")} прослушиваний
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <section className="rounded-2xl border border-white/[0.08] bg-[#161720] p-5">
         <h2 className="text-[20px] font-semibold text-white">Upload CSV</h2>
         <p className="mt-1 text-[13px] text-white/60">
-          Загрузите CSV вида report_summary_YYYY-MM-DD_HH-mm-ss.csv
+          Подходит любой отчёт CSV: колонки могут называться по-английски (track, artist, upc, streams) или
+          по-русски (Трек, Исполнитель, UPC, Прослушивания), разделитель — запятая или точка с запятой.
         </p>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">

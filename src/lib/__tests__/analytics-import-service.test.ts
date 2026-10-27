@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { importAnalyticsCsvReport } from "@/lib/analytics-import-service";
+import {
+  importAnalyticsCsvReport,
+  parseAnalyticsCsv,
+  parseReportDateFromFilename
+} from "@/lib/analytics-import-service";
 
 type SnapshotRow = {
   userId: string;
@@ -402,4 +406,40 @@ test("daily summary is recalculated from snapshots and not accumulated", async (
   assert.ok(releaseSummary);
   assert.equal(releaseSummary?.totalStreams, 1500);
   assert.equal(releaseSummary?.totalPayStreams, 900);
+});
+
+test("English and Russian column headers parse to the same rows", () => {
+  const fallback = new Date("2026-10-26T00:00:00.000Z");
+  const english = parseAnalyticsCsv(
+    [
+      "track;artist;album;country;upc;platform;report_date;pay_streams;streams;;",
+      "Слышь че;Evianway;Слышь че;Россия;5063635661195;ВКонтакте;2026-10-25;404;217;;"
+    ].join("\r\n"),
+    fallback
+  );
+  const russian = parseAnalyticsCsv(
+    [
+      "Трек;Исполнитель;Альбом;Страна;UPC;Площадка;Дата отчёта;Платные прослушивания;Прослушивания",
+      "Слышь че;Evianway;Слышь че;Россия;5063635661195;ВКонтакте;25.10.2026;404;217"
+    ].join("\r\n"),
+    fallback
+  );
+
+  assert.equal(english.length, 1);
+  assert.deepEqual(russian, english);
+  assert.equal(english[0]?.streams, 217);
+  assert.equal(english[0]?.pay_streams, 404);
+  assert.equal(english[0]?.report_date.toISOString().slice(0, 10), "2026-10-25");
+});
+
+test("report date falls back to any date in the file name", () => {
+  assert.equal(
+    parseReportDateFromFilename("report_summary_2026-10-26_20-38-11.csv").toISOString().slice(0, 10),
+    "2026-10-26"
+  );
+  assert.equal(
+    parseReportDateFromFilename("Отчёт за неделю 2026-10-19.csv").toISOString().slice(0, 10),
+    "2026-10-19"
+  );
+  assert.throws(() => parseReportDateFromFilename("report.xlsx"));
 });

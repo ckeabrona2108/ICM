@@ -510,8 +510,42 @@ async function upsertSummarySafe(
   }
 }
 
+// Площадки и кабинеты отдают один и тот же отчёт с разными подписями колонок:
+// то по-английски (track, artist), то по-русски (Трек, Исполнитель). Сводим всё к одним ключам.
+const CSV_HEADER_ALIASES: Record<string, string[]> = {
+  track: ["track", "track name", "track title", "title", "трек", "название трека", "название", "композиция"],
+  artist: ["artist", "artists", "artist name", "артист", "артисты", "исполнитель", "исполнители"],
+  album: ["album", "album name", "release", "release title", "альбом", "релиз", "название релиза"],
+  country: ["country", "territory", "region", "страна", "территория", "регион"],
+  upc: ["upc", "upc code", "barcode", "код upc", "upc код", "штрихкод"],
+  platform: ["platform", "store", "service", "dsp", "площадка", "платформа", "сервис", "магазин"],
+  report_date: ["report date", "date", "day", "дата", "дата отчета", "день"],
+  pay_streams: [
+    "pay streams",
+    "paid streams",
+    "monetized streams",
+    "платные прослушивания",
+    "платные стримы",
+    "монетизируемые прослушивания",
+    "оплачиваемые прослушивания"
+  ],
+  streams: ["streams", "total streams", "plays", "прослушивания", "стримы", "всего прослушиваний", "прослушиваний"]
+};
+
+const CSV_HEADER_LOOKUP = new Map<string, string>(
+  Object.entries(CSV_HEADER_ALIASES).flatMap(([key, aliases]) => aliases.map((alias) => [alias, key] as const))
+);
+
 function normalizeHeader(value: string): string {
-  return normalizeAnalyticsPlatformHeader(value);
+  const cleaned = value
+    .replace(/\uFEFF/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[_\-.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return CSV_HEADER_LOOKUP.get(cleaned) ?? normalizeAnalyticsPlatformHeader(value);
 }
 
 function normalizeText(value: string): string {
@@ -539,10 +573,13 @@ function parseCsvReportDate(value: string, fallback: Date): Date {
   const normalized = normalizeText(value);
   if (!normalized) return fallback;
 
-  const iso = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
-  if (!iso) return fallback;
+  // 2026-10-25, 2026-10-25 00:00:00, 2026/10/25 или 25.10.2026
+  const iso = normalized.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T].*)?$/u);
+  const ru = normalized.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})(?:[ T].*)?$/u);
+  const parts = iso ? [iso[1], iso[2], iso[3]] : ru ? [ru[3], ru[2], ru[1]] : null;
+  if (!parts) return fallback;
 
-  const parsed = new Date(`${iso[1]}-${iso[2]}-${iso[3]}T00:00:00.000Z`);
+  const parsed = new Date(`${parts[0]}-${parts[1].padStart(2, "0")}-${parts[2].padStart(2, "0")}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return fallback;
   return parsed;
 }
@@ -617,11 +654,14 @@ function detectCsvDelimiter(headerLine: string): "," | ";" {
 }
 
 export function parseReportDateFromFilename(fileName: string): Date {
-  const match = fileName.match(/(\d{4}-\d{2}-\d{2})_\d{2}-\d{2}-\d{2}\.csv$/i);
+  if (!/\.csv$/i.test(fileName.trim())) {
+    throw new Error("Загрузите отчёт в формате CSV.");
+  }
+  // Дата из имени нужна только как запасная: у строк отчёта обычно есть своя report_date.
+  const match = fileName.match(/(\d{4}-\d{2}-\d{2})(?!.*\d{4}-\d{2}-\d{2})/u);
   if (!match) {
-    throw new Error(
-      "Некорректное имя файла. Ожидается формат report_summary_YYYY-MM-DD_HH-mm-ss.csv"
-    );
+    const today = new Date();
+    return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
   }
 
   const report_date = new Date(`${match[1]}T00:00:00.000Z`);
@@ -639,7 +679,7 @@ function collapseNames(values: Set<string>): string | null {
   return `${normalized[0]} (+${normalized.length - 1})`;
 }
 
-function parseAnalyticsCsv(csvText: string, fallbackReportDate: Date): ParsedAnalyticsCsvRow[] {
+export function parseAnalyticsCsv(csvText: string, fallbackReportDate: Date): ParsedAnalyticsCsvRow[] {
   const lines = csvText
     .replace(/^\uFEFF/, "")
     .split(/\r?\n/)
@@ -650,20 +690,18 @@ function parseAnalyticsCsv(csvText: string, fallbackReportDate: Date): ParsedAna
 
   const delimiter = detectCsvDelimiter(lines[0]);
   const headers = parseCsvLine(lines[0], delimiter).map(normalizeHeader);
-  const indexMap = new Map(headers.map((header, index) => [header, index]));
-  const required = [
-    "track",
-    "artist",
-    "album",
-    "country",
-    "upc",
-    "pay_streams",
-    "streams"
+  const indexMap = new Map<string, number>();
+  headers.forEach((header, index) => {
+    if (header && !indexMap.has(header)) indexMap.set(header, index);
+  });
+  const required: Array<[string, string]> = [
+    ["upc", "UPC"],
+    ["streams", "streams / Прослушивания"]
   ];
 
-  for (const name of required) {
+  for (const [name, label] of required) {
     if (!indexMap.has(name)) {
-      throw new Error(`CSV не содержит обязательный столбец: ${name}`);
+      throw new Error(`CSV не содержит обязательный столбец: ${label}`);
     }
   }
 

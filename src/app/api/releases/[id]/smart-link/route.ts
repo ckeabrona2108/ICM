@@ -62,6 +62,9 @@ export async function PATCH(
     if (error instanceof Error && error.message === "SLUG_ALREADY_EXISTS") {
       return NextResponse.json({ error: "Этот slug уже занят." }, { status: 409 });
     }
+    if (error instanceof Error && error.message === "INVALID_SLUG") {
+      return NextResponse.json({ error: "Короткая ссылка должна содержать буквы или цифры." }, { status: 400 });
+    }
     console.error("[smart-link:update] failed", error);
     return NextResponse.json({ error: "Не удалось сохранить Smart Link." }, { status: 500 });
   }

@@ -153,6 +153,7 @@ export function SmartLinkSettingsClient({
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
   const [publicUrl, setPublicUrl] = React.useState(initialData.publicUrl);
+  const [copied, setCopied] = React.useState(false);
   const [platformPickerOpen, setPlatformPickerOpen] = React.useState(false);
   const [expandedPlatformCodes, setExpandedPlatformCodes] = React.useState<string[]>(
     initialData.platforms
@@ -363,12 +364,15 @@ export function SmartLinkSettingsClient({
           <button
             type="button"
             onClick={() => {
-              void navigator.clipboard.writeText(publicUrl).catch(() => null);
+              void navigator.clipboard.writeText(publicUrl).then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1800);
+              }).catch(() => null);
             }}
             className={SMART_LINK_ACTION_CLASS}
           >
             <Copy className="h-4 w-4" />
-            Копировать
+            {copied ? "Скопировано" : "Копировать"}
           </button>
         </div>
       </div>

@@ -33,6 +33,15 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Lets smart links with theme "auto" match the visitor's system theme on first render.
+        source: "/l/:slug",
+        headers: [
+          { key: "Accept-CH", value: "Sec-CH-Prefers-Color-Scheme" },
+          { key: "Critical-CH", value: "Sec-CH-Prefers-Color-Scheme" },
+          { key: "Vary", value: "Sec-CH-Prefers-Color-Scheme" }
+        ]
+      },
+      {
         source: "/",
         headers: [
           {

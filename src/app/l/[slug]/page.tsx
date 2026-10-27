@@ -1,18 +1,25 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { cache } from "react";
 import { ExternalLink, Mail, Music2, Send, Video } from "lucide-react";
 
 import { SmartLinkPlatformIcon } from "@/components/smart-link/platform-icon";
+import { SmartLinkPixels } from "@/components/smart-link/smart-link-pixels";
 import { SmartLinkPublicModeSwitcher } from "@/components/smart-link/smart-link-public-mode-switcher";
 import { SmartLinkShareButton } from "@/components/smart-link/smart-link-share-button";
 import { SmartLinkViewTracker } from "@/components/smart-link/smart-link-view-tracker";
-import { SMART_LINK_PRIMARY_PLATFORM_CODES } from "@/lib/smart-link-platforms";
 import { getSmartLinkPublicView } from "@/lib/smart-link-service";
+import { parseSmartLinkPixelIds, safeSmartLinkHref } from "@/lib/smart-link-urls";
 
 export const dynamic = "force-dynamic";
 
+// generateMetadata and the page both need the view; share one lookup per request.
+const getPublicView = cache(getSmartLinkPublicView);
+
 function buildEmbedUrl(url: string): string | null {
+  if (!safeSmartLinkHref(url)) return null;
   try {
     const parsed = new URL(url);
     if (parsed.hostname.includes("youtube.com")) {
@@ -56,7 +63,7 @@ export async function generateMetadata({
 }: {
   params: { slug: string };
 }): Promise<Metadata> {
-  const data = await getSmartLinkPublicView(params.slug);
+  const data = await getPublicView(params.slug);
   if (!data) {
     return {
       title: "Релиз не найден"
@@ -95,7 +102,7 @@ export default async function SmartLinkPublicPage({
   params: { slug: string };
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const data = await getSmartLinkPublicView(params.slug);
+  const data = await getPublicView(params.slug);
   if (!data) {
     notFound();
   }
@@ -106,9 +113,9 @@ export default async function SmartLinkPublicPage({
     if (value && key.startsWith("utm_")) passthroughParams.set(key, value);
   }
   const queryString = passthroughParams.toString();
-  const activeButtons = data.platforms
-    .filter((item) => item.status === "live" && (item.url?.trim().length ?? 0) > 0)
-    .slice();
+  const platformButtons = data.platforms.filter(
+    (item) => (item.status === "live" && (item.url?.trim().length ?? 0) > 0) || item.status === "soon"
+  );
   const shareLinks = [
     {
       label: "Telegram",
@@ -131,13 +138,15 @@ export default async function SmartLinkPublicPage({
       href: `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(data.publicUrl)}`
     }
   ];
-  const followEntries = Object.entries(data.followLinks).filter(([, value]) => value.trim().length > 0);
+  const followEntries = Object.entries(data.followLinks)
+    .map(([key, value]) => [key, safeSmartLinkHref(value)] as const)
+    .filter((entry): entry is readonly [string, string] => Boolean(entry[1]));
   const newsFeedWidget = data.newsFeedWidget;
   const hasNewsFeed =
     data.sectionVisibility.newsFeed &&
     (data.newsFeedPosts.length > 0 || Boolean(newsFeedWidget) || data.newsFeedLinks.vk.trim().length > 0);
   const coverVideoEmbedUrl = buildEmbedUrl(data.coverVideoUrl);
-  const inlineVideos = normalizePublicItems(data.inlineVideos).filter((item) => item.url.trim().length > 0);
+  const inlineVideos = normalizePublicItems(data.inlineVideos).filter((item) => Boolean(safeSmartLinkHref(item.url)));
   const creditSections = data.creditSections
     .map((section) => ({
       ...section,
@@ -150,10 +159,11 @@ export default async function SmartLinkPublicPage({
     (item) => item.label.trim().length > 0 || item.value.trim().length > 0
   );
   const contactEntriesWithValue = contacts.filter((item) => item.value.trim().length > 0);
-  const pixels = normalizePublicItems(data.pixels).filter(
-    (item) => item.label.trim().length > 0 || item.value.trim().length > 0
-  );
-  const isLightTheme = data.theme === "light";
+  const pixelIds = data.sectionVisibility.pixels ? parseSmartLinkPixelIds(data.pixels) : null;
+  // "auto" follows the visitor's system theme via the Sec-CH-Prefers-Color-Scheme client hint
+  // (requested in next.config.mjs); browsers without client hints get the dark theme.
+  const prefersLight = headers().get("sec-ch-prefers-color-scheme")?.trim().replace(/"/g, "") === "light";
+  const isLightTheme = data.theme === "light" || (data.theme === "auto" && prefersLight);
   const sectionSurface = isLightTheme
     ? "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(247,249,253,0.94))] shadow-[0_18px_48px_-36px_rgba(72,86,122,0.22)]"
     : "border-white/10 bg-white/[0.03]";
@@ -247,7 +257,24 @@ export default async function SmartLinkPublicPage({
 
   const releaseLinksPanel = data.sectionVisibility.links ? (
     <div className="grid gap-3">
-      {activeButtons.map((item) => {
+      {platformButtons.map((item) => {
+        if (item.status === "soon") {
+          return (
+            <div
+              key={item.code}
+              aria-disabled="true"
+              className={`flex items-center justify-between gap-4 overflow-hidden rounded-[20px] border px-[18px] py-[18px] ${disabledCardSurface}`}
+            >
+              <span className="flex min-w-0 items-center gap-4">
+                <SmartLinkPlatformIcon code={item.code} size={24} />
+                <span className="block min-w-0 truncate text-[16px] font-normal leading-6 tracking-0">{item.label}</span>
+              </span>
+              <span className={`inline-flex h-12 shrink-0 items-center justify-center rounded-[20px] border px-6 text-[15px] font-medium sm:px-8 ${soonSurface}`}>
+                Скоро
+              </span>
+            </div>
+          );
+        }
         const href = `/l/${encodeURIComponent(data.publicSlug)}/go/${encodeURIComponent(item.code)}${queryString ? `?${queryString}` : ""}`;
         return (
           <a
@@ -372,6 +399,7 @@ export default async function SmartLinkPublicPage({
         />
       )}
       <SmartLinkViewTracker slug={data.publicSlug} />
+      {pixelIds ? <SmartLinkPixels ids={pixelIds} /> : null}
       <div className="relative z-[1] mx-auto max-w-[520px] pb-8">
         {data.coverUrl ? (
           <div
@@ -404,7 +432,7 @@ export default async function SmartLinkPublicPage({
               </>
             )}
 
-              {data.sectionVisibility.videos && data.coverVideoUrl ? (
+              {data.sectionVisibility.videos && (coverVideoEmbedUrl || safeSmartLinkHref(data.coverVideoUrl)) ? (
                 <section className={`rounded-[18px] border p-3 ${sectionSurface}`}>
                   <div className={`mb-3 flex items-center gap-2 text-sm font-semibold ${sectionText}`}>
                     <Video className="h-4 w-4" />
@@ -420,9 +448,9 @@ export default async function SmartLinkPublicPage({
                         allowFullScreen
                       />
                     </div>
-                  ) : (
+                  ) : safeSmartLinkHref(data.coverVideoUrl) ? (
                     <a
-                      href={data.coverVideoUrl}
+                      href={safeSmartLinkHref(data.coverVideoUrl) ?? undefined}
                       target="_blank"
                       rel="noreferrer"
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm transition ${cardSurface}`}
@@ -430,7 +458,7 @@ export default async function SmartLinkPublicPage({
                       Открыть видео
                       <ExternalLink className="h-4 w-4" />
                     </a>
-                  )}
+                  ) : null}
                 </section>
               ) : null}
 
@@ -489,9 +517,9 @@ export default async function SmartLinkPublicPage({
                                 {row.name ? <span className={`font-medium ${sectionText}`}>{row.name}</span> : null}
                                 {row.role ? <span className={mutedText}>{row.role}</span> : null}
                               </div>
-                              {row.link ? (
+                              {safeSmartLinkHref(row.link) ? (
                                 <a
-                                  href={row.link}
+                                  href={safeSmartLinkHref(row.link) ?? undefined}
                                   target="_blank"
                                   rel="noreferrer"
                                   className={`mt-1 inline-flex items-center gap-1 text-xs transition ${isLightTheme ? "text-[#6558ff] hover:text-[#5445ff]" : "text-[#9b90ff] hover:text-[#c1bbff]"}`}
@@ -572,20 +600,6 @@ export default async function SmartLinkPublicPage({
                   </section>
                 ) : null}
               </div>
-
-              {data.sectionVisibility.pixels && pixels.length > 0 ? (
-                <section className={`rounded-[18px] border p-3 ${sectionSurface}`}>
-                  <div className={`mb-3 text-sm font-semibold ${sectionText}`}>Пиксель</div>
-                  <div className="space-y-1.5">
-                    {pixels.map((item) => (
-                      <div key={item.id} className={`rounded-[12px] border px-3 py-2 ${rowSurface}`}>
-                        <div className={`text-xs font-semibold uppercase tracking-[0.2em] ${mutedText}`}>{item.label}</div>
-                        <div className={`mt-1 break-all text-sm ${sectionText}`}>{item.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              ) : null}
 
               <Link
                 href="/"

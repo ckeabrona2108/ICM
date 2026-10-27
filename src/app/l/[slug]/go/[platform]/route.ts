@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { resolveSmartLinkRedirect } from "@/lib/smart-link-service";
+import { readSmartLinkGeo } from "@/lib/smart-link-urls";
 
 export async function GET(
   request: Request,
@@ -14,13 +15,14 @@ export async function GET(
   }
 
   const url = new URL(request.url);
+  const geo = readSmartLinkGeo(request.headers);
   const destination = await resolveSmartLinkRedirect({
     slug,
     platformCode: platform,
     utmSource: url.searchParams.get("utm_source"),
     referrer: request.headers.get("referer"),
-    country: request.headers.get("x-vercel-ip-country"),
-    city: request.headers.get("x-vercel-ip-city"),
+    country: geo.country,
+    city: geo.city,
     userAgent: request.headers.get("user-agent")
   });
 

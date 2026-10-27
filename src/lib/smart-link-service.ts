@@ -10,6 +10,7 @@ import {
   SMART_LINK_PRIMARY_PLATFORM_CODES,
   SMART_LINK_PLATFORM_CODES
 } from "@/lib/smart-link-platforms";
+import { normalizeSmartLinkHref, safeSmartLinkHref } from "@/lib/smart-link-urls";
 
 type RecordLike = Record<string, unknown>;
 
@@ -305,7 +306,8 @@ function getDefaultSectionVisibility(): SmartLinkSectionVisibility {
   return {
     videos: false,
     credits: false,
-    links: false,
+    // Platform buttons are the whole point of a smart link: a fresh link must show them.
+    links: true,
     contacts: false,
     socials: false,
     newsFeed: false,
@@ -1054,10 +1056,43 @@ function deriveReleaseSmartLinkCandidates(input: {
   );
 }
 
+const SLUG_FALLBACK_MISS_TTL_MS = 10 * 60 * 1000;
+const SLUG_FALLBACK_MISS_LIMIT = 2000;
+
+const slugFallbackStore = globalThis as typeof globalThis & {
+  __icmSmartLinkSlugMisses?: Map<string, number>;
+};
+const slugFallbackMisses = slugFallbackStore.__icmSmartLinkSlugMisses ?? new Map<string, number>();
+slugFallbackStore.__icmSmartLinkSlugMisses = slugFallbackMisses;
+
+function isKnownSlugMiss(slug: string): boolean {
+  const expiresAt = slugFallbackMisses.get(slug);
+  if (!expiresAt) return false;
+  if (expiresAt > Date.now()) return true;
+  slugFallbackMisses.delete(slug);
+  return false;
+}
+
+function rememberSlugMiss(slug: string) {
+  if (slugFallbackMisses.size >= SLUG_FALLBACK_MISS_LIMIT) {
+    const oldest = slugFallbackMisses.keys().next().value;
+    if (oldest !== undefined) slugFallbackMisses.delete(oldest);
+  }
+  slugFallbackMisses.set(slug, Date.now() + SLUG_FALLBACK_MISS_TTL_MS);
+}
+
 async function getPromoLinkBySlugWithFallback(slug: string) {
   const existing = await getPromoLinkBySlug(slug);
   if (existing) return existing;
 
+  // The legacy fallback scans every release, so unknown slugs (bots, typos) must not repeat it.
+  if (isKnownSlugMiss(slug)) return null;
+  const resolved = await resolvePromoLinkByLegacySlug(slug);
+  if (!resolved) rememberSlugMiss(slug);
+  return resolved;
+}
+
+async function resolvePromoLinkByLegacySlug(slug: string) {
   const releases = await prisma.release.findMany({
     select: {
       id: true,
@@ -1374,67 +1409,135 @@ export async function updateSmartLinkOwnerSettings(params: {
   });
   if (!ownerView) return null;
 
-  const release = await prisma.release.findFirst({
-    where: {
-      id: params.releaseId,
-      userId: params.userId
-    },
-    include: {
-      user: {
-        select: {
-          name: true,
-          telegram: true,
-          vk: true,
-          personalSiteUrl: true
+  if (typeof params.input.slug === "string" && params.input.slug.trim() !== ownerView.publicSlug) {
+    if (!/[a-z0-9а-яё]/iu.test(params.input.slug)) {
+      throw new Error("INVALID_SLUG");
+    }
+    const nextSlug = slugify(params.input.slug);
+    if (nextSlug !== ownerView.publicSlug) {
+      const existingPromo = await prisma.promo_links.findFirst({
+        where: {
+          shortName: nextSlug
         }
-      },
-      track: {
-        select: {
-          explicit: true
-        },
-        orderBy: {
-          index: "asc"
-        }
+      });
+      if (existingPromo && existingPromo.releaseId !== params.releaseId) {
+        throw new Error("SLUG_ALREADY_EXISTS");
+      }
+      try {
+        await prisma.promo_links.updateMany({
+          where: {
+            releaseId: params.releaseId
+          },
+          data: {
+            shortName: nextSlug
+          }
+        });
+      } catch (error) {
+        if (isPrismaUniqueConstraintError(error)) throw new Error("SLUG_ALREADY_EXISTS");
+        throw error;
       }
     }
-  });
-  if (!release) return null;
+  }
 
-  const selectedPlatformCodes = normalizeSelectedPlatforms(release.roles);
-  const currentState = readSmartLinkState(
-    release.roles,
-    getDefaultFollowLinks(release.user),
-    selectedPlatformCodes
+  // Read-modify-write of release.roles races with click tracking and other writers,
+  // so it runs in the same serializable transaction pattern as analytics events.
+  const saved = await retryPrismaSerializationConflict(() =>
+    prisma.$transaction(async (tx) => {
+      const release = await tx.release.findFirst({
+        where: {
+          id: params.releaseId,
+          userId: params.userId
+        },
+        select: {
+          roles: true,
+          user: { select: { telegram: true, vk: true, personalSiteUrl: true } }
+        }
+      });
+      if (!release) return false;
+
+      const nextState = applySmartLinkOwnerInput(
+        readSmartLinkState(
+          release.roles,
+          getDefaultFollowLinks(release.user),
+          normalizeSelectedPlatforms(release.roles)
+        ),
+        params.input,
+        normalizeSelectedPlatforms(release.roles)
+      );
+
+      await tx.release.update({
+        where: {
+          id: params.releaseId
+        },
+        data: {
+          roles: writeSmartLinkState(release.roles, nextState)
+        }
+      });
+      return true;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   );
+  if (!saved) return null;
+
+  return ensureSmartLinkForRelease({
+    userId: params.userId,
+    releaseId: params.releaseId
+  });
+}
+
+function normalizeFollowLinksInput(input: Partial<SmartLinkFollowLinks> | undefined): Partial<SmartLinkFollowLinks> {
+  const next: Partial<SmartLinkFollowLinks> = {};
+  if (!input) return next;
+  for (const key of SMART_LINK_FOLLOW_KEYS) {
+    if (typeof input[key] === "string") next[key] = normalizeSmartLinkHref(input[key]);
+  }
+  return next;
+}
+
+function applySmartLinkOwnerInput(
+  currentState: SmartLinkState,
+  input: SmartLinkOwnerUpdateInput,
+  selectedPlatformCodes: string[]
+): SmartLinkState {
   const nextState: SmartLinkState = {
     ...currentState,
-    theme: params.input.theme ?? currentState.theme,
-    allowWaveDownload: params.input.allowWaveDownload ?? currentState.allowWaveDownload,
-    sectionVisibility: params.input.sectionVisibility
-      ? { ...currentState.sectionVisibility, ...params.input.sectionVisibility }
+    theme: input.theme ? normalizeTheme(input.theme) : currentState.theme,
+    allowWaveDownload: input.allowWaveDownload ?? currentState.allowWaveDownload,
+    sectionVisibility: input.sectionVisibility
+      ? normalizeSectionVisibility({ ...currentState.sectionVisibility, ...input.sectionVisibility })
       : currentState.sectionVisibility,
-    coverVideoUrl: params.input.coverVideoUrl?.trim() ?? currentState.coverVideoUrl,
-    inlineVideos: params.input.inlineVideos ? normalizeVideoEntries(params.input.inlineVideos, getDefaultInlineVideos()) : currentState.inlineVideos,
-    creditSections: params.input.creditSections ? normalizeCreditSections(params.input.creditSections) : currentState.creditSections,
-    contacts: params.input.contacts ? normalizeInfoEntries(params.input.contacts, getDefaultContacts()) : currentState.contacts,
-    pixels: params.input.pixels ? normalizeInfoEntries(params.input.pixels, getDefaultPixels()) : currentState.pixels,
+    coverVideoUrl:
+      input.coverVideoUrl === undefined ? currentState.coverVideoUrl : normalizeSmartLinkHref(input.coverVideoUrl),
+    inlineVideos: input.inlineVideos
+      ? normalizeVideoEntries(input.inlineVideos, getDefaultInlineVideos()).map((row) => ({
+          ...row,
+          url: normalizeSmartLinkHref(row.url)
+        }))
+      : currentState.inlineVideos,
+    creditSections: input.creditSections
+      ? normalizeCreditSections(input.creditSections).map((section) => ({
+          ...section,
+          rows: section.rows.map((row) => ({ ...row, link: normalizeSmartLinkHref(row.link) }))
+        }))
+      : currentState.creditSections,
+    contacts: input.contacts ? normalizeInfoEntries(input.contacts, getDefaultContacts()) : currentState.contacts,
+    pixels: input.pixels ? normalizeInfoEntries(input.pixels, getDefaultPixels()) : currentState.pixels,
     newsFeedLinks: {
       ...currentState.newsFeedLinks,
-      ...params.input.newsFeedLinks
+      ...input.newsFeedLinks
     },
     followLinks: {
       ...currentState.followLinks,
-      ...params.input.followLinks
+      ...normalizeFollowLinksInput(input.followLinks)
     },
     platformLinks: { ...currentState.platformLinks },
     platformOrder: currentState.platformOrder.slice()
   };
 
-  const inputPlatformOrder = (params.input.platforms ?? [])
+  const inputPlatformOrder = (input.platforms ?? [])
     .map((item) => item.code)
     .filter((code): code is string => SMART_LINK_PLATFORM_CODES.includes(code as SmartLinkPlatformCode));
 
-  for (const item of params.input.platforms ?? []) {
+  for (const item of input.platforms ?? []) {
     if (!SMART_LINK_PLATFORM_CODES.includes(item.code as SmartLinkPlatformCode)) continue;
     const current = nextState.platformLinks[item.code] ?? {
       code: item.code,
@@ -1443,8 +1546,8 @@ export async function updateSmartLinkOwnerSettings(params: {
       url: null,
       order: nextState.platformOrder.length
     };
-    const url = item.url === undefined ? current.url : (item.url?.trim() || null);
-    const status = item.status ?? (url ? "live" : current.status);
+    const url = item.url === undefined ? current.url : normalizeSmartLinkHref(item.url) || null;
+    const status = item.status ? normalizePlatformStatus(item.status) : url ? "live" : current.status;
     nextState.platformLinks[item.code] = {
       ...current,
       url,
@@ -1453,11 +1556,7 @@ export async function updateSmartLinkOwnerSettings(params: {
     };
   }
 
-  nextState.platformOrder = normalizePlatformOrder(
-    inputPlatformOrder,
-    nextState.platformLinks,
-    normalizeSelectedPlatforms(release.roles)
-  );
+  nextState.platformOrder = normalizePlatformOrder(inputPlatformOrder, nextState.platformLinks, selectedPlatformCodes);
   nextState.platformOrder.forEach((code, index) => {
     const item = nextState.platformLinks[code];
     if (item) {
@@ -1468,39 +1567,7 @@ export async function updateSmartLinkOwnerSettings(params: {
     }
   });
 
-  if (params.input.slug) {
-    const nextSlug = slugify(params.input.slug);
-    const existingPromo = await prisma.promo_links.findFirst({
-      where: {
-        shortName: nextSlug
-      }
-    });
-    if (existingPromo && existingPromo.releaseId !== params.releaseId) {
-      throw new Error("SLUG_ALREADY_EXISTS");
-    }
-    await prisma.promo_links.updateMany({
-      where: {
-        releaseId: params.releaseId
-      },
-      data: {
-        shortName: nextSlug
-      }
-    });
-  }
-
-  await prisma.release.update({
-    where: {
-      id: params.releaseId
-    },
-    data: {
-      roles: writeSmartLinkState(release.roles, nextState)
-    }
-  });
-
-  return ensureSmartLinkForRelease({
-    userId: params.userId,
-    releaseId: params.releaseId
-  });
+  return nextState;
 }
 
 export async function getSmartLinkPublicView(slug: string): Promise<SmartLinkPublicView | null> {
@@ -1615,7 +1682,8 @@ export async function trackSmartLinkView(params: {
   city?: string | null;
   userAgent?: string | null;
 }) {
-  const row = await getPromoLinkBySlugWithFallback(params.slug);
+  // The tracker always posts the canonical slug, so the legacy full-scan fallback is not needed here.
+  const row = await getPromoLinkBySlug(params.slug);
   if (!row) return;
   await appendSmartLinkAnalyticsEvent({
     releaseId: row.releaseId,
@@ -1642,7 +1710,8 @@ export async function resolveSmartLinkRedirect(params: {
   city?: string | null;
   userAgent?: string | null;
 }): Promise<string | null> {
-  const row = await getPromoLinkBySlugWithFallback(params.slug);
+  // Unknown slugs fall back to the public page route, which still resolves legacy slugs.
+  const row = await getPromoLinkBySlug(params.slug);
   if (!row) return null;
   if (!shouldTreatReleaseAsApproved(row.release)) return null;
 
@@ -1653,7 +1722,8 @@ export async function resolveSmartLinkRedirect(params: {
     selectedPlatformCodes
   );
   const target = state.platformLinks[params.platformCode];
-  if (!target || target.status !== "live" || !target.url) {
+  const destination = target?.status === "live" ? safeSmartLinkHref(target.url) : null;
+  if (!destination) {
     return null;
   }
 
@@ -1674,5 +1744,5 @@ export async function resolveSmartLinkRedirect(params: {
     }
   });
 
-  return target.url;
+  return destination;
 }

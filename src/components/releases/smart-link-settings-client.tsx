@@ -858,7 +858,7 @@ function PresaveSection({ draft, patch, view }: Omit<SectionProps, "setVisibilit
           id="presave-url"
           value={draft.presaveUrl}
           onChange={(event) => patch({ presaveUrl: event.target.value })}
-          placeholder="Ссылка на пре-сейв от дистрибьютора, например Звонко"
+          placeholder="https://…"
           className={`${INPUT_CLASS} font-mono text-[12.5px] ${valid ? "" : "border-rose-400/50"}`}
         />
         <p className={`mt-1.5 text-xs ${valid ? "text-zinc-500" : "text-rose-300"}`}>

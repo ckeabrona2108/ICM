@@ -20,7 +20,7 @@ type RecordLike = Record<string, unknown>;
 
 export type SmartLinkTheme = "dark" | "light" | "auto";
 export type SmartLinkBackground = "cover" | "plain";
-export type SmartLinkAccent = "brand" | "mono" | "violet" | "green";
+export type SmartLinkAccent = "mono" | "red" | "violet" | "green";
 export type SmartLinkButtonShape = "round" | "pill" | "square";
 export type SmartLinkPlatformStatus = "live" | "soon" | "hidden";
 
@@ -415,7 +415,9 @@ function normalizeBackground(value: unknown): SmartLinkBackground {
 }
 
 function normalizeAccent(value: unknown): SmartLinkAccent {
-  return value === "mono" || value === "violet" || value === "green" ? value : "brand";
+  // White "Слушать" buttons (mono) are the approved default look. The old "brand" value was only ever
+  // saved as the previous default, so it also maps to mono; red is now an explicit "red" choice.
+  return value === "red" || value === "violet" || value === "green" ? value : "mono";
 }
 
 function normalizeButtonShape(value: unknown): SmartLinkButtonShape {
@@ -764,12 +766,13 @@ function extractVkDomainToken(input: string): string | null {
 
   try {
     const parsed = new URL(trimmed.startsWith("http") ? trimmed : `https://${trimmed}`);
-    if (!/(^|\.)vk\.com$/iu.test(parsed.hostname)) return null;
+    // vk.ru is the same network as vk.com; artists paste either.
+    if (!/(^|\.)vk\.(com|ru)$/iu.test(parsed.hostname)) return null;
     const [segment = ""] = parsed.pathname.split("/").filter(Boolean);
     return segment || null;
   } catch {
     const normalized = trimmed
-      .replace(/^https?:\/\/(?:m\.)?vk\.com\//iu, "")
+      .replace(/^https?:\/\/(?:m\.)?vk\.(?:com|ru)\//iu, "")
       .replace(/^@/u, "")
       .split(/[?#/]/u)[0]
       ?.trim();

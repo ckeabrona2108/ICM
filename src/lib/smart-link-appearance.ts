@@ -1,8 +1,8 @@
 import type { SmartLinkAccent, SmartLinkButtonShape } from "@/lib/smart-link-service";
 
 export const SMART_LINK_ACCENT_OPTIONS: Array<{ value: SmartLinkAccent; label: string; swatch: string }> = [
-  { value: "brand", label: "Фирменный", swatch: "#ff2140" },
   { value: "mono", label: "Монохром", swatch: "#fafafa" },
+  { value: "red", label: "Красный", swatch: "#ff2140" },
   { value: "violet", label: "Фиолетовый", swatch: "#7b6cff" },
   { value: "green", label: "Зелёный", swatch: "#22c55e" }
 ];

@@ -184,47 +184,20 @@ export default async function SmartLinkPublicPage({
   const mutedText = isLightTheme ? "text-black/50" : "text-white/50";
   const sectionText = isLightTheme ? "text-black/82" : "text-white/82";
   const softText = isLightTheme ? "text-black/60" : "text-white/60";
-  const shellSurface = isLightTheme
-    ? "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(247,249,253,0.98))] text-[#121620] shadow-[0_36px_120px_-56px_rgba(58,71,105,0.22)]"
-    : "border-white/10 bg-[linear-gradient(180deg,rgba(17,18,28,0.84),rgba(11,13,21,0.88))] text-white shadow-[0_30px_120px_-60px_rgba(91,75,255,0.28)]";
+  const shellSurface = isLightTheme ? "text-[#121620]" : "text-white";
   const cardSurface = isLightTheme
     ? "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.84),rgba(249,250,253,0.96))] text-[#161b24] shadow-[0_16px_38px_-30px_rgba(72,86,122,0.26)] hover:border-black/14 hover:bg-white"
     : "border-white/12 bg-white/[0.04] text-white hover:border-white/20 hover:bg-white/[0.07]";
-  const badgeSurface = isLightTheme
-    ? "border-[#7b6cff]/18 bg-[#7b6cff]/[0.08] text-[#5a4dcb]"
-    : "border-white/10 bg-white/[0.04] text-white/60";
   const platformCardSurface = isLightTheme
-    ? "border-black/[0.04] bg-white text-[#3c3c3c] shadow-[0_12px_28px_-24px_rgba(72,86,122,0.18)] hover:bg-white"
-    : "border-white/12 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.04))] text-white shadow-[0_20px_48px_-34px_rgba(0,0,0,0.45)] hover:border-white/20 hover:bg-white/[0.08]";
+    ? "border-black/[0.06] bg-white/90 text-[#111114] shadow-[0_12px_28px_-24px_rgba(72,86,122,0.25)] hover:bg-white"
+    : "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md hover:border-white/20 hover:bg-white/[0.12]";
   const coverPanel = (
-    <div
-      className={`mx-auto w-full max-w-[228px] overflow-hidden rounded-[18px] border ${
-        isLightTheme
-          ? "border-black/8 bg-[radial-gradient(circle_at_top,rgba(123,61,245,0.1),transparent_48%),rgba(255,255,255,0.78)]"
-          : "border-white/10 bg-[radial-gradient(circle_at_top,rgba(123,61,245,0.18),transparent_48%),rgba(255,255,255,0.03)]"
-      }`}
-    >
+    <div className="mx-auto aspect-square w-full max-w-[240px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
       {data.coverUrl ? (
-        <div className="relative flex aspect-square items-center justify-center p-1.5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={data.coverUrl}
-            alt=""
-            aria-hidden="true"
-            className={`absolute inset-0 h-full w-full scale-110 object-cover blur-2xl ${isLightTheme ? "opacity-26" : "opacity-35"}`}
-          />
-          <div
-            className={`absolute inset-0 ${
-              isLightTheme
-                ? "bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.2),transparent_42%),linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.2))]"
-                : "bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.08),transparent_42%),linear-gradient(180deg,rgba(9,10,16,0.08),rgba(9,10,16,0.34))]"
-            }`}
-          />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={data.coverUrl} alt={data.title} className="relative z-[1] h-full w-full rounded-[14px] object-contain" />
-        </div>
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={data.coverUrl} alt={data.title} className="h-full w-full object-cover" />
       ) : (
-        <div className="flex aspect-square items-center justify-center bg-white/[0.04] text-white/40">
+        <div className="flex h-full w-full items-center justify-center bg-white/[0.06] text-white/40">
           <Music2 className="h-12 w-12" />
         </div>
       )}
@@ -232,23 +205,23 @@ export default async function SmartLinkPublicPage({
   );
 
   const headerPanel = (
-    <div>
-      <div className="flex items-center justify-between gap-3">
-        <div className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.28em] ${badgeSurface}`}>
-          Smart Link
-        </div>
-        <SmartLinkShareButton links={shareLinks} publicUrl={data.publicUrl} theme={isLightTheme ? "light" : "dark"} />
-      </div>
-      <h1 className={`mt-2 text-[1.52rem] font-semibold tracking-[-0.045em] sm:text-[1.92rem] ${sectionText}`}>{data.title}</h1>
-      <div className={`mt-2 flex flex-wrap items-center gap-1.5 text-[12px] sm:text-[13px] ${softText}`}>
+    <div className="text-center">
+      <h1 className={`text-[26px] font-bold leading-tight tracking-[-0.03em] sm:text-[28px] ${isLightTheme ? "text-[#111114]" : "text-white"}`}>
+        {data.title}
+      </h1>
+      <div className={`mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-[14px] ${softText}`}>
         <span>{data.artist}</span>
-        <span>•</span>
-        <span>{data.releaseDate}</span>
+        <span aria-hidden="true">·</span>
+        <span>{data.releaseDate.slice(0, 4)}</span>
         {data.explicit ? (
-          <>
-            <span>•</span>
-            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${badgeSurface}`}>Explicit</span>
-          </>
+          <span
+            title="Explicit"
+            className={`ml-0.5 inline-grid h-[18px] w-[18px] place-items-center rounded-[4px] text-[10px] font-bold ${
+              isLightTheme ? "bg-black/10 text-black/60" : "bg-white/15 text-white/75"
+            }`}
+          >
+            E
+          </span>
         ) : null}
       </div>
     </div>
@@ -277,7 +250,7 @@ export default async function SmartLinkPublicPage({
   ) : null;
 
   const releaseLinksPanel = data.sectionVisibility.links ? (
-    <div className="grid gap-3">
+    <div className="grid gap-2">
       {platformButtons.map((item) => {
         const href = `/l/${encodeURIComponent(data.publicSlug)}/go/${encodeURIComponent(item.code)}${queryString ? `?${queryString}` : ""}`;
         return (
@@ -286,15 +259,15 @@ export default async function SmartLinkPublicPage({
             href={href}
             target="_blank"
             rel="noreferrer"
-            className={`group flex items-center justify-between gap-4 overflow-hidden border px-[18px] py-[18px] transition ${platformCardSurface}`}
+            className={`group flex h-[60px] items-center justify-between gap-3 overflow-hidden border pl-3 pr-2 transition ${platformCardSurface}`}
             style={{ borderRadius: shapeRadius.card }}
           >
-            <span className="flex min-w-0 items-center gap-4">
-              <SmartLinkPlatformIcon code={item.code} size={24} />
-              <span className="block min-w-0 truncate text-[16px] font-normal leading-6 tracking-0">{item.label}</span>
+            <span className="flex min-w-0 items-center gap-3">
+              <SmartLinkPlatformIcon code={item.code} size={34} />
+              <span className="block min-w-0 truncate text-[15px] font-medium">{item.label}</span>
             </span>
             <span
-              className="inline-flex h-12 shrink-0 items-center justify-center px-6 text-[16px] font-semibold shadow-[0_18px_36px_-24px_rgba(0,0,0,0.5)] transition group-hover:brightness-110 sm:px-10"
+              className="inline-flex h-10 shrink-0 items-center justify-center px-5 text-[14px] font-semibold transition group-hover:brightness-110"
               style={{ background: accentColors.background, color: accentColors.color, borderRadius: shapeRadius.button }}
             >
               Слушать
@@ -336,7 +309,7 @@ export default async function SmartLinkPublicPage({
                 </div>
               ) : null}
               <div className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${mutedText}`}>{post.publishedLabel}</div>
-              {post.text ? <p className={`mt-2 whitespace-pre-line text-[14px] leading-6 ${sectionText}`}>{post.text}</p> : null}
+              {post.text ? <p className={`mt-2 line-clamp-6 whitespace-pre-line text-[14px] leading-6 ${sectionText}`}>{post.text}</p> : null}
               <a
                 href={post.url}
                 target="_blank"
@@ -408,7 +381,10 @@ export default async function SmartLinkPublicPage({
       )}
       <SmartLinkViewTracker slug={data.publicSlug} />
       {pixelIds ? <SmartLinkPixels ids={pixelIds} /> : null}
-      <div className="relative z-[1] mx-auto max-w-[520px] pb-8">
+      <div className="relative z-[1] mx-auto max-w-[440px] pb-8">
+        <div className="mb-3 flex justify-end">
+          <SmartLinkShareButton links={shareLinks} publicUrl={data.publicUrl} theme={isLightTheme ? "light" : "dark"} />
+        </div>
         {showCoverBackground ? (
           <div
             aria-hidden="true"
@@ -417,14 +393,14 @@ export default async function SmartLinkPublicPage({
             }`}
           />
         ) : null}
-        <div className={`relative overflow-hidden rounded-[22px] border p-3 backdrop-blur-[10px] sm:p-4 ${shellSurface}`}>
+        <div className={`relative ${shellSurface}`}>
           {isLightTheme ? (
             <div
               aria-hidden="true"
               className="pointer-events-none absolute inset-x-8 top-0 h-24 rounded-full bg-[radial-gradient(circle,rgba(123,61,245,0.12)_0%,rgba(123,61,245,0.04)_46%,transparent_76%)] blur-3xl"
             />
           ) : null}
-          <div className="space-y-3.5">
+          <div className="space-y-5">
             {hasNewsFeed ? (
               <SmartLinkPublicModeSwitcher
                 coverContent={coverPanel}
@@ -436,12 +412,13 @@ export default async function SmartLinkPublicPage({
                   </div>
                 }
                 newsContent={newsPanel}
+                theme={isLightTheme ? "light" : "dark"}
               />
             ) : (
               <>
                 {coverPanel}
                 {headerPanel}
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {presavePanel}
                   {releaseLinksPanel}
                 </div>
@@ -620,12 +597,11 @@ export default async function SmartLinkPublicPage({
               <Link
                 href="/"
                 aria-label="ICECREAMMUSIC — дистрибуция музыки"
-                className={`mx-auto flex w-fit items-center gap-2.5 rounded-full border py-1.5 pl-1.5 pr-4 transition ${denseSurface} ${isLightTheme ? "hover:border-black/14 hover:bg-white" : "hover:border-white/18 hover:bg-white/[0.06]"}`}
+                className={`mx-auto block w-fit pt-4 font-mono text-[11px] uppercase tracking-[0.2em] transition ${
+                  isLightTheme ? "text-black/45 hover:text-black/75" : "text-white/50 hover:text-white/85"
+                }`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/brand/smart-link-logo.png" alt="" className="h-7 w-7 shrink-0 object-contain" />
-                <span className={`text-[12px] ${mutedText}`}>by</span>
-                <span className={`text-[12px] font-semibold tracking-[0.18em] ${sectionText}`}>ICECREAMMUSIC</span>
+                by ICECREAMMUSIC
               </Link>
             </div>
           </div>

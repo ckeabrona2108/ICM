@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { canonicalAudioContentType } from "@/lib/audio-content-type";
 import { authOptions } from "@/lib/auth";
 import { createPresignedUpload, getStorageBucketHint, resolveStoredFileUrl } from "@/lib/s3";
 import { enforceRateLimit } from "@/lib/rate-limit";
@@ -82,7 +83,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const contentType = parsed.data.contentType.toLowerCase();
+  // The URL is signed for the exact type the browser will send, but checks run
+  // on the canonical type so aliases like audio/x-flac are accepted.
+  const signedContentType = parsed.data.contentType.toLowerCase();
+  const contentType = canonicalAudioContentType(signedContentType);
   if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
     return NextResponse.json({ error: "Unsupported upload type" }, { status: 415 });
   }
@@ -105,7 +109,7 @@ export async function POST(request: Request) {
   const key = `${storageRoot}/${session.user.id}/${Date.now()}-${fileName}`;
   const signed = await createPresignedUpload({
     key,
-    contentType
+    contentType: signedContentType
   });
   const publicUrl =
     resolveStoredFileUrl({

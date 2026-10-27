@@ -27,6 +27,7 @@ import {
   type UploadedFileRef
 } from "./wizard-context";
 import { TrackMetaForm } from "./track-meta-form";
+import { useTrackUploadStatus } from "./track-upload-status";
 import { WizardCard } from "./wizard-ui";
 
 const MAX_BYTES = 1024 * 1024 * 1024; // 1GB
@@ -317,6 +318,7 @@ async function readDuration(file: File): Promise<number | undefined> {
 
 export function StepTracks() {
   const { data, set } = useWizard();
+  const { statuses: uploadStatuses, retry: retryUpload } = useTrackUploadStatus();
   const [drag, setDrag] = React.useState(false);
   const [showMobileUploadNotice] = React.useState(() => detectMobileUploadRisk());
   const [error, setError] = React.useState<string | null>(null);
@@ -682,6 +684,8 @@ export function StepTracks() {
                 t.meta.trackPersons.length === 0 ||
                 t.meta.trackPersons.some((p) => !p.name.trim() || !p.role) ||
                 authorsIncomplete;
+              const uploadStatus = t.hasAudio ? uploadStatuses[t.id] : undefined;
+              const uploadedToStorage = Boolean(t.audioUpload?.storageKey);
 
               return (
                 <div
@@ -704,6 +708,24 @@ export function StepTracks() {
                       {!t.hasAudio ? (
                         <span className="hidden shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/62 sm:inline">
                           Без аудио
+                        </span>
+                      ) : null}
+
+                      {uploadStatus?.state === "uploading" ? (
+                        <span className="shrink-0 rounded-md bg-[var(--ux-accent)]/15 px-2 py-0.5 text-[10px] tabular-nums text-[#d8c9ff]">
+                          Загрузка {uploadStatus.percent}%
+                        </span>
+                      ) : uploadStatus?.state === "error" ? (
+                        <span className="shrink-0 rounded-md bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-200/90">
+                          Ошибка загрузки
+                        </span>
+                      ) : t.hasAudio && uploadedToStorage ? (
+                        <span className="shrink-0 rounded-md bg-emerald-400/10 px-2 py-0.5 text-[10px] text-emerald-200/90">
+                          Загружено
+                        </span>
+                      ) : t.hasAudio && t.localAudioFile ? (
+                        <span className="shrink-0 rounded-md border border-white/[0.08] bg-white/[0.04] px-2 py-0.5 text-[10px] text-white/62">
+                          Ожидает загрузки
                         </span>
                       ) : null}
 
@@ -790,6 +812,29 @@ export function StepTracks() {
                       </button>
                     </div>
                   </div>
+
+                  {uploadStatus?.state === "uploading" ? (
+                    <div className="h-1 w-full bg-white/[0.04]">
+                      <div
+                        className="h-full bg-[var(--ux-accent)] transition-[width] duration-300"
+                        style={{ width: `${uploadStatus.percent}%` }}
+                      />
+                    </div>
+                  ) : null}
+                  {uploadStatus?.state === "error" ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-rose-400/20 bg-rose-500/[0.06] px-4 py-2.5 sm:px-5">
+                      <p className="min-w-0 flex-1 text-[12px] text-rose-200/90">
+                        Аудио не загрузилось: {uploadStatus.message}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => retryUpload(t.id)}
+                        className="shrink-0 rounded-md border border-rose-300/30 px-2.5 py-1 text-[11px] text-rose-100 transition-colors hover:bg-rose-500/15"
+                      >
+                        Повторить
+                      </button>
+                    </div>
+                  ) : null}
 
                   {open ? (
                     <div className="border-t border-white/[0.08] bg-white/[0.02] px-3 py-4 sm:px-4">

@@ -13,6 +13,7 @@ import {
   type UploadedCoverRef,
   type UploadedFileRef,
   type StepId,
+  type TrackFile,
   type WizardData,
   type WizardSubmissionMode
 } from "./wizard-context";
@@ -46,6 +47,9 @@ import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
 import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
+import { resolveAudioContentType } from "@/lib/audio-content-type";
+import { TrackUploadQueue, isPendingLocalAudioIssue } from "@/lib/track-upload-queue";
+import { TrackUploadStatusContext, type TrackUploadStatus } from "./track-upload-status";
 
 const STEPS: Array<{ id: StepId; label: string }> = [
   { id: "intro", label: "Что загружаем?" },
@@ -347,21 +351,6 @@ function hasDraftContent(data: WizardData): boolean {
 
 type SubmitPhase = "idle" | "saving" | "uploading" | "submitting";
 
-function inferContentTypeFromName(name: string): string {
-  const normalized = name.trim().toLowerCase();
-  if (normalized.endsWith(".wav")) return "audio/wav";
-  if (normalized.endsWith(".flac")) return "audio/flac";
-  if (normalized.endsWith(".mp3")) return "audio/mpeg";
-  if (normalized.endsWith(".aac")) return "audio/aac";
-  if (normalized.endsWith(".m4a")) return "audio/mp4";
-  if (normalized.endsWith(".aif") || normalized.endsWith(".aiff")) return "audio/aiff";
-  if (normalized.endsWith(".png")) return "image/png";
-  if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
-  if (normalized.endsWith(".webp")) return "image/webp";
-  if (normalized.endsWith(".gif")) return "image/gif";
-  return "application/octet-stream";
-}
-
 function sanitizeFileName(name: string): string {
   return name
     .trim()
@@ -507,7 +496,7 @@ function WizardInner({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { step, setStep, set, data, submissionMode } = useWizard();
+  const { step, setStep, set, updateTracks, data, submissionMode } = useWizard();
   const idx = STEPS.findIndex((s) => s.id === step);
   const [submitErrors, setSubmitErrors] = React.useState<string[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
@@ -564,9 +553,14 @@ function WizardInner({
     () => buildReleaseSubmissionData(data),
     [data]
   );
+  // Attached-but-not-yet-uploaded audio is uploaded during submit, so it must
+  // not block step navigation or the submit button.
   const validationIssues = React.useMemo(
-    () => validateReleaseSubmission(submissionData),
-    [submissionData]
+    () =>
+      validateReleaseSubmission(submissionData).filter(
+        (issue) => !isPendingLocalAudioIssue(issue, data.tracks)
+      ),
+    [data.tracks, submissionData]
   );
   const validationMessages = React.useMemo(
     () => {
@@ -856,14 +850,125 @@ function WizardInner({
     [saveDraftToBackend, sourceReleaseId, submissionMode, updateDraftReleaseId]
   );
 
-  const prepareSubmissionDataWithUploads = React.useCallback(async (): Promise<ReleaseSubmissionData> => {
+  const trackUploadQueueRef = React.useRef(new TrackUploadQueue<UploadedFileRef>());
+  const [trackUploadStatuses, setTrackUploadStatuses] = React.useState<Record<string, TrackUploadStatus>>({});
+
+  const setTrackUploadStatus = React.useCallback(
+    (trackId: string, status: TrackUploadStatus | null) => {
+      setTrackUploadStatuses((current) => {
+        const previous = current[trackId];
+        if (!status) {
+          if (!previous) return current;
+          const next = { ...current };
+          delete next[trackId];
+          return next;
+        }
+        if (
+          previous?.state === "uploading" &&
+          status.state === "uploading" &&
+          previous.percent === status.percent
+        ) {
+          return current;
+        }
+        return { ...current, [trackId]: status };
+      });
+    },
+    []
+  );
+
+  // Uploads one track's audio and stores the result on that track right away.
+  // Autosave and submit share the same running upload through the queue.
+  const uploadTrackAudio = React.useCallback(
+    async (
+      trackState: TrackFile,
+      onProgress?: (loaded: number, total: number) => void
+    ): Promise<UploadedFileRef> => {
+      const sourceFile = trackState.localAudioFile ?? null;
+      return await trackUploadQueueRef.current.run(
+        trackState.id,
+        sourceFile ?? trackState.audioUrl ?? trackState.id,
+        async (emitProgress) => {
+          setTrackUploadStatus(trackState.id, { state: "uploading", percent: 0 });
+          try {
+            let audioBlob: Blob;
+            if (sourceFile) {
+              audioBlob = sourceFile;
+            } else {
+              try {
+                const audioResponse = await fetch(trackState.audioUrl as string);
+                if (!audioResponse.ok) {
+                  throw new Error("audio_unavailable");
+                }
+                audioBlob = await audioResponse.blob();
+              } catch {
+                throw new Error(
+                  "Не удалось получить локальный аудиофайл. Заново прикрепите файл на шаге «Список треков» и повторите отправку. На iPhone и во встроенных webview надёжнее повторить загрузку в Safari или Chrome."
+                );
+              }
+            }
+
+            const upload = await uploadBlobToStorage({
+              fileName: trackState.name,
+              contentType: resolveAudioContentType(trackState.name, audioBlob.type),
+              blob: audioBlob,
+              kind: "audio",
+              onProgress: (loaded, total) => {
+                emitProgress(loaded, total);
+                setTrackUploadStatus(trackState.id, {
+                  state: "uploading",
+                  percent: total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 0
+                });
+              }
+            });
+
+            updateTracks((tracks) =>
+              tracks.map((track) =>
+                track.id === trackState.id && (track.localAudioFile ?? null) === sourceFile
+                  ? { ...track, localAudioFile: null, audioUpload: upload }
+                  : track
+              )
+            );
+            setTrackUploadStatus(trackState.id, null);
+            return upload;
+          } catch (error) {
+            const message =
+              error instanceof Error && error.message
+                ? error.message
+                : "Не удалось загрузить файл в хранилище.";
+            setTrackUploadStatus(trackState.id, { state: "error", message });
+            throw new Error(message);
+          }
+        },
+        onProgress
+      );
+    },
+    [setTrackUploadStatus, updateTracks]
+  );
+
+  const retryTrackUpload = React.useCallback(
+    (trackId: string) => {
+      const trackState = data.tracks.find((track) => track.id === trackId);
+      if (!trackState || trackState.audioUpload?.storageKey) return;
+      void uploadTrackAudio(trackState).catch(() => {
+        // the error is shown on the track row
+      });
+    },
+    [data.tracks, uploadTrackAudio]
+  );
+
+  const trackUploadStatusValue = React.useMemo(
+    () => ({ statuses: trackUploadStatuses, retry: retryTrackUpload }),
+    [retryTrackUpload, trackUploadStatuses]
+  );
+
+  const prepareSubmissionDataWithUploads = React.useCallback(async (
+    options: { strict?: boolean } = {}
+  ): Promise<ReleaseSubmissionData> => {
     const preparedTracks = submissionData.tracks.map((track) => ({ ...track }));
     const prepared: ReleaseSubmissionData = {
       ...submissionData,
       tracks: preparedTracks
     };
-    let updatedTracks = data.tracks;
-    let tracksChanged = false;
     const uploadState = new Map<string, number>();
     const uploadJobs: Array<{ id: string; size: number }> = [];
 
@@ -928,91 +1033,37 @@ function WizardInner({
       }
     }
 
-    const uploadResults = await mapWithConcurrency(preparedTracks, 3, async (track, index) => {
+    const pendingTracks = preparedTracks.flatMap((track, index) => {
       const trackState = data.tracks[index];
-      if (!trackState || track.hasAudio === false) {
-        return { index, upload: null as UploadedFileRef | null };
-      }
+      if (!trackState || track.hasAudio === false) return [];
+      if (track.audioFile?.storageKey && track.audioFile?.url) return [];
+      return [{ index, trackState }];
+    });
 
-      if (track.audioFile?.storageKey && track.audioFile?.url) {
-        return { index, upload: track.audioFile };
-      }
-
-      if (trackState.audioUpload?.storageKey && trackState.audioUpload?.url) {
-        return { index, upload: trackState.audioUpload };
-      }
-
+    // A failed track must not discard the ones that did upload: each success is
+    // stored on its track immediately, and only the failures are reported.
+    const failures: string[] = [];
+    await mapWithConcurrency(pendingTracks, 3, async ({ index, trackState }) => {
+      const label = `№${index + 1} «${trackState.name}»`;
       if (!trackState.localAudioFile && !trackState.audioUrl) {
-        throw new Error(`Трек «${trackState.name}» не содержит аудиофайл для загрузки.`);
+        failures.push(`Трек ${label} не содержит аудиофайл для загрузки.`);
+        return;
       }
-
-      let audioBlob: Blob;
-      if (trackState.localAudioFile) {
-        audioBlob = trackState.localAudioFile;
-      } else {
-        try {
-          const audioResponse = await fetch(trackState.audioUrl as string);
-          if (!audioResponse.ok) {
-            throw new Error("audio_unavailable");
-          }
-          audioBlob = await audioResponse.blob();
-        } catch {
-          throw new Error(
-            `Не удалось получить локальный аудиофайл трека «${trackState.name}». Заново прикрепите файл на шаге «Список треков» и повторите отправку. На iPhone и во встроенных webview надёжнее повторить загрузку в Safari или Chrome.`
-          );
-        }
-      }
-
-      const contentType = audioBlob.type || inferContentTypeFromName(trackState.name);
       try {
-        const upload = await uploadBlobToStorage({
-          fileName: trackState.name,
-          contentType,
-          blob: audioBlob,
-          kind: "audio",
-          onProgress: (loaded, total) => updateUploadProgress(`track:${trackState.id}`, loaded, total)
-        });
-        return { index, upload };
-      } catch (error) {
-        const reason =
-          error instanceof Error && error.message
-            ? ` Причина: ${error.message}`
-            : "";
-        throw new Error(
-          `Не удалось загрузить аудиофайл трека «${trackState.name}» в хранилище. Проверьте подключение и повторите.${reason}`
+        const upload = await uploadTrackAudio(trackState, (loaded, total) =>
+          updateUploadProgress(`track:${trackState.id}`, loaded, total)
         );
+        preparedTracks[index] = { ...preparedTracks[index], audioFile: upload };
+      } catch (error) {
+        const reason = error instanceof Error && error.message ? ` Причина: ${error.message}` : "";
+        failures.push(`Не удалось загрузить аудиофайл трека ${label}.${reason}`);
       }
     });
 
-    for (const result of uploadResults) {
-      if (!result.upload) continue;
-      const track = preparedTracks[result.index];
-      const trackState = data.tracks[result.index];
-      if (!track || !trackState) continue;
-      track.audioFile = result.upload;
-
-      if (
-        trackState.audioUpload?.storageKey === result.upload.storageKey &&
-        trackState.audioUpload?.url === result.upload.url &&
-        !trackState.localAudioFile
-      ) {
-        continue;
-      }
-
-      tracksChanged = true;
-      updatedTracks = updatedTracks.map((item, itemIndex) =>
-        itemIndex === result.index
-          ? {
-              ...item,
-              localAudioFile: null,
-              audioUpload: result.upload
-            }
-          : item
+    if (failures.length > 0 && options.strict) {
+      throw new Error(
+        `${failures.join(" ")} Уже загруженные треки сохранены — повторите отправку, догрузятся только недостающие.`
       );
-    }
-
-    if (tracksChanged) {
-      set("tracks", updatedTracks);
     }
 
     if (totalUploadBytes > 0) {
@@ -1020,7 +1071,7 @@ function WizardInner({
     }
 
     return prepared;
-  }, [data, set, submissionData]);
+  }, [data, set, submissionData, uploadTrackAudio]);
 
   const doSubmit = React.useCallback(async () => {
     if (autosaveTimerRef.current != null) {
@@ -1028,7 +1079,9 @@ function WizardInner({
       autosaveTimerRef.current = null;
     }
 
-    const localIssues = validateReleaseSubmission(submissionData);
+    const localIssues = validateReleaseSubmission(submissionData).filter(
+      (issue) => !isPendingLocalAudioIssue(issue, data.tracks)
+    );
 
     if (localIssues.length > 0) {
       setSubmitErrors([...new Set(localIssues.map((issue) => issue.message))]);
@@ -1054,7 +1107,15 @@ function WizardInner({
         submissionMode === "new" ? draftReleaseIdRef.current : sourceReleaseId,
         submissionDataSnapshot
       );
-      const preparedSubmissionData = pendingSubmission?.payload.data ?? await prepareSubmissionDataWithUploads();
+      const preparedSubmissionData =
+        pendingSubmission?.payload.data ?? await prepareSubmissionDataWithUploads({ strict: true });
+      const preparedIssues = validateReleaseSubmission(preparedSubmissionData);
+      if (preparedIssues.length > 0) {
+        setStep("review");
+        setSubmitErrors([...new Set(preparedIssues.map((issue) => issue.message))]);
+        setSubmitErrorsBySection(groupMessagesBySection(preparedIssues));
+        return;
+      }
       setUploadProgress((current) => Math.max(current, 97));
       setSubmitPhase("saving");
       const draftPayload: ReleaseDraftSaveRequest = {
@@ -1221,6 +1282,7 @@ function WizardInner({
     }
   }, [
     currentStatus,
+    data.tracks,
     moderationStarted,
     prepareSubmissionDataWithUploads,
     persistDraft,
@@ -1469,6 +1531,7 @@ function WizardInner({
   const currentChrome = STEP_CHROME[step];
 
   return (
+    <TrackUploadStatusContext.Provider value={trackUploadStatusValue}>
     <div ref={wizardRootRef} className="pb-16 pt-2">
       <div className="mx-auto w-full max-w-[960px] space-y-6">
         <div className="mx-auto flex w-full max-w-[860px] flex-wrap items-end justify-between gap-3">
@@ -1679,5 +1742,6 @@ function WizardInner({
         ) : null}
       </div>
     </div>
+    </TrackUploadStatusContext.Provider>
   );
 }

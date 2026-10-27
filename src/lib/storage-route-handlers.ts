@@ -1,3 +1,4 @@
+import { canonicalAudioContentType } from "./audio-content-type";
 import { sniffArtistSocialMedia } from "./media-signature";
 import {
   authorizeStorageRead,
@@ -99,7 +100,8 @@ function detectUpload(bytes: Uint8Array): DetectedUpload | null {
   return detectAdditionalUpload(bytes);
 }
 
-function contentTypeMatches(claimed: string, detected: DetectedUpload): boolean {
+function contentTypeMatches(rawClaimed: string, detected: DetectedUpload): boolean {
+  const claimed = canonicalAudioContentType(rawClaimed);
   if (claimed === detected.mimeType) return true;
   if (detected.mimeType === "audio/wav" && claimed === "audio/x-wav") return true;
   if (detected.mimeType === "audio/aiff" && claimed === "audio/x-aiff") return true;

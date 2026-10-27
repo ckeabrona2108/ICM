@@ -219,6 +219,8 @@ interface Ctx {
   data: WizardData;
   set: <K extends keyof WizardData>(key: K, value: WizardData[K]) => void;
   patch: (patch: Partial<WizardData>) => void;
+  /** Applies a change to the latest tracks list (safe from async callbacks). */
+  updateTracks: (updater: (tracks: TrackFile[]) => TrackFile[]) => void;
   step: StepId;
   setStep: (s: StepId) => void;
   reset: () => void;
@@ -270,6 +272,13 @@ export function WizardProvider({
     setData((d) => ({ ...d, ...patch }));
   }, []);
 
+  const updateTracks = React.useCallback(
+    (updater: (tracks: TrackFile[]) => TrackFile[]) => {
+      setData((d) => ({ ...d, tracks: updater(d.tracks) }));
+    },
+    []
+  );
+
   const reset = React.useCallback(() => {
     setData((prev) => {
       for (const t of prev.tracks) revokeBlobUrl(t.audioUrl);
@@ -288,7 +297,7 @@ export function WizardProvider({
 
   return (
     <WizardCtx.Provider
-      value={{ data, set, patch, step, setStep, reset, submissionMode }}
+      value={{ data, set, patch, updateTracks, step, setStep, reset, submissionMode }}
     >
       {children}
     </WizardCtx.Provider>

@@ -268,7 +268,7 @@ export function AnalyticsPage() {
               )}
             </AnalyticsCard>
 
-            <AnalyticsCard title="Страны" hint="Доля прослушиваний по последнему отчёту">
+            <AnalyticsCard title="Страны" hint="Доля прослушиваний за период">
               {countriesState.loading ? (
                 <div className="space-y-2">
                   <SkeletonBlock className="h-9 w-full" />

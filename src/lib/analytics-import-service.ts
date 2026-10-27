@@ -788,6 +788,16 @@ export function parseAnalyticsCsv(csvText: string, fallbackReportDate: Date): Pa
     });
   }
 
+  // Платных прослушиваний (дольше 30 секунд) не может быть больше, чем всех.
+  // В некоторых выгрузках колонки pay_streams и streams перепутаны — меняем их местами.
+  const totalStreams = rows.reduce((sum, row) => sum + row.streams, 0);
+  const totalPayStreams = rows.reduce((sum, row) => sum + row.pay_streams, 0);
+  if (totalPayStreams > totalStreams) {
+    for (const row of rows) {
+      [row.streams, row.pay_streams] = [row.pay_streams, row.streams];
+    }
+  }
+
   return rows;
 }
 

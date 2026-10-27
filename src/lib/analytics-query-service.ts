@@ -1242,6 +1242,37 @@ async function enrichOverviewWithPlatformCharts(
   };
 }
 
+// В дни без прослушиваний у артиста нет строк в отчёте, и график обрывался раньше,
+// чем заканчивается сам отчёт площадок. Дотягиваем его нулями до последнего дня отчёта.
+async function padChartToLatestReport(
+  prisma: PrismaClient,
+  overview: AnalyticsOverviewResponse,
+  days: number
+): Promise<AnalyticsOverviewResponse> {
+  if (overview.chart.length === 0) return overview;
+  const latest = await prisma.analytics_report_snapshots.aggregate({
+    where: { period_days: days },
+    _max: { report_date: true }
+  });
+  const latestReportDate = latest._max.report_date;
+  if (!latestReportDate) return overview;
+
+  const latestKey = toDateKey(latestReportDate);
+  const existing = new Map(overview.chart.map((point) => [point.date, point]));
+  const start = buildReportRangeFromLatest(latestReportDate, days);
+  const chart: AnalyticsChartPoint[] = [];
+  for (const cursor = new Date(start); toDateKey(cursor) <= latestKey; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const key = toDateKey(cursor);
+    chart.push(existing.get(key) ?? { date: key, streams: 0, pay_streams: 0 });
+  }
+
+  return {
+    ...overview,
+    latestReportDate: latestKey > (overview.latestReportDate ?? "") ? latestKey : overview.latestReportDate,
+    chart
+  };
+}
+
 export async function getAnalyticsOverview(
   prisma: PrismaClient,
   params: AnalyticsOverviewParams
@@ -1278,12 +1309,11 @@ export async function getAnalyticsOverview(
           latestReportDate: summaryOverview.latestReportDate
         });
 
-        return platformSummary
-          ? {
-              ...summaryOverview,
-              ...platformSummary
-            }
-          : summaryOverview;
+        return padChartToLatestReport(
+          prisma,
+          platformSummary ? { ...summaryOverview, ...platformSummary } : summaryOverview,
+          days
+        );
       }
     } catch (error) {
       if (!isAnalyticsSummaryUnavailableError(error)) {
@@ -1718,12 +1748,16 @@ export async function getAnalyticsCountries(
   const latestReportDate = latest._max.report_date ?? null;
   if (!latestReportDate) return { latestReportDate: null, countriesBreakdown: [] };
 
-  const dayStart = new Date(`${toDateKey(latestReportDate)}T00:00:00.000Z`);
+  // Страны считаем за весь выбранный период, как и «Все прослушивания»,
+  // а не за последний день: иначе в день без прослушиваний карточка пустая.
+  const rangeStart = buildReportRangeFromLatest(latestReportDate, days);
+  const rangeEnd = new Date(`${toDateKey(latestReportDate)}T00:00:00.000Z`);
+  rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 1);
   const grouped = await prisma.analytics_report_snapshots.groupBy({
     by: ["country"],
     where: {
       ...where,
-      report_date: { gte: dayStart, lt: new Date(dayStart.getTime() + 24 * 60 * 60 * 1000) }
+      report_date: { gte: rangeStart, lt: rangeEnd }
     },
     _sum: { streams: true, pay_streams: true },
     orderBy: { _sum: { streams: "desc" } }
@@ -1747,7 +1781,8 @@ export async function getAnalyticsCountries(
             FROM "analytics_report_snapshots"
             WHERE "user_id" = ${sqlUuid(params.user_id)}
               AND "release_id" IN (${sqlUuidList(releaseIds)})
-              AND DATE("report_date") = DATE(${dayStart})
+              AND "report_date" >= ${rangeStart}
+              AND "report_date" < ${rangeEnd}
               AND ${buildLegacyPeriodHourCondition(days)}
             GROUP BY "country"
             ORDER BY SUM("streams") DESC

@@ -156,7 +156,7 @@ function AnalyticsOverviewCardBase({
       </KpiTile>
 
       <KpiTile label="Топ страны" loading={loading}>
-        <RankedTileBody entries={countryEntries} unit="в последнем отчёте" />
+        <RankedTileBody entries={countryEntries} unit="за период" />
       </KpiTile>
     </div>
   );

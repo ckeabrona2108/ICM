@@ -427,8 +427,9 @@ test("English and Russian column headers parse to the same rows", () => {
 
   assert.equal(english.length, 1);
   assert.deepEqual(russian, english);
-  assert.equal(english[0]?.streams, 217);
-  assert.equal(english[0]?.pay_streams, 404);
+  // В этой выгрузке колонки перепутаны (платных больше, чем всех) — парсер меняет их местами.
+  assert.equal(english[0]?.streams, 404);
+  assert.equal(english[0]?.pay_streams, 217);
   assert.equal(english[0]?.report_date.toISOString().slice(0, 10), "2026-10-25");
 });
 
@@ -459,4 +460,19 @@ test("platform cabinet export with «Все прослушивания» and «>
   assert.equal(rows[0]?.streams, 8155);
   assert.equal(rows[0]?.pay_streams, 4507);
   assert.equal(rows[0]?.report_date.toISOString().slice(0, 10), "2026-07-28");
+});
+
+test("swapped pay_streams and streams columns are corrected", () => {
+  const rows = parseAnalyticsCsv(
+    [
+      "track;artist;album;country;upc;platform;report_date;pay_streams;streams;;",
+      "Слышь че;Evianway;Слышь че;Россия;5063635661195;ВКонтакте;2026-10-25;404;217;;",
+      "ФИФА;Evianway;ФИФА;Россия;5063833087957;ВКонтакте;2026-10-25;380;252;;"
+    ].join("\r\n"),
+    new Date("2026-10-26T00:00:00.000Z")
+  );
+
+  assert.equal(rows[0]?.streams, 404);
+  assert.equal(rows[0]?.pay_streams, 217);
+  assert.equal(rows[1]?.streams, 380);
 });

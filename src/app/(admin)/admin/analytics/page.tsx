@@ -11,9 +11,9 @@ export default async function AdminAnalyticsPage() {
 
   return (
     <div className="pb-10">
-      <h1 className="text-[24px] font-semibold tracking-tight text-white sm:text-[26px]">Analytics Imports</h1>
+      <h1 className="text-[24px] font-semibold tracking-tight text-white sm:text-[26px]">Аналитика: импорт отчётов</h1>
       <p className="mt-2 max-w-3xl text-[14px] text-white/65">
-        Импорт rolling CSV отчётов агрегатора, контроль matched/unmatched и пересчёт summary.
+        Загружайте отчёты агрегатора по периодам и следите за обработкой в панели «Ход загрузки».
       </p>
 
       <div className="mt-6">

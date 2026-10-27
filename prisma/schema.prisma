@@ -1946,6 +1946,8 @@ model analytics_import_jobs {
   rows_with_unknown_platform  Int                           @default(0)
   top_platform                String?
   error_message               String?
+  progress_percent            Int                           @default(0)
+  progress_stage              String?
   started_at                  DateTime?                     @db.Timestamp(3)
   finished_at                 DateTime?                     @db.Timestamp(3)
   created_by_admin_id         String                        @db.Uuid

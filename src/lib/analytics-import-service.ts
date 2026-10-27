@@ -146,24 +146,64 @@ function getAnalyticsPlatformSummaryRepo(
   return repo ?? null;
 }
 
+type AnalyticsSnapshotRow = {
+  release_id: string;
+  user_id: string;
+  upc: string;
+  report_date: Date;
+  period_days: number;
+  country: string;
+  platform: string;
+  streams: number;
+  pay_streams: number;
+  track_name: string | null;
+  artist_name: string | null;
+  album_name: string | null;
+  source_file_name: string;
+};
+
+const SNAPSHOT_INSERT_CHUNK_SIZE = 2_000;
+
+// Большие выгрузки (десятки тысяч строк) по одной строке не успевают в таймаут транзакции.
+// Старые данные за эти даты уже удалены, поэтому пишем пачками через createMany,
+// а построчный upsert оставляем только для старых схем без колонки platform.
+async function insertAnalyticsSnapshots(params: {
+  tx: Prisma.TransactionClient;
+  modeRef: { current: SnapshotUniqueMode };
+  rows: AnalyticsSnapshotRow[];
+}): Promise<number> {
+  const { tx, modeRef, rows } = params;
+  if (rows.length === 0) return 0;
+
+  if (modeRef.current === "platform") {
+    try {
+      const now = new Date();
+      for (let index = 0; index < rows.length; index += SNAPSHOT_INSERT_CHUNK_SIZE) {
+        await tx.analytics_report_snapshots.createMany({
+          data: rows.slice(index, index + SNAPSHOT_INSERT_CHUNK_SIZE).map((row) => ({
+            id: randomUUID(),
+            ...row,
+            updated_at: now
+          }))
+        });
+      }
+      return rows.length;
+    } catch (error) {
+      if (!isUnknownPlatformFieldError(error)) throw error;
+      modeRef.current = "legacy_no_platform";
+    }
+  }
+
+  for (const row of rows) {
+    await upsertAnalyticsSnapshotCompat({ tx, modeRef, row });
+  }
+  return rows.length;
+}
+
 async function upsertAnalyticsSnapshotCompat(params: {
   tx: Prisma.TransactionClient;
   modeRef: { current: SnapshotUniqueMode };
-  row: {
-    release_id: string;
-    user_id: string;
-    upc: string;
-    report_date: Date;
-    period_days: number;
-    country: string;
-    platform: string;
-    streams: number;
-    pay_streams: number;
-    track_name: string | null;
-    artist_name: string | null;
-    album_name: string | null;
-    source_file_name: string;
-  };
+  row: AnalyticsSnapshotRow;
 }): Promise<void> {
   const { tx, modeRef, row } = params;
 
@@ -807,6 +847,7 @@ function toRoundedPercent(value: number): Prisma.Decimal {
 
 const MAX_READABLE_CHANGE_PERCENT = 150;
 const ANALYTICS_IMPORT_TRANSACTION_TIMEOUT_MS = 180_000;
+const ANALYTICS_IMPORT_LOCK_KEY = 73_110_027;
 const ANALYTICS_RECOMPUTE_TRANSACTION_TIMEOUT_MS = 300_000;
 
 function clampReadableChangePercent(value: number): number {
@@ -1119,14 +1160,168 @@ export async function recomputeSummariesForReportDate(params: {
   };
 }
 
+// Построчный пересчёт делает ~7 запросов на каждого пользователя и релиз за каждую дату:
+// на полугодовой выгрузке (183 даты) это сотни тысяч запросов и больше часа в статусе processing.
+// Здесь итоги за дату строятся целиком из snapshots несколькими INSERT ... SELECT.
+// Даты идут по возрастанию, чтобы change_percent брал уже пересчитанный предыдущий отчёт.
+async function recomputeSummariesForReportDateBulk(params: {
+  prisma: PrismaClient;
+  report_date: Date;
+}): Promise<void> {
+  const reportDate = params.report_date;
+  await params.prisma.$transaction(
+    async (tx) => {
+      await tx.$queryRawUnsafe(
+        `SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(${ANALYTICS_IMPORT_LOCK_KEY})) AS lock`
+      );
+      const previous = await tx.$queryRaw<Array<{ report_date: Date | null }>>(Prisma.sql`
+        SELECT MAX("report_date") AS "report_date"
+        FROM "analytics_report_snapshots"
+        WHERE "report_date" < ${reportDate}
+      `);
+      const previousReportDate = previous[0]?.report_date ?? null;
+
+      await tx.$executeRaw(Prisma.sql`DELETE FROM "analytics_daily_summaries" WHERE "report_date" = ${reportDate}`);
+      await tx.$executeRaw(Prisma.sql`DELETE FROM "analytics_platform_summaries" WHERE "report_date" = ${reportDate}`);
+
+      // Итоги пользователя (release_id IS NULL) и релиза за дату.
+      for (const scope of ["user", "release"] as const) {
+        const groupKey = scope === "user" ? Prisma.sql`"user_id"` : Prisma.sql`"user_id", "release_id"`;
+        const releasesCount =
+          scope === "user" ? Prisma.sql`COUNT(DISTINCT "release_id")::int` : Prisma.sql`1`;
+        const summaryRelease = scope === "user" ? Prisma.sql`NULL::uuid` : Prisma.sql`totals."release_id"`;
+        const platformRelease = scope === "user" ? Prisma.sql`NULL::uuid` : Prisma.sql`by_platform."release_id"`;
+        const previousScope =
+          scope === "user"
+            ? Prisma.sql`"release_id" IS NULL`
+            : Prisma.sql`"release_id" IS NOT NULL`;
+        const previousJoin =
+          scope === "user"
+            ? Prisma.sql`previous."user_id" = by_platform."user_id"`
+            : Prisma.sql`previous."user_id" = by_platform."user_id" AND previous."release_id" = by_platform."release_id"`;
+
+        await tx.$executeRaw(Prisma.sql`
+          WITH base AS (
+            SELECT "user_id", "release_id", "country", "platform", "streams", "pay_streams"
+            FROM "analytics_report_snapshots"
+            WHERE "report_date" = ${reportDate}
+          ),
+          totals AS (
+            SELECT ${groupKey}, SUM("streams")::int AS "streams", SUM("pay_streams")::int AS "pay_streams",
+                   COUNT(DISTINCT "country")::int AS "countries_count", ${releasesCount} AS "releases_count"
+            FROM base GROUP BY ${groupKey}
+          ),
+          by_country AS (
+            SELECT DISTINCT ON (${groupKey}) ${groupKey}, "country"
+            FROM (SELECT ${groupKey}, "country", SUM("streams") AS "streams" FROM base GROUP BY ${groupKey}, "country") grouped
+            ORDER BY ${groupKey}, "streams" DESC
+          ),
+          by_platform AS (
+            SELECT ${groupKey}, "platform", SUM("streams") AS "streams" FROM base GROUP BY ${groupKey}, "platform"
+          ),
+          top_platform AS (
+            SELECT DISTINCT ON (${groupKey}) ${groupKey}, "platform" FROM by_platform ORDER BY ${groupKey}, "streams" DESC
+          ),
+          platform_counts AS (
+            SELECT ${groupKey}, COUNT(*)::int AS "platforms_count" FROM by_platform GROUP BY ${groupKey}
+          )
+          INSERT INTO "analytics_daily_summaries" (
+            "id", "user_id", "release_id", "report_date", "total_streams", "total_pay_streams",
+            "countries_count", "top_country", "releases_count", "top_platform", "platforms_count", "updated_at"
+          )
+          SELECT gen_random_uuid()::text, totals."user_id", ${summaryRelease}, ${reportDate}, totals."streams",
+                 totals."pay_streams", totals."countries_count", by_country."country", totals."releases_count",
+                 top_platform."platform", platform_counts."platforms_count", NOW()
+          FROM totals
+          JOIN by_country USING (${groupKey})
+          JOIN top_platform USING (${groupKey})
+          JOIN platform_counts USING (${groupKey})
+        `);
+
+        await tx.$executeRaw(Prisma.sql`
+          WITH base AS (
+            SELECT "user_id", "release_id", COALESCE("platform", 'Unknown') AS "platform", "streams", "pay_streams"
+            FROM "analytics_report_snapshots"
+            WHERE "report_date" = ${reportDate}
+          ),
+          totals AS (
+            SELECT ${groupKey}, SUM("streams") AS "streams" FROM base GROUP BY ${groupKey}
+          ),
+          by_platform AS (
+            SELECT ${groupKey}, "platform", SUM("streams") AS "streams", SUM("pay_streams") AS "pay_streams"
+            FROM base GROUP BY ${groupKey}, "platform"
+          ),
+          previous AS (
+            SELECT "user_id", "release_id", "platform", "streams"
+            FROM "analytics_platform_summaries"
+            WHERE "report_date" = ${previousReportDate} AND ${previousScope}
+          )
+          INSERT INTO "analytics_platform_summaries" (
+            "id", "user_id", "release_id", "report_date", "platform", "streams", "pay_streams",
+            "share_percent", "change_percent", "updated_at"
+          )
+          SELECT gen_random_uuid()::text, by_platform."user_id", ${platformRelease}, ${reportDate},
+                 by_platform."platform", by_platform."streams"::int, by_platform."pay_streams"::int,
+                 ROUND(CASE WHEN totals."streams" > 0 THEN by_platform."streams" * 100.0 / totals."streams" ELSE 0 END, 3),
+                 CASE
+                   WHEN COALESCE(previous."streams", 0) = 0 THEN CASE WHEN by_platform."streams" > 0 THEN NULL ELSE 0 END
+                   ELSE ROUND(GREATEST(-${Prisma.raw(String(MAX_READABLE_CHANGE_PERCENT))}, LEAST(${Prisma.raw(String(MAX_READABLE_CHANGE_PERCENT))},
+                     (by_platform."streams" - previous."streams") * 100.0 / previous."streams")), 3)
+                 END,
+                 NOW()
+          FROM by_platform
+          JOIN totals USING (${groupKey})
+          LEFT JOIN previous ON ${previousJoin} AND previous."platform" = by_platform."platform"
+        `);
+      }
+    },
+    {
+      maxWait: 60_000,
+      timeout: ANALYTICS_RECOMPUTE_TRANSACTION_TIMEOUT_MS
+    }
+  );
+}
+
+export async function recomputeSummariesForReportDates(params: {
+  prisma: PrismaClient;
+  report_dates: Date[];
+  fallbackTouched?: Map<string, { userIds: Set<string>; releaseIds: Set<string> }>;
+  onDateDone?: (done: number, total: number) => void;
+}): Promise<void> {
+  const ordered = Array.from(new Set(params.report_dates.map((date) => date.getTime())))
+    .sort((left, right) => left - right)
+    .map((time) => new Date(time));
+
+  for (const report_date of ordered) {
+    try {
+      await recomputeSummariesForReportDateBulk({ prisma: params.prisma, report_date });
+    } catch (error) {
+      // Старые схемы без platform-колонок и без analytics_platform_summaries — старый построчный путь.
+      if (!isUnknownPlatformFieldError(error) && !isRawPlatformQueryUnavailableError(error)) throw error;
+      const touched = params.fallbackTouched?.get(report_date.toISOString());
+      await recomputeSummariesForReportDate({
+        prisma: params.prisma,
+        report_date,
+        touchedUserIds: touched ? Array.from(touched.userIds) : undefined,
+        touchedReleaseIds: touched ? Array.from(touched.releaseIds) : undefined
+      });
+    }
+    params.onDateDone?.(ordered.indexOf(report_date) + 1, ordered.length);
+  }
+}
+
+export type AnalyticsImportProgressReporter = (percent: number, stage: string) => void;
+
 export async function importAnalyticsCsvReport(params: {
   prisma: PrismaClient;
   source_file_name: string;
   csvText: string;
   period_days?: number;
   import_job_id?: string;
+  onProgress?: AnalyticsImportProgressReporter;
 }): Promise<AnalyticsImportResult> {
   assertAnalyticsStorageRepos(params.prisma);
+  const reportProgress: AnalyticsImportProgressReporter = params.onProgress ?? (() => undefined);
 
   const isDev = process.env.NODE_ENV !== "production";
   const devLog = (...args: unknown[]) => {
@@ -1135,6 +1330,7 @@ export async function importAnalyticsCsvReport(params: {
     console.log("[analytics-import]", ...args);
   };
 
+  reportProgress(2, "Читаем файл");
   const fallbackReportDate = parseReportDateFromFilename(params.source_file_name);
   const periodDays = normalizeAnalyticsPeriodDays(params.period_days);
   const parsedRows = parseAnalyticsCsv(params.csvText, fallbackReportDate).map((row) => ({
@@ -1144,6 +1340,7 @@ export async function importAnalyticsCsvReport(params: {
   const groupedRows = groupAnalyticsRows(parsedRows);
   const reportTimestamps = Array.from(new Set(groupedRows.map((row) => row.report_date.toISOString())));
   const reportDates = reportTimestamps.map((value) => new Date(value));
+  reportProgress(6, `Ищем релизы по UPC · ${parsedRows.length.toLocaleString("ru-RU")} строк`);
 
   const uniqueUpcs = Array.from(
     new Set(
@@ -1216,8 +1413,14 @@ export async function importAnalyticsCsvReport(params: {
     current: "platform"
   };
 
+  reportProgress(12, "Записываем строки отчёта");
   await params.prisma.$transaction(
     async (tx) => {
+      // Импорты по одним и тем же датам удаляют и пишут одни и те же строки:
+      // выполняем их строго по очереди, иначе второй падает на уникальном индексе.
+      if (typeof (tx as { $queryRawUnsafe?: unknown }).$queryRawUnsafe === "function") {
+        await tx.$queryRawUnsafe(`SELECT 1 AS locked FROM (SELECT pg_advisory_xact_lock(${ANALYTICS_IMPORT_LOCK_KEY})) AS lock`);
+      }
       const platformSummaryRepo = getAnalyticsPlatformSummaryRepo(tx);
       if (reportDates.length > 0) {
         await tx.analytics_report_snapshots.deleteMany({
@@ -1253,6 +1456,7 @@ export async function importAnalyticsCsvReport(params: {
       }
 
       const unmatchedPayload: Prisma.unmatched_analytics_importsCreateManyInput[] = [];
+      const pendingSnapshots = new Map<string, AnalyticsSnapshotRow>();
 
       for (const row of groupedRows) {
         if (!row.upc) {
@@ -1316,10 +1520,14 @@ export async function importAnalyticsCsvReport(params: {
           rows_with_unknown_platform += 1;
         }
 
-        await upsertAnalyticsSnapshotCompat({
-          tx,
-          modeRef: snapshotUniqueModeRef,
-          row: {
+        const snapshotKey = [release.id, reportTimestamp, row.country, row.platform].join("|");
+        const pending = pendingSnapshots.get(snapshotKey);
+        if (pending) {
+          // Два UPC одного релиза в одной ячейке — суммируем, как раньше делал upsert.
+          pending.streams += row.streams;
+          pending.pay_streams += row.pay_streams;
+        } else {
+          pendingSnapshots.set(snapshotKey, {
             release_id: release.id,
             user_id: release.userId,
             upc: csvUpc,
@@ -1333,14 +1541,19 @@ export async function importAnalyticsCsvReport(params: {
             artist_name: collapseNames(row.artistNames),
             album_name: collapseNames(row.albumNames),
             source_file_name: params.source_file_name
-          }
-        });
-        insertedSnapshotsCount += 1;
+          });
+        }
       }
 
-      if (unmatchedPayload.length > 0) {
+      insertedSnapshotsCount = await insertAnalyticsSnapshots({
+        tx,
+        modeRef: snapshotUniqueModeRef,
+        rows: Array.from(pendingSnapshots.values())
+      });
+
+      for (let index = 0; index < unmatchedPayload.length; index += SNAPSHOT_INSERT_CHUNK_SIZE) {
         await tx.unmatched_analytics_imports.createMany({
-          data: unmatchedPayload
+          data: unmatchedPayload.slice(index, index + SNAPSHOT_INSERT_CHUNK_SIZE)
         });
       }
     },
@@ -1351,14 +1564,16 @@ export async function importAnalyticsCsvReport(params: {
   );
 
   if (touchedByDate.size > 0) {
-    for (const [reportTimestamp, touched] of touchedByDate.entries()) {
-      await recomputeSummariesForReportDate({
-        prisma: params.prisma,
-        report_date: new Date(reportTimestamp),
-        touchedUserIds: Array.from(touched.userIds),
-        touchedReleaseIds: Array.from(touched.releaseIds)
-      });
-    }
+    // Запись строк — быстрая часть; основное время уходит на итоги по датам.
+    reportProgress(30, `Пересчитываем итоги · 0 из ${touchedByDate.size} дат`);
+    await recomputeSummariesForReportDates({
+      prisma: params.prisma,
+      report_dates: Array.from(touchedByDate.keys()).map((value) => new Date(value)),
+      fallbackTouched: touchedByDate,
+      onDateDone: (done, total) => {
+        reportProgress(30 + Math.floor((done / total) * 69), `Пересчитываем итоги · ${done} из ${total} дат`);
+      }
+    });
   }
 
   devLog("import-summary", {

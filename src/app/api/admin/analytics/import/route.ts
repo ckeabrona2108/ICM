@@ -13,8 +13,6 @@ import {
 import { normalizeAnalyticsPeriodDays } from "@/lib/analytics-period";
 import { prisma } from "@/lib/prisma";
 
-const INLINE_PROCESS_MAX_BYTES = 2 * 1024 * 1024;
-
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) {
@@ -90,27 +88,8 @@ export async function POST(request: Request) {
         stored_file_path: storedFilePath
       });
 
-      if (sizeBytes <= INLINE_PROCESS_MAX_BYTES) {
-        const result = await processAnalyticsImportJob({
-          prisma,
-          jobId: job.id,
-          csvText
-        });
-
-        return NextResponse.json(
-          {
-            ok: true,
-            mode: "inline",
-            job_id: job.id,
-            period_days: periodDays,
-            report_date: job.report_date.toISOString().slice(0, 10),
-            result
-          },
-          { status: 200 }
-        );
-      }
-
-      // Queue-like behavior fallback until dedicated worker is connected.
+      // Любой файл обрабатываем в фоне: ответ приходит сразу, а админка показывает
+      // ход обработки по progress_percent задачи. Так большие отчёты не упираются в таймаут прокси.
       void processAnalyticsImportJob({ prisma, jobId: job.id }).catch((error) => {
         console.error("[analytics-import] async processing failed", error);
       });
@@ -122,6 +101,7 @@ export async function POST(request: Request) {
           job_id: job.id,
           period_days: periodDays,
           report_date: job.report_date.toISOString().slice(0, 10),
+          size_bytes: sizeBytes,
           message:
             "Import job created and scheduled. Poll import status in /api/admin/analytics/imports."
         },

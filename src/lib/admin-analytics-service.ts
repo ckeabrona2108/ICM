@@ -11,7 +11,7 @@ import {
   importAnalyticsCsvReport,
   isAnalyticsStorageUnavailableError,
   parseReportDateFromFilename,
-  recomputeSummariesForReportDate,
+  recomputeSummariesForReportDates,
   relinkUnmatchedAnalyticsRowToRelease
 } from "@/lib/analytics-import-service";
 import {
@@ -232,6 +232,42 @@ async function readJobCsv(job: {
   }
 }
 
+export const ANALYTICS_IMPORT_ALREADY_RUNNING_MESSAGE =
+  "Этот отчёт уже импортируется. Дождитесь окончания — статус обновится в истории импортов.";
+const ANALYTICS_IMPORT_STALE_PROCESSING_MS = 30 * 60 * 1000;
+const ANALYTICS_IMPORT_PROGRESS_WRITE_INTERVAL_MS = 1000;
+
+// Ход обработки пишем в задачу не чаще раза в секунду: админка опрашивает её и рисует полосу.
+// Ошибка записи прогресса (например, старая схема без колонок) не должна ронять сам импорт.
+function createImportJobProgressWriter(prisma: PrismaClient, jobId: string) {
+  let lastWriteAt = 0;
+  let lastStage = "";
+  let chain: Promise<void> = Promise.resolve();
+  let enabled = true;
+
+  const write = (percent: number, stage: string, force = false) => {
+    if (!enabled) return chain;
+    const now = Date.now();
+    // Новый этап пишем всегда, а повторы того же этапа — не чаще интервала.
+    if (!force && stage === lastStage && now - lastWriteAt < ANALYTICS_IMPORT_PROGRESS_WRITE_INTERVAL_MS) return chain;
+    lastWriteAt = now;
+    lastStage = stage;
+    chain = chain
+      .then(async () => {
+        await prisma.analytics_import_jobs.update({
+          where: { id: jobId },
+          data: { progress_percent: Math.max(0, Math.min(100, Math.round(percent))), progress_stage: stage }
+        });
+      })
+      .catch(() => {
+        enabled = false;
+      });
+    return chain;
+  };
+
+  return write;
+}
+
 export async function processAnalyticsImportJob(params: {
   prisma: PrismaClient;
   jobId: string;
@@ -246,8 +282,19 @@ export async function processAnalyticsImportJob(params: {
     throw new Error("Import job not found");
   }
 
-  await jobsRepo.update({
-    where: { id: job.id },
+  // Большой файл обрабатывается в фоне несколько минут. Если в это время нажать
+  // «Повторить», второй запуск столкнётся с уже записанными строками и пометит
+  // успешный импорт как упавший — поэтому занимаем задачу атомарно.
+  const staleBefore = new Date(Date.now() - ANALYTICS_IMPORT_STALE_PROCESSING_MS);
+  const claimed = await params.prisma.analytics_import_jobs.updateMany({
+    where: {
+      id: job.id,
+      OR: [
+        { status: { not: AnalyticsImportJobStatus.PROCESSING } },
+        { started_at: null },
+        { started_at: { lt: staleBefore } }
+      ]
+    },
     data: {
       status: AnalyticsImportJobStatus.PROCESSING,
       error_message: null,
@@ -256,6 +303,12 @@ export async function processAnalyticsImportJob(params: {
       updated_at: new Date()
     }
   });
+  if (claimed.count === 0) {
+    throw new Error(ANALYTICS_IMPORT_ALREADY_RUNNING_MESSAGE);
+  }
+
+  const writeProgress = createImportJobProgressWriter(params.prisma, job.id);
+  await writeProgress(0, "Запускаем обработку", true);
 
   try {
     const csvText = params.csvText ?? (await readJobCsv(job));
@@ -266,8 +319,13 @@ export async function processAnalyticsImportJob(params: {
       source_file_name: job.source_file_name,
       csvText,
       period_days: periodDays,
-      import_job_id: job.id
+      import_job_id: job.id,
+      onProgress: (percent, stage) => {
+        void writeProgress(percent, stage);
+      }
     });
+
+    await writeProgress(100, "Готово", true);
 
     const status = statusByResult(result.matched_rows, result.unmatched_rows);
 
@@ -343,11 +401,10 @@ export async function getAnalyticsImportJobDetails(params: {
     take: 1000
   });
 
+  // Строки файла лежат под своими датами, поэтому ищем их по имени файла, а не по дате отчёта.
   const snapshots = await params.prisma.analytics_report_snapshots.findMany({
-    where: {
-      source_file_name: job.source_file_name,
-      report_date: job.report_date
-    },
+    where: { source_file_name: job.source_file_name },
+    distinct: ["user_id", "release_id"],
     select: {
       user_id: true,
       release_id: true
@@ -454,24 +511,34 @@ export async function recalculateAnalyticsImportJobSummaries(params: {
   }
 
   const snapshots = await params.prisma.analytics_report_snapshots.findMany({
-    where: {
-      source_file_name: job.source_file_name,
-      report_date: job.report_date
-    },
+    where: { source_file_name: job.source_file_name },
     select: {
       user_id: true,
-      release_id: true
+      release_id: true,
+      report_date: true
     }
+  });
+
+  // Пересчитываем итоги за каждую дату из файла, а не только за дату из его названия.
+  const touchedByDate = new Map<string, { userIds: Set<string>; releaseIds: Set<string> }>();
+  for (const snapshot of snapshots) {
+    const key = snapshot.report_date.toISOString();
+    const touched = touchedByDate.get(key) ?? { userIds: new Set<string>(), releaseIds: new Set<string>() };
+    touched.userIds.add(snapshot.user_id);
+    touched.releaseIds.add(snapshot.release_id);
+    touchedByDate.set(key, touched);
+  }
+
+  await recomputeSummariesForReportDates({
+    prisma: params.prisma,
+    report_dates: Array.from(touchedByDate.keys()).map((value) => new Date(value)),
+    fallbackTouched: touchedByDate
   });
 
   const touchedUserIds = Array.from(new Set(snapshots.map((item) => item.user_id)));
   const touchedReleaseIds = Array.from(new Set(snapshots.map((item) => item.release_id)));
-
-  const recalculated = await recomputeSummariesForReportDate({
-    prisma: params.prisma,
-    report_date: job.report_date,
-    touchedUserIds,
-    touchedReleaseIds
+  const unmatchedCount = await params.prisma.unmatched_analytics_imports.count({
+    where: { OR: [{ import_job_id: job.id }, { source_file_name: job.source_file_name }] }
   });
 
   await jobsRepo.update({
@@ -479,11 +546,22 @@ export async function recalculateAnalyticsImportJobSummaries(params: {
     data: {
       affected_users_count: touchedUserIds.length,
       affected_releases_count: touchedReleaseIds.length,
+      // Данные файла в базе есть — значит импорт прошёл, даже если статус остался «failed».
+      ...(snapshots.length > 0 && job.status === AnalyticsImportJobStatus.FAILED
+        ? {
+            status: statusByResult(snapshots.length, unmatchedCount),
+            error_message: null
+          }
+        : {}),
       updated_at: new Date()
     }
   });
 
-  return recalculated;
+  return {
+    users: touchedUserIds.length,
+    releases: touchedReleaseIds.length,
+    reportDates: touchedByDate.size
+  };
 }
 
 // Строки отчёта сохраняются со своими датами (за неделю или месяц), а не с датой из имени файла.
@@ -540,11 +618,10 @@ async function removeAnalyticsDataForSourceFile(params: {
       }
       continue;
     }
-    await recomputeSummariesForReportDate({
+    await recomputeSummariesForReportDates({
       prisma: params.prisma,
-      report_date,
-      touchedUserIds: Array.from(touched.userIds),
-      touchedReleaseIds: Array.from(touched.releaseIds)
+      report_dates: [report_date],
+      fallbackTouched: new Map([[report_date.toISOString(), touched]])
     });
   }
 

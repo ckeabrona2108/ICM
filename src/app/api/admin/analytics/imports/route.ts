@@ -43,6 +43,10 @@ export async function GET(request: Request) {
       affectedUsersCount: Number(job.affected_users_count ?? 0),
       affectedReleasesCount: Number(job.affected_releases_count ?? 0),
       errorMessage: job.error_message ?? null,
+      progressPercent: Number((job as { progress_percent?: number }).progress_percent ?? 0),
+      progressStage: (job as { progress_stage?: string | null }).progress_stage ?? null,
+      startedAt:
+        job.started_at instanceof Date ? job.started_at.toISOString() : job.started_at ? String(job.started_at) : null,
       createdAt:
         job.created_at instanceof Date
           ? job.created_at.toISOString()

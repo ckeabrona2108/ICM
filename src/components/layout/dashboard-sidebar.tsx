@@ -19,7 +19,6 @@ import {
   LayoutDashboard,
   LayoutGrid,
   LogOut,
-  MessageSquare,
   Music2,
   Package,
   PanelLeftClose,
@@ -155,12 +154,6 @@ function buildNav(counts: {
       href: "/dashboard/promo",
       label: "Промо",
       icon: Rocket
-    },
-    {
-      type: "leaf",
-      href: "/dashboard/messages",
-      label: "Сообщения",
-      icon: MessageSquare
     },
     ...(COLLAB_MARKET_ENABLED
       ? ([

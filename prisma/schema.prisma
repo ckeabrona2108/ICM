@@ -149,6 +149,25 @@ model promo_urls {
   @@schema("icecream")
 }
 
+// Просмотры и переходы Smart Link. Пишутся только вставкой, итоги считаются запросами.
+model smart_link_events {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  release_id   String   @db.Uuid
+  release      release  @relation(fields: [release_id], references: [id], onDelete: Cascade)
+  type         String
+  platform     String?
+  source       String
+  device       String
+  country      String
+  city         String
+  visitor_hash String
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([release_id, created_at])
+  @@index([release_id, type, visitor_hash, created_at])
+  @@schema("icecream")
+}
+
 model promo_submissions {
   id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id               String                @db.Uuid
@@ -572,6 +591,7 @@ model release {
   financial_import_rows        financial_import_rows[]
   partner_code_usages          partner_code_usages[]
   promo_links                  promo_links[]
+  smart_link_events            smart_link_events[]
   promo_submissions            promo_submissions[]
   royalty                      royalty[]
   royalty_transactions         royalty_transactions[]

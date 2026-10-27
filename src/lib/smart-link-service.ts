@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -11,10 +13,15 @@ import {
   SMART_LINK_PLATFORM_CODES
 } from "@/lib/smart-link-platforms";
 import { normalizeSmartLinkHref, safeSmartLinkHref } from "@/lib/smart-link-urls";
+import { findSmartLinkPlatformLinksByUpc, normalizeSmartLinkUpc, SMART_LINK_AUTOFILL_CODES } from "@/lib/smart-link-autofill";
+import { isSmartLinkPrerelease } from "@/lib/smart-link-release-date";
 
 type RecordLike = Record<string, unknown>;
 
 export type SmartLinkTheme = "dark" | "light" | "auto";
+export type SmartLinkBackground = "cover" | "plain";
+export type SmartLinkAccent = "brand" | "mono" | "violet" | "green";
+export type SmartLinkButtonShape = "round" | "pill" | "square";
 export type SmartLinkPlatformStatus = "live" | "soon" | "hidden";
 
 export interface SmartLinkPlatformConfig {
@@ -99,6 +106,14 @@ export interface SmartLinkAnalyticsState {
   totalViews: number;
   totalClicks: number;
   platformClicks: Record<string, number>;
+  // *Views — откуда и с чего открывают страницу, *Clicks — то же только для переходов на площадки.
+  sourceViews: Record<string, number>;
+  countryViews: Record<string, number>;
+  cityViews: Record<string, number>;
+  deviceViews: {
+    mobile: number;
+    desktop: number;
+  };
   sourceClicks: Record<string, number>;
   countryClicks: Record<string, number>;
   cityClicks: Record<string, number>;
@@ -118,6 +133,9 @@ export interface SmartLinkAnalyticsState {
 
 export interface SmartLinkState {
   theme: SmartLinkTheme;
+  background: SmartLinkBackground;
+  accent: SmartLinkAccent;
+  buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
   platformLinks: Record<string, SmartLinkPlatformConfig>;
   platformOrder: string[];
@@ -129,6 +147,8 @@ export interface SmartLinkState {
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
   pixels: SmartLinkPixelEntry[];
+  presaveUrl: string;
+  autofillCheckedAt: string | null;
   analytics: SmartLinkAnalyticsState;
 }
 
@@ -140,6 +160,9 @@ export interface SmartLinkOwnerView {
   publicSlug: string;
   publicUrl: string;
   theme: SmartLinkTheme;
+  background: SmartLinkBackground;
+  accent: SmartLinkAccent;
+  buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
   coverUrl: string | null;
   releaseDate: string;
@@ -153,6 +176,10 @@ export interface SmartLinkOwnerView {
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
   pixels: SmartLinkPixelEntry[];
+  /** Pre-save link (e.g. from the distributor) shown with a countdown until the release date. */
+  presaveUrl: string;
+  /** Last background search of platform links by UPC. */
+  autofillCheckedAt: string | null;
   analytics: SmartLinkAnalyticsState;
 }
 
@@ -182,6 +209,9 @@ export interface SmartLinkPublicView extends SmartLinkOwnerView {
 export interface SmartLinkOwnerUpdateInput {
   slug?: string;
   theme?: SmartLinkTheme;
+  background?: SmartLinkBackground;
+  accent?: SmartLinkAccent;
+  buttonShape?: SmartLinkButtonShape;
   allowWaveDownload?: boolean;
   platforms?: Array<{
     code: string;
@@ -197,7 +227,11 @@ export interface SmartLinkOwnerUpdateInput {
   creditSections?: SmartLinkCreditSection[];
   contacts?: SmartLinkContactEntry[];
   pixels?: SmartLinkPixelEntry[];
+  presaveUrl?: string | null;
 }
+
+/** Pseudo platform code used for the pre-save button's redirect and click statistics. */
+export const SMART_LINK_PRESAVE_CODE = "presave";
 
 const SMART_LINK_FOLLOW_KEYS = [
   "instagram",
@@ -290,6 +324,13 @@ function getDefaultAnalytics(): SmartLinkAnalyticsState {
     totalViews: 0,
     totalClicks: 0,
     platformClicks: {},
+    sourceViews: {},
+    countryViews: {},
+    cityViews: {},
+    deviceViews: {
+      mobile: 0,
+      desktop: 0
+    },
     sourceClicks: {},
     countryClicks: {},
     cityClicks: {},
@@ -367,6 +408,18 @@ function getDefaultPixels(): SmartLinkPixelEntry[] {
 
 function normalizeTheme(value: unknown): SmartLinkTheme {
   return value === "light" || value === "auto" ? value : "dark";
+}
+
+function normalizeBackground(value: unknown): SmartLinkBackground {
+  return value === "plain" ? "plain" : "cover";
+}
+
+function normalizeAccent(value: unknown): SmartLinkAccent {
+  return value === "mono" || value === "violet" || value === "green" ? value : "brand";
+}
+
+function normalizeButtonShape(value: unknown): SmartLinkButtonShape {
+  return value === "pill" || value === "square" ? value : "round";
 }
 
 function normalizePlatformStatus(value: unknown): SmartLinkPlatformStatus {
@@ -476,16 +529,29 @@ function normalizeAnalytics(value: unknown): SmartLinkAnalyticsState {
         }))
     : [];
 
+  // Старые счётчики из release.roles копили источники, страны, города и устройства сразу
+  // за просмотры и переходы. Разделить их уже нельзя, поэтому считаем их визитами (*Views).
+  // Новые события пишутся в smart_link_events, а здесь остаётся только этот исторический итог.
+  const isSplitShape = asRecord(source.sourceViews) !== null;
+  const visitDeviceSource = isSplitShape ? asRecord(source.deviceViews) : deviceSource;
+  const readCounts = (value: unknown) => (asRecord(value) as Record<string, number> | null) ?? {};
   return {
     totalViews: typeof source.totalViews === "number" ? source.totalViews : 0,
     totalClicks: typeof source.totalClicks === "number" ? source.totalClicks : 0,
-    platformClicks: asRecord(source.platformClicks) as Record<string, number> ?? {},
-    sourceClicks: asRecord(source.sourceClicks) as Record<string, number> ?? {},
-    countryClicks: asRecord(source.countryClicks) as Record<string, number> ?? {},
-    cityClicks: asRecord(source.cityClicks) as Record<string, number> ?? {},
+    platformClicks: readCounts(source.platformClicks),
+    sourceViews: readCounts(isSplitShape ? source.sourceViews : source.sourceClicks),
+    countryViews: readCounts(isSplitShape ? source.countryViews : source.countryClicks),
+    cityViews: readCounts(isSplitShape ? source.cityViews : source.cityClicks),
+    deviceViews: {
+      mobile: typeof visitDeviceSource?.mobile === "number" ? visitDeviceSource.mobile : 0,
+      desktop: typeof visitDeviceSource?.desktop === "number" ? visitDeviceSource.desktop : 0
+    },
+    sourceClicks: isSplitShape ? readCounts(source.sourceClicks) : {},
+    countryClicks: isSplitShape ? readCounts(source.countryClicks) : {},
+    cityClicks: isSplitShape ? readCounts(source.cityClicks) : {},
     deviceClicks: {
-      mobile: typeof deviceSource?.mobile === "number" ? deviceSource.mobile : 0,
-      desktop: typeof deviceSource?.desktop === "number" ? deviceSource.desktop : 0
+      mobile: isSplitShape && typeof deviceSource?.mobile === "number" ? deviceSource.mobile : 0,
+      desktop: isSplitShape && typeof deviceSource?.desktop === "number" ? deviceSource.desktop : 0
     },
     daily: asRecord(source.daily) as SmartLinkAnalyticsState["daily"] ?? {},
     recentEvents: recentEvents.slice(0, 25)
@@ -599,6 +665,9 @@ function readSmartLinkState(
   const platformLinks = normalizePlatformLinks(raw?.platformLinks, selectedCodes);
   return {
     theme: normalizeTheme(raw?.theme),
+    background: normalizeBackground(raw?.background),
+    accent: normalizeAccent(raw?.accent),
+    buttonShape: normalizeButtonShape(raw?.buttonShape),
     allowWaveDownload: asBoolean(raw?.allowWaveDownload) ?? false,
     platformLinks,
     platformOrder: normalizePlatformOrder(raw?.platformOrder, platformLinks, selectedCodes),
@@ -612,6 +681,8 @@ function readSmartLinkState(
     creditSections: normalizeCreditSections(raw?.creditSections),
     contacts: normalizeInfoEntries(raw?.contacts, getDefaultContacts()),
     pixels: normalizeInfoEntries(raw?.pixels, getDefaultPixels()),
+    presaveUrl: normalizeSmartLinkHref(raw?.presaveUrl),
+    autofillCheckedAt: asString(raw?.autofillCheckedAt),
     analytics: normalizeAnalytics(raw?.analytics)
   };
 }
@@ -902,10 +973,6 @@ async function resolveVkNewsFeedPosts(params: {
   }
 }
 
-function todayKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
-}
-
 function classifyDevice(userAgent: string | null): "mobile" | "desktop" {
   if (!userAgent) return "desktop";
   return /iphone|android|mobile|ipad|ipod/iu.test(userAgent) ? "mobile" : "desktop";
@@ -933,6 +1000,200 @@ function deriveSource(params: {
   }
 }
 
+/* ---------- Visitor events (smart_link_events) ---------- */
+
+const SMART_LINK_BOT_USER_AGENT =
+  /bot|crawl|spider|slurp|preview|facebookexternalhit|embedly|vkshare|whatsapp|skypeuripreview|bitlybot|headless|lighthouse|curl|wget|python-requests|httpclient|okhttp|go-http-client|axios|node-fetch/iu;
+const SMART_LINK_VIEW_DEDUPE_MS = 30 * 60 * 1000;
+const SMART_LINK_CLICK_DEDUPE_MS = 10 * 60 * 1000;
+const SMART_LINK_DAILY_WINDOW_DAYS = 90;
+const SMART_LINK_GEO_TOP_LIMIT = 50;
+const SMART_LINK_RECENT_EVENTS_LIMIT = 25;
+
+export function isSmartLinkBotUserAgent(userAgent: string | null | undefined): boolean {
+  const value = userAgent?.trim();
+  if (!value) return true;
+  return SMART_LINK_BOT_USER_AGENT.test(value);
+}
+
+function buildVisitorHash(ip: string | null | undefined, userAgent: string | null | undefined): string {
+  return createHash("sha256")
+    .update(`${ip?.trim() || "unknown"}|${userAgent?.trim() || ""}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function clampLabel(value: string | null | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, 80) : fallback;
+}
+
+type SmartLinkEventInput = {
+  releaseId: string;
+  type: SmartLinkVisitorEvent["type"];
+  platformCode?: string;
+  utmSource?: string | null;
+  referrer?: string | null;
+  country?: string | null;
+  city?: string | null;
+  userAgent?: string | null;
+  ip?: string | null;
+};
+
+// Вставка без чтения-изменения JSON: просмотры и клики не конфликтуют друг с другом и с настройками.
+async function recordSmartLinkEvent(input: SmartLinkEventInput): Promise<void> {
+  if (isSmartLinkBotUserAgent(input.userAgent)) return;
+
+  const visitorHash = buildVisitorHash(input.ip, input.userAgent);
+  const dedupeMs = input.type === "view" ? SMART_LINK_VIEW_DEDUPE_MS : SMART_LINK_CLICK_DEDUPE_MS;
+  const platform = input.type === "click" ? input.platformCode ?? null : null;
+  const duplicate = await prisma.smart_link_events.findFirst({
+    where: {
+      release_id: input.releaseId,
+      type: input.type,
+      visitor_hash: visitorHash,
+      platform,
+      created_at: { gte: new Date(Date.now() - dedupeMs) }
+    },
+    select: { id: true }
+  });
+  if (duplicate) return;
+
+  await prisma.smart_link_events.create({
+    data: {
+      release_id: input.releaseId,
+      type: input.type,
+      platform,
+      source: clampLabel(deriveSource({ utmSource: input.utmSource, referrer: input.referrer }), "Direct"),
+      device: classifyDevice(input.userAgent ?? null),
+      country: clampLabel(input.country, "Unknown"),
+      city: clampLabel(input.city, "Unknown"),
+      visitor_hash: visitorHash
+    }
+  });
+}
+
+function addCounts(target: Record<string, number>, key: string | null, value: number) {
+  const normalized = key ?? "Unknown";
+  target[normalized] = (target[normalized] ?? 0) + value;
+}
+
+function keepTopCounts(source: Record<string, number>, limit: number): Record<string, number> {
+  const entries = Object.entries(source);
+  if (entries.length <= limit) return source;
+  return Object.fromEntries(entries.sort((left, right) => right[1] - left[1]).slice(0, limit));
+}
+
+function cloneAnalytics(state: SmartLinkAnalyticsState): SmartLinkAnalyticsState {
+  return structuredClone(state);
+}
+
+// Суммирует исторический итог из release.roles с событиями из smart_link_events — одним набором запросов на все релизы.
+async function loadSmartLinkAnalytics(
+  baselines: Map<string, SmartLinkAnalyticsState>,
+  options: { includeRecentEvents?: boolean } = {}
+): Promise<Map<string, SmartLinkAnalyticsState>> {
+  const releaseIds = Array.from(baselines.keys());
+  const result = new Map<string, SmartLinkAnalyticsState>();
+  for (const [releaseId, baseline] of baselines) result.set(releaseId, cloneAnalytics(baseline));
+  if (releaseIds.length === 0) return result;
+
+  const where = { release_id: { in: releaseIds } };
+  const dailySince = new Date(Date.now() - SMART_LINK_DAILY_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [totals, platforms, sources, countries, cities, devices, daily, recent] = await Promise.all([
+    prisma.smart_link_events.groupBy({ by: ["release_id", "type"], where, _count: { _all: true } }),
+    prisma.smart_link_events.groupBy({
+      by: ["release_id", "platform"],
+      where: { ...where, type: "click" },
+      _count: { _all: true }
+    }),
+    prisma.smart_link_events.groupBy({ by: ["release_id", "type", "source"], where, _count: { _all: true } }),
+    prisma.smart_link_events.groupBy({ by: ["release_id", "type", "country"], where, _count: { _all: true } }),
+    prisma.smart_link_events.groupBy({ by: ["release_id", "type", "city"], where, _count: { _all: true } }),
+    prisma.smart_link_events.groupBy({ by: ["release_id", "type", "device"], where, _count: { _all: true } }),
+    prisma.$queryRaw<Array<{ release_id: string; day: string; type: string; count: number }>>(Prisma.sql`
+      SELECT "release_id"::text AS "release_id",
+             to_char("created_at" AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS "day",
+             "type",
+             COUNT(*)::int AS "count"
+      FROM "smart_link_events"
+      WHERE "release_id" IN (${Prisma.join(releaseIds.map((id) => Prisma.sql`${id}::uuid`))})
+        AND "created_at" >= ${dailySince}
+      GROUP BY 1, 2, 3
+    `),
+    options.includeRecentEvents
+      ? prisma.smart_link_events.findMany({
+          where,
+          orderBy: { created_at: "desc" },
+          take: SMART_LINK_RECENT_EVENTS_LIMIT * Math.min(releaseIds.length, 4)
+        })
+      : Promise.resolve([])
+  ]);
+
+  for (const row of totals) {
+    const state = result.get(row.release_id);
+    if (!state) continue;
+    if (row.type === "click") state.totalClicks += row._count._all;
+    else state.totalViews += row._count._all;
+  }
+  for (const row of platforms) {
+    const state = result.get(row.release_id);
+    if (state) addCounts(state.platformClicks, row.platform, row._count._all);
+  }
+  for (const row of sources) {
+    const state = result.get(row.release_id);
+    if (state) addCounts(row.type === "click" ? state.sourceClicks : state.sourceViews, row.source, row._count._all);
+  }
+  for (const row of countries) {
+    const state = result.get(row.release_id);
+    if (state) addCounts(row.type === "click" ? state.countryClicks : state.countryViews, row.country, row._count._all);
+  }
+  for (const row of cities) {
+    const state = result.get(row.release_id);
+    if (state) addCounts(row.type === "click" ? state.cityClicks : state.cityViews, row.city, row._count._all);
+  }
+  for (const row of devices) {
+    const state = result.get(row.release_id);
+    if (!state) continue;
+    const bucket = row.type === "click" ? state.deviceClicks : state.deviceViews;
+    bucket[row.device === "mobile" ? "mobile" : "desktop"] += row._count._all;
+  }
+  for (const row of daily) {
+    const state = result.get(row.release_id);
+    if (!state) continue;
+    const day = state.daily[row.day] ?? { views: 0, clicks: 0 };
+    if (row.type === "click") day.clicks += row.count;
+    else day.views += row.count;
+    state.daily[row.day] = day;
+  }
+
+  const recentByRelease = new Map<string, SmartLinkVisitorEvent[]>();
+  for (const row of recent) {
+    const list = recentByRelease.get(row.release_id) ?? [];
+    list.push({
+      at: row.created_at.toISOString(),
+      type: row.type === "click" ? "click" : "view",
+      platform: row.platform ?? undefined,
+      source: row.source,
+      device: row.device === "mobile" ? "mobile" : "desktop",
+      country: row.country,
+      city: row.city
+    });
+    recentByRelease.set(row.release_id, list);
+  }
+
+  for (const [releaseId, state] of result) {
+    const fresh = recentByRelease.get(releaseId);
+    if (fresh) state.recentEvents = [...fresh, ...state.recentEvents].slice(0, SMART_LINK_RECENT_EVENTS_LIMIT);
+    state.countryViews = keepTopCounts(state.countryViews, SMART_LINK_GEO_TOP_LIMIT);
+    state.cityViews = keepTopCounts(state.cityViews, SMART_LINK_GEO_TOP_LIMIT);
+    state.countryClicks = keepTopCounts(state.countryClicks, SMART_LINK_GEO_TOP_LIMIT);
+    state.cityClicks = keepTopCounts(state.cityClicks, SMART_LINK_GEO_TOP_LIMIT);
+  }
+
+  return result;
+}
+
 async function buildOwnerViewFromRelease(params: {
   promoLink: { id: string; shortName: string; releaseId: string };
   release: {
@@ -956,6 +1217,8 @@ async function buildOwnerViewFromRelease(params: {
     labelName: string | null;
     track: Array<{ explicit: boolean | null }>;
   };
+  // Готовая статистика (для списка она грузится одним набором запросов на все релизы).
+  analytics?: SmartLinkAnalyticsState;
 }): Promise<SmartLinkOwnerView> {
   const artist = deriveArtistName({
     performer: params.release.performer,
@@ -968,13 +1231,20 @@ async function buildOwnerViewFromRelease(params: {
     getDefaultFollowLinks(params.release.user),
     selectedPlatformCodes
   );
-  const cover = await getReleaseCoverAsset({
-    id: params.release.id,
-    preview: params.release.preview,
-    roles: params.release.roles,
-    userId: params.release.userId,
-    title: params.release.title
-  });
+  const [cover, analytics] = await Promise.all([
+    getReleaseCoverAsset({
+      id: params.release.id,
+      preview: params.release.preview,
+      roles: params.release.roles,
+      userId: params.release.userId,
+      title: params.release.title
+    }),
+    params.analytics
+      ? Promise.resolve(params.analytics)
+      : loadSmartLinkAnalytics(new Map([[params.release.id, state.analytics]]), { includeRecentEvents: true }).then(
+          (loaded) => loaded.get(params.release.id) ?? state.analytics
+        )
+  ]);
 
   return {
     releaseId: params.release.id,
@@ -984,6 +1254,9 @@ async function buildOwnerViewFromRelease(params: {
     publicSlug: params.promoLink.shortName,
     publicUrl: `${getBaseUrl()}/l/${params.promoLink.shortName}`,
     theme: state.theme,
+    background: state.background,
+    accent: state.accent,
+    buttonShape: state.buttonShape,
     allowWaveDownload: state.allowWaveDownload,
     coverUrl: cover.url,
     releaseDate: toIsoDate(params.release.date),
@@ -997,7 +1270,9 @@ async function buildOwnerViewFromRelease(params: {
     creditSections: state.creditSections,
     contacts: state.contacts,
     pixels: state.pixels,
-    analytics: state.analytics
+    presaveUrl: state.presaveUrl,
+    autofillCheckedAt: state.autofillCheckedAt,
+    analytics
   };
 }
 
@@ -1092,8 +1367,30 @@ async function getPromoLinkBySlugWithFallback(slug: string) {
   return resolved;
 }
 
+// Старые адреса строились из «артист-название» или «название-артист» (иногда без дефисов),
+// поэтому релиз-кандидат содержит начало первого или последнего фрагмента в названии либо артисте.
+function buildLegacySlugReleaseFilter(slug: string): Prisma.releaseWhereInput | null {
+  const parts = slug.split("-").filter(Boolean);
+  const first = parts[0] ?? "";
+  const last = parts.at(-1) ?? "";
+  const fragments = unique(
+    [first.slice(0, 3), parts.length > 1 ? last.slice(0, 3) : last.slice(-3)].filter((value) => value.length >= 2)
+  );
+  if (fragments.length === 0) return null;
+  return {
+    OR: fragments.flatMap((fragment) => [
+      { title: { contains: fragment, mode: "insensitive" as const } },
+      { performer: { contains: fragment, mode: "insensitive" as const } },
+      { user: { name: { contains: fragment, mode: "insensitive" as const } } }
+    ])
+  };
+}
+
 async function resolvePromoLinkByLegacySlug(slug: string) {
+  const filter = buildLegacySlugReleaseFilter(slug);
+  if (!filter) return null;
   const releases = await prisma.release.findMany({
+    where: filter,
     select: {
       id: true,
       title: true,
@@ -1249,13 +1546,19 @@ export async function getReleasePublicListenSummary(releaseId: string): Promise<
 }
 
 async function buildUniquePromoSlug(baseSlug: string): Promise<string> {
-  let candidate = baseSlug;
+  // Одним запросом берём все занятые варианты base, base-2, base-3… и выбираем первый свободный.
+  const taken = new Set(
+    (
+      await prisma.promo_links.findMany({
+        where: { shortName: { startsWith: baseSlug } },
+        select: { shortName: true }
+      })
+    ).map((item) => item.shortName)
+  );
+  if (!taken.has(baseSlug)) return baseSlug;
   let counter = 2;
-  while (await prisma.promo_links.findFirst({ where: { shortName: candidate }, select: { id: true } })) {
-    candidate = `${baseSlug}-${counter}`;
-    counter += 1;
-  }
-  return candidate;
+  while (taken.has(`${baseSlug}-${counter}`)) counter += 1;
+  return `${baseSlug}-${counter}`;
 }
 
 function isPrismaUniqueConstraintError(error: unknown): boolean {
@@ -1362,38 +1665,58 @@ export async function getSmartLinksByUser(userId: string): Promise<SmartLinkOwne
     }
   });
 
-  const items: SmartLinkOwnerView[] = [];
+  const approved = releases.filter((release) =>
+    shouldTreatReleaseAsApproved({
+      status: release.status,
+      confirmed: release.confirmed,
+      upc: release.upc,
+      roles: release.roles
+    })
+  );
+  if (approved.length === 0) return [];
 
-  for (const release of releases) {
-    if (
-      !shouldTreatReleaseAsApproved({
-        status: release.status,
-        confirmed: release.confirmed,
-        upc: release.upc,
-        roles: release.roles
-      })
-    ) {
-      continue;
-    }
-
-    let promoLink = await getPromoLinkByReleaseId(release.id);
-    if (!promoLink) {
-      const artist = deriveArtistName({
-        performer: release.performer,
-        userName: release.user.name,
-        roles: release.roles
-      });
-      const slug = await buildUniquePromoSlug(slugify(`${artist}-${release.title}`));
-      promoLink = await createPromoLink(release.id, slug);
-    }
-
-    items.push(
-      await buildOwnerViewFromRelease({
-        promoLink,
-        release
-      })
-    );
+  const existingLinks = await prisma.promo_links.findMany({
+    where: { releaseId: { in: approved.map((release) => release.id) } }
+  });
+  const linkByRelease = new Map<string, (typeof existingLinks)[number]>();
+  for (const link of existingLinks) {
+    if (!linkByRelease.has(link.releaseId)) linkByRelease.set(link.releaseId, link);
   }
+
+  // Ссылка создаётся один раз — для релизов, одобренных после прошлого открытия списка.
+  for (const release of approved) {
+    if (linkByRelease.has(release.id)) continue;
+    const artist = deriveArtistName({
+      performer: release.performer,
+      userName: release.user.name,
+      roles: release.roles
+    });
+    const slug = await buildUniquePromoSlug(slugify(`${artist}-${release.title}`));
+    linkByRelease.set(release.id, await createPromoLink(release.id, slug));
+  }
+
+  const analyticsByRelease = await loadSmartLinkAnalytics(
+    new Map(
+      approved.map((release) => [
+        release.id,
+        readSmartLinkState(
+          release.roles,
+          getDefaultFollowLinks(release.user),
+          normalizeSelectedPlatforms(release.roles)
+        ).analytics
+      ])
+    )
+  );
+
+  const items: SmartLinkOwnerView[] = await Promise.all(
+    approved.map((release) =>
+      buildOwnerViewFromRelease({
+        promoLink: linkByRelease.get(release.id)!,
+        release,
+        analytics: analyticsByRelease.get(release.id)
+      })
+    )
+  );
 
   return items;
 }
@@ -1501,6 +1824,9 @@ function applySmartLinkOwnerInput(
   const nextState: SmartLinkState = {
     ...currentState,
     theme: input.theme ? normalizeTheme(input.theme) : currentState.theme,
+    background: input.background ? normalizeBackground(input.background) : currentState.background,
+    accent: input.accent ? normalizeAccent(input.accent) : currentState.accent,
+    buttonShape: input.buttonShape ? normalizeButtonShape(input.buttonShape) : currentState.buttonShape,
     allowWaveDownload: input.allowWaveDownload ?? currentState.allowWaveDownload,
     sectionVisibility: input.sectionVisibility
       ? normalizeSectionVisibility({ ...currentState.sectionVisibility, ...input.sectionVisibility })
@@ -1521,6 +1847,7 @@ function applySmartLinkOwnerInput(
       : currentState.creditSections,
     contacts: input.contacts ? normalizeInfoEntries(input.contacts, getDefaultContacts()) : currentState.contacts,
     pixels: input.pixels ? normalizeInfoEntries(input.pixels, getDefaultPixels()) : currentState.pixels,
+    presaveUrl: input.presaveUrl === undefined ? currentState.presaveUrl : normalizeSmartLinkHref(input.presaveUrl),
     newsFeedLinks: {
       ...currentState.newsFeedLinks,
       ...input.newsFeedLinks
@@ -1585,9 +1912,11 @@ export async function getSmartLinkPublicView(slug: string): Promise<SmartLinkPub
     return null;
   }
 
+  // Посетителю статистика не нужна: не считаем её и не отдаём в публичную страницу.
   const ownerView = await buildOwnerViewFromRelease({
     promoLink: row,
-    release
+    release,
+    analytics: getDefaultAnalytics()
   });
   const state = readSmartLinkState(
     release.roles,
@@ -1618,62 +1947,6 @@ export async function getSmartLinkPublicView(slug: string): Promise<SmartLinkPub
   };
 }
 
-async function appendSmartLinkAnalyticsEvent(params: {
-  releaseId: string;
-  event: SmartLinkVisitorEvent;
-  platformCode?: string;
-}) {
-  await retryPrismaSerializationConflict(() =>
-    prisma.$transaction(async (tx) => {
-      const release = await tx.release.findUnique({
-        where: { id: params.releaseId },
-        select: {
-          roles: true,
-          status: true,
-          confirmed: true,
-          upc: true,
-          user: { select: { telegram: true, vk: true, personalSiteUrl: true } }
-        }
-      });
-      if (!release || !shouldTreatReleaseAsApproved(release)) return;
-
-      const state = readSmartLinkState(
-        release.roles,
-        getDefaultFollowLinks(release.user),
-        normalizeSelectedPlatforms(release.roles)
-      );
-      const nextAnalytics = structuredClone(state.analytics) as SmartLinkAnalyticsState;
-      const key = todayKey(new Date(params.event.at));
-      const day = nextAnalytics.daily[key] ?? { views: 0, clicks: 0 };
-      if (params.event.type === "view") {
-        nextAnalytics.totalViews += 1;
-        day.views += 1;
-      } else {
-        nextAnalytics.totalClicks += 1;
-        day.clicks += 1;
-        if (params.platformCode) {
-          nextAnalytics.platformClicks[params.platformCode] =
-            (nextAnalytics.platformClicks[params.platformCode] ?? 0) + 1;
-        }
-      }
-      nextAnalytics.daily[key] = day;
-      nextAnalytics.sourceClicks[params.event.source] =
-        (nextAnalytics.sourceClicks[params.event.source] ?? 0) + 1;
-      nextAnalytics.countryClicks[params.event.country] =
-        (nextAnalytics.countryClicks[params.event.country] ?? 0) + 1;
-      nextAnalytics.cityClicks[params.event.city] =
-        (nextAnalytics.cityClicks[params.event.city] ?? 0) + 1;
-      nextAnalytics.deviceClicks[params.event.device] += 1;
-      nextAnalytics.recentEvents = [params.event, ...nextAnalytics.recentEvents].slice(0, 25);
-
-      await tx.release.update({
-        where: { id: params.releaseId },
-        data: { roles: writeSmartLinkState(release.roles, { ...state, analytics: nextAnalytics }) }
-      });
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
-  );
-}
-
 export async function trackSmartLinkView(params: {
   slug: string;
   utmSource?: string | null;
@@ -1681,23 +1954,24 @@ export async function trackSmartLinkView(params: {
   country?: string | null;
   city?: string | null;
   userAgent?: string | null;
+  ip?: string | null;
 }) {
+  if (isSmartLinkBotUserAgent(params.userAgent)) return;
   // The tracker always posts the canonical slug, so the legacy full-scan fallback is not needed here.
-  const row = await getPromoLinkBySlug(params.slug);
+  const row = await prisma.promo_links.findFirst({
+    where: { shortName: params.slug },
+    select: { releaseId: true }
+  });
   if (!row) return;
-  await appendSmartLinkAnalyticsEvent({
+  await recordSmartLinkEvent({
     releaseId: row.releaseId,
-    event: {
-      at: new Date().toISOString(),
-      type: "view",
-      source: deriveSource({
-        utmSource: params.utmSource,
-        referrer: params.referrer
-      }),
-      device: classifyDevice(params.userAgent ?? null),
-      country: params.country?.trim() || "Unknown",
-      city: params.city?.trim() || "Unknown"
-    }
+    type: "view",
+    utmSource: params.utmSource,
+    referrer: params.referrer,
+    country: params.country,
+    city: params.city,
+    userAgent: params.userAgent,
+    ip: params.ip
   });
 }
 
@@ -1709,6 +1983,8 @@ export async function resolveSmartLinkRedirect(params: {
   country?: string | null;
   city?: string | null;
   userAgent?: string | null;
+  ip?: string | null;
+  trackClick?: boolean;
 }): Promise<string | null> {
   // Unknown slugs fall back to the public page route, which still resolves legacy slugs.
   const row = await getPromoLinkBySlug(params.slug);
@@ -1722,27 +1998,122 @@ export async function resolveSmartLinkRedirect(params: {
     selectedPlatformCodes
   );
   const target = state.platformLinks[params.platformCode];
-  const destination = target?.status === "live" ? safeSmartLinkHref(target.url) : null;
+  const destination =
+    params.platformCode === SMART_LINK_PRESAVE_CODE
+      ? safeSmartLinkHref(state.presaveUrl)
+      : target?.status === "live"
+        ? safeSmartLinkHref(target.url)
+        : null;
   if (!destination) {
     return null;
   }
 
-  await appendSmartLinkAnalyticsEvent({
-    releaseId: row.releaseId,
-    platformCode: params.platformCode,
-    event: {
-      at: new Date().toISOString(),
+  // Посетитель не должен ждать записи статистики или получать ошибку из-за неё.
+  if (params.trackClick !== false) {
+    void recordSmartLinkEvent({
+      releaseId: row.releaseId,
       type: "click",
-      platform: params.platformCode,
-      source: deriveSource({
-        utmSource: params.utmSource,
-        referrer: params.referrer
-      }),
-      device: classifyDevice(params.userAgent ?? null),
-      country: params.country?.trim() || "Unknown",
-      city: params.city?.trim() || "Unknown"
-    }
-  });
+      platformCode: params.platformCode,
+      utmSource: params.utmSource,
+      referrer: params.referrer,
+      country: params.country,
+      city: params.city,
+      userAgent: params.userAgent,
+      ip: params.ip
+    }).catch((error) => {
+      console.error("[smart-link:click] tracking failed", error);
+    });
+  }
 
   return destination;
+}
+
+/* ---------- Search of platform links by UPC ---------- */
+
+const AUTOFILL_RETRY_MS = 6 * 60 * 60 * 1000;
+
+function getMissingAutofillCodes(state: SmartLinkState): string[] {
+  return SMART_LINK_AUTOFILL_CODES.filter((code) => {
+    const item = state.platformLinks[code];
+    return !item?.url && item?.status !== "hidden";
+  });
+}
+
+/** Owner-triggered search: returns found links without saving, the editor merges them into the draft. */
+export async function findSmartLinkLinksForOwner(params: {
+  userId: string;
+  releaseId: string;
+}): Promise<{ upc: string | null; found: Record<string, string> } | null> {
+  if (!isUuidLike(params.releaseId)) return null;
+  const release = await prisma.release.findFirst({
+    where: { id: params.releaseId, userId: params.userId },
+    select: { upc: true }
+  });
+  if (!release) return null;
+  const upc = normalizeSmartLinkUpc(release.upc);
+  return { upc, found: upc ? await findSmartLinkPlatformLinksByUpc(upc) : {} };
+}
+
+/**
+ * After the release date, fills platforms that still have no link from the UPC search.
+ * Called fire-and-forget on page views; retries at most every 6 hours per release and never
+ * overwrites a link the artist set or a platform they hid.
+ */
+const autofillInFlight = new Set<string>();
+
+export async function runSmartLinkAutofillInBackground(slug: string, now: Date = new Date()): Promise<void> {
+  // Several visitors can open the page at once; one search per link is enough.
+  if (autofillInFlight.has(slug)) return;
+  autofillInFlight.add(slug);
+  try {
+    await autofillSmartLink(slug, now);
+  } finally {
+    autofillInFlight.delete(slug);
+  }
+}
+
+async function autofillSmartLink(slug: string, now: Date): Promise<void> {
+  const promo = await prisma.promo_links.findFirst({
+    where: { shortName: slug },
+    select: {
+      releaseId: true,
+      release: { select: { date: true, upc: true, roles: true, user: { select: { telegram: true, vk: true, personalSiteUrl: true } } } }
+    }
+  });
+  if (!promo) return;
+  const upc = normalizeSmartLinkUpc(promo.release.upc);
+  if (!upc || isSmartLinkPrerelease(toIsoDate(promo.release.date), now)) return;
+
+  const state = readSmartLinkState(
+    promo.release.roles,
+    getDefaultFollowLinks(promo.release.user),
+    normalizeSelectedPlatforms(promo.release.roles)
+  );
+  const lastCheck = state.autofillCheckedAt ? Date.parse(state.autofillCheckedAt) : 0;
+  if (now.getTime() - lastCheck < AUTOFILL_RETRY_MS) return;
+  if (getMissingAutofillCodes(state).length === 0) return;
+
+  const found = await findSmartLinkPlatformLinksByUpc(upc);
+
+  await retryPrismaSerializationConflict(() =>
+    prisma.$transaction(async (tx) => {
+      const release = await tx.release.findUnique({
+        where: { id: promo.releaseId },
+        select: { roles: true, user: { select: { telegram: true, vk: true, personalSiteUrl: true } } }
+      });
+      if (!release) return;
+      const selected = normalizeSelectedPlatforms(release.roles);
+      const current = readSmartLinkState(release.roles, getDefaultFollowLinks(release.user), selected);
+      const missing = new Set(getMissingAutofillCodes(current));
+      const platforms = Object.entries(found)
+        .filter(([code]) => missing.has(code))
+        .map(([code, url]) => ({ code, url, status: "live" as const }));
+      const next = applySmartLinkOwnerInput(current, { platforms }, selected);
+      next.autofillCheckedAt = now.toISOString();
+      await tx.release.update({
+        where: { id: promo.releaseId },
+        data: { roles: writeSmartLinkState(release.roles, next) }
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  );
 }

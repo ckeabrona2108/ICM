@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
 import { resolveSmartLinkRedirect } from "@/lib/smart-link-service";
 import { readSmartLinkGeo } from "@/lib/smart-link-urls";
 
@@ -16,6 +17,9 @@ export async function GET(
 
   const url = new URL(request.url);
   const geo = readSmartLinkGeo(request.headers);
+  const ip = getRequestIp(request);
+  // Переход работает всегда, а слишком частые клики с одного адреса просто не считаются.
+  const trackClick = consumeRateLimit({ key: `smart-link-click:${ip}`, limit: 60, windowMs: 60_000 }).allowed;
   const destination = await resolveSmartLinkRedirect({
     slug,
     platformCode: platform,
@@ -23,7 +27,9 @@ export async function GET(
     referrer: request.headers.get("referer"),
     country: geo.country,
     city: geo.city,
-    userAgent: request.headers.get("user-agent")
+    userAgent: request.headers.get("user-agent"),
+    ip,
+    trackClick
   });
 
   if (!destination) {

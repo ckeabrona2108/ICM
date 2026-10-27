@@ -1,28 +1,104 @@
-import Link from "next/link";
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { ExternalLink, Settings2 } from "lucide-react";
 
 import { authOptions } from "@/lib/auth";
-import { getSmartLinksByUser } from "@/lib/smart-link-service";
-import { DashboardEmptyState, DashboardShell, PageSection } from "@/components/layout/dashboard-shell";
-import { PageHeader } from "@/components/layout/page-header";
-import { SmartLinkCopyButton } from "@/components/smart-link/smart-link-copy-button";
+import { getSmartLinkPlatformLabel } from "@/lib/smart-link-platforms";
+import { getSmartLinksByUser, type SmartLinkOwnerView } from "@/lib/smart-link-service";
+import { getSmartLinkCountDelta, getSmartLinkRateDelta, type SmartLinkDelta } from "@/lib/smart-link-stats";
+import { safeSmartLinkHref } from "@/lib/smart-link-urls";
+import { DashboardEmptyState, DashboardShell } from "@/components/layout/dashboard-shell";
+import { SmartLinksTable, type SmartLinkTableItem } from "@/components/smart-link/smart-links-table";
 
 export const dynamic = "force-dynamic";
+
+function lastDayKeys(count: number, offset = 0): string[] {
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - offset - (count - 1 - index));
+    return date.toISOString().slice(0, 10);
+  });
+}
+
+const DELTA_TONE_CLASS: Record<SmartLinkDelta["tone"], string> = {
+  up: "bg-emerald-400/10 text-emerald-300",
+  down: "bg-rose-400/10 text-rose-300",
+  flat: "bg-zinc-800 text-zinc-400"
+};
+
+function sumDaily(items: SmartLinkOwnerView[], keys: string[], field: "views" | "clicks"): number {
+  return items.reduce((total, item) => total + keys.reduce((sum, key) => sum + (item.analytics.daily[key]?.[field] ?? 0), 0), 0);
+}
 
 export default async function SmartLinksDashboardPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
   const smartLinks = await getSmartLinksByUser(session.user.id);
+  const sparkKeys = lastDayKeys(14);
+  const monthKeys = lastDayKeys(30);
+  const previousMonthKeys = lastDayKeys(30, 30);
+
+  const items: SmartLinkTableItem[] = smartLinks.map((item) => ({
+    releaseId: item.releaseId,
+    title: item.title,
+    artist: item.artist,
+    slug: item.publicSlug,
+    publicUrl: item.publicUrl,
+    coverUrl: item.coverUrl,
+    livePlatformCodes: item.platforms
+      .filter((platform) => platform.status === "live" && safeSmartLinkHref(platform.url))
+      .map((platform) => platform.code),
+    views: item.analytics.totalViews,
+    clicks: item.analytics.totalClicks,
+    dailyClicks: sparkKeys.map((key) => item.analytics.daily[key]?.clicks ?? 0)
+  }));
+
+  const totalViews = smartLinks.reduce((sum, item) => sum + item.analytics.totalViews, 0);
+  const totalClicks = smartLinks.reduce((sum, item) => sum + item.analytics.totalClicks, 0);
+  const platformTotals = new Map<string, number>();
+  for (const item of smartLinks) {
+    for (const [code, value] of Object.entries(item.analytics.platformClicks)) {
+      platformTotals.set(code, (platformTotals.get(code) ?? 0) + value);
+    }
+  }
+  const [topPlatform] = Array.from(platformTotals.entries()).sort((left, right) => right[1] - left[1]);
+  const monthViews = sumDaily(smartLinks, monthKeys, "views");
+  const monthClicks = sumDaily(smartLinks, monthKeys, "clicks");
+  const previousViews = sumDaily(smartLinks, previousMonthKeys, "views");
+  const previousClicks = sumDaily(smartLinks, previousMonthKeys, "clicks");
+  const kpis: Array<{ label: string; value: string; hint: string; delta: SmartLinkDelta | null }> = [
+    {
+      label: "Просмотры страниц",
+      value: totalViews.toLocaleString("ru-RU"),
+      hint: `${monthViews.toLocaleString("ru-RU")} за 30 дней`,
+      delta: getSmartLinkCountDelta(monthViews, previousViews)
+    },
+    {
+      label: "Переходы на площадки",
+      value: totalClicks.toLocaleString("ru-RU"),
+      hint: `${monthClicks.toLocaleString("ru-RU")} за 30 дней`,
+      delta: getSmartLinkCountDelta(monthClicks, previousClicks)
+    },
+    {
+      label: "Конверсия в переход",
+      value: `${totalViews > 0 ? Math.round((totalClicks / totalViews) * 100) : 0}%`,
+      hint: "переходы / просмотры",
+      delta: getSmartLinkRateDelta({ hits: monthClicks, total: monthViews }, { hits: previousClicks, total: previousViews })
+    },
+    {
+      label: "Чаще всего выбирают",
+      value: topPlatform ? getSmartLinkPlatformLabel(topPlatform[0]) : "—",
+      hint: topPlatform && totalClicks > 0 ? `${Math.round((topPlatform[1] / totalClicks) * 100)}% переходов` : "пока нет данных",
+      delta: null
+    }
+  ];
 
   return (
     <DashboardShell>
-      <PageHeader
-        title="Smart Links"
-        description="Отдельный раздел для всех публичных ссылок релизов: открывайте, копируйте, отслеживайте переходы и переходите в тонкую настройку каждого smart link."
-      />
+      <div>
+        <h1 className="text-[28px] font-semibold tracking-[-0.03em] text-white">Smart Links</h1>
+        <p className="mt-1.5 text-sm text-zinc-400">Одна ссылка на релиз для всех площадок. Создаётся сама, когда релиз одобрен.</p>
+      </div>
 
       {smartLinks.length === 0 ? (
         <DashboardEmptyState
@@ -30,92 +106,28 @@ export default async function SmartLinksDashboardPage() {
           description="Smart Link создаётся автоматически для опубликованного релиза. Как только релиз будет готов, он появится здесь."
         />
       ) : (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {smartLinks.map((item) => {
-            const topPlatform = item.platforms.find((platform) => platform.status === "live")?.label ?? "Скоро";
-            const publishedCount = item.platforms.filter((platform) => platform.status === "live").length;
-
-            return (
-              <PageSection key={item.releaseId} className="overflow-hidden">
-                <div className="flex flex-col gap-4 sm:flex-row">
-                  <div className="aspect-square h-24 w-24 shrink-0 overflow-hidden rounded-[22px] border border-white/[0.08] bg-[radial-gradient(circle_at_top,rgba(123,61,245,0.16),transparent_48%),rgba(255,255,255,0.03)] p-2">
-                    {item.coverUrl ? (
-                      <div className="relative h-full w-full overflow-hidden rounded-[16px]">
-                        <img
-                          src={item.coverUrl}
-                          alt=""
-                          aria-hidden="true"
-                          className="absolute inset-0 h-full w-full scale-110 object-cover opacity-35 blur-xl"
-                          loading="lazy"
-                        />
-                        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(9,10,16,0.06),rgba(9,10,16,0.32))]" />
-                        <img
-                          src={item.coverUrl}
-                          alt={item.title}
-                          className="relative z-[1] h-full w-full object-contain object-center"
-                          loading="lazy"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-[0.24em] text-white/38">
-                        No Cover
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-xl font-semibold text-white">{item.title}</p>
-                        <p className="mt-1 truncate text-sm font-medium text-white/62">
-                          UPC: {item.upc || "—"}
-                        </p>
-                        <p className="mt-2 truncate text-sm text-white/46">{item.publicUrl}</p>
-                      </div>
-
-                    </div>
-
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-3.5 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/42">Просмотры</p>
-                        <p className="mt-2 text-lg font-semibold text-white">{item.analytics.totalViews}</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-3.5 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/42">Переходы</p>
-                        <p className="mt-2 text-lg font-semibold text-white">{item.analytics.totalClicks}</p>
-                      </div>
-                      <div className="rounded-2xl border border-white/[0.08] bg-black/20 px-3.5 py-3">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/42">Площадки</p>
-                        <p className="mt-2 text-sm font-semibold text-white">{publishedCount} live</p>
-                        <p className="mt-1 text-xs text-white/50">{topPlatform}</p>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2.5">
-                      <a
-                        href={item.publicUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.04] px-3.5 text-sm font-medium text-white/82 transition hover:bg-white/[0.07] hover:text-white"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                        Открыть
-                      </a>
-                      <SmartLinkCopyButton url={item.publicUrl} />
-                      <Link
-                        href={`/dashboard/releases/${encodeURIComponent(item.releaseId)}/smart-link`}
-                        className="inline-flex h-10 items-center gap-2 rounded-xl border border-violet-400/18 bg-violet-500/10 px-3.5 text-sm font-medium text-violet-100 transition hover:bg-violet-500/16"
-                      >
-                        <Settings2 className="h-4 w-4" />
-                        Редактировать
-                      </Link>
-                    </div>
-                  </div>
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {kpis.map((kpi) => (
+              <div key={kpi.label} className="rounded-[14px] border border-zinc-800 bg-zinc-950/60 px-4 py-4">
+                <div className="text-[12.5px] text-zinc-400">{kpi.label}</div>
+                <div className="mt-2 flex min-w-0 items-baseline gap-2">
+                  <span className="truncate text-[24px] font-semibold tracking-[-0.03em] text-white">{kpi.value}</span>
+                  {kpi.delta ? (
+                    <span
+                      title="Последние 30 дней к предыдущим 30"
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${DELTA_TONE_CLASS[kpi.delta.tone]}`}
+                    >
+                      {kpi.delta.text}
+                    </span>
+                  ) : null}
                 </div>
-              </PageSection>
-            );
-          })}
-        </div>
+                <div className="mt-1 text-xs text-zinc-500">{kpi.hint}</div>
+              </div>
+            ))}
+          </div>
+          <SmartLinksTable items={items} />
+        </>
       )}
     </DashboardShell>
   );

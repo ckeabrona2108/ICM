@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { BarChart3, Clock3 } from "lucide-react";
+import { BarChart3 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
@@ -20,7 +20,6 @@ import {
   ShareRow,
   SkeletonBlock,
   formatCountryName,
-  formatReportDate,
   getPlatformColor
 } from "@/components/analytics/analytics-ui";
 import type {
@@ -40,8 +39,6 @@ const AnalyticsLineChart = dynamic(
     loading: () => <SkeletonBlock className="h-[260px] w-full sm:h-[300px]" />
   }
 );
-
-const STALE_REPORT_DAYS = 7;
 
 function buildQuery(filters: AnalyticsFilterState, options: { withRelease: boolean }): string {
   const params = new URLSearchParams();
@@ -109,13 +106,6 @@ const isReleaseList = (payload: unknown): payload is AnalyticsReleaseListItemRes
 const isCountries = (payload: unknown): payload is AnalyticsCountriesResponse =>
   Boolean(payload && typeof payload === "object" && "countries_breakdown" in payload);
 
-function daysSince(dateKey: string | null | undefined): number | null {
-  if (!dateKey) return null;
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime())) return null;
-  return Math.floor((Date.now() - date.getTime()) / (24 * 60 * 60 * 1000));
-}
-
 export function AnalyticsPage() {
   const [filters, setFilters] = React.useState<AnalyticsFilterState>(DEFAULT_ANALYTICS_FILTERS);
   const [focusedPlatform, setFocusedPlatform] = React.useState("");
@@ -167,8 +157,6 @@ export function AnalyticsPage() {
 
   const countryRows = countriesState.data?.countries_breakdown ?? [];
   const countryTotal = countryRows.reduce((sum, item) => sum + item.streams, 0);
-  const reportAge = daysSince(overview?.latest_report_date);
-  const latestReportLabel = formatReportDate(overview?.latest_report_date);
   const hasData = Boolean(overview && (overview.total_streams > 0 || overview.chart.length > 0));
 
   return (
@@ -178,19 +166,6 @@ export function AnalyticsPage() {
         <div>
           <h1 className="text-[28px] font-bold tracking-tight text-white">Аналитика</h1>
           <p className="mt-1 text-[14px] text-white/55">Прослушивания ваших релизов на всех площадках</p>
-          {latestReportLabel ? (
-            <p
-              className={cn(
-                "mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[12px] font-medium",
-                reportAge != null && reportAge > STALE_REPORT_DAYS
-                  ? "border-amber-300/30 bg-amber-400/10 text-amber-200"
-                  : "border-white/[0.08] bg-white/[0.04] text-white/60"
-              )}
-            >
-              <Clock3 className="h-3.5 w-3.5" />
-              Последний отчёт площадок — {latestReportLabel}. Отчёты приходят с задержкой 2–5 дней
-            </p>
-          ) : null}
         </div>
         <AnalyticsFilters value={filters} releases={releases} onChange={setFilters} />
       </div>

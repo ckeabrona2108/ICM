@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   CircleAlert,
   ImagePlus,
+  ArrowUp,
   Loader2,
   Music2,
   PlayCircle,
@@ -38,7 +39,6 @@ import type { AiChatThreadPayload as AiStudioChatThreadPayload } from "@/lib/ai-
 import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { DashboardEmptyState } from "@/components/layout/dashboard-shell";
-import { TripledIdentity } from "@/components/ui/tripled-social";
 import { useCurrentUser } from "@/components/user/user-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,12 +67,25 @@ const SECTION_LABELS: Record<AiStudioSection, string> = {
   audio: "Аудио"
 };
 
+const SECTION_EMPTY_TITLES: Record<AiStudioSection, string> = {
+  chat: "Чем помочь?",
+  image: "Создайте обложку или промо-арт",
+  video: "Создайте видео для клипа или сниппета",
+  audio: "Создайте трек или бит"
+};
+
 const SECTION_EMPTY_HINTS: Record<AiStudioSection, string> = {
   chat: "Задайте вопрос или попросите помочь с текстом.",
   image: "Опишите обложку или промо-арт — результат появится здесь.",
   video: "Опишите сцену для клипа или сниппета — видео появится здесь.",
   audio: "Опишите звучание, жанр и настроение — трек появится здесь."
 };
+
+const CHAT_EXAMPLE_PROMPTS = [
+  "Напиши описание релиза для площадок",
+  "Придумай 5 идей для TikTok под новый трек",
+  "Помоги с припевом о летней ночи"
+];
 
 const SECTION_EXAMPLE_PROMPTS: Record<AiStudioSection, string[]> = {
   chat: [],
@@ -313,6 +326,7 @@ interface AiStudioMediaConversationItem {
 
 export function AiStudioPage({
   activeTab,
+  userName,
   aiStudioStatus,
   aiTokenBalance,
   pendingAiTokenBalance,
@@ -1167,6 +1181,7 @@ export function AiStudioPage({
         <ToolbarDropdown
           label={selectedModel?.label ?? MODEL_FALLBACKS[modelWorkspaceSection][0]}
           onClick={() => onSelectToolbarField("model")}
+          accent
         />
         {toolbarParams.map((param) => (
           <ToolbarDropdown
@@ -1179,54 +1194,52 @@ export function AiStudioPage({
     ) : null;
   return (
     <>
-      <div className="grid gap-5 pb-28 motion-safe:animate-[aiStudioEnter_160ms_cubic-bezier(0.22,1,0.36,1)] xl:grid-cols-[240px_minmax(0,1fr)]">
-        <AiStudioSidebar
-          activeTab={activeTab}
-          chatThreads={chatThreadsState}
-          activeChatThreadId={activeChatThreadState?.id ?? activeChatThreadId}
-          onNewChat={openNewChat}
-          onSelectChatThread={selectChatThread}
-        />
-        <div className="space-y-5">
-          <section className="perf-content-auto perf-paint-contain rounded-[28px] border border-white/[0.08] bg-[#10131a]/95 px-5 py-4 shadow-[0_14px_40px_-30px_rgba(11,14,24,0.82)] sm:px-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h1 className="font-display text-[28px] font-bold leading-tight tracking-[-0.02em] text-white sm:text-[32px]">
-                  AI Студия
-                </h1>
-                <p className="mt-1 max-w-2xl text-[14px] font-medium text-white/55">
-                  Изображения, видео, музыка и тексты для продвижения артиста.
-                </p>
+      {/* Desktop: the studio fits the viewport and only its inner areas scroll, so nothing jumps. */}
+      <div className="flex flex-col gap-4 pb-28 motion-safe:animate-[aiStudioEnter_160ms_cubic-bezier(0.22,1,0.36,1)] xl:h-[calc(100dvh-136px)] xl:pb-0">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 xl:overflow-y-auto">
+          <section className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3 rounded-[24px] border border-white/[0.08] bg-[#11131b] px-4 py-3 sm:px-5">
+            <h1 className="font-display text-[22px] font-bold tracking-[-0.02em] text-white">AI Студия</h1>
+            {/* Segmented tabs instead of the old left column (21st.dev "Segmented Control"). */}
+            <nav
+              aria-label="Инструменты AI Студии"
+              className="-mx-1 flex max-w-full gap-0.5 overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.04] p-1"
+            >
+              {WORKSPACE_TABS.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <Link
+                    key={tab.id}
+                    href={`/dashboard/ai-studio/${tab.id}`}
+                    aria-current={isActive ? "page" : undefined}
+                    className={cn(
+                      "whitespace-nowrap rounded-xl px-3.5 py-2 text-[13px] font-semibold transition-colors",
+                      isActive
+                        ? "bg-[#7b61ff] text-white shadow-[0_8px_20px_-10px_rgba(123,97,255,0.95)]"
+                        : "text-white/55 hover:text-white"
+                    )}
+                  >
+                    {tab.label}
+                  </Link>
+                );
+              })}
+            </nav>
+            <div className="ml-auto flex items-center gap-4">
+              <div className="flex items-center gap-1.5 whitespace-nowrap text-[13px] text-white/50">
+                AI-токены <span className="text-[15px] font-bold tabular-nums text-white">{formatAiTokenAmount(aiTokenBalanceValue)}</span>
+                {pendingAiTokenBalanceValue > 0 ? (
+                  <>
+                    · ожидают <span className="font-bold tabular-nums text-amber-200">{formatAiTokenAmount(pendingAiTokenBalanceValue)}</span>
+                  </>
+                ) : null}
+                · тариф <span className="text-[15px] font-bold text-white">{entitlements.plan}</span>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center rounded-2xl border border-white/[0.08] bg-white/[0.03]">
-                  <div className="px-4 py-2">
-                    <div className="text-[11px] font-medium text-white/45">AI-токены</div>
-                    <div className="text-[18px] font-bold tabular-nums text-white">{formatAiTokenAmount(aiTokenBalanceValue)}</div>
-                  </div>
-                  {pendingAiTokenBalanceValue > 0 ? (
-                    <>
-                      <span aria-hidden className="h-8 w-px bg-white/[0.08]" />
-                      <div className="px-4 py-2">
-                        <div className="text-[11px] font-medium text-white/45">Ожидают</div>
-                        <div className="text-[18px] font-bold tabular-nums text-amber-200">{formatAiTokenAmount(pendingAiTokenBalanceValue)}</div>
-                      </div>
-                    </>
-                  ) : null}
-                  <span aria-hidden className="h-8 w-px bg-white/[0.08]" />
-                  <div className="px-4 py-2">
-                    <div className="text-[11px] font-medium text-white/45">Тариф</div>
-                    <div className="text-[18px] font-bold text-white">{entitlements.plan}</div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={openPurchaseModal}
-                  className="inline-flex h-12 items-center rounded-2xl bg-[#7b61ff] px-5 text-[14px] font-semibold text-white shadow-[0_14px_30px_-14px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff]"
-                >
-                  Пополнить токены
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={openPurchaseModal}
+                className="inline-flex h-10 items-center rounded-xl bg-[#7b61ff] px-4 text-[13px] font-semibold text-white shadow-[0_10px_24px_-12px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff]"
+              >
+                Пополнить
+              </button>
             </div>
           </section>
 
@@ -1243,7 +1256,10 @@ export function AiStudioPage({
               <AiStudioPreparingState pendingTokens={pendingAiTokenBalanceValue} onRefresh={() => router.refresh()} />
             ) : (
               <ChatWorkspace
-                title={activeChatThreadState?.title ?? "Новый чат"}
+                userName={userName}
+                chatThreads={chatThreadsState}
+                activeChatThreadId={activeChatThreadState?.id ?? activeChatThreadId}
+                onSelectChatThread={selectChatThread}
                 modelLabel={selectedChatModel?.label ?? "GPT-4o"}
                 modelPrice={chatModelPrice}
                 aiTokenBalance={aiTokenBalanceValue}
@@ -1271,8 +1287,17 @@ export function AiStudioPage({
           ) : null}
 
           {showModelWorkspace ? (
-            <section className="perf-content-auto perf-paint-contain flex min-h-[calc(100vh-220px)] flex-col rounded-[28px] border border-white/[0.08] bg-[#10131a]/95 px-5 py-5">
-              <div className="min-h-[480px] flex-1 rounded-[24px] bg-[radial-gradient(ellipse_at_top,rgba(123,97,255,0.10),transparent_60%)] p-5">
+            <section className="flex min-h-[640px] flex-1 flex-col overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#11131b] xl:min-h-0">
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-3">
+                <h2 className="text-[16px] font-semibold text-white">{SECTION_LABELS[modelWorkspaceSection ?? "image"]}</h2>
+                <Link
+                  href="/dashboard/ai-studio/archive"
+                  className="inline-flex h-9 items-center rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.08] hover:text-white"
+                >
+                  История генераций
+                </Link>
+              </div>
+              <div className="min-h-[320px] flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_50%_0%,rgba(123,97,255,0.12),transparent_55%)] p-4 sm:p-6 xl:min-h-0">
                 {shouldShowPreparingState ? (
                   <AiStudioPreparingState
                     pendingTokens={pendingAiTokenBalanceValue}
@@ -1282,10 +1307,10 @@ export function AiStudioPage({
                 ) : currentMediaConversation.length > 0 ? (
                   <MediaWorkspace conversation={currentMediaConversation} modelLabelLookup={modelLabelLookup} />
                 ) : (
-                  <div className="flex min-h-[420px] items-center justify-center rounded-[24px] text-center">
+                  <div className="flex h-full min-h-[280px] items-center justify-center rounded-[20px] border border-dashed border-white/[0.1] px-6 text-center">
                     <div className="max-w-lg">
                       <div className="text-[22px] font-bold tracking-[-0.01em] text-white">
-                        {SECTION_LABELS[modelWorkspaceSection ?? "image"]}
+                        {SECTION_EMPTY_TITLES[modelWorkspaceSection ?? "image"]}
                       </div>
                       <p className="mt-2 text-[14px] font-medium leading-6 text-white/50">
                         {SECTION_EMPTY_HINTS[modelWorkspaceSection ?? "image"]}
@@ -1315,7 +1340,7 @@ export function AiStudioPage({
               </div>
               {!shouldShowPreparingState ? (
                 <ComposerBar
-                  className="mt-4 lg:sticky lg:bottom-0"
+                  className="m-4 mt-0 shrink-0 sm:mx-6 sm:mb-5"
                   activeSection={modelWorkspaceSection ?? "image"}
                   prompt={currentPrompt}
                   onPromptChange={(value) =>
@@ -1758,7 +1783,7 @@ function ComposerBar({
   return (
     <div
       className={cn(
-        "perf-fixed-layer perf-paint-contain rounded-[28px] border border-white/[0.08] bg-[#10131a]/96 p-3 shadow-[0_14px_40px_-28px_rgba(11,14,24,0.82)] backdrop-blur-[6px]",
+        "rounded-[22px] border border-white/[0.1] bg-[#161925] p-3 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.9),0_0_0_4px_rgba(123,97,255,0.06)] transition focus-within:border-[#7b61ff]/45",
         className
       )}
     >
@@ -1770,112 +1795,99 @@ function ComposerBar({
         accept="image/*,audio/*"
         onChange={onFileInputChange}
       />
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {controls}
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            className="ml-auto inline-flex items-center gap-2 rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform,color] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-          >
-            <ChevronDown className="h-4 w-4" />
-            Скрыть
-          </button>
-        </div>
-        <Textarea
-          value={prompt}
-          onChange={(event) => onPromptChange(event.target.value)}
-          placeholder={SECTION_PROMPTS[activeSection]}
-          className="min-h-[110px] rounded-[22px] border-white/[0.10] bg-[#0f1218] text-[15px] text-white placeholder:text-white/36 focus-visible:ring-[#7b3df5]"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          {canAddReferences ? (
-            <button
-              type="button"
-              onClick={openFilePicker}
-              className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform,color] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-            >
-              📎 Добавить референс
-            </button>
-          ) : null}
+      <Textarea
+        value={prompt}
+        onChange={(event) => onPromptChange(event.target.value)}
+        placeholder={SECTION_PROMPTS[activeSection]}
+        className="min-h-[60px] resize-none border-0 bg-transparent px-2 text-[15px] text-white shadow-none placeholder:text-white/38 focus-visible:ring-0"
+      />
+      {referenceFiles.length > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-1.5 px-1">
           {referenceFiles.map((file) => (
             <span
               key={file.id}
-              className="inline-flex items-center gap-2 rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72"
+              className="inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[0.06] px-2.5 text-[12px] font-medium text-white/75"
             >
-              <span>{file.name}</span>
+              <span className="max-w-[160px] truncate">{file.name}</span>
               <button
                 type="button"
                 onClick={() => onRemoveReference(file.id)}
-                className="text-white/40 transition-colors duration-150 ease-out hover:text-white motion-reduce:transition-none"
+                className="text-white/40 transition-colors hover:text-white"
                 aria-label={`Удалить ${file.name}`}
               >
                 ×
               </button>
             </span>
           ))}
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform,color] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-            >
-              <Settings2 className="h-4 w-4" />
-            </button>
-            <div className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72">
-              {modelPrice || costLabel}
-            </div>
-            <Button
-              disabled={!canGenerate || generationBusy}
-              onClick={onGenerate}
-              className={cn(
-                "h-11 px-5 transition-[opacity,filter,box-shadow,transform] duration-150 ease-out",
-                !canGenerate && !generationBusy
-                  ? "cursor-not-allowed opacity-80 saturate-[0.82] shadow-none"
-                  : "shadow-[0_14px_30px_-18px_rgba(123,61,245,0.75)]"
-              )}
-            >
-              {generationBusy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Генерируется
-                </>
-              ) : (
-                "Сгенерировать"
-              )}
-            </Button>
-          </div>
         </div>
-        {disabledHint ? (
-          <div className="flex justify-end">
-            <div className="rounded-full border border-amber-300/28 bg-amber-400/[0.14] px-3.5 py-1.5 text-[12px] font-semibold text-amber-50 shadow-[0_10px_24px_-18px_rgba(251,191,36,0.85)]">
-              {disabledHint}
-            </div>
-          </div>
+      ) : null}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {controls}
+        {canAddReferences ? (
+          <button
+            type="button"
+            onClick={openFilePicker}
+            className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12.5px] font-semibold text-white/78 transition-colors hover:bg-white/[0.08]"
+          >
+            + Референс
+          </button>
         ) : null}
-        <div className="h-1.5 rounded-full bg-white/[0.06]">
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Настройки генерации"
+            className="grid h-8 w-8 place-items-center rounded-full text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
+          >
+            <Settings2 className="h-4 w-4" />
+          </button>
+          <span className="text-[12px] text-white/42">{modelPrice || costLabel} токенов</span>
+          <button
+            type="button"
+            disabled={!canGenerate || generationBusy}
+            onClick={onGenerate}
+            className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#7b61ff] px-4 text-[13px] font-semibold text-white shadow-[0_10px_24px_-12px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+          >
+            {generationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {generationBusy ? "Создаём…" : "Создать"}
+          </button>
+        </div>
+      </div>
+      {disabledHint ? (
+        <p className="mt-2 text-right text-[12px] font-medium text-amber-200/80">{disabledHint}</p>
+      ) : null}
+      {generationBusy || generationProgress > 0 ? (
+        <div className="mt-2 h-1 rounded-full bg-white/[0.06]">
           <div
-            className="h-1.5 rounded-full bg-[linear-gradient(90deg,#7b3df5_0%,#22d3ee_100%)] transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none"
+            className="h-1 rounded-full bg-[#7b61ff] transition-[width] duration-200 ease-out motion-reduce:transition-none"
             style={{ width: `${generationProgress}%` }}
           />
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
 
 function ToolbarDropdown({
   label,
-  onClick
+  onClick,
+  accent = false
 }: {
   label: string;
   onClick: () => void;
+  /** Model chip: tinted purple so it stands out from the parameter chips. */
+  accent?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform,color] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
+      className={cn(
+        "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-semibold transition-colors",
+        accent
+          ? "border-[#7b61ff]/35 bg-[#7b61ff]/14 text-[#ddd6fe] hover:bg-[#7b61ff]/22"
+          : "border-white/[0.08] bg-white/[0.04] text-white/78 hover:bg-white/[0.08]"
+      )}
     >
       <span>{label}</span>
       <ChevronDown className="h-3.5 w-3.5 text-white/44" />
@@ -2329,97 +2341,146 @@ function FloatingToast({ message }: { message: string }) {
   );
 }
 
-function AiStudioSidebar({
-  activeTab,
+function isSameLocalDay(value: string, now: Date): boolean {
+  const date = new Date(value);
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
+}
+
+function ChatHistoryPanel({
   chatThreads,
   activeChatThreadId,
   onNewChat,
   onSelectChatThread
 }: {
-  activeTab: AiStudioWorkspaceTab;
   chatThreads: AiStudioChatThreadResponse[];
   activeChatThreadId: string | null;
   onNewChat: () => void;
   onSelectChatThread: (threadId: string) => void;
 }) {
-  return (
-    <aside className="perf-paint-contain h-fit rounded-[24px] border border-white/[0.08] bg-[#11131b] p-3 xl:sticky xl:top-24">
-      <div className="mb-2 px-2 text-[12px] font-semibold text-white/40">Инструменты</div>
+  const now = new Date();
+  const today = chatThreads.filter((thread) => isSameLocalDay(thread.lastMessageAt ?? thread.createdAt, now));
+  const earlier = chatThreads.filter((thread) => !isSameLocalDay(thread.lastMessageAt ?? thread.createdAt, now));
 
-      <div className="space-y-1">
-        {WORKSPACE_TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <Link
-              key={tab.id}
-              href={`/dashboard/ai-studio/${tab.id}`}
-              className={cn(
-                "flex h-11 items-center gap-3 rounded-xl px-3 transition-colors duration-150 motion-reduce:transition-none",
-                isActive ? "bg-[#7b61ff]/16 text-white" : "text-white/65 hover:bg-white/[0.05] hover:text-white"
-              )}
-            >
-              <Icon className={cn("h-[18px] w-[18px]", isActive ? "text-[#b9a8ff]" : "text-white/45")} />
-              <span className="text-[14px] font-medium">{tab.label}</span>
-              {isActive ? <span aria-hidden className="ml-auto h-1.5 w-1.5 rounded-full bg-[#7b61ff]" /> : null}
-            </Link>
-          );
-        })}
+  const renderThread = (thread: AiStudioChatThreadResponse) => (
+    <button
+      key={thread.id}
+      type="button"
+      onClick={() => onSelectChatThread(thread.id)}
+      className={cn(
+        "w-full rounded-xl px-3 py-2 text-left transition-colors",
+        activeChatThreadId === thread.id ? "bg-[#7b61ff]/16" : "hover:bg-white/[0.05]"
+      )}
+    >
+      <div className="truncate text-[13px] font-medium text-white">{thread.title}</div>
+      <div className="mt-0.5 truncate text-[11px] text-white/40">
+        {thread.modelCode} · {formatDate(thread.lastMessageAt ?? thread.createdAt)}
       </div>
+    </button>
+  );
 
-      {activeTab === "chat" ? (
-        <div className="mt-5 rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-3">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/38">Диалоги</div>
-              <div className="mt-1 text-[14px] font-medium text-white/72">История чатов</div>
-            </div>
-            <button
-              type="button"
-              onClick={onNewChat}
-              className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[12px] font-medium text-white/72 transition-[background-color,border-color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-            >
-              Новый чат
-            </button>
-          </div>
-          <div className="space-y-2">
-            {chatThreads.length > 0 ? (
-              chatThreads.map((thread) => (
-                <button
-                  key={thread.id}
-                  type="button"
-                  onClick={() => onSelectChatThread(thread.id)}
-                  className={cn(
-                    "w-full rounded-[18px] border p-3 text-left transition-[background-color,border-color,transform] duration-200 ease-out motion-reduce:transition-none",
-                    activeChatThreadId === thread.id
-                      ? "border-[#7b3df5]/35 bg-[#171b26]"
-                      : "border-white/[0.08] bg-black/15 hover:-translate-y-0.5 hover:border-white/[0.14] hover:bg-white/[0.05]"
-                  )}
-                >
-                  <div className="text-[13px] font-medium text-white line-clamp-2">{thread.title}</div>
-                  <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/44">
-                    <span className="rounded-full border border-white/8 bg-white/[0.04] px-2 py-1">{thread.modelCode}</span>
-                    <span>{thread.lastMessageAt ? formatDate(thread.lastMessageAt) : formatDate(thread.createdAt)}</span>
-                  </div>
-                </button>
-              ))
-            ) : (
-              <div className="rounded-[18px] border border-dashed border-white/[0.08] bg-black/10 px-3 py-4 text-[12px] leading-5 text-white/46">
-                Здесь появится история диалогов. Создайте новый чат, чтобы начать общение.
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
+  return (
+    <aside className="flex max-h-[300px] min-h-0 flex-col border-b border-white/[0.07] p-3 lg:max-h-none lg:border-b-0 lg:border-r">
+      <button
+        type="button"
+        onClick={onNewChat}
+        className="mb-2 flex h-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-[#7b61ff]/50 text-[13px] font-semibold text-[#c4b5fd] transition hover:bg-[#7b61ff]/10 hover:text-white"
+      >
+        + Новый чат
+      </button>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {chatThreads.length === 0 ? (
+          <p className="px-3 py-3 text-[12px] leading-5 text-white/45">Здесь появится история диалогов.</p>
+        ) : (
+          <>
+            {today.length > 0 ? (
+              <>
+                <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-white/35">Сегодня</div>
+                {today.map(renderThread)}
+              </>
+            ) : null}
+            {earlier.length > 0 ? (
+              <>
+                <div className="px-3 pb-1 pt-2 text-[11px] font-semibold text-white/35">Ранее</div>
+                {earlier.map(renderThread)}
+              </>
+            ) : null}
+          </>
+        )}
+      </div>
     </aside>
   );
 }
 
-function ChatWorkspace({
-  title,
+/** Prompt composer in the spirit of 21st.dev "Prompt Composer with Model Selector". */
+function ChatComposer({
+  prompt,
+  onPromptChange,
+  onSend,
+  canSend,
+  sending,
   modelLabel,
   modelPrice,
-  aiTokenBalance,
+  onOpenModelSelector,
+  disabledHint
+}: {
+  prompt: string;
+  onPromptChange: (value: string) => void;
+  onSend: () => void;
+  canSend: boolean;
+  sending: boolean;
+  modelLabel: string;
+  modelPrice: number;
+  onOpenModelSelector: () => void;
+  disabledHint?: string | null;
+}) {
+  return (
+    <div className="w-full max-w-[760px]">
+      <div className="rounded-[22px] border border-white/[0.1] bg-[#161925] p-3 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.9),0_0_0_4px_rgba(123,97,255,0.06)] transition focus-within:border-[#7b61ff]/45">
+        <Textarea
+          value={prompt}
+          onChange={(event) => onPromptChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              if (canSend && !sending) onSend();
+            }
+          }}
+          placeholder="Спросите что-нибудь…"
+          className="min-h-[56px] resize-none border-0 bg-transparent px-2 text-[15px] text-white shadow-none placeholder:text-white/38 focus-visible:ring-0"
+        />
+        <div className="mt-1 flex items-center gap-2">
+          <ToolbarDropdown label={modelLabel} onClick={onOpenModelSelector} accent />
+          <div className="flex-1" />
+          <span className="text-[12px] text-white/42">{modelPrice} токенов</span>
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={!canSend || sending}
+            aria-label="Отправить"
+            className="grid h-9 w-9 place-items-center rounded-full bg-[#7b61ff] text-white shadow-[0_8px_20px_-8px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+          >
+            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.6} />}
+          </button>
+        </div>
+      </div>
+      {disabledHint ? (
+        <p className="mt-2 text-center text-[12px] font-medium text-amber-200/80">{disabledHint}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatWorkspace({
+  userName,
+  chatThreads,
+  activeChatThreadId,
+  onSelectChatThread,
+  modelLabel,
+  modelPrice,
   onOpenModelSelector,
   messages,
   prompt,
@@ -2427,11 +2488,13 @@ function ChatWorkspace({
   onSend,
   sending,
   canSend,
-  progress,
   onNewChat,
   disabledHint
 }: {
-  title: string;
+  userName: string;
+  chatThreads: AiStudioChatThreadResponse[];
+  activeChatThreadId: string | null;
+  onSelectChatThread: (threadId: string) => void;
   modelLabel: string;
   modelPrice: number;
   aiTokenBalance: number;
@@ -2446,117 +2509,112 @@ function ChatWorkspace({
   onNewChat: () => void;
   disabledHint?: string | null;
 }) {
-  return (
-    <section className="perf-content-auto perf-paint-contain flex min-h-[calc(100vh-260px)] flex-col overflow-hidden rounded-[32px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(16,19,26,0.98),rgba(10,13,18,0.98))] shadow-[0_26px_80px_-46px_rgba(0,0,0,0.82)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] bg-[radial-gradient(circle_at_top_left,rgba(194,160,255,0.14),transparent_34%)] px-5 py-4">
-        <div>
-          <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/38">Чаты</div>
-          <h2 className="mt-1 text-[20px] font-semibold text-white">{title}</h2>
-          <p className="mt-1 text-[13px] text-white/52">GPT-подобный диалог с отдельной историей.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ToolbarDropdown label={modelLabel} onClick={onOpenModelSelector} />
-          <div className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72">
-            {formatAiTokenAmount(aiTokenBalance)} AI
-          </div>
-          <button
-            type="button"
-            onClick={onNewChat}
-            className="rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform] duration-200 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-          >
-            Новый чат
-          </button>
-        </div>
-      </div>
+  const messagesRef = React.useRef<HTMLDivElement | null>(null);
+  const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  // Keep the latest message in view without scrolling the whole page.
+  React.useEffect(() => {
+    const node = messagesRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [messages.length, sending]);
 
-      <div className="perf-scroll-shell flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_25%)] px-5 py-5">
-        {messages.length > 0 ? (
-          <div className="space-y-4">
-            {messages.map((message) => (
-              <div key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
-                <div className={cn("max-w-[84%] space-y-2", message.role === "user" ? "items-end" : "items-start")}>
-                  {message.role === "assistant" ? <TripledIdentity name="AI Studio" avatarUrl={null} meta={modelLabel} compact /> : null}
-                  <div
-                    className={cn(
-                      "rounded-[26px] border px-4 py-3 text-[14px] leading-6 shadow-[0_20px_50px_-38px_rgba(0,0,0,0.85)]",
-                      message.role === "user"
-                        ? "border-[#d8c5ff]/24 bg-[linear-gradient(180deg,rgba(201,171,255,0.18),rgba(131,84,255,0.1))] text-white"
-                        : "border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))] text-white/88"
-                    )}
-                  >
-                    {message.content}
-                  </div>
-                </div>
-              </div>
-            ))}
+  const firstName = userName.trim().split(/\s+/u)[0] ?? "";
+  const composer = (
+    <ChatComposer
+      prompt={prompt}
+      onPromptChange={onPromptChange}
+      onSend={onSend}
+      canSend={canSend}
+      sending={sending}
+      modelLabel={modelLabel}
+      modelPrice={modelPrice}
+      onOpenModelSelector={onOpenModelSelector}
+      disabledHint={disabledHint}
+    />
+  );
+
+  return (
+    <section className="grid min-h-[640px] flex-1 overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#11131b] lg:grid-cols-[260px_minmax(0,1fr)] xl:min-h-0">
+      <ChatHistoryPanel
+        chatThreads={chatThreads}
+        activeChatThreadId={activeChatThreadId}
+        onNewChat={onNewChat}
+        onSelectChatThread={onSelectChatThread}
+      />
+
+      <div className="flex min-h-0 min-w-0 flex-col bg-[radial-gradient(ellipse_at_50%_0%,rgba(123,97,255,0.12),transparent_55%)]">
+        {messages.length === 0 ? (
+          // Empty chat: greeting, centered composer and suggestions (21st.dev "Prompt Input with Suggestions").
+          <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
+            <h2 className="text-center text-[28px] font-bold tracking-[-0.02em] text-white sm:text-[30px]">
+              Чем помочь{firstName ? ", " : ""}
+              {firstName ? (
+                <span className="bg-gradient-to-r from-[#c4b5fd] to-[#f9a8d4] bg-clip-text text-transparent">{firstName}</span>
+              ) : null}
+              ?
+            </h2>
+            <p className="mt-1.5 text-center text-[14px] text-white/50">
+              Тексты песен, описания релизов, посты и идеи для продвижения
+            </p>
+            <div className="mt-6 flex w-full justify-center">{composer}</div>
+            <div className="mt-4 flex max-w-[760px] flex-wrap justify-center gap-2">
+              {CHAT_EXAMPLE_PROMPTS.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => onPromptChange(example)}
+                  className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-[13px] font-medium text-white/70 transition hover:border-[#7b61ff]/40 hover:bg-[#7b61ff]/12 hover:text-white"
+                >
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          <div className="grid min-h-[420px] place-items-center rounded-[24px] border border-dashed border-white/[0.08] bg-white/[0.02] px-6 text-center">
-            <div className="max-w-lg space-y-3">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-white/60">
-                <Bot className="h-6 w-6" />
+          <>
+            {/* Message thread (21st.dev "Message Thread"): assistant without bubbles, user in purple. */}
+            <div ref={messagesRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+              <div className="mx-auto flex max-w-[760px] flex-col gap-6">
+                {messages.map((message) =>
+                  message.role === "user" ? (
+                    <div key={message.id} className="flex justify-end">
+                      <div className="max-w-[80%] whitespace-pre-wrap rounded-[18px] rounded-br-md border border-[#7b61ff]/35 bg-[linear-gradient(180deg,rgba(123,97,255,0.32),rgba(123,97,255,0.2))] px-4 py-2.5 text-[14px] leading-6 text-white">
+                        {message.content}
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={message.id} className="flex gap-3">
+                      <span aria-hidden className="mt-0.5 h-7 w-7 shrink-0 rounded-[9px] bg-gradient-to-br from-[#7b61ff] to-[#ec4899]" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11.5px] text-white/38">AI Studio · {modelLabel}</div>
+                        <div className="mt-0.5 whitespace-pre-wrap text-[14.5px] leading-7 text-white/88">{message.content}</div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(message.content).then(() => {
+                              setCopiedId(message.id);
+                              window.setTimeout(() => setCopiedId((current) => (current === message.id ? null : current)), 1500);
+                            });
+                          }}
+                          className="mt-2 rounded-lg border border-white/[0.08] px-2 py-1 text-[11.5px] font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
+                        >
+                          {copiedId === message.id ? "Скопировано" : "Копировать"}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                )}
+                {sending ? (
+                  <div className="flex items-center gap-3 text-[13px] text-white/50">
+                    <span aria-hidden className="h-7 w-7 shrink-0 rounded-[9px] bg-gradient-to-br from-[#7b61ff] to-[#ec4899] opacity-70" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Думаю над ответом…
+                  </div>
+                ) : null}
               </div>
-              <div className="text-[18px] font-semibold text-white">Начните новый диалог</div>
-              <p className="text-[14px] leading-6 text-white/54">
-                Это отдельный GPT-подобный чат внутри AI Studio. Здесь нет генерации изображений, видео или аудио.
-              </p>
             </div>
-          </div>
+            <div className="flex shrink-0 justify-center px-4 pb-4 pt-2 sm:px-6">{composer}</div>
+          </>
         )}
-      </div>
-
-      <div className="border-t border-white/[0.08] p-4">
-        <div className="space-y-3 rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[13px] font-medium text-white/54">Выбранная модель: {modelLabel}</div>
-            <div className="text-[13px] text-white/54">
-              Стоимость: <span className="font-semibold text-white">{modelPrice} токенов</span>
-            </div>
-          </div>
-          <Textarea
-            value={prompt}
-            onChange={(event) => onPromptChange(event.target.value)}
-            placeholder="Напишите сообщение..."
-            className="min-h-[120px] rounded-[22px] border-white/[0.10] bg-[#0f1218] text-[15px] text-white placeholder:text-white/36 focus-visible:ring-[#7b3df5]"
-          />
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[12px] text-white/42">
-              Enter для отправки, Shift+Enter для новой строки.
-            </div>
-            <Button
-              disabled={!canSend || sending}
-              onClick={onSend}
-              className={cn(
-                "h-11 px-5 transition-[opacity,filter,box-shadow,transform] duration-150 ease-out",
-                !canSend && !sending
-                  ? "cursor-not-allowed opacity-80 saturate-[0.82] shadow-none"
-                  : "shadow-[0_14px_30px_-18px_rgba(123,61,245,0.75)]"
-              )}
-            >
-              {sending ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Отправляем
-                </>
-              ) : (
-                "Отправить"
-              )}
-            </Button>
-          </div>
-          {disabledHint ? (
-            <div className="flex justify-end">
-              <div className="rounded-full border border-amber-300/28 bg-amber-400/[0.14] px-3.5 py-1.5 text-[12px] font-semibold text-amber-50 shadow-[0_10px_24px_-18px_rgba(251,191,36,0.85)]">
-                {disabledHint}
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="mt-3 h-1.5 rounded-full bg-white/[0.06]">
-          <div
-            className="h-1.5 rounded-full bg-[linear-gradient(90deg,#7b3df5_0%,#22d3ee_100%)] transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
       </div>
     </section>
   );

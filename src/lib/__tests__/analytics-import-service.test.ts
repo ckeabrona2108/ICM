@@ -443,3 +443,20 @@ test("report date falls back to any date in the file name", () => {
   );
   assert.throws(() => parseReportDateFromFilename("report.xlsx"));
 });
+
+test("platform cabinet export with «Все прослушивания» and «>30 секунд» columns parses", () => {
+  const rows = parseAnalyticsCsv(
+    [
+      "\uFEFFНазвание,Артист,Альбом,Страна,Дата,UPC,Площадка,Album ID,Все прослушивания,Прослушивания >30 секунд",
+      "ВС РФ,Spirit Glam,ВС РФ,Россия,2026-07-28,5063833940450,Яндекс.Музыка,36050398,8155,4507"
+    ].join("\r\n"),
+    new Date("2026-10-27T00:00:00.000Z")
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.track, "ВС РФ");
+  assert.equal(rows[0]?.upc, "5063833940450");
+  assert.equal(rows[0]?.streams, 8155);
+  assert.equal(rows[0]?.pay_streams, 4507);
+  assert.equal(rows[0]?.report_date.toISOString().slice(0, 10), "2026-07-28");
+});

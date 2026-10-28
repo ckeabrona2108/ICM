@@ -115,6 +115,19 @@ export function readMinimumPayoutAmount(): number {
   return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : fallback;
 }
 
+// Imported royalties are source rows for a quarterly report, not completed payments.
+// After an import is deleted the link to it is set to NULL, so the import origin is
+// also recognised by the ledger description written at import time.
+export function isImportedRoyaltyTransaction(transaction: {
+  description?: string | null;
+  royalty_transaction?: { financial_import_id?: string | null } | null;
+}): boolean {
+  const royalty = transaction.royalty_transaction;
+  if (!royalty) return false;
+  if (royalty.financial_import_id) return true;
+  return String(transaction.description ?? "").startsWith("Royalty import");
+}
+
 export async function getFinanceDashboardViewData(
   userId: string
 ): Promise<FinanceDashboardViewData> {
@@ -215,11 +228,7 @@ export async function getFinanceDashboardViewData(
   const accrualReports = reports.filter((report) => report.status !== "agreed");
 
   const transactions: FinanceTransactionView[] = balanceTransactionsRaw
-    .filter((transaction) => {
-      const royalty = transaction.royalty_transaction;
-      // Imported royalties are source rows for a report, not completed payments.
-      return !royalty || !royalty.financial_import_id;
-    })
+    .filter((transaction) => !isImportedRoyaltyTransaction(transaction))
     .map((transaction) => {
     const amount = decimalToNumber(transaction.amount);
     const royalty = transaction.royalty_transaction;

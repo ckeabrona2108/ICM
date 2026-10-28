@@ -3237,6 +3237,16 @@ export async function deleteSmartCatalogSyncImport(params: {
       }
     });
 
+    // Rollback only removes rows it recorded at apply time. Anything else created by this
+    // import would lose its import link on delete (ON DELETE SET NULL) and then show up in
+    // the artist's wallet history as a real accrual, so remove it together with the import.
+    await tx.balance_transactions.deleteMany({
+      where: { royalty_transaction: { financial_import_id: params.importId } }
+    });
+    await tx.royalty_transactions.deleteMany({
+      where: { financial_import_id: params.importId }
+    });
+
     await tx.financial_imports.delete({
       where: { id: params.importId }
     });

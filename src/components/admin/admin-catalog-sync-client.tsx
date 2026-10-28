@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { FinanceOrphanAccrualsPanel } from "@/components/admin/finance-orphan-accruals-panel";
 
 type SmartKind = "catalog" | "finance";
 
@@ -602,6 +603,7 @@ export function AdminCatalogSyncClient() {
 
   return (
     <div className="space-y-6 pb-10">
+      <FinanceOrphanAccrualsPanel />
       <section className="rounded-2xl border border-white/[0.08] bg-[#161720] p-5">
         <div className="flex flex-wrap gap-2">
           {(["catalog", "finance"] as SmartKind[]).map((kind) => (

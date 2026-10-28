@@ -3,6 +3,7 @@ import * as React from "react";
 
 import "@/app/globals.css";
 import { Providers } from "@/app/providers";
+import { YandexMetrika } from "@/components/analytics/yandex-metrika";
 import { PremiumShell } from "@/components/layout/premium-shell";
 import { ChunkLoadRecovery } from "@/components/pwa/chunk-load-recovery";
 import {
@@ -114,6 +115,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="font-sans text-[19px] font-[550] antialiased">
         <ChunkLoadRecovery />
+        <YandexMetrika />
         <Providers>
           <PremiumShell>{children}</PremiumShell>
         </Providers>

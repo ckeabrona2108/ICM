@@ -594,14 +594,38 @@ export default async function SmartLinkPublicPage({
                 ) : null}
               </div>
 
+              {/* Listeners of a release are often musicians themselves: invite them to release their own track. */}
               <Link
-                href="/"
-                aria-label="ICECREAMMUSIC — дистрибуция музыки"
-                className={`mx-auto block w-fit pt-4 font-mono text-[11px] uppercase tracking-[0.2em] transition ${
-                  isLightTheme ? "text-black/45 hover:text-black/75" : "text-white/50 hover:text-white/85"
+                href={`/register?utm_source=smartlink&utm_medium=referral&utm_campaign=release_cta&utm_content=${encodeURIComponent(data.publicSlug)}`}
+                aria-label="Выпусти свой первый трек с ICECREAMMUSIC"
+                className={`group mt-4 flex items-center gap-3 rounded-[18px] border p-3 transition ${
+                  isLightTheme
+                    ? "border-black/8 bg-white/80 hover:border-black/15 hover:bg-white"
+                    : "border-white/10 bg-[linear-gradient(135deg,rgba(123,97,255,0.16),rgba(255,255,255,0.03))] hover:border-white/20"
                 }`}
               >
-                by ICECREAMMUSIC
+                <span
+                  className={`grid h-11 w-11 shrink-0 place-items-center rounded-[13px] ${
+                    isLightTheme ? "bg-black/[0.04]" : "bg-white/[0.06]"
+                  }`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/brand/logo.png" alt="" className="h-7 w-auto object-contain" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className={`block text-[14px] font-semibold leading-tight ${sectionText}`}>
+                    Выпусти свой первый трек
+                  </span>
+                  <span className={`mt-0.5 block text-[12px] leading-snug ${mutedText}`}>
+                    Яндекс Музыка, VK Музыка и ещё 240+ площадок с ICECREAMMUSIC
+                  </span>
+                </span>
+                <span
+                  className="shrink-0 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white transition group-hover:brightness-110"
+                  style={{ background: "#7b61ff" }}
+                >
+                  Начать
+                </span>
               </Link>
             </div>
           </div>

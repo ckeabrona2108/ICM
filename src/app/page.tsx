@@ -828,6 +828,10 @@ export default async function HomePage() {
             </span>
             <span>© 2026 ICECREAMMUSIC</span>
           </div>
+          <nav aria-label="Полезное" className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Link href="/guides" className="transition hover:text-white">Гайды для артистов</Link>
+            <Link href="/plugins" className="transition hover:text-white">Плагины</Link>
+          </nav>
         </div>
         <div className="mx-auto max-w-7xl border-t border-white/[0.06] px-6 pb-8 pt-5 text-center text-[12.5px] leading-relaxed text-white/55 sm:px-8">
           <p>ИП Шманцарь Вячеслав Васильевич</p>

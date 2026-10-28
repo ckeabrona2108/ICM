@@ -143,6 +143,8 @@ export interface SmartLinkState {
   newsFeedLinks: SmartLinkNewsFeedLinks;
   sectionVisibility: SmartLinkSectionVisibility;
   coverVideoUrl: string;
+  /** MP4 from Snippet Studio, played muted in place of the cover. Same-origin storage path or empty. */
+  snippetVideoUrl: string;
   inlineVideos: SmartLinkVideoEntry[];
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
@@ -172,6 +174,8 @@ export interface SmartLinkOwnerView {
   newsFeedLinks: SmartLinkNewsFeedLinks;
   sectionVisibility: SmartLinkSectionVisibility;
   coverVideoUrl: string;
+  /** MP4 from Snippet Studio, played muted in place of the cover. Same-origin storage path or empty. */
+  snippetVideoUrl: string;
   inlineVideos: SmartLinkVideoEntry[];
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
@@ -223,6 +227,7 @@ export interface SmartLinkOwnerUpdateInput {
   newsFeedLinks?: Partial<SmartLinkNewsFeedLinks>;
   sectionVisibility?: Partial<SmartLinkSectionVisibility>;
   coverVideoUrl?: string | null;
+  snippetVideoUrl?: string | null;
   inlineVideos?: SmartLinkVideoEntry[];
   creditSections?: SmartLinkCreditSection[];
   contacts?: SmartLinkContactEntry[];
@@ -679,6 +684,7 @@ function readSmartLinkState(
       ? normalizeSectionVisibility(raw?.sectionVisibility)
       : getDefaultSectionVisibility(),
     coverVideoUrl: asString(raw?.coverVideoUrl) ?? "",
+    snippetVideoUrl: normalizeSnippetVideoUrl(raw?.snippetVideoUrl),
     inlineVideos: normalizeVideoEntries(raw?.inlineVideos, getDefaultInlineVideos()),
     creditSections: normalizeCreditSections(raw?.creditSections),
     contacts: normalizeInfoEntries(raw?.contacts, getDefaultContacts()),
@@ -687,6 +693,18 @@ function readSmartLinkState(
     autofillCheckedAt: asString(raw?.autofillCheckedAt),
     analytics: normalizeAnalytics(raw?.analytics)
   };
+}
+
+const SNIPPET_VIDEO_PATH = /^\/api\/uploads\/object\/uploads\/[0-9a-f-]{36}\/[A-Za-z0-9._%-]+\.mp4$/u;
+
+/** Only MP4s the artist uploaded to our own storage can play in the smart link header. */
+export function normalizeSnippetVideoUrl(value: unknown): string {
+  const raw = asString(value)?.trim() ?? "";
+  return SNIPPET_VIDEO_PATH.test(raw) ? raw : "";
+}
+
+function snippetVideoOwnerId(url: string): string | null {
+  return url.split("/")[5] ?? null;
 }
 
 function writeSmartLinkState(roles: unknown, nextState: SmartLinkState): Prisma.InputJsonValue {
@@ -1269,6 +1287,7 @@ async function buildOwnerViewFromRelease(params: {
     newsFeedLinks: state.newsFeedLinks,
     sectionVisibility: state.sectionVisibility,
     coverVideoUrl: state.coverVideoUrl,
+    snippetVideoUrl: state.snippetVideoUrl,
     inlineVideos: state.inlineVideos,
     creditSections: state.creditSections,
     contacts: state.contacts,
@@ -1735,6 +1754,14 @@ export async function updateSmartLinkOwnerSettings(params: {
   });
   if (!ownerView) return null;
 
+  if (params.input.snippetVideoUrl) {
+    const snippetVideoUrl = normalizeSnippetVideoUrl(params.input.snippetVideoUrl);
+    // A header video must be a file this artist uploaded, never someone else's.
+    if (!snippetVideoUrl || snippetVideoOwnerId(snippetVideoUrl) !== params.userId) {
+      throw new Error("INVALID_SNIPPET_VIDEO");
+    }
+  }
+
   if (typeof params.input.slug === "string" && params.input.slug.trim() !== ownerView.publicSlug) {
     if (!/[a-z0-9а-яё]/iu.test(params.input.slug)) {
       throw new Error("INVALID_SLUG");
@@ -1836,6 +1863,8 @@ function applySmartLinkOwnerInput(
       : currentState.sectionVisibility,
     coverVideoUrl:
       input.coverVideoUrl === undefined ? currentState.coverVideoUrl : normalizeSmartLinkHref(input.coverVideoUrl),
+    snippetVideoUrl:
+      input.snippetVideoUrl === undefined ? currentState.snippetVideoUrl : normalizeSnippetVideoUrl(input.snippetVideoUrl),
     inlineVideos: input.inlineVideos
       ? normalizeVideoEntries(input.inlineVideos, getDefaultInlineVideos()).map((row) => ({
           ...row,

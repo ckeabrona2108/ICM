@@ -747,6 +747,7 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
           dropTrackTime={dropTrackTime}
           fileBase={fileBase}
           smartLinkUrl={source?.smartLinkUrl ?? null}
+          releaseId={source?.releaseId ?? null}
           disabledReason={exportBlocker}
         />
       </section>

@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy, Download, Loader2, X } from "lucide-react";
+import { Check, Copy, Download, Link2, Loader2, X } from "lucide-react";
 
 import { renderSnippetVideo, SnippetExportUnsupportedError } from "@/components/video-snippets/render-snippet-video";
+import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
 import { cn } from "@/lib/utils";
 
 import { PlatformGlyph, type PlatformGlyphId } from "./platform-glyphs";
@@ -19,6 +20,14 @@ interface ExportJob {
   message: string;
   url: string | null;
   sizeMb: number | null;
+  smartLink: { status: "idle" | "uploading" | "done" | "error"; progress: number; message: string };
+}
+
+const SMART_LINK_IDLE: ExportJob["smartLink"] = { status: "idle", progress: 0, message: "" };
+
+/** Storage key → the same-origin path the smart link page plays from. */
+function objectPath(key: string) {
+  return `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
 }
 
 const FORMAT_GLYPHS: Record<SnippetFormatId, PlatformGlyphId[]> = {
@@ -58,6 +67,7 @@ export function StudioExport(props: {
   dropTrackTime: number | null;
   fileBase: string;
   smartLinkUrl: string | null;
+  releaseId: string | null;
   disabledReason: string | null;
 }) {
   const [formats, setFormats] = React.useState<Record<SnippetFormatId, boolean>>({ story: true, square: false, wide: false });
@@ -96,7 +106,7 @@ export function StudioExport(props: {
     const assets = { ...props.assets };
     const { clipStart, clipDuration, trackDuration, dropTrackTime } = props;
     revokeObjectUrls();
-    setJobs(selected.map((format) => ({ format, status: "queued", progress: 0, message: "В очереди", url: null, sizeMb: null })));
+    setJobs(selected.map((format) => ({ format, status: "queued", progress: 0, message: "В очереди", url: null, sizeMb: null, smartLink: SMART_LINK_IDLE })));
     await loadSceneFonts();
 
     for (const format of selected) {
@@ -161,6 +171,35 @@ export function StudioExport(props: {
       }
     }
     if (abortRef.current === controller) abortRef.current = null;
+  };
+
+  const putIntoSmartLink = async (job: ExportJob) => {
+    const releaseId = props.releaseId;
+    if (!job.url || !releaseId) return;
+    const setLink = (smartLink: ExportJob["smartLink"]) => updateJob(job.format, { smartLink });
+    setLink({ status: "uploading", progress: 0, message: "Загружаем видео…" });
+    try {
+      const blob = await fetch(job.url).then((response) => response.blob());
+      const uploaded = await uploadBrowserBlobToStorage({
+        fileName: `snippet-${job.format}.mp4`,
+        contentType: "video/mp4",
+        kind: "audio",
+        blob,
+        onProgress: (loaded, total) => setLink({ status: "uploading", progress: (loaded / Math.max(1, total)) * 100, message: "Загружаем видео…" })
+      });
+      const response = await fetch(`/api/releases/${releaseId}/smart-link`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ snippetVideoUrl: objectPath(uploaded.key) })
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Не удалось обновить смарт-линк");
+      }
+      setLink({ status: "done", progress: 100, message: "Видео стоит в шапке смарт-линка" });
+    } catch (error) {
+      setLink({ status: "error", progress: 0, message: error instanceof Error ? error.message : "Не удалось загрузить видео" });
+    }
   };
 
   const copy = async (value: string) => {
@@ -272,7 +311,33 @@ export function StudioExport(props: {
                 >
                   <Download className="h-4 w-4" /> Скачать MP4
                 </a>
-              ) : (
+              ) : null}
+              {job.status === "done" && job.url && props.releaseId && props.smartLinkUrl && job.format !== "wide" ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {job.smartLink.status === "done" ? (
+                    <a
+                      href={props.smartLinkUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#7df0c4]/40 bg-[#7df0c4]/10 px-4 text-[13px] font-semibold text-[#7df0c4]"
+                    >
+                      <Check className="h-4 w-4" /> {job.smartLink.message} · Открыть
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void putIntoSmartLink(job)}
+                      disabled={job.smartLink.status === "uploading"}
+                      className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-4 text-[13px] font-semibold text-white hover:bg-white/[0.08] disabled:opacity-60"
+                    >
+                      {job.smartLink.status === "uploading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+                      {job.smartLink.status === "uploading" ? `Загружаем… ${Math.round(job.smartLink.progress)}%` : "Поставить в шапку смарт-линка"}
+                    </button>
+                  )}
+                  {job.smartLink.status === "error" ? <span className="text-[12px] text-rose-300">{job.smartLink.message}</span> : null}
+                </div>
+              ) : null}
+              {job.status === "done" && job.url ? null : (
                 <div className="h-2 overflow-hidden rounded-full bg-white/10">
                   <div className="h-full rounded-full bg-gradient-to-r from-[#7b61ff] to-[#b3a6ff] transition-[width]" style={{ width: `${job.progress}%` }} />
                 </div>

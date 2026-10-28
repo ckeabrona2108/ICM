@@ -1736,15 +1736,33 @@ export async function getAnalyticsCountries(
   });
   if (releaseIds.length === 0) return { latestReportDate: null, countriesBreakdown: [] };
 
-  const where: Prisma.analytics_report_snapshotsWhereInput = {
+  let where: Prisma.analytics_report_snapshotsWhereInput = {
     user_id: params.user_id,
     release_id: { in: releaseIds },
     period_days: days
   };
-  const latest = await prisma.analytics_report_snapshots.aggregate({
+  let latest = await prisma.analytics_report_snapshots.aggregate({
     where,
     _max: { report_date: true }
   });
+  if (!latest._max.report_date) {
+    // Как и общие цифры: совместный релиз может быть заведён в двух аккаунтах с одним UPC,
+    // а отчёт привязывается только к одному из них. Тогда берём строки по UPC принятых релизов.
+    const accessibleReleases = await prisma.release.findMany({
+      where: { id: { in: releaseIds }, userId: params.user_id },
+      select: { upc: true }
+    });
+    const upcs = accessibleReleases
+      .map((release) => normalizeUpc(release.upc ?? undefined))
+      .filter((value): value is string => Boolean(value));
+    if (upcs.length > 0) {
+      where = { upc: { in: upcs }, period_days: days };
+      latest = await prisma.analytics_report_snapshots.aggregate({
+        where,
+        _max: { report_date: true }
+      });
+    }
+  }
   const latestReportDate = latest._max.report_date ?? null;
   if (!latestReportDate) return { latestReportDate: null, countriesBreakdown: [] };
 

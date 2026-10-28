@@ -32,7 +32,7 @@ function AnalyticsReleaseTableBase({
   const total = sorted.reduce((sum, release) => sum + release.streams, 0);
 
   return (
-    <AnalyticsCard title="Релизы" hint="Нажмите на релиз, чтобы показать только его">
+    <AnalyticsCard title="Релизы">
       {loading ? (
         <div className="space-y-2">
           <SkeletonBlock className="h-12 w-full" />

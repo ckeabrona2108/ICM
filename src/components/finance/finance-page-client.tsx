@@ -32,8 +32,8 @@ import { computeAvailableToWithdraw } from "@/lib/payouts";
 import type { PayoutRequestSummary } from "@/lib/payout-request";
 import { PayoutRequestWizard } from "@/components/finance/payout-request-wizard";
 
-const RevenueChart = dynamic(
-  () => import("@/components/charts/revenue-chart").then((module) => module.RevenueChart),
+const AccrualsChart = dynamic(
+  () => import("@/components/finance/accruals-chart").then((module) => module.AccrualsChart),
   {
     ssr: false,
     loading: () => (
@@ -81,7 +81,6 @@ export function FinancePageClient({
   initialAgreedBalance,
   initialPendingPayout,
   initialAccruals,
-  initialAccrualSeries,
   minimumPayoutAmount,
   payoutWindow,
   initialPayoutRequests,
@@ -464,9 +463,8 @@ export function FinancePageClient({
 
           {activeTab === "Начисления" ? (
             <PageSection className="mt-4">
-              <h2 className="text-[20px] font-semibold text-white">Начисления</h2>
-              <div className="mt-4">
-                <RevenueChart data={initialAccrualSeries} />
+              <div>
+                <AccrualsChart reports={reports} />
               </div>
 
               <div className="mt-6">

@@ -67,6 +67,11 @@ function toDate(value: Date): string {
   return value.toISOString().slice(0, 10);
 }
 
+function toReportDate(value: string | Date | null | undefined): string {
+  const date = value instanceof Date ? value : new Date(String(value ?? ""));
+  return Number.isNaN(date.getTime()) ? String(value ?? "").slice(0, 10) : toDate(date);
+}
+
 function decimalToNumber(value: unknown): number {
   return Number(value ?? 0);
 }
@@ -227,7 +232,7 @@ export async function getFinanceDashboardViewData(
   ).length;
   const accrualReports = reports.filter((report) => report.status !== "agreed");
 
-  const transactions: FinanceTransactionView[] = balanceTransactionsRaw
+  const ledgerTransactions: FinanceTransactionView[] = balanceTransactionsRaw
     .filter((transaction) => !isImportedRoyaltyTransaction(transaction))
     .map((transaction) => {
     const amount = decimalToNumber(transaction.amount);
@@ -285,12 +290,35 @@ export async function getFinanceDashboardViewData(
     };
     });
 
+  // A quarterly report is the artist-facing accrual: once agreed it shows up in wallet
+  // history as one line, instead of the hidden per-row royalties it was built from.
+  const reportAccruals: FinanceTransactionView[] = reportsRaw
+    .filter((report) => report.lifecycleState === "agreed")
+    .map((report) => ({
+      id: `report-${report.id}`,
+      date: toReportDate(report.agreedAt ?? report.periodEnd),
+      type: "Royalty" as const,
+      amount: decimalToNumber(report.amount),
+      status: "Completed" as const,
+      description: `Отчёт за ${report.quarterLabel}`,
+      releaseTitle: null,
+      trackTitle: null,
+      platformName: null,
+      sourceReference: null
+    }));
+  const transactions = [...ledgerTransactions, ...reportAccruals].sort((left, right) =>
+    String(right.date).localeCompare(String(left.date))
+  );
+
   const accruals = roundMoney(
     accrualReports.reduce((sum, report) => sum + decimalToNumber(report.amount), 0)
   );
 
+  // The chart shows every report that brings money (agreed or awaiting agreement);
+  // only reports sent back for rework are left out.
+  const chartReports = reports.filter((report) => report.status !== "changes_requested");
   const accrualByMonth = new Map<string, number>();
-  for (const report of accrualReports) {
+  for (const report of chartReports) {
     const date = new Date(report.periodEnd || report.periodStart);
     if (Number.isNaN(date.getTime()) || date < accrualWindowStart) {
       continue;

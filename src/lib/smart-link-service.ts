@@ -289,7 +289,7 @@ function isUuidLike(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value.trim());
 }
 
-function getBaseUrl(): string {
+export function getBaseUrl(): string {
   return (
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     process.env.NEXTAUTH_URL?.trim() ||
@@ -695,7 +695,7 @@ function writeSmartLinkState(roles: unknown, nextState: SmartLinkState): Prisma.
   return root as Prisma.InputJsonValue;
 }
 
-function deriveArtistName(input: {
+export function deriveArtistName(input: {
   performer?: string | null;
   userName?: string | null;
   roles?: unknown;

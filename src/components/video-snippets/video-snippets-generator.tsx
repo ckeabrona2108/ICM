@@ -24,6 +24,7 @@ import type { SubscriptionStateResponse } from "@/lib/api/contracts";
 import {
   formatSnippetTime,
   getEffectiveSegment,
+  getVideoSnippetCompositionSize,
   isAcceptedImageFile,
   normalizeVideoSnippetStyle,
   VIDEO_SNIPPET_BACKGROUNDS,
@@ -54,6 +55,9 @@ import type {
 } from "./video-snippet-state";
 import { useAudioAnalyzer } from "./use-audio-analyzer";
 import { useVideoRecorder } from "./use-video-recorder";
+import type { SnippetFrameDrawer } from "./render-snippet-video";
+
+const EXPORT_FPS = 30;
 
 interface VideoSnippetsGeneratorProps {
   initialSeed?: {
@@ -159,6 +163,7 @@ function ToggleControl(props: {
 
 export function VideoSnippetsGenerator({ initialSeed }: VideoSnippetsGeneratorProps) {
   const previewCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const exportRendererRef = React.useRef<SnippetFrameDrawer | null>(null);
   const previewUrlRef = React.useRef<string | null>(null);
   const coverUrlRef = React.useRef<string | null>(null);
   const backgroundUrlRef = React.useRef<string | null>(null);
@@ -324,7 +329,7 @@ export function VideoSnippetsGenerator({ initialSeed }: VideoSnippetsGeneratorPr
     autoDetectEnabled,
     startOffset
   });
-  const { recordState, start: startRecording } = useVideoRecorder({
+  const { recordState, start: startRecording, renderOffline, cancel: cancelRecording } = useVideoRecorder({
     canvasRef: previewCanvasRef,
     getAudioStream
   });
@@ -710,6 +715,24 @@ export function VideoSnippetsGenerator({ initialSeed }: VideoSnippetsGeneratorPr
       .replace(/[^a-z0-9а-яё]+/gi, "-")
       .replace(/^-+|-+$/g, "");
     const fileNameBase = safeTitle || "video-snippet";
+
+    const drawFrame = exportRendererRef.current;
+    if (resolvedAudioBuffer && drawFrame) {
+      await stop();
+      const { width, height } = getVideoSnippetCompositionSize(format);
+      const rendered = await renderOffline({
+        audioBuffer: resolvedAudioBuffer,
+        startTime: effectiveSegment.startTime,
+        durationSeconds: effectiveSegment.durationSeconds,
+        width,
+        height,
+        fps: EXPORT_FPS,
+        drawFrame,
+        fileNameBase
+      });
+      if (rendered) return;
+    }
+
     await startRecording({
       durationSeconds: effectiveSegment.durationSeconds,
       fileNameBase,
@@ -921,6 +944,7 @@ export function VideoSnippetsGenerator({ initialSeed }: VideoSnippetsGeneratorPr
               motionSpeed={snippetConfig.motionSpeed}
               backgroundBassPulse={snippetConfig.backgroundBassPulse}
               shouldAnimate={isPreviewAnimating}
+              exportRendererRef={exportRendererRef}
               className="h-full w-full"
             />
           </div>
@@ -1020,6 +1044,11 @@ export function VideoSnippetsGenerator({ initialSeed }: VideoSnippetsGeneratorPr
               <Sparkles className="h-4 w-4" />
               Generate Video
             </Button>
+            {recordState.status === "recording" ? (
+              <Button type="button" variant="ghost" onClick={cancelRecording} className="h-9 px-3 text-[13px]">
+                Отменить
+              </Button>
+            ) : null}
             {recordState.status === "complete" && recordState.downloadUrl ? (
               <a
                 href={recordState.downloadUrl}

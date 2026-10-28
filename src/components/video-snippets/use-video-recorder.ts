@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { renderSnippetVideo, SnippetExportUnsupportedError, type RenderSnippetVideoOptions } from "./render-snippet-video";
 import { defaultRecordState, type VideoRecordState } from "./video-snippet-state";
 
 function clamp(value: number, min: number, max: number) {
@@ -39,6 +40,7 @@ export function useVideoRecorder(params: {
   const chunksRef = React.useRef<BlobPart[]>([]);
   const progressTimerRef = React.useRef<number | null>(null);
   const stopTimerRef = React.useRef<number | null>(null);
+  const abortRef = React.useRef<AbortController | null>(null);
   const [recordState, setRecordState] = React.useState<VideoRecordState>(defaultRecordState);
 
   const clearTimers = React.useCallback(() => {
@@ -169,9 +171,81 @@ export function useVideoRecorder(params: {
     [canvasRef, clearTimers, getAudioStream, reset]
   );
 
+  /**
+   * Frame-by-frame MP4 export. Resolves `false` when the browser cannot encode
+   * offline, so the caller can fall back to real-time recording.
+   */
+  const renderOffline = React.useCallback(
+    async (options: Omit<RenderSnippetVideoOptions, "onProgress" | "signal"> & { fileNameBase: string }) => {
+      const { fileNameBase, ...renderOptions } = options;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      reset();
+      const fileName = `${fileNameBase}.mp4`;
+      setRecordState({
+        status: "recording",
+        progress: 0,
+        downloadUrl: null,
+        mimeType: "video/mp4",
+        fileName,
+        message: "Подготовка звука..."
+      });
+
+      try {
+        const blob = await renderSnippetVideo({
+          ...renderOptions,
+          signal: controller.signal,
+          onProgress: ({ frame, totalFrames, speed }) => {
+            const speedLabel = speed >= 1 ? ` · в ${speed.toFixed(1).replace(".", ",")}× быстрее реального времени` : "";
+            setRecordState((current) => ({
+              ...current,
+              progress: (frame / totalFrames) * 100,
+              message: `Кадр ${frame} / ${totalFrames}${speedLabel}`
+            }));
+          }
+        });
+        setRecordState({
+          status: "complete",
+          progress: 100,
+          downloadUrl: URL.createObjectURL(blob),
+          mimeType: "video/mp4",
+          fileName,
+          message: `Видео готово · MP4 · ${(blob.size / 1024 / 1024).toFixed(1).replace(".", ",")} МБ`
+        });
+        return true;
+      } catch (error) {
+        if (error instanceof SnippetExportUnsupportedError) {
+          setRecordState(defaultRecordState);
+          return false;
+        }
+        if (error instanceof DOMException && error.name === "AbortError") {
+          setRecordState({ ...defaultRecordState, message: "Рендер отменён" });
+          return true;
+        }
+        console.error("[VideoSnippets] offline render failed", error);
+        setRecordState({ ...defaultRecordState, status: "error", message: "Не удалось собрать видео" });
+        return true;
+      } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      }
+    },
+    [reset]
+  );
+
+  const cancel = React.useCallback(() => {
+    abortRef.current?.abort();
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+  }, []);
+
   React.useEffect(() => {
     return () => {
       clearTimers();
+      abortRef.current?.abort();
       if (recorderRef.current?.state === "recording") {
         recorderRef.current.stop();
       }
@@ -181,6 +255,8 @@ export function useVideoRecorder(params: {
   return {
     recordState,
     start,
+    renderOffline,
+    cancel,
     reset
   };
 }

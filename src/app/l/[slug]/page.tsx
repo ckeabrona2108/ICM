@@ -192,11 +192,17 @@ export default async function SmartLinkPublicPage({
   const platformCardSurface = isLightTheme
     ? "border-black/[0.06] bg-white/90 text-[#111114] shadow-[0_12px_28px_-24px_rgba(72,86,122,0.25)] hover:bg-white"
     : "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md hover:border-white/20 hover:bg-white/[0.12]";
-  const coverPanel = data.snippetVideoUrl ? (
-    <div className="mx-auto aspect-[9/16] w-full max-w-[270px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
-      <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} />
+  const hasSnippet = Boolean(data.snippetVideoUrl);
+  // On phones the snippet replaces the cover at the top; on wide screens it gets its own column.
+  const snippetPanel = data.snippetVideoUrl ? (
+    <div className="relative mx-auto w-full max-w-[270px] lg:max-w-none">
+      <div aria-hidden="true" className="absolute -inset-8 hidden rounded-[48px] bg-[#7b61ff]/25 blur-3xl lg:block" />
+      <div className="relative aspect-[9/16] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10 lg:rounded-[28px] lg:shadow-[0_50px_120px_-30px_rgba(0,0,0,0.85)]">
+        <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} />
+      </div>
     </div>
-  ) : (
+  ) : null;
+  const coverPanel = hasSnippet ? null : (
     <div className="mx-auto aspect-square w-full max-w-[240px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
       {data.coverUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -210,11 +216,13 @@ export default async function SmartLinkPublicPage({
   );
 
   const headerPanel = (
-    <div className="text-center">
-      <h1 className={`text-[26px] font-bold leading-tight tracking-[-0.03em] sm:text-[28px] ${isLightTheme ? "text-[#111114]" : "text-white"}`}>
+    <div className={hasSnippet ? "text-center lg:text-left" : "text-center"}>
+      <h1
+        className={`text-[26px] font-bold leading-tight tracking-[-0.03em] sm:text-[28px] ${hasSnippet ? "lg:text-[44px]" : ""} ${isLightTheme ? "text-[#111114]" : "text-white"}`}
+      >
         {data.title}
       </h1>
-      <div className={`mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-[14px] ${softText}`}>
+      <div className={`mt-1.5 flex flex-wrap items-center justify-center gap-1.5 text-[14px] ${hasSnippet ? "lg:justify-start lg:text-[16px]" : ""} ${softText}`}>
         <span>{data.artist}</span>
         <span aria-hidden="true">·</span>
         <span>{data.releaseDate.slice(0, 4)}</span>
@@ -386,7 +394,7 @@ export default async function SmartLinkPublicPage({
       )}
       <SmartLinkViewTracker slug={data.publicSlug} />
       {pixelIds ? <SmartLinkPixels ids={pixelIds} /> : null}
-      <div className="relative z-[1] mx-auto max-w-[440px] pb-8">
+      <div className={`relative z-[1] mx-auto max-w-[440px] pb-8 ${hasSnippet ? "lg:max-w-[1040px]" : ""}`}>
         <div className="mb-3 flex justify-end">
           <SmartLinkShareButton links={shareLinks} publicUrl={data.publicUrl} theme={isLightTheme ? "light" : "dark"} />
         </div>
@@ -398,7 +406,9 @@ export default async function SmartLinkPublicPage({
             }`}
           />
         ) : null}
-        <div className={`relative ${shellSurface}`}>
+        <div className={hasSnippet ? "lg:grid lg:grid-cols-[380px_minmax(0,460px)] lg:items-start lg:justify-center lg:gap-16" : undefined}>
+        {snippetPanel ? <aside className="mb-5 lg:sticky lg:top-8 lg:mb-0">{snippetPanel}</aside> : null}
+        <div className={`relative ${shellSurface} ${hasSnippet ? "lg:pt-6" : ""}`}>
           {isLightTheme ? (
             <div
               aria-hidden="true"
@@ -634,6 +644,7 @@ export default async function SmartLinkPublicPage({
               </Link>
             </div>
           </div>
+        </div>
         </div>
     </main>
   );

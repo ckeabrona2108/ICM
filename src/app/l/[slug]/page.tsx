@@ -6,6 +6,7 @@ import { cache } from "react";
 import { ExternalLink, Mail, Music2, Send, Video } from "lucide-react";
 
 import { SmartLinkPlatformIcon } from "@/components/smart-link/platform-icon";
+import { SmartLinkCoverVideo } from "@/components/smart-link/smart-link-cover-video";
 import { SmartLinkCountdown } from "@/components/smart-link/smart-link-countdown";
 import { SmartLinkPixels } from "@/components/smart-link/smart-link-pixels";
 import { SmartLinkPublicModeSwitcher } from "@/components/smart-link/smart-link-public-mode-switcher";
@@ -191,7 +192,11 @@ export default async function SmartLinkPublicPage({
   const platformCardSurface = isLightTheme
     ? "border-black/[0.06] bg-white/90 text-[#111114] shadow-[0_12px_28px_-24px_rgba(72,86,122,0.25)] hover:bg-white"
     : "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md hover:border-white/20 hover:bg-white/[0.12]";
-  const coverPanel = (
+  const coverPanel = data.snippetVideoUrl ? (
+    <div className="mx-auto aspect-[9/16] w-full max-w-[270px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
+      <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} />
+    </div>
+  ) : (
     <div className="mx-auto aspect-square w-full max-w-[240px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
       {data.coverUrl ? (
         // eslint-disable-next-line @next/next/no-img-element

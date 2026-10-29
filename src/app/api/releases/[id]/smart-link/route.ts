@@ -62,6 +62,9 @@ export async function PATCH(
     if (error instanceof Error && error.message === "SLUG_ALREADY_EXISTS") {
       return NextResponse.json({ error: "Этот slug уже занят." }, { status: 409 });
     }
+    if (error instanceof Error && error.message === "INVALID_SNIPPET_VIDEO") {
+      return NextResponse.json({ error: "Видео для шапки должно быть загружено из студии сниппетов." }, { status: 400 });
+    }
     if (error instanceof Error && error.message === "INVALID_SLUG") {
       return NextResponse.json({ error: "Короткая ссылка должна содержать буквы или цифры." }, { status: 400 });
     }

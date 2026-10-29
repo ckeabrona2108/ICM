@@ -12,6 +12,7 @@ import type {
 } from "@/lib/video-snippets";
 
 import { renderFrame, type CoverImage } from "./render-snippet-frame";
+import type { SnippetFrameDrawer } from "./render-snippet-video";
 import { useCanvasRenderer } from "./use-canvas-renderer";
 import type {
   BassReactionControlsState,
@@ -100,6 +101,8 @@ interface VideoSnippetPreviewProps {
   motionSpeed: number;
   backgroundBassPulse: number;
   shouldAnimate: boolean;
+  /** Filled with a drawer that renders this exact scene for any playback frame — used by the offline MP4 export. */
+  exportRendererRef?: React.MutableRefObject<SnippetFrameDrawer | null>;
   className?: string;
 }
 
@@ -225,6 +228,7 @@ const VideoSnippetPreviewBase = React.forwardRef<HTMLCanvasElement, VideoSnippet
       motionSpeed,
       backgroundBassPulse,
       shouldAnimate,
+      exportRendererRef,
       className
     }: VideoSnippetPreviewProps,
     forwardedRef
@@ -327,9 +331,8 @@ const VideoSnippetPreviewBase = React.forwardRef<HTMLCanvasElement, VideoSnippet
       };
     }, [backgroundControls.customBackgroundUrl]);
 
-    const draw = React.useCallback(
-      (context: CanvasRenderingContext2D, width: number, height: number) => {
-        const state: VideoSnippetRenderState = {
+    const buildState = React.useCallback(
+      (width: number, height: number, playback: VideoSnippetPlaybackFrame | null): VideoSnippetRenderState => ({
           width,
           height,
           config: {
@@ -409,26 +412,14 @@ const VideoSnippetPreviewBase = React.forwardRef<HTMLCanvasElement, VideoSnippet
             motionSpeed,
             backgroundBassPulse
           },
-          playback: analysisRef.current,
+          playback,
           cover: coverRef.current,
           background: backgroundRef.current
-        };
-        try {
-          renderFrame(context, state);
-        } catch (error) {
-          console.error("[VideoSnippets] preview render failed", error);
-          drawPreviewFallback(context, width, height, {
-            accentColor,
-            title,
-            artist,
-            showWatermark
-          });
-        }
-      },
+      }),
       [
         accentColor,
-        analysisRef,
         artist,
+        showWatermark,
         backgroundEffect,
         blurBackground,
         coverUrl,
@@ -458,6 +449,20 @@ const VideoSnippetPreviewBase = React.forwardRef<HTMLCanvasElement, VideoSnippet
         spectrumHeightScale,
         spectrumOffsetX,
         spectrumOffsetY,
+        spectrumInvert,
+        spectrumDiameter,
+        spectrumImageSize,
+        spectrumPositionX,
+        spectrumPositionY,
+        spectrumWaveHeight,
+        spectrumSeparation,
+        spectrumRotation,
+        spectrumCenterCutout,
+        spectrumGlowStrength,
+        spectrumThickness,
+        spectrumLayers,
+        spectrumSensitivityBoost,
+        spectrumSmoothnessBoost,
         orbSize,
         orbRingThickness,
         orbRingGlow,
@@ -490,6 +495,33 @@ const VideoSnippetPreviewBase = React.forwardRef<HTMLCanvasElement, VideoSnippet
         coverVersion
       ]
     );
+
+    const draw = React.useCallback(
+      (context: CanvasRenderingContext2D, width: number, height: number) => {
+        try {
+          renderFrame(context, buildState(width, height, analysisRef.current));
+        } catch (error) {
+          console.error("[VideoSnippets] preview render failed", error);
+          drawPreviewFallback(context, width, height, {
+            accentColor,
+            title,
+            artist,
+            showWatermark
+          });
+        }
+      },
+      [accentColor, analysisRef, artist, buildState, showWatermark, title]
+    );
+
+    React.useEffect(() => {
+      if (!exportRendererRef) return;
+      exportRendererRef.current = (context, width, height, playback) => {
+        renderFrame(context, buildState(width, height, playback));
+      };
+      return () => {
+        exportRendererRef.current = null;
+      };
+    }, [buildState, exportRendererRef]);
 
     useCanvasRenderer({
       canvasRef,

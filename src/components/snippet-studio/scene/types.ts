@@ -23,6 +23,7 @@ export type TemplateId =
 export type TemplateCategory = "classic" | "design" | "audio";
 
 export type BackgroundId =
+  | "auto"
   | "cover-blur"
   | "lava"
   | "aurora"
@@ -159,6 +160,7 @@ export const TEMPLATE_LIST: Array<{ id: TemplateId; name: string; category: Temp
 ];
 
 export const BACKGROUND_LIST: Array<{ id: BackgroundId; name: string; description: string }> = [
+  { id: "auto", name: "Как в шаблоне", description: "Родной фон шаблона: красный у «Эха», плёнка у «Плёнки», лава у остальных" },
   { id: "cover-blur", name: "Размытая обложка", description: "Обложка на весь кадр, сильно размыта" },
   { id: "lava", name: "Лава", description: "Пятна цвета обложки плавают и сливаются" },
   { id: "aurora", name: "Аврора", description: "Ленты света волнами проходят через кадр" },
@@ -176,7 +178,7 @@ export const DEFAULT_PALETTE: [string, string, string, string] = ["#7b61ff", "#f
 export function createDefaultSceneSettings(): SceneSettings {
   return {
     template: "premiere",
-    background: "lava",
+    background: "auto",
     backgroundSpeed: 1,
     backgroundBlur: 0.6,
     backgroundBeat: true,

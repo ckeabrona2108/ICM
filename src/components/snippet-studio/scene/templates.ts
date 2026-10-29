@@ -33,8 +33,10 @@ interface ColumnItem {
 }
 
 export interface TemplateDefinition {
-  /** Templates with their own backdrop (paper, film…) skip the live background. */
+  /** The template's own backdrop, used when the background is "as in template". */
   ownBackground?: (scene: SceneContext) => void;
+  /** Paper and full-bleed templates are built around their backdrop and never take a live one. */
+  keepsOwnBackground?: boolean;
   draw: (scene: SceneContext) => void;
 }
 
@@ -561,6 +563,7 @@ const PAPER = "#f1ece2";
 const INK = "#111111";
 
 const headline: TemplateDefinition = {
+  keepsOwnBackground: true,
   ownBackground(scene) {
     scene.ctx.fillStyle = PAPER;
     scene.ctx.fillRect(0, 0, scene.width, scene.height);
@@ -799,6 +802,7 @@ function halftoneGrid(scene: SceneContext) {
 }
 
 const halftone: TemplateDefinition = {
+  keepsOwnBackground: true,
   ownBackground(scene) {
     scene.ctx.fillStyle = PAPER;
     scene.ctx.fillRect(0, 0, scene.width, scene.height);
@@ -918,6 +922,7 @@ const film: TemplateDefinition = {
 // ——— Audio-reactive ———
 
 const glitch: TemplateDefinition = {
+  keepsOwnBackground: true,
   ownBackground(scene) {
     const { ctx, width, height, settings, frame } = scene;
     ctx.fillStyle = "#050508";

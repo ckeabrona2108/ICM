@@ -104,7 +104,8 @@ function paintLayer(scene: SceneContext, small: CanvasRenderingContext2D, width:
     small.restore();
   };
 
-  switch (settings.background) {
+  // "auto" on a template without a backdrop of its own means the house default.
+  switch (settings.background === "auto" ? "lava" : settings.background) {
     case "solid": {
       fillBase(base);
       blob(small, width * 0.5, height * 0.38, size * 0.7, mix(base, accentA, 0.35), 0.8);

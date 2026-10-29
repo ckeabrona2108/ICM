@@ -63,6 +63,9 @@ export function extractPalette(image: CanvasImageSource | null): [string, string
       if (accents.length === 3) break;
     }
     const fallbackAccents = DEFAULT_PALETTE.slice(0, 3);
+    // A black-and-white cover has no colour to give: every live background would come
+    // out as grey on grey. Use the ICM violet, pink and cyan instead.
+    if (accents.every((accent) => saturation(accent) < 0.18)) return [...DEFAULT_PALETTE];
     const accentHex = [0, 1, 2].map((index) => (accents[index] ? toHex(accents[index]) : fallbackAccents[index]));
 
     const darkest = [...colours].sort((a, b) => luminance(a.rgb) - luminance(b.rgb))[0]?.rgb;

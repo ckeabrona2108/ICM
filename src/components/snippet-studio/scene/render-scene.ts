@@ -83,7 +83,8 @@ export class SceneRenderer {
     ctx.scale(zoom, zoom);
     ctx.translate(-width / 2, -height / 2);
 
-    if (template.ownBackground) {
+    const useOwnBackground = template.ownBackground && (template.keepsOwnBackground || settings.background === "auto");
+    if (template.ownBackground && useOwnBackground) {
       template.ownBackground(scene);
     } else {
       this.background.paint(scene);

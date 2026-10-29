@@ -442,7 +442,7 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
       ].filter((marker) => marker.time > 0 && marker.time < trackDuration)
     : [];
 
-  const templateOwnsBackground = Boolean(TEMPLATES[settings.template].ownBackground);
+  const templateKeepsBackground = Boolean(TEMPLATES[settings.template].keepsOwnBackground);
   const fileBase = (settings.text.title || "snippet").toLowerCase().replace(/[^a-z0-9а-яё]+/giu, "-").replace(/^-+|-+$/gu, "") || "snippet";
   const exportBlocker = !isReady || !resolvedAudioBuffer ? "Сначала выбери релиз или загрузи трек" : null;
 
@@ -663,9 +663,9 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
 
           {tab === "background" ? (
             <div className="flex flex-col gap-4">
-              {templateOwnsBackground ? (
-                <p className="rounded-xl border border-dashed border-white/15 px-3 py-2.5 text-[12px] text-white/65">
-                  У шаблона «{TEMPLATE_LIST.find((item) => item.id === settings.template)?.name}» свой фон. Живые фоны работают с «Премьерой», «Винилом», «Стеклом», «Плеером» и «Неон-орбом».
+              {templateKeepsBackground ? (
+                <p className="rounded-xl border border-amber-300/30 bg-amber-300/[0.06] px-3 py-2.5 text-[12px] leading-relaxed text-amber-100/85">
+                  «{TEMPLATE_LIST.find((item) => item.id === settings.template)?.name}» построен вокруг своего фона, поэтому живой фон к нему не применяется. Он работает во всех остальных шаблонах.
                 </p>
               ) : null}
               <div className="grid grid-cols-4 gap-2">

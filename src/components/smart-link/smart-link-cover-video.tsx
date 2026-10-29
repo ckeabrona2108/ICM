@@ -38,7 +38,7 @@ export function SmartLinkCoverVideo({ src, poster, title }: { src: string; poste
         type="button"
         onClick={toggleSound}
         aria-label={muted ? "Включить звук" : "Выключить звук"}
-        className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md transition hover:bg-black/70"
+        className="absolute right-3 top-3 z-[2] flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md transition hover:bg-black/70"
       >
         {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
       </button>

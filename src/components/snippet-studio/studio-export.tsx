@@ -4,11 +4,11 @@ import * as React from "react";
 import { Check, Copy, Download, Link2, Loader2, X } from "lucide-react";
 
 import { renderSnippetVideo, SnippetExportUnsupportedError } from "@/components/video-snippets/render-snippet-video";
-import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
 import { cn } from "@/lib/utils";
 
 import { PlatformGlyph, type PlatformGlyphId } from "./platform-glyphs";
 import { SceneRenderer } from "./scene/render-scene";
+import { uploadSnippetToSmartLink } from "./smart-link-publish";
 import { SNIPPET_FORMATS, type SceneAssets, type SceneSettings, type SnippetFormatId } from "./scene/types";
 
 type JobStatus = "queued" | "rendering" | "done" | "error" | "canceled";
@@ -25,10 +25,7 @@ interface ExportJob {
 
 const SMART_LINK_IDLE: ExportJob["smartLink"] = { status: "idle", progress: 0, message: "" };
 
-/** Storage key → the same-origin path the smart link page plays from. */
-function objectPath(key: string) {
-  return `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
-}
+
 
 const FORMAT_GLYPHS: Record<SnippetFormatId, PlatformGlyphId[]> = {
   story: ["tiktok", "instagram", "vk", "youtubeShorts"],
@@ -180,22 +177,12 @@ export function StudioExport(props: {
     setLink({ status: "uploading", progress: 0, message: "Загружаем видео…" });
     try {
       const blob = await fetch(job.url).then((response) => response.blob());
-      const uploaded = await uploadBrowserBlobToStorage({
-        fileName: `snippet-${job.format}.mp4`,
-        contentType: "video/mp4",
-        kind: "audio",
+      await uploadSnippetToSmartLink({
+        releaseId,
         blob,
-        onProgress: (loaded, total) => setLink({ status: "uploading", progress: (loaded / Math.max(1, total)) * 100, message: "Загружаем видео…" })
+        fileName: `snippet-${job.format}.mp4`,
+        onProgress: (fraction) => setLink({ status: "uploading", progress: fraction * 100, message: "Загружаем видео…" })
       });
-      const response = await fetch(`/api/releases/${releaseId}/smart-link`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ snippetVideoUrl: objectPath(uploaded.key) })
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? "Не удалось обновить смарт-линк");
-      }
       setLink({ status: "done", progress: 100, message: "Видео стоит в шапке смарт-линка" });
     } catch (error) {
       setLink({ status: "error", progress: 0, message: error instanceof Error ? error.message : "Не удалось загрузить видео" });

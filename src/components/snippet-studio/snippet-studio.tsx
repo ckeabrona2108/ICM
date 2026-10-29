@@ -217,7 +217,7 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
   const canRemoveWatermark = plan === "PRO" || plan === "ENTERPRISE";
   const source = sources?.find((item) => item.releaseId === releaseId) ?? null;
 
-  const { analysisRef, analysis, analysisStatus, resolvedAudioBuffer, currentTime, durationSeconds, isPlaying, isReady, play, pause, stop } = useAudioAnalyzer({
+  const { analysisRef, analysis, resolvedAudioBuffer, currentTime, durationSeconds, isPlaying, isReady, play, pause, stop } = useAudioAnalyzer({
     audioUrl: audioFile ? null : audioUrl,
     audioFile,
     audioBuffer: null,
@@ -454,23 +454,24 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
   return (
     <div className="flex flex-col gap-5 text-white">
       {/* Source */}
-      <section aria-label="Релиз и трек" className={cn(card, "flex flex-wrap items-center gap-4")}>
-        <div className="flex min-w-0 flex-[1_1_100%] items-center gap-3 md:flex-[1_1_320px]">
-          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-white/[0.06]">
-            {coverUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={coverUrl} alt="" className="h-full w-full object-cover" />
-            ) : (
-              <Music2 className="m-4 h-6 w-6 text-white/40" />
-            )}
-          </div>
-          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-            <label className="relative">
+      <section aria-label="Релиз и трек" className={cn(card, "flex items-center gap-4")}>
+        <div className="relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-2xl bg-white/[0.06] shadow-[0_12px_30px_-12px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
+          {coverUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={coverUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <Music2 className="absolute inset-0 m-auto h-7 w-7 text-white/35" />
+          )}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-white/50">Трек для сниппета</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="relative min-w-[220px] flex-[1_1_260px]">
               <span className="sr-only">Релиз из каталога</span>
               <select
                 value={releaseId}
                 onChange={(event) => void selectRelease(event.target.value)}
-                className="h-11 w-full appearance-none truncate rounded-xl border border-white/10 bg-[#11131f] pl-3 pr-9 text-[14px] font-semibold text-white"
+                className="h-12 w-full appearance-none truncate rounded-2xl border border-white/10 bg-white/[0.04] pl-4 pr-10 text-[15px] font-semibold text-white transition-colors hover:border-white/20 focus:border-[#8b72ff]/70 focus:outline-none"
               >
                 <option value="">{sources === null ? "Загружаем релизы…" : sources.length ? "Выбери релиз из каталога" : "Релизов с треками пока нет"}</option>
                 {(sources ?? []).map((item) => (
@@ -479,46 +480,59 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
                   </option>
                 ))}
               </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-white/60" />
+              <ChevronDown className="pointer-events-none absolute right-4 top-4 h-4 w-4 text-white/55" />
             </label>
-            <span className="flex min-w-0 items-center gap-2 text-[12px] text-white/60">
-              <span className="truncate">
-                {audioStatus ?? (audioFile ? `Свой файл: ${audioFile.name}` : source ? `Обложка, название и смарт-линк подставлены из релиза` : analysisStatus)}
-              </span>
-              {audioStatus && releaseId && !audioStatus.startsWith("Ищем") ? (
-                <button type="button" onClick={() => void selectRelease(releaseId, trackIndex ?? undefined)} className="shrink-0 font-semibold text-[#b3a6ff] hover:text-[#d6ceff]">
-                  Повторить
-                </button>
-              ) : null}
-            </span>
+            {source && source.tracks.length > 1 ? (
+              <label className="relative min-w-[160px] flex-[0_1_220px]">
+                <span className="sr-only">Трек</span>
+                <select
+                  value={trackIndex ?? ""}
+                  onChange={(event) => void selectRelease(releaseId, Number(event.target.value))}
+                  className="h-12 w-full appearance-none truncate rounded-2xl border border-white/10 bg-white/[0.04] pl-4 pr-10 text-[14px] font-medium text-white hover:border-white/20 focus:border-[#8b72ff]/70 focus:outline-none"
+                >
+                  {source.tracks.map((track) => (
+                    <option key={track.index} value={track.index}>
+                      {track.title}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-4 top-4 h-4 w-4 text-white/55" />
+              </label>
+            ) : null}
+            <div className="flex h-12 shrink-0 items-center rounded-2xl border border-white/10 bg-white/[0.04] p-1">
+              <label className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-white/85 hover:bg-white/[0.08]">
+                <Upload className="h-4 w-4" /> Свой трек
+                <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" className="sr-only" onChange={(event) => void onAudioUpload(event.target.files?.[0] ?? null)} />
+              </label>
+              <span aria-hidden="true" className="h-5 w-px bg-white/10" />
+              <label className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-white/85 hover:bg-white/[0.08]">
+                <Upload className="h-4 w-4" /> Обложка
+                <input type="file" accept=".jpg,.jpeg,.png,.webp,image/*" className="sr-only" onChange={(event) => onCoverUpload(event.target.files?.[0] ?? null)} />
+              </label>
+            </div>
           </div>
-        </div>
-        {source && source.tracks.length > 1 ? (
-          <label className="relative">
-            <span className="sr-only">Трек</span>
-            <select
-              value={trackIndex ?? ""}
-              onChange={(event) => void selectRelease(releaseId, Number(event.target.value))}
-              className="h-11 appearance-none rounded-xl border border-white/10 bg-[#11131f] pl-3 pr-9 text-[14px] text-white"
-            >
-              {source.tracks.map((track) => (
-                <option key={track.index} value={track.index}>
-                  {track.title}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-white/60" />
-          </label>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 text-[13px] font-medium text-white/85 hover:bg-white/[0.08]">
-            <Upload className="h-4 w-4" /> Свой трек
-            <input type="file" accept=".mp3,.wav,.m4a,.aac,audio/*" className="sr-only" onChange={(event) => void onAudioUpload(event.target.files?.[0] ?? null)} />
-          </label>
-          <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 text-[13px] font-medium text-white/85 hover:bg-white/[0.08]">
-            <Upload className="h-4 w-4" /> Обложка
-            <input type="file" accept=".jpg,.jpeg,.png,.webp,image/*" className="sr-only" onChange={(event) => onCoverUpload(event.target.files?.[0] ?? null)} />
-          </label>
+          <span className="flex min-w-0 items-center gap-2 text-[12px] text-white/60">
+            <span
+              aria-hidden="true"
+              className={cn(
+                "h-2 w-2 shrink-0 rounded-full",
+                isReady ? "bg-[#7df0c4]" : audioStatus && !audioStatus.startsWith("Ищем") ? "bg-rose-400" : releaseId || audioFile ? "animate-pulse bg-amber-300" : "bg-white/25"
+              )}
+            />
+            <span className="truncate">
+              {audioStatus ??
+                (isReady
+                  ? `${audioFile ? audioFile.name : "Трек загружен"} · ${formatSnippetTime(trackDuration)} · фрагмент ${formatSnippetTime(segment.startTime)}–${formatSnippetTime(segment.endTime)}`
+                  : audioFile || releaseId
+                    ? "Загружаем трек…"
+                    : "Выбери релиз — обложка, название и смарт-линк подставятся сами")}
+            </span>
+            {audioStatus && releaseId && !audioStatus.startsWith("Ищем") ? (
+              <button type="button" onClick={() => void selectRelease(releaseId, trackIndex ?? undefined)} className="shrink-0 font-semibold text-[#b3a6ff] hover:text-[#d6ceff]">
+                Повторить
+              </button>
+            ) : null}
+          </span>
         </div>
       </section>
 

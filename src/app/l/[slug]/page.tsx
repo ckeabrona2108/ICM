@@ -192,13 +192,9 @@ export default async function SmartLinkPublicPage({
   const platformCardSurface = isLightTheme
     ? "border-black/[0.06] bg-white/90 text-[#111114] shadow-[0_12px_28px_-24px_rgba(72,86,122,0.25)] hover:bg-white"
     : "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md hover:border-white/20 hover:bg-white/[0.12]";
-  // A studio snippet plays whole, edge to edge, in place of the cover.
-  const snippetPanel = data.snippetVideoUrl ? (
-    <div className="relative mx-auto aspect-[9/16] w-full max-w-[380px] overflow-hidden rounded-[28px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.8)] ring-1 ring-white/10">
-      <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} />
-    </div>
-  ) : null;
-  const coverPanel = snippetPanel ?? (
+  const hasPhoneSnippet = Boolean(data.snippetVideoUrl);
+  const hasWideSnippet = Boolean(data.snippetVideoWideUrl);
+  const coverPhoto = (
     <div className="mx-auto aspect-square w-full max-w-[240px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
       {data.coverUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -209,6 +205,18 @@ export default async function SmartLinkPublicPage({
         </div>
       )}
     </div>
+  );
+  // Wide screens play the 16:9 studio clip when there is one; otherwise, and on phones
+  // without a vertical clip, the plain cover stays.
+  const coverPanel = (
+    <>
+      {data.snippetVideoWideUrl ? (
+        <div className="hidden aspect-video w-full overflow-hidden rounded-[22px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.8)] ring-1 ring-white/10 lg:block">
+          <SmartLinkCoverVideo src={data.snippetVideoWideUrl} poster={data.coverUrl} title={data.title} media="(min-width: 1024px)" />
+        </div>
+      ) : null}
+      {hasWideSnippet ? <div className="lg:hidden">{coverPhoto}</div> : coverPhoto}
+    </>
   );
 
   const headerPanel = (
@@ -348,6 +356,28 @@ export default async function SmartLinkPublicPage({
     </section>
   );
 
+  // Phones with a vertical clip get it as the whole first screen, with the platform
+  // buttons laid over its darkened lower part — no scrolling to reach them.
+  const phoneHero = data.snippetVideoUrl ? (
+    <section className="relative h-[calc(100dvh-24px)] w-full overflow-hidden rounded-[28px] bg-black ring-1 ring-white/10 sm:h-[calc(100dvh-40px)] lg:hidden">
+      <div className="absolute inset-0">
+        <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} media="(max-width: 1023px)" />
+      </div>
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-b from-transparent via-black/50 to-black/90" />
+      <div className="absolute left-3 top-3 z-[2]">
+        <SmartLinkShareButton links={shareLinks} publicUrl={data.publicUrl} theme="dark" />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 z-[1] flex max-h-[68%] flex-col gap-3 overflow-y-auto px-3.5 pb-4 text-white">
+        {/* The snippet already shows the title; the page name stays for screen readers. */}
+        <h1 className="sr-only">
+          {data.title} — {data.artist}
+        </h1>
+        {presavePanel}
+        {releaseLinksPanel}
+      </div>
+    </section>
+  ) : null;
+
   return (
     <main
       className={`perf-scroll-shell relative h-[100dvh] overflow-x-hidden overflow-y-auto touch-pan-y px-2.5 py-3 [webkit-overflow-scrolling:touch] sm:px-4 sm:py-5 lg:px-8 ${
@@ -388,8 +418,9 @@ export default async function SmartLinkPublicPage({
       )}
       <SmartLinkViewTracker slug={data.publicSlug} />
       {pixelIds ? <SmartLinkPixels ids={pixelIds} /> : null}
-      <div className="relative z-[1] mx-auto max-w-[440px] pb-8">
-        <div className="mb-3 flex justify-end">
+      <div className={`relative z-[1] mx-auto max-w-[440px] pb-8 ${hasWideSnippet ? "lg:max-w-[620px]" : ""}`}>
+        {phoneHero}
+        <div className={`mb-3 justify-end ${hasPhoneSnippet ? "hidden lg:flex" : "flex"}`}>
           <SmartLinkShareButton links={shareLinks} publicUrl={data.publicUrl} theme={isLightTheme ? "light" : "dark"} />
         </div>
         {showCoverBackground ? (
@@ -407,7 +438,9 @@ export default async function SmartLinkPublicPage({
               className="pointer-events-none absolute inset-x-8 top-0 h-24 rounded-full bg-[radial-gradient(circle,rgba(123,61,245,0.12)_0%,rgba(123,61,245,0.04)_46%,transparent_76%)] blur-3xl"
             />
           ) : null}
-          <div className="space-y-5">
+          <div className={`space-y-5 ${hasPhoneSnippet ? "mt-5 lg:mt-0" : ""}`}>
+            {/* On phones with a vertical clip, the hero above already holds all of this. */}
+            <div className={hasPhoneSnippet ? "hidden lg:block" : "contents"}>
             {hasNewsFeed ? (
               <SmartLinkPublicModeSwitcher
                 coverContent={coverPanel}
@@ -422,15 +455,16 @@ export default async function SmartLinkPublicPage({
                 theme={isLightTheme ? "light" : "dark"}
               />
             ) : (
-              <>
+              <div className="space-y-5">
                 {coverPanel}
                 {headerPanel}
                 <div className="space-y-2.5">
                   {presavePanel}
                   {releaseLinksPanel}
                 </div>
-              </>
+              </div>
             )}
+            </div>
 
               {data.sectionVisibility.videos && (coverVideoEmbedUrl || safeSmartLinkHref(data.coverVideoUrl)) ? (
                 <section className={`rounded-[18px] border p-3 ${sectionSurface}`}>

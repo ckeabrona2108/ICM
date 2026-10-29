@@ -143,8 +143,10 @@ export interface SmartLinkState {
   newsFeedLinks: SmartLinkNewsFeedLinks;
   sectionVisibility: SmartLinkSectionVisibility;
   coverVideoUrl: string;
-  /** MP4 from Snippet Studio, played muted in place of the cover. Same-origin storage path or empty. */
+  /** Vertical MP4 from Snippet Studio, the full first screen on phones. Same-origin storage path or empty. */
   snippetVideoUrl: string;
+  /** 16:9 MP4 from Snippet Studio, shown in place of the cover on wide screens. */
+  snippetVideoWideUrl: string;
   inlineVideos: SmartLinkVideoEntry[];
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
@@ -174,8 +176,10 @@ export interface SmartLinkOwnerView {
   newsFeedLinks: SmartLinkNewsFeedLinks;
   sectionVisibility: SmartLinkSectionVisibility;
   coverVideoUrl: string;
-  /** MP4 from Snippet Studio, played muted in place of the cover. Same-origin storage path or empty. */
+  /** Vertical MP4 from Snippet Studio, the full first screen on phones. Same-origin storage path or empty. */
   snippetVideoUrl: string;
+  /** 16:9 MP4 from Snippet Studio, shown in place of the cover on wide screens. */
+  snippetVideoWideUrl: string;
   inlineVideos: SmartLinkVideoEntry[];
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
@@ -228,6 +232,7 @@ export interface SmartLinkOwnerUpdateInput {
   sectionVisibility?: Partial<SmartLinkSectionVisibility>;
   coverVideoUrl?: string | null;
   snippetVideoUrl?: string | null;
+  snippetVideoWideUrl?: string | null;
   inlineVideos?: SmartLinkVideoEntry[];
   creditSections?: SmartLinkCreditSection[];
   contacts?: SmartLinkContactEntry[];
@@ -685,6 +690,7 @@ function readSmartLinkState(
       : getDefaultSectionVisibility(),
     coverVideoUrl: asString(raw?.coverVideoUrl) ?? "",
     snippetVideoUrl: normalizeSnippetVideoUrl(raw?.snippetVideoUrl),
+    snippetVideoWideUrl: normalizeSnippetVideoUrl(raw?.snippetVideoWideUrl),
     inlineVideos: normalizeVideoEntries(raw?.inlineVideos, getDefaultInlineVideos()),
     creditSections: normalizeCreditSections(raw?.creditSections),
     contacts: normalizeInfoEntries(raw?.contacts, getDefaultContacts()),
@@ -1288,6 +1294,7 @@ async function buildOwnerViewFromRelease(params: {
     sectionVisibility: state.sectionVisibility,
     coverVideoUrl: state.coverVideoUrl,
     snippetVideoUrl: state.snippetVideoUrl,
+    snippetVideoWideUrl: state.snippetVideoWideUrl,
     inlineVideos: state.inlineVideos,
     creditSections: state.creditSections,
     contacts: state.contacts,
@@ -1754,8 +1761,9 @@ export async function updateSmartLinkOwnerSettings(params: {
   });
   if (!ownerView) return null;
 
-  if (params.input.snippetVideoUrl) {
-    const snippetVideoUrl = normalizeSnippetVideoUrl(params.input.snippetVideoUrl);
+  for (const candidate of [params.input.snippetVideoUrl, params.input.snippetVideoWideUrl]) {
+    if (!candidate) continue;
+    const snippetVideoUrl = normalizeSnippetVideoUrl(candidate);
     // A header video must be a file this artist uploaded, never someone else's.
     if (!snippetVideoUrl || snippetVideoOwnerId(snippetVideoUrl) !== params.userId) {
       throw new Error("INVALID_SNIPPET_VIDEO");
@@ -1865,6 +1873,8 @@ function applySmartLinkOwnerInput(
       input.coverVideoUrl === undefined ? currentState.coverVideoUrl : normalizeSmartLinkHref(input.coverVideoUrl),
     snippetVideoUrl:
       input.snippetVideoUrl === undefined ? currentState.snippetVideoUrl : normalizeSnippetVideoUrl(input.snippetVideoUrl),
+    snippetVideoWideUrl:
+      input.snippetVideoWideUrl === undefined ? currentState.snippetVideoWideUrl : normalizeSnippetVideoUrl(input.snippetVideoWideUrl),
     inlineVideos: input.inlineVideos
       ? normalizeVideoEntries(input.inlineVideos, getDefaultInlineVideos()).map((row) => ({
           ...row,

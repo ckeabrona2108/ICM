@@ -71,6 +71,7 @@ interface SmartLinkDraft {
   sectionVisibility: SmartLinkSectionVisibility;
   coverVideoUrl: string;
   snippetVideoUrl: string;
+  snippetVideoWideUrl: string;
   inlineVideos: SmartLinkVideoEntry[];
   creditSections: SmartLinkCreditSection[];
   contacts: SmartLinkContactEntry[];
@@ -153,6 +154,7 @@ function draftFromView(view: SmartLinkOwnerView): SmartLinkDraft {
     sectionVisibility: view.sectionVisibility,
     coverVideoUrl: view.coverVideoUrl,
     snippetVideoUrl: view.snippetVideoUrl,
+    snippetVideoWideUrl: view.snippetVideoWideUrl,
     inlineVideos: view.inlineVideos,
     creditSections: view.creditSections,
     contacts: view.contacts,
@@ -888,26 +890,37 @@ function VideosSection({ draft, patch, setVisibility }: SectionProps) {
       <SectionHeader title="Видео" description="Клип или тизер прямо на странице релиза. YouTube встраивается, остальные ссылки открываются в новой вкладке.">
         <VisibilityToggle checked={draft.sectionVisibility.videos} onChange={(value) => setVisibility("videos", value)} />
       </SectionHeader>
-      <Panel className="flex items-center gap-4 p-4">
-        {draft.snippetVideoUrl ? (
-          <>
-            <video src={draft.snippetVideoUrl} muted loop autoPlay playsInline className="h-28 w-16 shrink-0 rounded-lg object-cover" aria-label="Видео-шапка" />
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-[14px] font-semibold">Видео-шапка из Snippet Studio</span>
-              <span className="text-[12px] text-zinc-400">Играет без звука вместо обложки, по тапу — со звуком.</span>
-            </div>
-            <button type="button" onClick={() => patch({ snippetVideoUrl: "" })} className="shrink-0 text-[13px] font-semibold text-rose-300 hover:text-rose-200">
-              Убрать
-            </button>
-          </>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="text-[14px] font-semibold">Видео вместо обложки</span>
-            <a href="/dashboard/video-snippets" className="text-[13px] font-medium text-violet-300 hover:text-violet-200">
-              Собрать сниппет в Snippet Studio и поставить в шапку →
-            </a>
+      <Panel className="flex flex-col gap-3 p-4">
+        <div className="flex flex-col gap-1">
+          <span className="text-[14px] font-semibold">Видео вместо обложки</span>
+          <span className="text-[12px] text-zinc-400">
+            Собираются в Snippet Studio: 9:16 — на весь экран телефона, 16:9 — для компьютера. Без видео остаётся обычная обложка.
+          </span>
+        </div>
+        {(
+          [
+            ["snippetVideoUrl", "Телефон · 9:16", "h-24 w-14"],
+            ["snippetVideoWideUrl", "Компьютер · 16:9", "h-14 w-24"]
+          ] as const
+        ).map(([field, label, size]) => (
+          <div key={field} className="flex items-center gap-3 rounded-xl border border-zinc-800/80 p-2.5">
+            {draft[field] ? (
+              <video src={draft[field]} muted loop autoPlay playsInline className={`${size} shrink-0 rounded-lg object-cover`} aria-label={label} />
+            ) : (
+              <span className={`${size} grid shrink-0 place-items-center rounded-lg bg-zinc-800/70 text-[10px] text-zinc-500`}>обложка</span>
+            )}
+            <span className="min-w-0 flex-1 text-[13px] font-medium">{label}</span>
+            {draft[field] ? (
+              <button type="button" onClick={() => patch({ [field]: "" })} className="shrink-0 text-[13px] font-semibold text-rose-300 hover:text-rose-200">
+                Убрать
+              </button>
+            ) : (
+              <a href="/dashboard/video-snippets" className="shrink-0 text-[13px] font-medium text-violet-300 hover:text-violet-200">
+                Собрать →
+              </a>
+            )}
           </div>
-        )}
+        ))}
       </Panel>
       <Panel className="p-4">
         <label htmlFor="cover-video" className={LABEL_CLASS}>

@@ -7,11 +7,13 @@ function objectPath(key: string) {
   return `/api/uploads/object/${key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
 }
 
-async function patchSmartLinkVideo(releaseId: string, snippetVideoUrl: string) {
+export type SmartLinkVideoSlot = "mobile" | "web";
+
+async function patchSmartLinkVideo(releaseId: string, slot: SmartLinkVideoSlot, url: string) {
   const response = await fetch(`/api/releases/${releaseId}/smart-link`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ snippetVideoUrl })
+    body: JSON.stringify(slot === "web" ? { snippetVideoWideUrl: url } : { snippetVideoUrl: url })
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -19,9 +21,13 @@ async function patchSmartLinkVideo(releaseId: string, snippetVideoUrl: string) {
   }
 }
 
-/** Uploads a finished MP4 and makes it the smart link header. Returns the path it now plays from. */
+/**
+ * Uploads a finished MP4 and makes it the smart link header: vertical clips fill the
+ * phone screen, 16:9 clips replace the cover on wide screens. Returns the path it plays from.
+ */
 export async function uploadSnippetToSmartLink(params: {
   releaseId: string;
+  slot: SmartLinkVideoSlot;
   blob: Blob;
   fileName: string;
   onProgress?: (fraction: number) => void;
@@ -34,6 +40,6 @@ export async function uploadSnippetToSmartLink(params: {
     onProgress: (loaded, total) => params.onProgress?.(loaded / Math.max(1, total))
   });
   const path = objectPath(uploaded.key);
-  await patchSmartLinkVideo(params.releaseId, path);
+  await patchSmartLinkVideo(params.releaseId, params.slot, path);
   return path;
 }

@@ -182,11 +182,12 @@ export function StudioExport(props: {
       const blob = await fetch(job.url).then((response) => response.blob());
       await uploadSnippetToSmartLink({
         releaseId,
+        slot: job.format === "wide" ? "web" : "mobile",
         blob,
         fileName: `snippet-${job.format}.mp4`,
         onProgress: (fraction) => setLink({ status: "uploading", progress: fraction * 100, message: "Загружаем видео…" })
       });
-      setLink({ status: "done", progress: 100, message: "Видео стоит в шапке смарт-линка" });
+      setLink({ status: "done", progress: 100, message: job.format === "wide" ? "Стоит в смарт-линке для компьютера" : "Стоит в смарт-линке для телефона" });
     } catch (error) {
       setLink({ status: "error", progress: 0, message: error instanceof Error ? error.message : "Не удалось загрузить видео" });
     }
@@ -302,7 +303,7 @@ export function StudioExport(props: {
                   <Download className="h-4 w-4" /> Скачать MP4
                 </a>
               ) : null}
-              {job.status === "done" && job.url && props.releaseId && props.smartLinkUrl && job.format !== "wide" ? (
+              {job.status === "done" && job.url && props.releaseId && props.smartLinkUrl ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {job.smartLink.status === "done" ? (
                     <a
@@ -321,7 +322,7 @@ export function StudioExport(props: {
                       className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-4 text-[13px] font-semibold text-white hover:bg-white/[0.08] disabled:opacity-60"
                     >
                       {job.smartLink.status === "uploading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                      {job.smartLink.status === "uploading" ? `Загружаем… ${Math.round(job.smartLink.progress)}%` : "Поставить в шапку смарт-линка"}
+                      {job.smartLink.status === "uploading" ? `Загружаем… ${Math.round(job.smartLink.progress)}%` : job.format === "wide" ? "Поставить в смарт-линк · компьютер" : "Поставить в смарт-линк · телефон"}
                     </button>
                   )}
                   {job.smartLink.status === "error" ? <span className="text-[12px] text-rose-300">{job.smartLink.message}</span> : null}

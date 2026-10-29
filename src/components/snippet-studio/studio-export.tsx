@@ -33,6 +33,9 @@ const FORMAT_GLYPHS: Record<SnippetFormatId, PlatformGlyphId[]> = {
   wide: ["telegram"]
 };
 
+// Per-platform smart link URLs are hidden for now; flip to bring the block back.
+const SHOW_TRACKED_LINKS = false;
+
 const LINK_TARGETS: Array<{ id: PlatformGlyphId; name: string; source: string }> = [
   { id: "tiktok", name: "TikTok", source: "tiktok" },
   { id: "vk", name: "VK Клипы", source: "vk_clips" },
@@ -335,7 +338,8 @@ export function StudioExport(props: {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-4">
+      {SHOW_TRACKED_LINKS ? (
+        <div className="flex flex-col gap-3 border-t border-white/[0.08] pt-4">
         <div className="flex flex-col gap-1">
           <span className="text-[14px] font-semibold text-white">Ссылки для роликов</span>
           <span className="text-[12px] leading-relaxed text-white/60">
@@ -371,6 +375,7 @@ export function StudioExport(props: {
           </span>
         )}
       </div>
+      ) : null}
     </div>
   );
 }

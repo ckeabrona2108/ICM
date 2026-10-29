@@ -2,18 +2,20 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { cache } from "react";
+import { cache, type CSSProperties } from "react";
 import { ExternalLink, Mail, Music2, Send, Video } from "lucide-react";
 
 import { SmartLinkPlatformIcon } from "@/components/smart-link/platform-icon";
 import { SmartLinkCoverVideo } from "@/components/smart-link/smart-link-cover-video";
+import { SmartLinkLiveBackground } from "@/components/smart-link/smart-link-live-background";
+import { SmartLinkTiltCover } from "@/components/smart-link/smart-link-tilt-cover";
 import { SmartLinkCountdown } from "@/components/smart-link/smart-link-countdown";
 import { SmartLinkPixels } from "@/components/smart-link/smart-link-pixels";
 import { SmartLinkPublicModeSwitcher } from "@/components/smart-link/smart-link-public-mode-switcher";
 import { SmartLinkShareButton } from "@/components/smart-link/smart-link-share-button";
 import { SmartLinkViewTracker } from "@/components/smart-link/smart-link-view-tracker";
 import { getSmartLinkAccentColors, getSmartLinkShapeRadius } from "@/lib/smart-link-appearance";
-import { getSmartLinkPublicView } from "@/lib/smart-link-service";
+import { getSmartLinkPublicView, type SmartLinkPageStyle } from "@/lib/smart-link-service";
 import { decodeSmartLinkSlug, parseSmartLinkPixelIds, safeSmartLinkHref } from "@/lib/smart-link-urls";
 import {
   formatSmartLinkReleaseDate,
@@ -189,29 +191,44 @@ export default async function SmartLinkPublicPage({
   const cardSurface = isLightTheme
     ? "border-black/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.84),rgba(249,250,253,0.96))] text-[#161b24] shadow-[0_16px_38px_-30px_rgba(72,86,122,0.26)] hover:border-black/14 hover:bg-white"
     : "border-white/12 bg-white/[0.04] text-white hover:border-white/20 hover:bg-white/[0.07]";
+  // Page styles share their look with the studio templates; they apply to the dark theme.
+  const pageStyle = isLightTheme ? "auto" : data.pageStyle;
+  const autoVariants = ["lava", "aurora", "nebula", "mesh"] as const;
+  const slugHash = [...data.publicSlug].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) >>> 0, 7);
+  const liveBackgroundVariant =
+    pageStyle === "neon" ? "aurora" : pageStyle === "film" ? "haze" : pageStyle === "gloss" ? "mesh" : pageStyle === "minimal" ? null : autoVariants[slugHash % autoVariants.length];
+  const darkPlatformSurface: Record<SmartLinkPageStyle, string> = {
+    auto: "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md hover:border-white/20 hover:bg-white/[0.12]",
+    neon: "border-[#8b72ff]/45 bg-[#0d0a24]/55 text-white shadow-[0_0_26px_-8px_rgba(123,97,255,0.85),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md hover:border-[#22d3ee]/60 hover:shadow-[0_0_30px_-6px_rgba(34,211,238,0.8)]",
+    film: "border-[#f1e7cf]/15 bg-[#2a2016]/45 text-[#f6efe0] backdrop-blur-sm hover:border-[#f1e7cf]/30 hover:bg-[#2a2016]/60",
+    gloss: "border-white/25 bg-white/[0.13] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_18px_40px_-24px_rgba(0,0,0,0.6)] backdrop-blur-xl hover:bg-white/[0.2]",
+    minimal: "border-white/10 bg-white/[0.04] text-white hover:bg-white/[0.07]"
+  };
   const platformCardSurface = isLightTheme
     ? "border-black/[0.06] bg-white/90 text-[#111114] shadow-[0_12px_28px_-24px_rgba(72,86,122,0.25)] hover:bg-white"
-    : "border-white/10 bg-white/[0.08] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md hover:border-white/20 hover:bg-white/[0.12]";
+    : darkPlatformSurface[pageStyle];
   const hasPhoneSnippet = Boolean(data.snippetVideoUrl);
   const hasWideSnippet = Boolean(data.snippetVideoWideUrl);
   const coverPhoto = (
-    <div className="mx-auto aspect-square w-full max-w-[240px] overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
-      {data.coverUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data.coverUrl} alt={data.title} className="h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-white/[0.06] text-white/40">
-          <Music2 className="h-12 w-12" />
-        </div>
-      )}
-    </div>
+    <SmartLinkTiltCover className="sl-enter-cover mx-auto aspect-square w-full max-w-[240px]">
+      <div className="h-full w-full overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
+        {data.coverUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={data.coverUrl} alt={data.title} className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-white/[0.06] text-white/40">
+            <Music2 className="h-12 w-12" />
+          </div>
+        )}
+      </div>
+    </SmartLinkTiltCover>
   );
   // Wide screens play the 16:9 studio clip when there is one; otherwise, and on phones
   // without a vertical clip, the plain cover stays.
   const coverPanel = (
     <>
       {data.snippetVideoWideUrl ? (
-        <div className="hidden aspect-video w-full overflow-hidden rounded-[22px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.8)] ring-1 ring-white/10 lg:block">
+        <div className="sl-enter-cover hidden aspect-video w-full overflow-hidden rounded-[22px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.8)] ring-1 ring-white/10 lg:block">
           <SmartLinkCoverVideo src={data.snippetVideoWideUrl} poster={data.coverUrl} title={data.title} media="(min-width: 1024px)" />
         </div>
       ) : null}
@@ -220,7 +237,7 @@ export default async function SmartLinkPublicPage({
   );
 
   const headerPanel = (
-    <div className="text-center">
+    <div className="sl-enter-rise text-center" style={{ "--sl-i": 0 } as CSSProperties}>
       <h1 className={`text-[26px] font-bold leading-tight tracking-[-0.03em] sm:text-[28px] ${isLightTheme ? "text-[#111114]" : "text-white"}`}>
         {data.title}
       </h1>
@@ -247,7 +264,7 @@ export default async function SmartLinkPublicPage({
     ? `/l/${encodeURIComponent(data.publicSlug)}/go/presave${queryString ? `?${queryString}` : ""}`
     : null;
   const presavePanel = prerelease ? (
-    <div className="space-y-3">
+    <div className="sl-enter-rise space-y-3" style={{ "--sl-i": 1 } as CSSProperties}>
       <div className={`text-center text-[13px] ${softText}`}>Релиз выйдет {formatSmartLinkReleaseDate(data.releaseDate)}</div>
       <SmartLinkCountdown target={getSmartLinkReleaseMoment(data.releaseDate).toISOString()} theme={isLightTheme ? "light" : "dark"} />
       {presaveHref ? (
@@ -266,7 +283,7 @@ export default async function SmartLinkPublicPage({
 
   const releaseLinksPanel = data.sectionVisibility.links ? (
     <div className="grid gap-2">
-      {platformButtons.map((item) => {
+      {platformButtons.map((item, index) => {
         const href = `/l/${encodeURIComponent(data.publicSlug)}/go/${encodeURIComponent(item.code)}${queryString ? `?${queryString}` : ""}`;
         return (
           <a
@@ -274,8 +291,8 @@ export default async function SmartLinkPublicPage({
             href={href}
             target="_blank"
             rel="noreferrer"
-            className={`group flex h-[60px] items-center justify-between gap-3 overflow-hidden border pl-3 pr-2 transition ${platformCardSurface}`}
-            style={{ borderRadius: shapeRadius.card }}
+            className={`sl-enter-rise group flex h-[60px] items-center justify-between gap-3 overflow-hidden border pl-3 pr-2 transition ${platformCardSurface}`}
+            style={{ borderRadius: shapeRadius.card, "--sl-i": index + 2 } as CSSProperties}
           >
             <span className="flex min-w-0 items-center gap-3">
               <SmartLinkPlatformIcon code={item.code} size={34} />
@@ -360,7 +377,7 @@ export default async function SmartLinkPublicPage({
   // buttons laid over its darkened lower part — no scrolling to reach them.
   const phoneHero = data.snippetVideoUrl ? (
     <section className="relative h-[calc(100dvh-24px)] w-full overflow-hidden rounded-[28px] bg-black ring-1 ring-white/10 sm:h-[calc(100dvh-40px)] lg:hidden">
-      <div className="absolute inset-0">
+      <div className="sl-enter-cover absolute inset-0">
         <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} media="(max-width: 1023px)" />
       </div>
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-[48%] bg-gradient-to-b from-transparent via-black/50 to-black/90" />
@@ -398,6 +415,12 @@ export default async function SmartLinkPublicPage({
             alt=""
             className={`absolute left-1/2 top-[38%] h-[92vmax] w-[92vmax] max-w-none -translate-x-1/2 -translate-y-1/2 object-cover blur-[140px] ${isLightTheme ? "opacity-26" : "opacity-38"}`}
           />
+          {!isLightTheme && liveBackgroundVariant && data.coverUrl ? (
+            <div className={pageStyle === "film" ? "sepia-[0.45]" : undefined}>
+              <SmartLinkLiveBackground coverUrl={data.coverUrl} variant={liveBackgroundVariant} />
+            </div>
+          ) : null}
+          {pageStyle === "film" ? <div className="sl-film-grain absolute inset-0" /> : null}
           <div
             className={`absolute inset-0 ${
               isLightTheme

@@ -20,6 +20,8 @@ type RecordLike = Record<string, unknown>;
 
 export type SmartLinkTheme = "dark" | "light" | "auto";
 export type SmartLinkBackground = "cover" | "plain";
+/** Page look, in step with the studio templates. "auto" picks a live background from the cover. */
+export type SmartLinkPageStyle = "auto" | "neon" | "film" | "gloss" | "minimal";
 export type SmartLinkAccent = "mono" | "red" | "violet" | "green";
 export type SmartLinkButtonShape = "round" | "pill" | "square";
 export type SmartLinkPlatformStatus = "live" | "soon" | "hidden";
@@ -134,6 +136,7 @@ export interface SmartLinkAnalyticsState {
 export interface SmartLinkState {
   theme: SmartLinkTheme;
   background: SmartLinkBackground;
+  pageStyle: SmartLinkPageStyle;
   accent: SmartLinkAccent;
   buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
@@ -165,6 +168,7 @@ export interface SmartLinkOwnerView {
   publicUrl: string;
   theme: SmartLinkTheme;
   background: SmartLinkBackground;
+  pageStyle: SmartLinkPageStyle;
   accent: SmartLinkAccent;
   buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
@@ -218,6 +222,7 @@ export interface SmartLinkOwnerUpdateInput {
   slug?: string;
   theme?: SmartLinkTheme;
   background?: SmartLinkBackground;
+  pageStyle?: SmartLinkPageStyle;
   accent?: SmartLinkAccent;
   buttonShape?: SmartLinkButtonShape;
   allowWaveDownload?: boolean;
@@ -418,6 +423,10 @@ function getDefaultPixels(): SmartLinkPixelEntry[] {
 
 function normalizeTheme(value: unknown): SmartLinkTheme {
   return value === "light" || value === "auto" ? value : "dark";
+}
+
+function normalizePageStyle(value: unknown): SmartLinkPageStyle {
+  return value === "neon" || value === "film" || value === "gloss" || value === "minimal" ? value : "auto";
 }
 
 function normalizeBackground(value: unknown): SmartLinkBackground {
@@ -678,6 +687,7 @@ function readSmartLinkState(
   return {
     theme: normalizeTheme(raw?.theme),
     background: normalizeBackground(raw?.background),
+    pageStyle: normalizePageStyle(raw?.pageStyle),
     accent: normalizeAccent(raw?.accent),
     buttonShape: normalizeButtonShape(raw?.buttonShape),
     allowWaveDownload: asBoolean(raw?.allowWaveDownload) ?? false,
@@ -1282,6 +1292,7 @@ async function buildOwnerViewFromRelease(params: {
     publicUrl: `${getBaseUrl()}/l/${params.promoLink.shortName}`,
     theme: state.theme,
     background: state.background,
+    pageStyle: state.pageStyle,
     accent: state.accent,
     buttonShape: state.buttonShape,
     allowWaveDownload: state.allowWaveDownload,
@@ -1863,6 +1874,7 @@ function applySmartLinkOwnerInput(
     ...currentState,
     theme: input.theme ? normalizeTheme(input.theme) : currentState.theme,
     background: input.background ? normalizeBackground(input.background) : currentState.background,
+    pageStyle: input.pageStyle ? normalizePageStyle(input.pageStyle) : currentState.pageStyle,
     accent: input.accent ? normalizeAccent(input.accent) : currentState.accent,
     buttonShape: input.buttonShape ? normalizeButtonShape(input.buttonShape) : currentState.buttonShape,
     allowWaveDownload: input.allowWaveDownload ?? currentState.allowWaveDownload,

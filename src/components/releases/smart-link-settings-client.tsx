@@ -30,6 +30,7 @@ import type { LucideIcon } from "lucide-react";
 import type {
   SmartLinkAccent,
   SmartLinkBackground,
+  SmartLinkPageStyle,
   SmartLinkButtonShape,
   SmartLinkContactEntry,
   SmartLinkCreditSection,
@@ -62,6 +63,7 @@ interface SmartLinkDraft {
   slug: string;
   theme: SmartLinkTheme;
   background: SmartLinkBackground;
+  pageStyle: SmartLinkPageStyle;
   accent: SmartLinkAccent;
   buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
@@ -101,6 +103,14 @@ const NAV_GROUPS: Array<{ title: string; items: Array<{ key: SectionKey; label: 
       { key: "analytics", label: "Аналитика", icon: BarChart3 }
     ]
   }
+];
+
+const PAGE_STYLES: Array<{ value: SmartLinkPageStyle; label: string; hint: string; thumb: string }> = [
+  { value: "auto", label: "Живой", hint: "Фон переливается цветами обложки", thumb: "radial-gradient(circle at 30% 30%, #ff6fb5, transparent 55%), radial-gradient(circle at 70% 70%, #22d3ee, transparent 55%), #1a1240" },
+  { value: "neon", label: "Неон", hint: "Ленты света и свечение кнопок", thumb: "linear-gradient(160deg, transparent 30%, #22d3ee 45%, #7b61ff 55%, transparent 70%), #070a1c" },
+  { value: "film", label: "Плёнка", hint: "Тёплое зерно и мягкий свет", thumb: "radial-gradient(circle at 50% 40%, #8a6a4a, #1a1612 70%)" },
+  { value: "gloss", label: "Глянец", hint: "Стеклянные кнопки на mesh-фоне", thumb: "radial-gradient(circle at 0% 0%, #7b61ff, transparent 60%), radial-gradient(circle at 100% 100%, #ff6fb5, transparent 60%), #14112e" },
+  { value: "minimal", label: "Минимал", hint: "Строго, без анимации фона", thumb: "#0b0b0e" }
 ];
 
 const THEME_PRESETS: Array<{
@@ -145,6 +155,7 @@ function draftFromView(view: SmartLinkOwnerView): SmartLinkDraft {
     slug: view.publicSlug,
     theme: view.theme,
     background: view.background,
+    pageStyle: view.pageStyle,
     accent: view.accent,
     buttonShape: view.buttonShape,
     allowWaveDownload: view.allowWaveDownload,
@@ -1181,6 +1192,31 @@ function DesignSection({ draft, patch, view }: Omit<SectionProps, "setVisibility
                 </div>
                 <div className="px-1 pt-2.5 text-[13.5px] font-medium">{preset.label}</div>
                 <div className="px-1 pb-1 text-xs text-zinc-400">{preset.hint}</div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-1 text-sm font-semibold">Стиль страницы</h2>
+        <p className="mb-3 text-xs text-zinc-400">В одном визуале с шаблонами Snippet Studio. Работает с тёмной темой и фоном из обложки.</p>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          {PAGE_STYLES.map((style) => {
+            const active = draft.pageStyle === style.value;
+            return (
+              <button
+                key={style.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => patch({ pageStyle: style.value })}
+                className={`rounded-[14px] border bg-zinc-950 p-2 text-left transition ${
+                  active ? "border-violet-400 ring-[3px] ring-violet-400/20" : "border-zinc-800 hover:border-zinc-700"
+                }`}
+              >
+                <div className="h-[64px] rounded-[9px]" style={{ background: style.thumb }} />
+                <div className="px-1 pt-2.5 text-[13.5px] font-medium">{style.label}</div>
+                <div className="px-1 pb-1 text-xs text-zinc-400">{style.hint}</div>
               </button>
             );
           })}

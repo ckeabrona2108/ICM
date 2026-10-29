@@ -1,5 +1,6 @@
 import { AudioFeatureTracker } from "./audio-features";
 import { BackgroundPainter } from "./backgrounds";
+import { drawIntroFade, drawLetterbox, drawLightLeak, drawParticles, drawSparkles } from "./effects";
 import { BODY_FONT, clamp, DISPLAY_FONT, drawCover, fitFontSize, hash, type SceneContext, smoothstep } from "./draw-utils";
 import { TEMPLATES } from "./templates";
 import type { SceneAssets, SceneFrame, SceneSettings } from "./types";
@@ -92,6 +93,9 @@ export class SceneRenderer {
       ctx.fillRect(0, 0, width, height);
     }
     template.draw(scene);
+    if (settings.fx.particles) drawParticles(scene);
+    if (settings.fx.sparkles) drawSparkles(scene);
+    if (settings.fx.lightLeak) drawLightLeak(scene);
     ctx.restore();
 
     if (settings.grain || settings.template === "film") this.background.paintGrain(scene, settings.template === "film" ? 0.12 : 0.06);
@@ -110,8 +114,10 @@ export class SceneRenderer {
       }
     }
 
+    if (settings.fx.letterbox) drawLetterbox(scene);
     if (settings.endCard && frame.clipDuration >= 8 && !frame.still) this.drawEndCard(scene);
     if (settings.watermark) this.drawWatermark(scene);
+    drawIntroFade(scene);
   }
 
   private drawEndCard(scene: SceneContext) {

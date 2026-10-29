@@ -56,6 +56,16 @@ export interface SceneFx {
   kickGlitch: boolean;
   shake: boolean;
   flash: boolean;
+  /** Slow push-in inside the cover frame over the whole clip. */
+  kenBurns: boolean;
+  /** Soft dust drifting up through the frame, brighter on the bass. */
+  particles: boolean;
+  /** Star glints around the cover on every kick. */
+  sparkles: boolean;
+  /** Warm light sweeping across the frame, flaring on the drop. */
+  lightLeak: boolean;
+  /** Cinema bars top and bottom. */
+  letterbox: boolean;
 }
 
 export interface SceneSettings {
@@ -150,7 +160,20 @@ export function createDefaultSceneSettings(): SceneSettings {
     backgroundBeat: true,
     grain: true,
     palette: [...DEFAULT_PALETTE],
-    fx: { bassPulse: 0.7, cameraZoom: 0.45, glow: 0.6, dropHit: true, kickGlitch: false, shake: false, flash: true },
+    fx: {
+      bassPulse: 0.7,
+      cameraZoom: 0.45,
+      glow: 0.6,
+      dropHit: true,
+      kickGlitch: false,
+      shake: false,
+      flash: true,
+      kenBurns: true,
+      particles: true,
+      sparkles: false,
+      lightLeak: false,
+      letterbox: false
+    },
     spectrum: "bars",
     text: { badge: "", title: "", artist: "", cta: "Слушай на всех площадках", link: "" },
     textAnimation: "fade",

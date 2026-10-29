@@ -642,6 +642,12 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
               <Toggle label="Глитч на бочку" hint="RGB-сдвиг и полосы на каждую долю" checked={settings.fx.kickGlitch} onChange={(value) => updateFx({ kickGlitch: value })} />
               <Toggle label="Тряска камеры" hint="На самых громких местах" checked={settings.fx.shake} onChange={(value) => updateFx({ shake: value })} />
               <Toggle label="Вспышка" hint="Мягкая, без стробоскопа" checked={settings.fx.flash} onChange={(value) => updateFx({ flash: value })} />
+              <Toggle label="Блёстки на бит" hint="Звёздочки вокруг обложки на каждую бочку" checked={settings.fx.sparkles} onChange={(value) => updateFx({ sparkles: value })} />
+              <SectionTitle>Атмосфера</SectionTitle>
+              <Toggle label="Медленный наезд" hint="Обложка плавно приближается за весь ролик" checked={settings.fx.kenBurns} onChange={(value) => updateFx({ kenBurns: value })} />
+              <Toggle label="Частицы" hint="Мягкая пыль в воздухе, ярче на басу" checked={settings.fx.particles} onChange={(value) => updateFx({ particles: value })} />
+              <Toggle label="Световые блики" hint="Тёплый свет проходит по кадру, вспыхивает на дропе" checked={settings.fx.lightLeak} onChange={(value) => updateFx({ lightLeak: value })} />
+              <Toggle label="Кинорамка" hint="Чёрные полосы сверху и снизу" checked={settings.fx.letterbox} onChange={(value) => updateFx({ letterbox: value })} />
               <SectionTitle>Спектр</SectionTitle>
               <div className="flex flex-wrap gap-1.5">
                 {SPECTRUM_OPTIONS.map((option) => (

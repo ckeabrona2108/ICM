@@ -121,7 +121,11 @@ export function drawCover(
   ctx.clip();
   if (assets.cover) {
     if (options.filter) ctx.filter = options.filter;
-    drawImageCover(ctx, assets.cover, x, y, size, height);
+    // Ken Burns: the picture slowly pushes in inside a steady frame.
+    const drift = settings.fx.kenBurns && !scene.frame.still ? 1 + 0.1 * clamp(scene.frame.time / Math.max(1, scene.frame.clipDuration), 0, 1) : 1;
+    ctx.translate(x + size / 2, y + height / 2);
+    ctx.scale(drift, drift);
+    drawImageCover(ctx, assets.cover, -size / 2, -height / 2, size, height);
     ctx.filter = "none";
   } else {
     drawCoverPlaceholder(ctx, settings.palette, x, y, size, height);
@@ -143,7 +147,7 @@ export function drawCoverPlaceholder(ctx: Ctx, palette: string[], x: number, y: 
 }
 
 /** Largest font size (≤ start) at which the text fits the width. */
-export function fitFontSize(ctx: Ctx, text: string, maxWidth: number, startSize: number, weight: number, family: string, minSize = 12) {
+export function fitFontSize(ctx: Ctx, text: string, maxWidth: number, startSize: number, weight: number, family: string, minSize = startSize * 0.25) {
   let size = startSize;
   while (size > minSize) {
     ctx.font = `${weight} ${size}px ${family}`;
@@ -207,27 +211,38 @@ export function drawText(
     stroke?: string;
     strokeWidth?: number;
     shadow?: boolean;
+    /** Defaults to the free room between the anchor and the frame edge. */
+    maxWidth?: number;
   }
 ) {
   if (!text) return;
   const { ctx } = scene;
   const motion = textMotion(scene, options.delay ?? 0);
+  const align = options.align ?? "center";
+  const weight = options.weight ?? 700;
+  const family = options.family ?? DISPLAY_FONT;
+  // Never let a line run off the frame: shrink it to the room it has from its anchor.
+  const margin = scene.unit * 0.06;
+  const room =
+    options.maxWidth ??
+    (align === "center" ? Math.min(x, scene.width - x) * 2 - margin * 2 : align === "right" || align === "end" ? x - margin : scene.width - x - margin);
+  const size = fitFontSize(ctx, text, Math.max(room, scene.unit * 0.1), options.size, weight, family);
   ctx.save();
   ctx.globalAlpha *= motion.alpha;
   ctx.translate(x, y + motion.offsetY);
   ctx.scale(motion.scale, motion.scale);
-  ctx.font = `${options.weight ?? 700} ${options.size}px ${options.family ?? DISPLAY_FONT}`;
-  ctx.textAlign = options.align ?? "center";
+  ctx.font = `${weight} ${size}px ${family}`;
+  ctx.textAlign = align;
   ctx.textBaseline = "alphabetic";
   if (options.letterSpacing) {
-    (ctx as Ctx & { letterSpacing?: string }).letterSpacing = `${options.letterSpacing}px`;
+    (ctx as Ctx & { letterSpacing?: string }).letterSpacing = `${options.letterSpacing * (size / options.size)}px`;
   }
   if (options.shadow) {
     ctx.shadowColor = "rgba(0,0,0,0.45)";
-    ctx.shadowBlur = options.size * 0.4;
+    ctx.shadowBlur = size * 0.4;
   }
   if (options.stroke) {
-    ctx.lineWidth = options.strokeWidth ?? Math.max(2, options.size * 0.035);
+    ctx.lineWidth = options.strokeWidth ?? Math.max(1, size * 0.035);
     ctx.strokeStyle = options.stroke;
     ctx.lineJoin = "round";
     ctx.strokeText(text, 0, 0);
@@ -252,7 +267,9 @@ export function drawPill(
   const motion = textMotion(scene, options.delay ?? 0);
   ctx.save();
   ctx.globalAlpha *= motion.alpha;
-  ctx.font = `600 ${options.size}px ${BODY_FONT}`;
+  const maxPillWidth = scene.width - scene.unit * 0.12;
+  const fontSize = fitFontSize(ctx, text, maxPillWidth - options.size * 2.2, options.size, 600, BODY_FONT);
+  ctx.font = `600 ${fontSize}px ${BODY_FONT}`;
   const paddingX = options.size * 1.1;
   const height = options.size * 2.4;
   const width = ctx.measureText(text).width + paddingX * 2;
@@ -269,7 +286,7 @@ export function drawPill(
   ctx.fillStyle = options.color;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, x + width / 2, top + height / 2 + options.size * 0.04);
+  ctx.fillText(text, x + width / 2, top + height / 2 + fontSize * 0.04);
   ctx.restore();
   return height;
 }

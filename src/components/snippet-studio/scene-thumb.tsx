@@ -11,6 +11,10 @@ export function SceneThumb(props: { settings: SceneSettings; assets: SceneAssets
   const width = props.width ?? 180;
   const height = props.height ?? 320;
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  // Redraw only when what the thumbnail shows changes, not on every studio re-render.
+  const settingsKey = JSON.stringify(settings);
+  const latestSettings = React.useRef(settings);
+  latestSettings.current = settings;
 
   React.useEffect(() => {
     const context = canvasRef.current?.getContext("2d");
@@ -20,11 +24,11 @@ export function SceneThumb(props: { settings: SceneSettings; assets: SceneAssets
       context,
       width,
       height,
-      { ...settings, watermark: false, endCard: false },
+      { ...latestSettings.current, watermark: false, endCard: false },
       { time: 4, clipDuration: 15, trackTime: 42, trackDuration: 180, dropTime: null, frequencyData: null, still: true },
       assets
     );
-  }, [assets, height, settings, width]);
+  }, [assets, height, settingsKey, width]);
 
   return <canvas ref={canvasRef} width={width} height={height} className={props.className} aria-hidden="true" />;
 }

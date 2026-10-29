@@ -56,34 +56,62 @@ function fitStack(scene: SceneContext, total: number, available: number, anchorX
   ctx.restore();
 }
 
-function layoutColumn(scene: SceneContext, items: ColumnItem[], gap: number) {
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Stacks items vertically inside the safe area; in 16:9 the cover sits left and text right.
+ * `backdrop` paints behind the stack, sized to exactly what was laid out (the glass card).
+ */
+function layoutColumn(
+  scene: SceneContext,
+  items: ColumnItem[],
+  gap: number,
+  options: { inset?: number; backdrop?: (rect: Rect) => void; padding?: number } = {}
+) {
   const { width, height, isWide } = scene;
+  const inset = options.inset ?? 0.08;
+  const padding = options.padding ?? 0;
   const stackHeight = (list: ColumnItem[]) => list.reduce((sum, item) => sum + item.height, 0) + gap * Math.max(0, list.length - 1);
   if (isWide) {
     const coverItems = items.filter((item) => item.cover);
     const textItems = items.filter((item) => !item.cover);
-    coverItems.forEach((item) => item.draw(width * 0.08, (height - item.height) / 2, item.height, "center"));
     const total = stackHeight(textItems);
-    const available = height * 0.86;
-    const top = Math.max(height * 0.07, (height - total) / 2);
-    fitStack(scene, total, available, width * 0.5, top, () => {
+    const available = height * 0.86 - padding * 2;
+    const scale = total > available ? available / total : 1;
+    const top = Math.max(height * 0.07 + padding, (height - total * scale) / 2);
+    const coverHeight = coverItems.reduce((max, item) => Math.max(max, item.height), 0);
+    const textLeft = coverHeight ? width * 0.1 + coverHeight + width * 0.06 : width * 0.12;
+    if (options.backdrop) {
+      const contentHeight = Math.max(coverHeight, total * scale);
+      options.backdrop({ x: width * 0.1 - padding, y: (height - contentHeight) / 2 - padding, width: width * 0.8 + padding * 2, height: contentHeight + padding * 2 });
+    }
+    coverItems.forEach((item) => item.draw(width * 0.1, (height - item.height) / 2, item.height, "center"));
+    fitStack(scene, total, available, textLeft, top, () => {
       let cursor = top;
       for (const item of textItems) {
-        item.draw(width * 0.5, cursor, width * 0.42, "left");
+        item.draw(textLeft, cursor, width * 0.9 - textLeft, "left");
         cursor += item.height + gap;
       }
     });
     return;
   }
-  const safeTop = isTall(scene) ? height * 0.13 : height * 0.06;
+  const safeTop = (isTall(scene) ? height * 0.13 : height * 0.06) + padding;
   // Square leaves room for the watermark line at the very bottom.
-  const safeBottom = isTall(scene) ? height * 0.8 : height * 0.9;
+  const safeBottom = (isTall(scene) ? height * 0.8 : height * 0.9) - padding;
   const total = stackHeight(items);
   const top = safeTop + Math.max(0, (safeBottom - safeTop - total) / 2);
+  const columnLeft = width * inset;
+  const columnWidth = width * (1 - inset * 2);
   fitStack(scene, total, safeBottom - safeTop, width / 2, top, () => {
+    options.backdrop?.({ x: columnLeft - padding, y: top - padding, width: columnWidth + padding * 2, height: total + padding * 2 });
     let cursor = top;
     for (const item of items) {
-      item.draw(width * 0.08, cursor, width * 0.84, "center");
+      item.draw(columnLeft, cursor, columnWidth, "center");
       cursor += item.height + gap;
     }
   });
@@ -98,11 +126,11 @@ function coverSize(scene: SceneContext, fraction: number) {
   return scene.width * (isTall(scene) ? fraction : fraction * 0.68);
 }
 
-function titleItem(scene: SceneContext, options: { size: number; color: string; maxLines?: number; weight?: number; uppercase?: boolean; delay?: number; family?: string }): ColumnItem | null {
+function titleItem(scene: SceneContext, options: { size: number; color: string; maxLines?: number; weight?: number; uppercase?: boolean; delay?: number; family?: string; maxWidth?: number }): ColumnItem | null {
   const raw = scene.settings.text.title || "Название трека";
   const text = options.uppercase ? raw.toUpperCase() : raw;
   const { ctx } = scene;
-  const maxWidth = scene.isWide ? scene.width * 0.42 : scene.width * 0.84;
+  const maxWidth = options.maxWidth ?? (scene.isWide ? scene.width * 0.42 : scene.width * 0.84);
   const family = options.family ?? DISPLAY_FONT;
   const weight = options.weight ?? 700;
   ctx.font = `${weight} ${options.size}px ${family}`;
@@ -219,9 +247,9 @@ const premiere: TemplateDefinition = {
 const vinyl: TemplateDefinition = {
   draw(scene) {
     const { ctx, width, height, unit, frame, isWide } = scene;
-    const radius = isWide ? height * 0.38 : width * (isTall(scene) ? 0.43 : 0.3);
+    const radius = isWide ? height * 0.38 : width * (isTall(scene) ? 0.43 : 0.24);
     const centerX = isWide ? width * 0.3 : width / 2;
-    const centerY = isWide ? height / 2 : height * (isTall(scene) ? 0.4 : 0.4);
+    const centerY = isWide ? height / 2 : height * (isTall(scene) ? 0.4 : 0.3);
     const angle = (frame.time / 2.4) * Math.PI * 2;
 
     ctx.save();
@@ -289,7 +317,7 @@ const vinyl: TemplateDefinition = {
 
     const textLeft = isWide ? width * 0.58 : width * 0.08;
     const textWidth = isWide ? width * 0.36 : width * 0.84;
-    const baseY = isWide ? height * 0.42 : centerY + radius + unit * 0.16;
+    const baseY = isWide ? height * 0.42 : centerY + radius + unit * (isTall(scene) ? 0.16 : 0.13);
     const titleSize = fitFontSize(ctx, scene.settings.text.title || "Название трека", textWidth, unit * 0.09, 700, DISPLAY_FONT);
     drawText(scene, scene.settings.text.title || "Название трека", textLeft, baseY, { size: titleSize, color: "#ffffff", align: "left", delay: 0.1 });
     drawText(scene, `${artistOf(scene)}${scene.settings.text.badge ? ` · ${scene.settings.text.badge}` : ""}`, textLeft, baseY + unit * 0.065, {
@@ -313,7 +341,8 @@ const vinyl: TemplateDefinition = {
     if (scene.settings.text.cta) {
       drawPill(scene, scene.settings.text.cta, textLeft, barTop + unit * 0.05, { size: unit * 0.028, background: "#ffffff", color: "#14112e", align: "left", delay: 0.35 });
     }
-    if (scene.settings.showLink && scene.settings.text.link) {
+    // In a square the link would collide with the watermark; the end card still shows it.
+    if (scene.settings.showLink && scene.settings.text.link && barTop + unit * 0.17 < height * 0.9) {
       drawText(scene, scene.settings.text.link, textLeft, barTop + unit * 0.17, { size: unit * 0.026, weight: 500, family: BODY_FONT, color: "rgba(255,255,255,0.7)", align: "left", delay: 0.4 });
     }
   }
@@ -321,36 +350,64 @@ const vinyl: TemplateDefinition = {
 
 const glass: TemplateDefinition = {
   draw(scene) {
-    const { ctx, width, height, unit } = scene;
-    const cardWidth = scene.isWide ? width * 0.78 : width * 0.82;
-    const cardHeight = scene.isWide ? height * 0.74 : isTall(scene) ? height * 0.58 : height * 0.86;
-    const cardX = (width - cardWidth) / 2;
-    const cardY = (height - cardHeight) / 2 - (isTall(scene) ? height * 0.03 : 0);
-    ctx.save();
-    roundRectPath(ctx, cardX, cardY, cardWidth, cardHeight, unit * 0.06);
-    const fill = ctx.createLinearGradient(cardX, cardY, cardX + cardWidth, cardY + cardHeight);
-    fill.addColorStop(0, "rgba(255,255,255,0.2)");
-    fill.addColorStop(1, "rgba(255,255,255,0.06)");
-    ctx.fillStyle = fill;
-    ctx.shadowColor = "rgba(0,0,0,0.35)";
-    ctx.shadowBlur = unit * 0.08;
-    ctx.fill();
-    ctx.shadowColor = "transparent";
-    ctx.lineWidth = Math.max(2, unit * 0.003);
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.stroke();
-    ctx.restore();
-    premiere.draw({ ...scene, settings: { ...scene.settings, text: { ...scene.settings.text, badge: "" } } });
+    const { ctx, unit, settings, frame } = scene;
+    const size = scene.isWide ? Math.min(scene.height * 0.5, scene.width * 0.3) : scene.width * (isTall(scene) ? 0.56 : 0.36);
+    const glow = settings.fx.glow * clamp(frame.audio.bass * 1.2 + scene.drop, 0, 1);
+    const padding = unit * 0.06;
+    layoutColumn(
+      scene,
+      compact([
+        {
+          height: size,
+          cover: true,
+          draw: (left, top, width) => {
+            const scaled = size * scene.pulse;
+            drawCover(scene, left + (width - scaled) / 2, top + (size - scaled) / 2, scaled, { radius: size * 0.07, glow });
+          }
+        },
+        titleItem(scene, { size: unit * 0.075, color: "#ffffff", maxWidth: scene.isWide ? scene.width * 0.4 : scene.width * 0.7 }),
+        lineItem(scene, artistOf(scene), { size: unit * 0.042, color: "rgba(255,255,255,0.8)" }),
+        spectrumItem(scene, unit * 0.06, "rgba(255,255,255,0.9)"),
+        ...ctaItems(scene, unit * 0.028)
+      ]),
+      unit * 0.03,
+      {
+        inset: 0.15,
+        padding,
+        backdrop: (rect) => {
+          ctx.save();
+          roundRectPath(ctx, rect.x, rect.y, rect.width, rect.height, unit * 0.06);
+          const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+          fill.addColorStop(0, "rgba(255,255,255,0.2)");
+          fill.addColorStop(1, "rgba(255,255,255,0.07)");
+          ctx.fillStyle = fill;
+          ctx.shadowColor = "rgba(0,0,0,0.35)";
+          ctx.shadowBlur = unit * 0.08;
+          ctx.fill();
+          ctx.shadowColor = "transparent";
+          ctx.lineWidth = Math.max(1, unit * 0.003);
+          ctx.strokeStyle = "rgba(255,255,255,0.35)";
+          ctx.stroke();
+          // A soft highlight along the top edge sells the glass.
+          const sheen = ctx.createLinearGradient(0, rect.y, 0, rect.y + rect.height * 0.35);
+          sheen.addColorStop(0, "rgba(255,255,255,0.14)");
+          sheen.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = sheen;
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+    );
   }
 };
 
 const player: TemplateDefinition = {
   draw(scene) {
     const { ctx, width, height, unit, frame, settings } = scene;
-    const phoneHeight = scene.isWide ? height * 0.86 : isTall(scene) ? height * 0.66 : height * 0.86;
+    const phoneHeight = scene.isWide ? height * 0.86 : isTall(scene) ? height * 0.66 : height * 0.7;
     const phoneWidth = phoneHeight / 2.05;
     const centerX = scene.isWide ? width * 0.3 : width / 2;
-    const centerY = height * (isTall(scene) ? 0.45 : 0.5);
+    const centerY = height * (isTall(scene) ? 0.45 : scene.isWide ? 0.5 : 0.41);
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.rotate(scene.isWide ? -0.05 : -0.07);
@@ -429,7 +486,7 @@ const player: TemplateDefinition = {
     drawSpectrum(localScene, artX, controlsY + innerWidth * 0.08, artSize, innerWidth * 0.08, { color: "rgba(255,255,255,0.75)", mirror: true });
     ctx.restore();
 
-    const captionY = scene.isWide ? height * 0.45 : centerY + phoneHeight / 2 + unit * 0.09;
+    const captionY = scene.isWide ? height * 0.45 : centerY + phoneHeight / 2 + unit * (isTall(scene) ? 0.09 : 0.07);
     const captionX = scene.isWide ? width * 0.6 : width / 2;
     const align = scene.isWide ? "left" : "center";
     drawText(scene, settings.text.cta, captionX, captionY, { size: unit * 0.04, weight: 700, color: "#ffffff", align, delay: 0.3, shadow: true });
@@ -485,18 +542,22 @@ const headline: TemplateDefinition = {
     if (settings.text.cta) {
       ctx.save();
       ctx.globalAlpha *= textMotion(scene, 0.4).alpha;
-      ctx.font = `700 ${unit * 0.03}px ${BODY_FONT}`;
       const label = `${settings.text.cta.toUpperCase()} →`;
-      const labelWidth = ctx.measureText(label).width + unit * 0.05;
+      const boxLeft = margin + imageSize + unit * 0.04;
+      // The label box and link share whatever room is left beside the photo.
+      const room = width - margin - boxLeft;
+      const labelSize = fitFontSize(ctx, label, room - unit * 0.05, unit * 0.03, 700, BODY_FONT);
+      ctx.font = `700 ${labelSize}px ${BODY_FONT}`;
+      const labelWidth = Math.min(room, ctx.measureText(label).width + unit * 0.05);
       ctx.fillStyle = INK;
-      ctx.fillRect(margin + imageSize + unit * 0.04, imageY + imageSize - unit * 0.07, labelWidth, unit * 0.07);
+      ctx.fillRect(boxLeft, imageY + imageSize - unit * 0.07, labelWidth, unit * 0.07);
       ctx.fillStyle = PAPER;
       ctx.textAlign = "left";
-      ctx.fillText(label, margin + imageSize + unit * 0.065, imageY + imageSize - unit * 0.025);
+      ctx.fillText(label, boxLeft + unit * 0.025, imageY + imageSize - unit * 0.025);
       if (settings.showLink && settings.text.link) {
         ctx.fillStyle = INK;
-        ctx.font = `500 ${unit * 0.026}px ${BODY_FONT}`;
-        ctx.fillText(settings.text.link, margin + imageSize + unit * 0.04, imageY + imageSize - unit * 0.1);
+        ctx.font = `500 ${fitFontSize(ctx, settings.text.link, room, unit * 0.026, 500, BODY_FONT)}px ${BODY_FONT}`;
+        ctx.fillText(settings.text.link, boxLeft, imageY + imageSize - unit * 0.1);
       }
       ctx.restore();
     }
@@ -570,6 +631,19 @@ const poster: TemplateDefinition = {
 };
 
 /** The brightest accent, lifted toward white until it reads as the light half of a duotone. */
+function isGreyPalette(palette: readonly string[]) {
+  return palette.slice(0, 3).every((hex) => {
+    const [r, g, b] = hexToRgb(hex);
+    const max = Math.max(r, g, b);
+    return max === 0 || (max - Math.min(r, g, b)) / max < 0.18;
+  });
+}
+
+/** A black-and-white cover has no colours to split — fall back to the ICM violet-and-pink pair. */
+function duotonePair(palette: readonly string[]): [string, string] {
+  return isGreyPalette(palette) ? ["#ff8fc7", "#1a1240"] : [duotoneLight(palette), palette[3]];
+}
+
 function duotoneLight(palette: readonly string[]) {
   const luminance = (hex: string) => {
     const [r, g, b] = hexToRgb(hex);
@@ -583,9 +657,8 @@ function duotoneLight(palette: readonly string[]) {
 }
 
 function duotoneCanvas(scene: SceneContext) {
-  const { palette } = scene.settings;
-  const light = duotoneLight(palette);
-  return cachedCanvas(scene, `duotone:${light}:${palette[3]}`, () => {
+  const [light, darkHex] = duotonePair(scene.settings.palette);
+  return cachedCanvas(scene, `duotone:${light}:${darkHex}`, () => {
     if (!scene.assets.cover) return null;
     const canvas = createCanvas(720, 720);
     const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -593,7 +666,7 @@ function duotoneCanvas(scene: SceneContext) {
     drawImageCover(context, scene.assets.cover, 0, 0, 720, 720);
     try {
       const image = context.getImageData(0, 0, 720, 720);
-      const dark = hexToRgb(palette[3]);
+      const dark = hexToRgb(darkHex);
       const lightRgb = hexToRgb(light);
       for (let index = 0; index < image.data.length; index += 4) {
         const luminance = (image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114) / 255;
@@ -612,7 +685,7 @@ function duotoneCanvas(scene: SceneContext) {
 
 const duotone: TemplateDefinition = {
   ownBackground(scene) {
-    scene.ctx.fillStyle = scene.settings.palette[3];
+    scene.ctx.fillStyle = duotonePair(scene.settings.palette)[1];
     scene.ctx.fillRect(0, 0, scene.width, scene.height);
   },
   draw(scene) {
@@ -640,7 +713,7 @@ const duotone: TemplateDefinition = {
     const titleY = scene.isWide ? height * 0.48 : y + size + unit * 0.12;
     const title = (settings.text.title || "Название").toUpperCase();
     const titleSize = fitFontSize(ctx, title, textWidth, unit * 0.12, 700, DISPLAY_FONT);
-    drawText(scene, title, textX, titleY, { size: titleSize, color: duotoneLight(settings.palette), align: "left", letterSpacing: -titleSize * 0.03 });
+    drawText(scene, title, textX, titleY, { size: titleSize, color: duotonePair(settings.palette)[0], align: "left", letterSpacing: -titleSize * 0.03 });
     drawText(scene, artistOf(scene), textX, titleY + unit * 0.065, { size: unit * 0.042, weight: 500, family: BODY_FONT, color: "rgba(255,255,255,0.85)", align: "left", delay: 0.2 });
     if (settings.showLink && settings.text.link) {
       drawText(scene, `${settings.text.cta} → ${settings.text.link}`, textX, titleY + unit * 0.12, { size: unit * 0.026, weight: 500, family: BODY_FONT, color: "rgba(255,255,255,0.7)", align: "left", delay: 0.35 });
@@ -835,9 +908,9 @@ const glitch: TemplateDefinition = {
 const orb: TemplateDefinition = {
   draw(scene) {
     const { ctx, width, height, unit, settings, frame } = scene;
-    const radius = (scene.isWide ? height * 0.27 : width * (isTall(scene) ? 0.3 : 0.22)) * scene.pulse;
+    const radius = (scene.isWide ? height * 0.27 : width * (isTall(scene) ? 0.3 : 0.19)) * scene.pulse;
     const centerX = scene.isWide ? width * 0.3 : width / 2;
-    const centerY = scene.isWide ? height / 2 : height * (isTall(scene) ? 0.4 : 0.42);
+    const centerY = scene.isWide ? height / 2 : height * (isTall(scene) ? 0.4 : 0.35);
     const [accent, second] = settings.palette;
     // Halo
     const halo = ctx.createRadialGradient(centerX, centerY, radius * 0.8, centerX, centerY, radius * 2.2);
@@ -909,10 +982,13 @@ const echo: TemplateDefinition = {
     const { ctx, width, height, unit, settings, frame } = scene;
     const word = (settings.text.title || "Название").toUpperCase();
     const margin = unit * 0.06;
-    const lines = scene.isWide ? 5 : isTall(scene) ? 8 : 6;
+    // The stack fills a fixed band so the artist line below always has clear space.
+    const bandTop = isTall(scene) ? height * 0.12 : height * 0.04;
+    const bandBottom = isTall(scene) ? height * 0.74 : height * 0.76;
     const size = fitFontSize(ctx, word, width - margin * 2, unit * 0.2, 700, DISPLAY_FONT);
     const lineHeight = size * 0.86;
-    const startY = (height - lineHeight * lines) / 2 + lineHeight * 0.85;
+    const lines = Math.max(3, Math.floor((bandBottom - bandTop) / lineHeight));
+    const startY = bandTop + (bandBottom - bandTop - lineHeight * lines) / 2 + lineHeight * 0.85;
     const highlighted = Math.floor(frame.time * 2) % lines;
     for (let line = 0; line < lines; line += 1) {
       const sway = Math.sin(frame.time * 1.5 + line * 0.7) * unit * 0.02 * (1 + frame.audio.kick);
@@ -927,16 +1003,17 @@ const echo: TemplateDefinition = {
         letterSpacing: size * 0.02
       });
     }
-    const radius = unit * (scene.isWide ? 0.17 : 0.2) * scene.pulse;
+    const radius = unit * (scene.isWide ? 0.17 : 0.19) * scene.pulse;
+    const circleY = (bandTop + bandBottom) / 2;
     ctx.save();
     ctx.beginPath();
-    ctx.arc(width / 2, height / 2 + (isTall(scene) ? unit * 0.18 : 0), radius, 0, Math.PI * 2);
+    ctx.arc(width / 2, circleY, radius, 0, Math.PI * 2);
     ctx.clip();
     ctx.filter = "grayscale(1) contrast(1.3)";
-    if (scene.assets.cover) drawImageCover(ctx, scene.assets.cover, width / 2 - radius, height / 2 + (isTall(scene) ? unit * 0.18 : 0) - radius, radius * 2, radius * 2);
+    if (scene.assets.cover) drawImageCover(ctx, scene.assets.cover, width / 2 - radius, circleY - radius, radius * 2, radius * 2);
     ctx.filter = "none";
     ctx.restore();
-    const footer = isTall(scene) ? height * 0.8 : height - margin;
+    const footer = bandBottom + unit * 0.07;
     drawText(scene, artistOf(scene).toUpperCase(), width / 2, footer, { size: unit * 0.045, weight: 700, color: "#ffffff", align: "center", delay: 0.3, letterSpacing: unit * 0.006 });
     if (settings.showLink && settings.text.link) {
       drawText(scene, settings.text.link, width / 2, footer + unit * 0.05, { size: unit * 0.026, weight: 500, family: BODY_FONT, color: "rgba(255,255,255,0.8)", align: "center", delay: 0.4 });

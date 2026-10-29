@@ -24,7 +24,7 @@ export function SceneThumb(props: { settings: SceneSettings; assets: SceneAssets
       context,
       width,
       height,
-      { ...latestSettings.current, watermark: false, endCard: false },
+      { ...latestSettings.current, watermark: false, endCard: false, lyrics: { ...latestSettings.current.lyrics, mode: "off" } },
       { time: 4, clipDuration: 15, trackTime: 42, trackDuration: 180, dropTime: null, frequencyData: null, still: true },
       assets
     );

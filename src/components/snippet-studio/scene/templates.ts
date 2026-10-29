@@ -1,4 +1,5 @@
 import {
+  applyHero,
   BODY_FONT,
   cachedCanvas,
   clamp,
@@ -13,6 +14,7 @@ import {
   formatClock,
   hash,
   hexToRgb,
+  idleFloat,
   MONO_FONT,
   rgba,
   roundRectPath,
@@ -199,7 +201,9 @@ function spectrumItem(scene: SceneContext, height: number, color: string): Colum
 }
 
 function ctaItems(scene: SceneContext, size: number, dark = false): ColumnItem[] {
-  const { text, showLink } = scene.settings;
+  const { text, showLink, lyrics } = scene.settings;
+  // Karaoke takes over the lower part of the frame; the end card still carries the call to action.
+  if (lyrics.mode === "karaoke" && lyrics.lines.length && lyrics.position === "bottom") return [];
   const items: Array<ColumnItem | null> = [
     pillItem(scene, text.cta, { size, background: dark ? "#111111" : "#ffffff", color: dark ? "#ffffff" : "#14112e", delay: 0.35 }),
     showLink ? lineItem(scene, text.link, { size: size * 0.82, color: dark ? "rgba(17,17,17,0.7)" : "rgba(255,255,255,0.78)", delay: 0.4 }) : null
@@ -231,7 +235,10 @@ const premiere: TemplateDefinition = {
           cover: true,
           draw: (left, top, width) => {
             const scaled = size * scene.pulse;
+            scene.ctx.save();
+            applyHero(scene, left + width / 2, top + size / 2, 1);
             drawCover(scene, left + (width - scaled) / 2, top + (size - scaled) / 2, scaled, { radius: size * 0.06, glow });
+            scene.ctx.restore();
           }
         },
         titleItem(scene, { size: unit * 0.085, color: "#ffffff" }),
@@ -252,6 +259,8 @@ const vinyl: TemplateDefinition = {
     const centerY = isWide ? height / 2 : height * (isTall(scene) ? 0.4 : 0.3);
     const angle = (frame.time / 2.4) * Math.PI * 2;
 
+    ctx.save();
+    applyHero(scene, centerX, centerY, 2);
     ctx.save();
     ctx.translate(centerX, centerY);
     ctx.scale(scene.pulse, scene.pulse);
@@ -299,8 +308,11 @@ const vinyl: TemplateDefinition = {
     ctx.fill();
     ctx.restore();
 
-    // Tonearm
+    // Tonearm, with a slight wobble as if it rides the grooves
     ctx.save();
+    ctx.translate(centerX + radius * 1.02, centerY - radius * 0.95);
+    ctx.rotate(Math.sin(frame.time * 3.1) * 0.006 + frame.audio.kick * 0.01);
+    ctx.translate(-(centerX + radius * 1.02), -(centerY - radius * 0.95));
     ctx.strokeStyle = "rgba(230,230,240,0.85)";
     ctx.lineCap = "round";
     ctx.lineWidth = unit * 0.012;
@@ -313,6 +325,7 @@ const vinyl: TemplateDefinition = {
     ctx.beginPath();
     ctx.arc(centerX + radius * 1.02, centerY - radius * 0.95, unit * 0.025, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
     ctx.restore();
 
     const textLeft = isWide ? width * 0.58 : width * 0.08;
@@ -354,6 +367,14 @@ const glass: TemplateDefinition = {
     const size = scene.isWide ? Math.min(scene.height * 0.5, scene.width * 0.3) : scene.width * (isTall(scene) ? 0.56 : 0.36);
     const glow = settings.fx.glow * clamp(frame.audio.bass * 1.2 + scene.drop, 0, 1);
     const padding = unit * 0.06;
+    // The card, cover and text drift together as one floating pane.
+    const float = idleFloat(scene, 4);
+    const coverGrowth = (settings.layout.coverScale - 1) * size;
+    const coverShift = settings.layout.coverShiftY * scene.height;
+    ctx.save();
+    ctx.translate(scene.width / 2 + float.x, scene.height / 2 + float.y);
+    ctx.rotate(float.rotation * 0.4);
+    ctx.translate(-scene.width / 2, -scene.height / 2);
     layoutColumn(
       scene,
       compact([
@@ -362,7 +383,10 @@ const glass: TemplateDefinition = {
           cover: true,
           draw: (left, top, width) => {
             const scaled = size * scene.pulse;
+            scene.ctx.save();
+            applyHero(scene, left + width / 2, top + size / 2, 1, { float: false });
             drawCover(scene, left + (width - scaled) / 2, top + (size - scaled) / 2, scaled, { radius: size * 0.07, glow });
+            scene.ctx.restore();
           }
         },
         titleItem(scene, { size: unit * 0.075, color: "#ffffff", maxWidth: scene.isWide ? scene.width * 0.4 : scene.width * 0.7 }),
@@ -374,7 +398,12 @@ const glass: TemplateDefinition = {
       {
         inset: 0.15,
         padding,
-        backdrop: (rect) => {
+        backdrop: (laidOut) => {
+          // Stretch the card over the user's cover and text offsets so nothing pokes out of it.
+          const top = laidOut.y + Math.min(0, coverShift - coverGrowth / 2, scene.textShift);
+          const bottom = laidOut.y + laidOut.height + Math.max(0, scene.textShift);
+          const grow = Math.max(0, coverGrowth / 2);
+          const rect = { x: laidOut.x - grow, y: top, width: laidOut.width + grow * 2, height: bottom - top };
           ctx.save();
           roundRectPath(ctx, rect.x, rect.y, rect.width, rect.height, unit * 0.06);
           const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
@@ -398,6 +427,7 @@ const glass: TemplateDefinition = {
         }
       }
     );
+    ctx.restore();
   }
 };
 
@@ -408,19 +438,38 @@ const player: TemplateDefinition = {
     const phoneWidth = phoneHeight / 2.05;
     const centerX = scene.isWide ? width * 0.3 : width / 2;
     const centerY = height * (isTall(scene) ? 0.45 : scene.isWide ? 0.5 : 0.41);
+    // A coloured glow behind the phone keeps it readable on dark backgrounds.
+    const backGlow = ctx.createRadialGradient(centerX, centerY, phoneWidth * 0.2, centerX, centerY, phoneHeight * 0.7);
+    backGlow.addColorStop(0, rgba(settings.palette[0], 0.5 + frame.audio.bass * 0.3));
+    backGlow.addColorStop(1, rgba(settings.palette[0], 0));
+    ctx.fillStyle = backGlow;
+    ctx.fillRect(centerX - phoneHeight, centerY - phoneHeight, phoneHeight * 2, phoneHeight * 2);
+
     ctx.save();
+    applyHero(scene, centerX, centerY, 3);
     ctx.translate(centerX, centerY);
-    ctx.rotate(scene.isWide ? -0.05 : -0.07);
-    ctx.scale(1 + frame.audio.kick * settings.fx.bassPulse * 0.02, 1 + frame.audio.kick * settings.fx.bassPulse * 0.02);
+    // The phone sways like it is held in a hand, and nods on the kick.
+    const sway = Math.sin(frame.time * 0.7) * 0.06 * settings.motion;
+    ctx.rotate((scene.isWide ? -0.05 : -0.07) + sway);
+    ctx.scale(1 + frame.audio.kick * settings.fx.bassPulse * 0.03, 1 + frame.audio.kick * settings.fx.bassPulse * 0.03);
     const left = -phoneWidth / 2;
     const top = -phoneHeight / 2;
     ctx.shadowColor = "rgba(0,0,0,0.55)";
     ctx.shadowBlur = unit * 0.1;
     ctx.shadowOffsetY = unit * 0.04;
     roundRectPath(ctx, left, top, phoneWidth, phoneHeight, phoneWidth * 0.14);
-    ctx.fillStyle = "#0a0a0d";
+    ctx.fillStyle = "#16161c";
     ctx.fill();
     ctx.shadowColor = "transparent";
+    // Metal rim light along the body edge.
+    const rim = ctx.createLinearGradient(left, top, left + phoneWidth, top + phoneHeight);
+    rim.addColorStop(0, "rgba(255,255,255,0.75)");
+    rim.addColorStop(0.35, "rgba(255,255,255,0.12)");
+    rim.addColorStop(0.65, "rgba(255,255,255,0.1)");
+    rim.addColorStop(1, rgba(settings.palette[1], 0.7));
+    ctx.lineWidth = Math.max(1.5, phoneWidth * 0.012);
+    ctx.strokeStyle = rim;
+    ctx.stroke();
     const inset = phoneWidth * 0.035;
     roundRectPath(ctx, left + inset, top + inset, phoneWidth - inset * 2, phoneHeight - inset * 2, phoneWidth * 0.11);
     const screen = ctx.createLinearGradient(0, top, 0, top + phoneHeight);
@@ -437,7 +486,8 @@ const player: TemplateDefinition = {
     ctx.fillStyle = "rgba(255,255,255,0.75)";
     ctx.textAlign = "center";
     ctx.fillText("Сейчас играет", 0, top + phoneHeight * 0.09);
-    const localScene: SceneContext = { ...scene, unit: innerWidth };
+    // Inside the phone the user's text offset must not apply.
+    const localScene: SceneContext = { ...scene, unit: innerWidth, textShift: 0 };
     drawCover(localScene, artX, artY, artSize, { radius: artSize * 0.05, glow: settings.fx.glow * frame.audio.bass });
     const textTop = artY + artSize + innerWidth * 0.13;
     const title = settings.text.title || "Название трека";
@@ -484,6 +534,15 @@ const player: TemplateDefinition = {
     triangle(innerWidth * 0.26, controlsY, iconSize, 1);
     triangle(innerWidth * 0.3, controlsY, iconSize, 1);
     drawSpectrum(localScene, artX, controlsY + innerWidth * 0.08, artSize, innerWidth * 0.08, { color: "rgba(255,255,255,0.75)", mirror: true });
+    // A glass reflection sweeps across the screen every few seconds.
+    const sweep = ((frame.time / 4) % 1) * 2 - 0.5;
+    const glare = ctx.createLinearGradient(left + phoneWidth * sweep, top, left + phoneWidth * (sweep + 0.4), top + phoneHeight * 0.4);
+    glare.addColorStop(0, "rgba(255,255,255,0)");
+    glare.addColorStop(0.5, "rgba(255,255,255,0.08)");
+    glare.addColorStop(1, "rgba(255,255,255,0)");
+    roundRectPath(ctx, left + inset, top + inset, phoneWidth - inset * 2, phoneHeight - inset * 2, phoneWidth * 0.11);
+    ctx.fillStyle = glare;
+    ctx.fill();
     ctx.restore();
 
     const captionY = scene.isWide ? height * 0.45 : centerY + phoneHeight / 2 + unit * (isTall(scene) ? 0.09 : 0.07);
@@ -529,7 +588,8 @@ const headline: TemplateDefinition = {
     const size = fitFontSize(ctx, widest, maxWidth, scene.isWide ? unit * 0.22 : unit * 0.2, 700, DISPLAY_FONT);
     let y = top + unit * 0.04 + size * 0.88;
     lines.forEach((line, index) => {
-      drawText(scene, line, margin, y, { size, color: INK, align: "left", delay: 0.05 + index * 0.08, letterSpacing: -size * 0.04 });
+      const drift = Math.sin(frame.time * 0.45 + index * 1.3) * unit * 0.012 * settings.motion;
+      drawText(scene, line, margin + drift, y, { size, color: INK, align: "left", delay: 0.05 + index * 0.08, letterSpacing: -size * 0.04 });
       y += size * 0.88;
     });
     const artist = artistOf(scene).toUpperCase();
@@ -538,7 +598,10 @@ const headline: TemplateDefinition = {
 
     const imageSize = scene.isWide ? height * 0.36 : width * 0.42;
     const imageY = height - (isTall(scene) ? height * 0.21 : margin) - imageSize;
+    ctx.save();
+    applyHero(scene, margin + imageSize / 2, imageY + imageSize / 2, 5);
     drawCover(scene, margin, imageY, imageSize, { radius: 0, filter: "grayscale(1) contrast(1.35)", shadow: false });
+    ctx.restore();
     if (settings.text.cta) {
       ctx.save();
       ctx.globalAlpha *= textMotion(scene, 0.4).alpha;
@@ -579,12 +642,14 @@ const poster: TemplateDefinition = {
     const imageWidth = scene.isWide ? width * 0.55 : width;
     const imageX = scene.isWide ? width * 0.45 : 0;
     const imageY = scene.isWide ? 0 : height * 0.2;
-    const zoom = 1.04 + frame.time * 0.004 + frame.audio.kick * settings.fx.cameraZoom * 0.02;
+    const zoom = 1.08 + frame.time * 0.004 + frame.audio.kick * settings.fx.cameraZoom * 0.03;
+    const pan = Math.sin(frame.time * 0.25) * imageWidth * 0.025 * settings.motion;
     ctx.save();
     ctx.beginPath();
     ctx.rect(imageX, imageY, imageWidth, imageHeight);
     ctx.clip();
-    ctx.translate(imageX + imageWidth / 2, imageY + imageHeight / 2);
+    applyHero(scene, imageX + imageWidth / 2, imageY + imageHeight / 2, 6, { float: false });
+    ctx.translate(imageX + imageWidth / 2 + pan, imageY + imageHeight / 2);
     ctx.scale(zoom, zoom);
     ctx.filter = "grayscale(1) contrast(1.15)";
     if (scene.assets.cover) drawImageCover(ctx, scene.assets.cover, -imageWidth / 2, -imageHeight / 2, imageWidth, imageHeight);
@@ -696,6 +761,7 @@ const duotone: TemplateDefinition = {
     const y = scene.isWide ? (height - size) / 2 : isTall(scene) ? height * 0.14 : height * 0.06;
     const zoom = 1.05 + frame.time * 0.006 + (scene.pulse - 1);
     ctx.save();
+    applyHero(scene, x + size / 2, y + size / 2, 7);
     ctx.beginPath();
     ctx.rect(x, y, size, size);
     ctx.clip();
@@ -753,6 +819,7 @@ const halftone: TemplateDefinition = {
     }
     const boost = 1 + frame.audio.bass * 0.35 * settings.fx.bassPulse;
     ctx.save();
+    applyHero(scene, x + size / 2, y + size / 2, 8);
     ctx.fillStyle = INK;
     for (let row = 0; row < cells; row += 1) {
       for (let column = 0; column < cells; column += 1) {
@@ -760,7 +827,9 @@ const halftone: TemplateDefinition = {
         const value = luminance
           ? (luminance[offset] * 0.299 + luminance[offset + 1] * 0.587 + luminance[offset + 2] * 0.114) / 255
           : 0.5 + 0.5 * Math.sin(row * 0.3 + column * 0.2);
-        const radius = (1 - value) * cell * 0.62 * boost;
+        // A slow ripple runs through the dots, so the print never sits still.
+        const ripple = 1 + Math.sin(row * 0.32 + column * 0.18 - frame.time * 2.2) * 0.22 * settings.motion;
+        const radius = (1 - value) * cell * 0.62 * boost * ripple;
         if (radius < 0.4) continue;
         ctx.beginPath();
         ctx.arc(x + column * cell + cell / 2, y + row * cell + cell / 2, Math.min(radius, cell * 0.78), 0, Math.PI * 2);
@@ -795,6 +864,8 @@ const film: TemplateDefinition = {
     const x = (scene.isWide ? width * 0.08 : (width - frameWidth) / 2) + weaveX;
     const y = (scene.isWide ? (height - frameHeight * 0.8) / 2 : isTall(scene) ? height * 0.14 : height * 0.05) + weaveY;
     const shownHeight = scene.isWide ? frameHeight * 0.8 : isTall(scene) ? frameHeight : height * 0.68;
+    ctx.save();
+    applyHero(scene, x + frameWidth / 2, y + shownHeight / 2, 9);
     // Sprocket strips
     ctx.fillStyle = "#0c0b09";
     ctx.fillRect(x - unit * 0.06, y - unit * 0.03, frameWidth + unit * 0.12, shownHeight + unit * 0.06);
@@ -824,6 +895,10 @@ const film: TemplateDefinition = {
       ctx.fillStyle = leak;
       ctx.fillRect(x, y, frameWidth, shownHeight);
     }
+    // Projector flicker.
+    ctx.fillStyle = `rgba(255,240,210,${(hash(frame.frameIndex * 3) * 0.05 + 0.01) * settings.motion})`;
+    ctx.fillRect(x, y, frameWidth, shownHeight);
+    ctx.restore();
     const captionX = scene.isWide ? x + frameWidth + unit * 0.12 : x;
     const captionY = scene.isWide ? height * 0.46 : y + shownHeight + unit * 0.1;
     const caption = `▶ ${artistOf(scene).toUpperCase()} — ${(settings.text.title || "ТРЕК").toUpperCase()}`;
@@ -848,8 +923,15 @@ const glitch: TemplateDefinition = {
     ctx.fillStyle = "#050508";
     ctx.fillRect(0, 0, width, height);
     if (!scene.assets.cover) return;
-    const strength = clamp(frame.audio.kick * (settings.fx.kickGlitch ? 1.3 : 0.8) + scene.drop, 0, 1.4);
+    // Short glitch bursts also fire on their own every second or so, not only on kicks.
+    const idleBurst = hash(Math.floor(frame.time * 1.7) + 0.5) > 0.62 && (frame.time * 1.7) % 1 < 0.35 ? 0.7 * settings.motion : 0;
+    const strength = clamp(frame.audio.kick * (settings.fx.kickGlitch ? 1.3 : 0.8) + scene.drop + idleBurst, 0, 1.4);
     ctx.save();
+    applyHero(scene, width / 2, height / 2, 10, { float: false });
+    const zoom = 1.06 + Math.sin(frame.time * 0.3) * 0.03 * settings.motion;
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-width / 2, -height / 2);
     ctx.filter = "contrast(1.35) saturate(1.5)";
     drawImageCover(ctx, scene.assets.cover, 0, 0, width, height);
     ctx.filter = "none";
@@ -912,6 +994,8 @@ const orb: TemplateDefinition = {
     const centerX = scene.isWide ? width * 0.3 : width / 2;
     const centerY = scene.isWide ? height / 2 : height * (isTall(scene) ? 0.4 : 0.35);
     const [accent, second] = settings.palette;
+    ctx.save();
+    applyHero(scene, centerX, centerY, 11);
     // Halo
     const halo = ctx.createRadialGradient(centerX, centerY, radius * 0.8, centerX, centerY, radius * 2.2);
     halo.addColorStop(0, rgba(accent, 0.45 + frame.audio.bass * 0.4));
@@ -956,6 +1040,7 @@ const orb: TemplateDefinition = {
     ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
     ctx.clip();
     if (scene.assets.cover) drawImageCover(ctx, scene.assets.cover, centerX - radius, centerY - radius, radius * 2, radius * 2);
+    ctx.restore();
     ctx.restore();
 
     const textX = scene.isWide ? width * 0.58 : width / 2;
@@ -1006,6 +1091,7 @@ const echo: TemplateDefinition = {
     const radius = unit * (scene.isWide ? 0.17 : 0.19) * scene.pulse;
     const circleY = (bandTop + bandBottom) / 2;
     ctx.save();
+    applyHero(scene, width / 2, circleY, 12);
     ctx.beginPath();
     ctx.arc(width / 2, circleY, radius, 0, Math.PI * 2);
     ctx.clip();

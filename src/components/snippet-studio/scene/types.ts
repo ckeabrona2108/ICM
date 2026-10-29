@@ -68,6 +68,24 @@ export interface SceneFx {
   letterbox: boolean;
 }
 
+export interface LyricLine {
+  text: string;
+  /** Seconds into the whole track, so the timing survives moving the clip. */
+  start: number;
+}
+
+export type LyricsMode = "off" | "karaoke" | "background";
+export type LyricsPosition = "top" | "middle" | "bottom";
+
+export interface SceneLayout {
+  /** 0.6..1.4 — size of the main visual (cover, record, phone, orb). */
+  coverScale: number;
+  /** -0.25..0.25 of the frame height. */
+  coverShiftY: number;
+  /** -0.25..0.25 of the frame height. */
+  textShiftY: number;
+}
+
 export interface SceneSettings {
   template: TemplateId;
   background: BackgroundId;
@@ -85,6 +103,10 @@ export interface SceneSettings {
   showLink: boolean;
   endCard: boolean;
   watermark: boolean;
+  /** 0..1 — how much the template floats, sways and drifts on its own, even between beats. */
+  motion: number;
+  layout: SceneLayout;
+  lyrics: { mode: LyricsMode; position: LyricsPosition; lines: LyricLine[] };
 }
 
 export interface AudioFeatures {
@@ -179,6 +201,9 @@ export function createDefaultSceneSettings(): SceneSettings {
     textAnimation: "fade",
     showLink: true,
     endCard: true,
-    watermark: true
+    watermark: true,
+    motion: 0.6,
+    layout: { coverScale: 1, coverShiftY: 0, textShiftY: 0 },
+    lyrics: { mode: "off", position: "bottom", lines: [] }
   };
 }

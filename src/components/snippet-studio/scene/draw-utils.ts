@@ -21,6 +21,8 @@ export interface SceneContext {
   drop: number;
   /** Cover scale factor driven by bass and the bass-pulse setting. */
   pulse: number;
+  /** Pixels the whole text block is moved by the user (layout → text position). */
+  textShift: number;
   cache: Map<string, HTMLCanvasElement>;
 }
 
@@ -229,7 +231,7 @@ export function drawText(
   const size = fitFontSize(ctx, text, Math.max(room, scene.unit * 0.1), options.size, weight, family);
   ctx.save();
   ctx.globalAlpha *= motion.alpha;
-  ctx.translate(x, y + motion.offsetY);
+  ctx.translate(x, y + motion.offsetY + scene.textShift);
   ctx.scale(motion.scale, motion.scale);
   ctx.font = `${weight} ${size}px ${family}`;
   ctx.textAlign = align;
@@ -274,7 +276,7 @@ export function drawPill(
   const height = options.size * 2.4;
   const width = ctx.measureText(text).width + paddingX * 2;
   const x = options.align === "left" ? centerX : centerX - width / 2;
-  const top = y + motion.offsetY;
+  const top = y + motion.offsetY + scene.textShift;
   roundRectPath(ctx, x, top, width, height, height / 2);
   ctx.fillStyle = options.background;
   ctx.fill();
@@ -312,6 +314,7 @@ export function drawSpectrum(
     return clamp(bands[Math.round(band)] ?? 0, 0, 1);
   };
   ctx.save();
+  ctx.translate(0, scene.textShift);
   ctx.globalAlpha *= options.alpha ?? 0.92;
   ctx.fillStyle = options.color;
   ctx.strokeStyle = options.color;
@@ -366,4 +369,33 @@ export function cachedCanvas(scene: SceneContext, key: string, build: () => HTML
     scene.cache.set(fullKey, created);
   }
   return created;
+}
+
+/**
+ * Idle motion: a slow float and sway that keeps the frame alive between beats.
+ * Driven by time only, so it also plays in the paused preview.
+ */
+export function idleFloat(scene: SceneContext, seed = 0) {
+  const amount = scene.settings.motion;
+  const time = scene.frame.time + seed * 2.3;
+  return {
+    x: Math.sin(time * 0.53 + seed) * scene.unit * 0.008 * amount,
+    y: Math.sin(time * 0.81 + seed * 1.7) * scene.unit * 0.014 * amount,
+    rotation: Math.sin(time * 0.47 + seed * 0.9) * 0.025 * amount
+  };
+}
+
+/**
+ * Moves and scales the template's main visual (cover, record, phone, orb) around its
+ * centre: the user's layout size and offset, the idle float and a small kick bump.
+ * Call inside ctx.save()/restore() before drawing the visual.
+ */
+export function applyHero(scene: SceneContext, centerX: number, centerY: number, seed = 0, options: { float?: boolean } = {}) {
+  const { ctx, settings, height, frame } = scene;
+  const float = options.float === false ? { x: 0, y: 0, rotation: 0 } : idleFloat(scene, seed);
+  const scale = settings.layout.coverScale * (1 + frame.audio.kick * settings.motion * 0.015);
+  ctx.translate(centerX + float.x, centerY + float.y + settings.layout.coverShiftY * height);
+  ctx.rotate(float.rotation);
+  ctx.scale(scale, scale);
+  ctx.translate(-centerX, -centerY);
 }

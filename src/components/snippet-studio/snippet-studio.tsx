@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { formatSnippetTime, getEffectiveSegment } from "@/lib/video-snippets";
 import type { VideoSnippetSource } from "@/lib/video-snippet-sources";
 
+import { distributeLyrics } from "./scene/lyrics";
 import { extractPalette } from "./scene/palette";
 import { TEMPLATES } from "./scene/templates";
 import {
@@ -18,6 +19,9 @@ import {
   SNIPPET_FORMATS,
   TEMPLATE_LIST,
   type BackgroundId,
+  type LyricLine,
+  type LyricsMode,
+  type LyricsPosition,
   type SceneAssets,
   type SceneSettings,
   type SnippetFormatId,
@@ -31,7 +35,7 @@ import { StudioExport } from "./studio-export";
 import { StudioPreview } from "./studio-preview";
 import { StudioWaveform } from "./studio-waveform";
 
-type InspectorTab = "template" | "background" | "fx" | "text";
+type InspectorTab = "template" | "background" | "fx" | "text" | "layout" | "lyrics";
 type SnippetLength = 15 | 30 | 60;
 
 const CATEGORY_LABELS: Array<{ id: TemplateCategory | "all"; label: string }> = [
@@ -130,6 +134,53 @@ function Slider(props: { label: string; value: number; onChange: (value: number)
   );
 }
 
+function RangeSlider(props: { label: string; value: number; min: number; max: number; step: number; format: (value: number) => string; onChange: (value: number) => void }) {
+  const id = React.useId();
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1.5 text-[14px] text-white">
+      <span className="flex justify-between">
+        {props.label}
+        <span className="tabular-nums text-white/65">{props.format(props.value)}</span>
+      </span>
+      <input
+        id={id}
+        type="range"
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        value={props.value}
+        onChange={(event) => props.onChange(Number(event.target.value))}
+        className="w-full accent-[#7b61ff]"
+      />
+    </label>
+  );
+}
+
+const signedPercent = (value: number) => `${value > 0 ? "+" : ""}${Math.round(value * 100)}%`;
+
+const LYRICS_MODES: Array<{ id: LyricsMode; label: string }> = [
+  { id: "off", label: "Выкл" },
+  { id: "karaoke", label: "Караоке" },
+  { id: "background", label: "На фоне" }
+];
+
+const LYRICS_POSITIONS: Array<{ id: LyricsPosition; label: string }> = [
+  { id: "top", label: "Сверху" },
+  { id: "middle", label: "По центру" },
+  { id: "bottom", label: "Снизу" }
+];
+
+/** Keeps each line's timing when the text is edited; new lines continue after the last one. */
+function linesFromText(text: string, previous: LyricLine[], clipStart: number) {
+  const texts = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  let lastStart = clipStart - 2.5;
+  return texts.map((line, index) => {
+    const start = previous[index]?.start ?? lastStart + 2.5;
+    lastStart = start;
+    return { text: line, start };
+  });
+}
+
 function SectionTitle(props: { children: React.ReactNode }) {
   return <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-white/60">{props.children}</div>;
 }
@@ -160,6 +211,8 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
   const [assets, setAssets] = React.useState<SceneAssets>({ cover: null, coverKey: "none" });
   const [plan, setPlan] = React.useState<string | null>(null);
   const uploadedCoverUrlRef = React.useRef<string | null>(null);
+  const [lyricsText, setLyricsText] = React.useState("");
+  const [syncIndex, setSyncIndex] = React.useState<number | null>(null);
 
   const canRemoveWatermark = plan === "PRO" || plan === "ENTERPRISE";
   const source = sources?.find((item) => item.releaseId === releaseId) ?? null;
@@ -180,6 +233,8 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
   const updateSettings = React.useCallback((patch: Partial<SceneSettings>) => setSettings((current) => ({ ...current, ...patch })), []);
   const updateText = (patch: Partial<SceneSettings["text"]>) => setSettings((current) => ({ ...current, text: { ...current.text, ...patch } }));
   const updateFx = (patch: Partial<SceneSettings["fx"]>) => setSettings((current) => ({ ...current, fx: { ...current.fx, ...patch } }));
+  const updateLayout = (patch: Partial<SceneSettings["layout"]>) => setSettings((current) => ({ ...current, layout: { ...current.layout, ...patch } }));
+  const updateLyrics = (patch: Partial<SceneSettings["lyrics"]>) => setSettings((current) => ({ ...current, lyrics: { ...current.lyrics, ...patch } }));
 
   // The scene draws its type with these families, in the preview and in the exported file alike.
   React.useEffect(() => {
@@ -304,6 +359,64 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
   const changeClipStart = (time: number) => {
     if (isPlaying) void stop();
     setClipStart(time);
+  };
+
+  const onLyricsTextChange = (text: string) => {
+    setLyricsText(text);
+    setSettings((current) => ({
+      ...current,
+      lyrics: {
+        ...current.lyrics,
+        mode: current.lyrics.mode === "off" && text.trim() ? "karaoke" : current.lyrics.mode,
+        lines: linesFromText(text, current.lyrics.lines, segment.startTime)
+      }
+    }));
+  };
+
+  const spreadLyrics = () => {
+    updateLyrics({ lines: distributeLyrics(settings.lyrics.lines.map((line) => line.text), segment.startTime, clipDuration) });
+  };
+
+  // Tap sync: play the clip and press "next line" (or Space) as each line starts.
+  const startTapSync = async () => {
+    if (!settings.lyrics.lines.length || !isReady) return;
+    setSyncIndex(0);
+    if (settings.lyrics.mode === "off") updateLyrics({ mode: "karaoke" });
+    await play({ fromTime: segment.startTime, durationSeconds: clipDuration });
+  };
+
+  const stampLine = React.useCallback(() => {
+    setSyncIndex((index) => {
+      if (index === null) return null;
+      const time = analysisRef.current?.currentTime ?? currentTime;
+      setSettings((current) => {
+        const lines = current.lyrics.lines.map((line, lineIndex) => (lineIndex === index ? { ...line, start: Math.round(time * 100) / 100 } : line));
+        return { ...current, lyrics: { ...current.lyrics, lines } };
+      });
+      const next = index + 1;
+      return next >= settings.lyrics.lines.length ? null : next;
+    });
+  }, [analysisRef, currentTime, settings.lyrics.lines.length]);
+
+  React.useEffect(() => {
+    if (syncIndex === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return;
+      event.preventDefault();
+      stampLine();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [stampLine, syncIndex]);
+
+  React.useEffect(() => {
+    if (syncIndex !== null && !isPlaying) setSyncIndex(null);
+    // Stopping playback ends a sync pass.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying]);
+
+  const nudgeLine = (index: number, delta: number) => {
+    updateLyrics({ lines: settings.lyrics.lines.map((line, lineIndex) => (lineIndex === index ? { ...line, start: Math.max(0, Math.round((line.start + delta) * 100) / 100) } : line)) });
   };
 
   const togglePlay = async () => {
@@ -494,13 +607,15 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
 
         {/* Inspector */}
         <aside className={cn(card, "flex min-w-0 flex-[1_1_340px] flex-col gap-4 pt-2 lg:max-w-[420px]")}>
-          <div role="tablist" aria-label="Настройки" className="flex gap-5 border-b border-white/[0.08]">
+          <div role="tablist" aria-label="Настройки" className="-mx-1 flex gap-4 overflow-x-auto border-b border-white/[0.08] px-1">
             {(
               [
                 ["template", "Шаблон"],
                 ["background", "Фон"],
                 ["fx", "Эффекты"],
-                ["text", "Текст"]
+                ["text", "Текст"],
+                ["layout", "Макет"],
+                ["lyrics", "Песня"]
               ] as Array<[InspectorTab, string]>
             ).map(([id, label]) => (
               <button
@@ -509,7 +624,7 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
                 role="tab"
                 aria-selected={tab === id}
                 onClick={() => setTab(id)}
-                className={cn("border-b-2 py-3 text-[14px] font-semibold", tab === id ? "border-[#7b61ff] text-white" : "border-transparent text-white/65 hover:text-white")}
+                className={cn("shrink-0 border-b-2 py-3 text-[14px] font-semibold", tab === id ? "border-[#7b61ff] text-white" : "border-transparent text-white/65 hover:text-white")}
               >
                 {label}
               </button>
@@ -656,6 +771,118 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
                   </Chip>
                 ))}
               </div>
+            </div>
+          ) : null}
+
+          {tab === "layout" ? (
+            <div className="flex flex-col gap-4">
+              <RangeSlider
+                label="Живость шаблона"
+                value={settings.motion}
+                min={0}
+                max={1}
+                step={0.05}
+                format={(value) => (value === 0 ? "статично" : `${Math.round(value * 100)}%`)}
+                onChange={(value) => updateSettings({ motion: value })}
+              />
+              <p className="-mt-2 text-[12px] text-white/55">Обложка, телефон или пластинка плавно парят и покачиваются — даже между битами.</p>
+              <SectionTitle>Обложка</SectionTitle>
+              <RangeSlider label="Размер" value={settings.layout.coverScale} min={0.6} max={1.4} step={0.02} format={(value) => `${Math.round(value * 100)}%`} onChange={(value) => updateLayout({ coverScale: value })} />
+              <RangeSlider label="Выше / ниже" value={settings.layout.coverShiftY} min={-0.25} max={0.25} step={0.01} format={signedPercent} onChange={(value) => updateLayout({ coverShiftY: value })} />
+              <SectionTitle>Текст</SectionTitle>
+              <RangeSlider label="Выше / ниже" value={settings.layout.textShiftY} min={-0.25} max={0.25} step={0.01} format={signedPercent} onChange={(value) => updateLayout({ textShiftY: value })} />
+              <button
+                type="button"
+                onClick={() => updateLayout({ coverScale: 1, coverShiftY: 0, textShiftY: 0 })}
+                className="self-start text-[13px] font-semibold text-[#b3a6ff] hover:text-[#d6ceff]"
+              >
+                Сбросить макет
+              </button>
+            </div>
+          ) : null}
+
+          {tab === "lyrics" ? (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap gap-1.5">
+                {LYRICS_MODES.map((mode) => (
+                  <Chip key={mode.id} active={settings.lyrics.mode === mode.id} onClick={() => updateLyrics({ mode: mode.id })}>
+                    {mode.label}
+                  </Chip>
+                ))}
+              </div>
+              {settings.lyrics.mode === "karaoke" ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {LYRICS_POSITIONS.map((position) => (
+                    <Chip key={position.id} active={settings.lyrics.position === position.id} onClick={() => updateLyrics({ position: position.id })}>
+                      {position.label}
+                    </Chip>
+                  ))}
+                </div>
+              ) : null}
+              <label className="flex flex-col gap-1.5 text-[13px] text-white/75">
+                Текст песни — каждая строка с новой строки
+                <textarea
+                  value={lyricsText}
+                  onChange={(event) => onLyricsTextChange(event.target.value)}
+                  rows={6}
+                  placeholder={"Первая строка припева\nВторая строка\nТретья строка"}
+                  className="resize-y rounded-[10px] border border-white/10 bg-[#11131f] px-3 py-2.5 text-[14px] leading-relaxed text-white placeholder:text-white/30"
+                />
+              </label>
+              {settings.lyrics.lines.length ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {syncIndex === null ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void startTapSync()}
+                          disabled={!isReady}
+                          className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#7b61ff] px-4 text-[13px] font-semibold text-white hover:bg-[#8b72ff] disabled:opacity-50"
+                        >
+                          <Play className="h-4 w-4" /> Разметить нажатиями
+                        </button>
+                        <Chip onClick={spreadLyrics}>Разложить ровно по фрагменту</Chip>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={stampLine}
+                        className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#7df0c4] px-4 text-[14px] font-bold text-[#0b0f1a]"
+                      >
+                        Строка {syncIndex + 1} началась · Пробел
+                      </button>
+                    )}
+                  </div>
+                  {syncIndex !== null ? (
+                    <p className="-mt-2 text-[12px] text-white/60">Жми, когда начинается строка: «{settings.lyrics.lines[syncIndex]?.text}»</p>
+                  ) : null}
+                  <ol className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+                    {settings.lyrics.lines.map((line, index) => (
+                      <li
+                        key={index}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px]",
+                          syncIndex === index ? "bg-[#7df0c4]/15 text-white" : "bg-white/[0.03] text-white/80"
+                        )}
+                      >
+                        <span className="w-12 shrink-0 tabular-nums text-white/55">{formatSnippetTime(line.start)}</span>
+                        <span className="min-w-0 flex-1 truncate">{line.text}</span>
+                        <button type="button" aria-label="Раньше на 0,1 с" onClick={() => nudgeLine(index, -0.1)} className="h-8 w-8 shrink-0 rounded-md text-white/60 hover:bg-white/10">
+                          −
+                        </button>
+                        <button type="button" aria-label="Позже на 0,1 с" onClick={() => nudgeLine(index, 0.1)} className="h-8 w-8 shrink-0 rounded-md text-white/60 hover:bg-white/10">
+                          +
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              ) : (
+                <p className="text-[12px] leading-relaxed text-white/55">
+                  Вставь текст, затем включи «Разметить нажатиями»: фрагмент заиграет, а ты жмёшь пробел в начале каждой строки. Строка будет заливаться цветом в такт.
+                </p>
+              )}
             </div>
           ) : null}
 

@@ -1,6 +1,7 @@
 import { AudioFeatureTracker } from "./audio-features";
 import { BackgroundPainter } from "./backgrounds";
 import { drawIntroFade, drawLetterbox, drawLightLeak, drawParticles, drawSparkles } from "./effects";
+import { drawBackgroundLyrics, drawKaraoke } from "./lyrics";
 import { BODY_FONT, clamp, DISPLAY_FONT, drawCover, fitFontSize, hash, type SceneContext, smoothstep } from "./draw-utils";
 import { TEMPLATES } from "./templates";
 import type { SceneAssets, SceneFrame, SceneSettings } from "./types";
@@ -65,7 +66,8 @@ export class SceneRenderer {
       frame,
       assets,
       drop,
-      pulse: 1 + settings.fx.bassPulse * (audio.bass * 0.05 + audio.kick * 0.035) + drop * 0.05,
+      pulse: 1 + settings.fx.bassPulse * (audio.bass * 0.07 + audio.kick * 0.05) + drop * 0.06,
+      textShift: settings.layout.textShiftY * height,
       cache: this.cache
     };
     const template = TEMPLATES[settings.template] ?? TEMPLATES.premiere;
@@ -92,7 +94,9 @@ export class SceneRenderer {
       ctx.fillStyle = scrim;
       ctx.fillRect(0, 0, width, height);
     }
+    if (settings.lyrics.mode === "background") drawBackgroundLyrics(scene);
     template.draw(scene);
+    if (settings.lyrics.mode === "karaoke") drawKaraoke(scene);
     if (settings.fx.particles) drawParticles(scene);
     if (settings.fx.sparkles) drawSparkles(scene);
     if (settings.fx.lightLeak) drawLightLeak(scene);

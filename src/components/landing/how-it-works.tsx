@@ -10,8 +10,8 @@ import {
 import {
   LineChart,
   Rocket,
+  ScanSearch,
   ShieldCheck,
-  Type,
   Upload,
   UserPlus,
   type LucideIcon
@@ -37,7 +37,7 @@ const STEPS: Step[] = [
       "Добавьте треки, обложку и заполните информацию о релизе."
   },
   {
-    icon: Type,
+    icon: ScanSearch,
     title: "Проверка",
     description:
       "Мы проверяем релиз и сообщаем, если что-то нужно исправить перед отправкой на площадки."
@@ -88,7 +88,7 @@ export function HowItWorks() {
       ref={containerRef}
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className="relative overflow-visible rounded-[28px] border border-white/[0.06] bg-[#0c0c0f] p-6 sm:p-10 lg:p-14"
+      className="relative overflow-visible rounded-[28px] border border-white/[0.06] bg-[#0c0c0f] p-6 sm:p-8 lg:p-10"
     >
       {/* moving spotlight */}
       <Spotlight index={highlightIndex} reduce={Boolean(reduce)} />
@@ -104,7 +104,7 @@ export function HowItWorks() {
           hidden: {},
           show: { transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
         }}
-        className="relative grid gap-x-8 gap-y-16 sm:grid-cols-2 lg:grid-cols-3"
+        className="relative grid gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3"
       >
         {STEPS.map((step, i) => (
           <StepCard
@@ -146,9 +146,9 @@ function StepCard({ step, index, active, onHover, onLeave }: StepCardProps) {
       className="group relative cursor-default text-center"
     >
       {/* number + label */}
-      <div className="mb-4 flex flex-col items-center leading-none">
+      <div className="mb-3 flex flex-col items-center leading-none">
         <span
-          className={`bg-clip-text text-[44px] font-semibold tracking-tighter transition-all duration-700 ${
+          className={`bg-clip-text text-[36px] font-semibold tracking-tighter transition-all duration-700 ${
             active
               ? "bg-gradient-to-b from-white via-[#c4b5fd] to-[#7b61ff] text-transparent"
               : "bg-gradient-to-b from-white/15 to-white/[0.04] text-transparent"
@@ -167,7 +167,7 @@ function StepCard({ step, index, active, onHover, onLeave }: StepCardProps) {
       </div>
 
       {/* icon container */}
-      <div className="relative mx-auto h-20 w-20">
+      <div className="relative mx-auto h-16 w-16">
         {/* expanding halo ripples (only when active) */}
         <AnimatePresence>
           {active ? (
@@ -254,7 +254,7 @@ function StepCard({ step, index, active, onHover, onLeave }: StepCardProps) {
             className="relative"
           >
             <Icon
-              className={`h-7 w-7 transition-colors duration-500 ${
+              className={`h-6 w-6 transition-colors duration-500 ${
                 active ? "text-[#e9e2ff]" : "text-white/85"
               }`}
               strokeWidth={1.4}
@@ -284,7 +284,7 @@ function StepCard({ step, index, active, onHover, onLeave }: StepCardProps) {
 
       {/* title with shimmer on active */}
       <h3
-        className={`relative mt-6 inline-block text-[17px] font-semibold transition-colors duration-500 sm:text-[18px] ${
+        className={`relative mt-5 inline-block text-[17px] font-semibold transition-colors duration-500 sm:text-[18px] ${
           active ? "text-white" : "text-white/85"
         }`}
       >
@@ -321,7 +321,7 @@ function StepCard({ step, index, active, onHover, onLeave }: StepCardProps) {
       </p>
 
       {/* progress bar */}
-      <div className="mx-auto mt-6 h-px w-16 overflow-hidden rounded-full bg-white/[0.06]">
+      <div className="mx-auto mt-5 h-px w-16 overflow-hidden rounded-full bg-white/[0.06]">
         <motion.div
           initial={{ width: "0%" }}
           animate={{ width: active ? "100%" : "0%" }}

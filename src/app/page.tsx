@@ -4,7 +4,6 @@ import type { Metadata } from "next";
 import { getServerSession } from "next-auth";
 import {
   ArrowRight,
-  ArrowUpRight,
   BadgeCheck,
   BarChart3,
   Clock3,
@@ -13,8 +12,7 @@ import {
   Layers3,
   ShieldCheck,
   Sparkles,
-  Wallet,
-  WalletCards
+  Wallet
 } from "lucide-react";
 
 import { FaqAccordion } from "@/components/landing/faq-accordion";
@@ -161,24 +159,28 @@ const PROMO_CARDS = [
 
 const FAQ_ITEMS = [
   {
-    q: "Что включает сервис кроме дистрибуции?",
-    a: "Помимо доставки музыки на площадки вы получаете личный кабинет, статистику, поддержку команды и инструменты для работы с релизами."
+    q: "Сколько процентов дохода остаётся артисту?",
+    a: "90% дохода с прослушиваний остаётся вам. Начисления видны в разделе «Кошелёк» личного кабинета."
   },
   {
-    q: "Как быстро нужно загружать релиз до даты выхода?",
-    a: "Рекомендуем загружать релизы заранее, чтобы оставалось время на проверку и возможные корректировки."
+    q: "За сколько дней до релиза нужно загрузить трек?",
+    a: "Выгрузка на площадки занимает до 5 дней на тарифе STANDARD, до 3 дней на PRO и от 24 часов на ENTERPRISE. Чтобы успеть с правками и питчингом в подборки, загружайте релиз хотя бы за 1–2 недели до даты выхода."
+  },
+  {
+    q: "Как и когда приходят выплаты?",
+    a: "Доход начисляется по квартальным отчётам площадок. Вывести деньги можно по согласованным отчётам от 2 000 ₽: физлицо подписывает расписку, самозанятый присылает чек из «Мой налог»."
+  },
+  {
+    q: "Как понять, что релиз принят?",
+    a: "Статус виден в кабинете на каждом этапе: проверка, модерация, отгрузка, публикация. Если нужны правки, вы увидите, что именно исправить."
   },
   {
     q: "Какие права передаёт артист?",
-    a: "Все права на музыку остаются за правообладателем согласно условиям сотрудничества."
+    a: "Права на музыку остаются за вами как за правообладателем. Мы распространяем релиз на площадки по условиям договора."
   },
   {
     q: "Можно ли выпускать ремиксы и каверы?",
-    a: "Да, если соблюдены все необходимые требования и оформлены соответствующие права."
-  },
-  {
-    q: "Как понять, что релиз уже принят?",
-    a: "Статус релиза отображается в личном кабинете на каждом этапе обработки."
+    a: "Да, если у вас есть разрешение правообладателя оригинала или лицензия на кавер. Без этого площадки снимут релиз."
   }
 ] as const;
 
@@ -239,33 +241,6 @@ const HOME_PAGE_JSON_LD = {
   ]
 };
 
-const HERO_METRICS = [
-  {
-    title: "Стримы",
-    value: "1 245 800",
-    icon: ArrowUpRight,
-    iconTint: "text-[#d9d2ff]",
-    tilt: "sm:-rotate-[3deg]",
-    shift: "sm:translate-y-2",
-    duration: "6.6s",
-    delay: "0.4s",
-    panel:
-      "bg-[linear-gradient(135deg,rgba(148,132,255,0.26),rgba(92,80,196,0.14))] border-white/12"
-  },
-  {
-    title: "Выплата доступна",
-    value: "14 500 ₽",
-    icon: WalletCards,
-    iconTint: "text-[#1fd19a]",
-    tilt: "sm:rotate-[4deg]",
-    shift: "sm:translate-y-6",
-    duration: "7.4s",
-    delay: "1.3s",
-    panel:
-      "bg-[linear-gradient(135deg,rgba(72,68,116,0.56),rgba(44,40,80,0.38))] border-white/10"
-  }
-] as const;
-
 const SURFACE_PANEL =
   "border border-white/[0.08] bg-[linear-gradient(180deg,rgba(17,18,28,0.92),rgba(11,13,21,0.88))] shadow-[0_30px_120px_-60px_rgba(91,75,255,0.32)] backdrop-blur-xl";
 
@@ -311,8 +286,8 @@ export default async function HomePage() {
 
       <IcmHeader user={session?.user ?? null} />
 
-      <section id="hero" className="relative">
-        <div className="mx-auto grid max-w-7xl gap-10 px-6 pb-8 pt-28 sm:px-8 sm:pb-12 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-10 lg:pb-16 lg:pt-36">
+      <section id="hero" className="relative overflow-x-clip">
+        <div className="relative mx-auto grid max-w-7xl gap-10 px-6 pb-8 pt-28 sm:px-8 sm:pb-12 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-10 lg:pb-32 lg:pt-36">
           <Reveal>
             <h1 className="max-w-2xl text-balance text-[44px] font-bold leading-[1.04] tracking-[-0.02em] sm:text-[56px] md:text-[68px] lg:text-[76px]">
               От первого трека до первого хита —
@@ -344,30 +319,38 @@ export default async function HomePage() {
               </a>
             </div>
 
-            <div className="mt-20 flex max-w-[520px] flex-col gap-3 sm:mt-24 sm:flex-row">
-              {HERO_METRICS.map((item) => {
-                const Icon = item.icon;
+            <p className="mt-12 flex items-center gap-2 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35 sm:tracking-[0.22em]">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1fd19a] shadow-[0_0_10px_rgba(31,209,154,0.8)]" />
+              Кабинет артиста · демо-данные
+            </p>
 
-                return (
-                  <div
-                    key={item.title}
-                    className={`flex min-h-[92px] flex-1 items-center gap-3 overflow-hidden rounded-[24px] border px-4 py-3 shadow-[0_20px_56px_-36px_rgba(0,0,0,0.82)] backdrop-blur-[20px] transition-transform duration-300 sm:min-h-[96px] ${item.panel} ${item.tilt} ${item.shift}`}
-                    style={{ animation: `float-soft ${item.duration} ease-in-out ${item.delay} infinite` }}
-                  >
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[16px] border border-white/8 bg-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] sm:h-14 sm:w-14">
-                      <Icon className={`h-5 w-5 sm:h-6 sm:w-6 ${item.iconTint}`} strokeWidth={1.8} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-medium leading-none text-white/55 sm:text-[13px]">
-                        {item.title}
-                      </div>
-                      <div className="mt-2 text-[20px] font-bold leading-none tracking-[-0.04em] text-white sm:text-[24px]">
-                        {item.value}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+            <div
+              aria-hidden
+              className="pointer-events-none mt-4 overflow-hidden rounded-[18px] [mask-image:linear-gradient(to_right,black_60%,transparent)] lg:hidden"
+            >
+              <Image
+                src="/landing/cabinet/analytics-kpi.webp"
+                alt=""
+                width={2244}
+                height={352}
+                sizes="(min-width: 640px) 1200px, 760px"
+                className="h-auto w-[200%] max-w-none"
+              />
+            </div>
+
+            <div aria-hidden className="pointer-events-none relative hidden lg:block">
+              <div className="absolute -left-8 top-0 w-[1080px] [perspective:1800px] xl:-left-16">
+                <div className="origin-top [transform:rotateX(26deg)_rotateZ(-5deg)] [mask-image:linear-gradient(to_right,black_65%,transparent_96%)]">
+                  <Image
+                    src="/landing/cabinet/analytics-kpi.webp"
+                    alt=""
+                    width={2244}
+                    height={352}
+                    sizes="1080px"
+                    className="h-auto w-full opacity-[0.85]"
+                  />
+                </div>
+              </div>
             </div>
           </Reveal>
 
@@ -475,7 +458,7 @@ export default async function HomePage() {
 
       <section id="how" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
         <Reveal className="text-center">
-          <SectionEyebrow>Как проходит релиз</SectionEyebrow>
+          <SectionEyebrow>Процесс</SectionEyebrow>
           <h2 className="mt-4 text-[34px] font-bold tracking-tight sm:text-[42px] lg:text-[54px]">
             Как проходит выпуск релиза
           </h2>
@@ -498,7 +481,7 @@ export default async function HomePage() {
                 Помогаем не только выпустить музыку, но и работать с ней дальше
               </h2>
               <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-white/60 sm:text-[16px]">
-                После публикации релиз продолжает жить. Поэтому в ICE CREAM MUSIC доступны инструменты, которые помогают следить за результатами и управлять дальнейшей работой.
+                После публикации релиз продолжает жить. Поэтому в ICECREAMMUSIC доступны инструменты, которые помогают следить за результатами и управлять дальнейшей работой.
               </p>
             </div>
 
@@ -533,8 +516,8 @@ export default async function HomePage() {
               Выпускайте музыку там, где её слушают
             </h2>
             <p className="mx-auto mt-4 max-w-3xl text-[15px] leading-relaxed text-white/60 sm:text-[16px]">
-              Мы доставляем релизы на популярные мировые и локальные музыкальные площадки. Вместо
-              набора карточек здесь лучше работает живая витрина охвата.
+              Мы доставляем релизы на популярные мировые и локальные музыкальные площадки — от
+              глобальных стримингов до российских витрин и соцсетей.
             </p>
             <div className="mt-6 inline-flex items-center gap-3 rounded-[22px] border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-left">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#7b61ff]/10 text-[#d7ccff]">
@@ -652,7 +635,7 @@ export default async function HomePage() {
                     return (
                       <div
                         key={card.title}
-                        className={`absolute top-1/2 w-[220px] rounded-[30px] border border-white/[0.1] bg-[linear-gradient(180deg,rgba(22,23,36,0.96),rgba(15,16,26,0.94))] p-4 shadow-[0_28px_72px_-34px_rgba(0,0,0,0.82)] backdrop-blur-xl md:w-[248px] ${card.rotate} ${card.shift} ${
+                        className={`absolute top-6 w-[220px] rounded-[30px] border border-white/[0.1] bg-[linear-gradient(180deg,rgba(22,23,36,0.96),rgba(15,16,26,0.94))] p-4 shadow-[0_28px_72px_-34px_rgba(0,0,0,0.82)] backdrop-blur-xl md:w-[248px] ${card.rotate} ${card.shift} ${
                           index === 0 ? "right-[35%]" : "right-[6%]"
                         }`}
                         style={{ animation: `float-soft ${6.8 + index}s ease-in-out ${index * 0.6}s infinite` }}
@@ -696,11 +679,12 @@ export default async function HomePage() {
           </div>
 
           <div className="relative mx-auto max-w-4xl text-center">
-            <SectionEyebrow>AI STUDIO</SectionEyebrow>
-            <h2 className="mt-5 text-[34px] font-bold leading-[1.02] tracking-tight sm:text-[44px] lg:text-[64px]">
-              ВАША AI-СТУДИЯ
-              <br />
-              ДЛЯ СОЗДАНИЯ ЛЮБОГО КОНТЕНТА
+            <SectionEyebrow>AI-студия</SectionEyebrow>
+            <h2 className="mt-4 text-balance text-[34px] font-bold leading-[1.04] tracking-tight sm:text-[42px] lg:text-[54px]">
+              Ваша AI-студия для{" "}
+              <span className="bg-gradient-to-r from-[#a78bfa] via-[#7b61ff] to-[#5d3dd1] bg-clip-text text-transparent">
+                любого контента
+              </span>
             </h2>
             <p className="mx-auto mt-6 max-w-3xl text-[15px] leading-relaxed text-white/64 sm:text-[17px]">
               От идеи до готового результата за несколько минут. Генерируйте изображения, видео,
@@ -709,10 +693,10 @@ export default async function HomePage() {
 
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               <Link
-                href="/dashboard/ai-studio"
+                href={session?.user?.id ? "/dashboard/ai-studio" : "/register"}
                 className="group inline-flex items-center gap-2 rounded-xl bg-[#7b61ff] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_36px_-10px_rgba(123,97,255,0.75)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#6a4ff0]"
               >
-                🚀 Начать создавать
+                Начать создавать
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
             </div>
@@ -782,7 +766,7 @@ export default async function HomePage() {
         <Reveal className="text-center">
           <SectionEyebrow>FAQ</SectionEyebrow>
           <h2 className="mt-4 text-[34px] font-bold tracking-tight sm:text-[42px] lg:text-[54px]">
-            FAQ
+            Частые вопросы
           </h2>
         </Reveal>
 
@@ -796,7 +780,7 @@ export default async function HomePage() {
           <div className="pointer-events-none absolute -top-20 left-1/2 h-72 w-[800px] -translate-x-1/2 rounded-full bg-[#7b61ff]/30 blur-[120px]" />
           <div className="relative">
             <h2 className="mt-4 text-[30px] font-bold tracking-tight sm:text-[40px] lg:text-[48px]">
-              Выпускайте музыку вместе с ICE CREAM MUSIC
+              Выпускайте музыку вместе с ICECREAMMUSIC
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-[15px] leading-relaxed text-white/64 sm:text-[16px]">
               Независимый артист — не значит один.

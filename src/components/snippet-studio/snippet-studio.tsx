@@ -32,6 +32,7 @@ import {
 } from "./scene/types";
 import { SceneThumb } from "./scene-thumb";
 import { StudioExport } from "./studio-export";
+import { StudioShareKit } from "./studio-share-kit";
 import { StudioPreview } from "./studio-preview";
 import { StudioWaveform } from "./studio-waveform";
 
@@ -995,6 +996,26 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
           fileBase={fileBase}
           smartLinkUrl={source?.smartLinkUrl ?? null}
           releaseId={source?.releaseId ?? null}
+          disabledReason={exportBlocker}
+        />
+      </section>
+
+      <section aria-label="Share Kit" className={cn(card, "flex flex-col gap-4")}>
+        <div className="flex flex-col gap-1">
+          <h2 className="font-display text-[20px] font-bold">Share Kit</h2>
+          <p className="text-[13px] text-white/65">Всё для дня релиза одной кнопкой: ролики, видеообложка для Spotify, картинки и готовые подписи — одним архивом.</p>
+        </div>
+        <StudioShareKit
+          settings={settings}
+          assets={assets}
+          audioBuffer={resolvedAudioBuffer}
+          clipStart={segment.startTime}
+          clipDuration={clipDuration}
+          trackDuration={trackDuration}
+          dropTrackTime={dropTrackTime}
+          fileBase={fileBase}
+          smartLinkUrl={source?.smartLinkUrl ?? null}
+          releaseDate={source?.releaseDate ?? null}
           disabledReason={exportBlocker}
         />
       </section>

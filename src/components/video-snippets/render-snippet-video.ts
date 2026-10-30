@@ -38,6 +38,8 @@ export interface RenderSnippetVideoOptions {
   drawFrame: SnippetFrameDrawer;
   onProgress?: (progress: { frame: number; totalFrames: number; speed: number }) => void;
   signal?: AbortSignal;
+  /** Video-only file (Spotify Canvas): the audio still drives the visuals but is not encoded. */
+  muted?: boolean;
 }
 
 const OUTPUT_SAMPLE_RATE = 48000;
@@ -111,7 +113,7 @@ export async function canRenderSnippetOffline(width: number, height: number) {
  * Runs faster than real time and does not depend on the tab being visible.
  */
 export async function renderSnippetVideo(options: RenderSnippetVideoOptions): Promise<Blob> {
-  const { audioBuffer, startTime, durationSeconds, width, height, fps, drawFrame, onProgress, signal } = options;
+  const { audioBuffer, startTime, durationSeconds, width, height, fps, drawFrame, onProgress, signal, muted = false } = options;
 
   if (typeof VideoEncoder === "undefined" || typeof AudioEncoder === "undefined") {
     throw new SnippetExportUnsupportedError("WebCodecs недоступен в этом браузере");
@@ -120,13 +122,13 @@ export async function renderSnippetVideo(options: RenderSnippetVideoOptions): Pr
   if (!videoCodec) {
     throw new SnippetExportUnsupportedError("Браузер не умеет кодировать H.264");
   }
-  const audioCodec = await getFirstEncodableAudioCodec(["aac", "opus"], { numberOfChannels: 2, sampleRate: OUTPUT_SAMPLE_RATE });
-  if (!audioCodec) {
+  const audioCodec = muted ? null : await getFirstEncodableAudioCodec(["aac", "opus"], { numberOfChannels: 2, sampleRate: OUTPUT_SAMPLE_RATE });
+  if (!muted && !audioCodec) {
     throw new SnippetExportUnsupportedError("Браузер не умеет кодировать звук");
   }
 
   throwIfAborted(signal);
-  const segmentAudio = await renderSegmentAudio(audioBuffer, startTime, durationSeconds);
+  const segmentAudio = muted ? null : await renderSegmentAudio(audioBuffer, startTime, durationSeconds);
   throwIfAborted(signal);
 
   const channels = Array.from({ length: audioBuffer.numberOfChannels }, (_, index) => audioBuffer.getChannelData(index));
@@ -149,14 +151,16 @@ export async function renderSnippetVideo(options: RenderSnippetVideoOptions): Pr
   // ~8 Mbit/s for 1080×1920 at 30 fps — what Reels and TikTok re-encode to anyway; grain would otherwise balloon the file.
   const videoBitrate = Math.round(width * height * fps * 0.13);
   const videoSource = new CanvasSource(canvas, { codec: videoCodec, bitrate: videoBitrate, keyFrameInterval: 2 });
-  const audioSource = new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 });
+  const audioSource = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 }) : null;
   output.addVideoTrack(videoSource, { frameRate: fps });
-  output.addAudioTrack(audioSource);
+  if (audioSource) output.addAudioTrack(audioSource);
 
   try {
     await output.start();
-    await audioSource.add(segmentAudio);
-    audioSource.close();
+    if (audioSource && segmentAudio) {
+      await audioSource.add(segmentAudio);
+      audioSource.close();
+    }
 
     const totalFrames = Math.max(1, Math.round(durationSeconds * fps));
     const startedAt = performance.now();

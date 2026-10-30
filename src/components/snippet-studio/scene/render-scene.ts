@@ -16,6 +16,8 @@ export interface SceneRenderInput {
   dropTime: number | null;
   frequencyData: Uint8Array | null;
   still?: boolean;
+  /** Looping clip (Canvas): no fade from black and no end card, so the seam stays invisible. */
+  loop?: boolean;
 }
 
 const END_CARD_SECONDS = 2.2;
@@ -120,9 +122,9 @@ export class SceneRenderer {
     }
 
     if (settings.fx.letterbox) drawLetterbox(scene);
-    if (settings.endCard && frame.clipDuration >= 8 && !frame.still) this.drawEndCard(scene);
+    if (settings.endCard && frame.clipDuration >= 8 && !frame.still && !input.loop) this.drawEndCard(scene);
     if (settings.watermark) this.drawWatermark(scene);
-    drawIntroFade(scene);
+    if (!input.loop) drawIntroFade(scene);
   }
 
   private drawEndCard(scene: SceneContext) {

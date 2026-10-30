@@ -319,14 +319,9 @@ export default async function HomePage() {
               </a>
             </div>
 
-            <p className="mt-12 flex items-center gap-2 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.16em] text-white/35 sm:tracking-[0.22em]">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#1fd19a] shadow-[0_0_10px_rgba(31,209,154,0.8)]" />
-              Кабинет артиста · демо-данные
-            </p>
-
             <div
               aria-hidden
-              className="pointer-events-none mt-4 overflow-hidden rounded-[18px] [mask-image:linear-gradient(to_right,black_60%,transparent)] lg:hidden"
+              className="pointer-events-none mt-12 overflow-hidden rounded-[18px] [mask-image:linear-gradient(to_right,black_60%,transparent)] lg:hidden"
             >
               <Image
                 src="/landing/cabinet/analytics-kpi.webp"
@@ -338,7 +333,7 @@ export default async function HomePage() {
               />
             </div>
 
-            <div aria-hidden className="pointer-events-none relative hidden lg:block">
+            <div aria-hidden className="pointer-events-none relative mt-12 hidden lg:block">
               <div className="absolute -left-8 top-0 w-[1080px] [perspective:1800px] xl:-left-16">
                 <div className="origin-top [transform:rotateX(26deg)_rotateZ(-5deg)] [mask-image:linear-gradient(to_right,black_65%,transparent_96%)]">
                   <Image

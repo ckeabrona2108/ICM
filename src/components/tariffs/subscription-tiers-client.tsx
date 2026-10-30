@@ -43,7 +43,7 @@ export function SubscriptionTiersClient({
   const [pendingTariffId, setPendingTariffId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [billingPeriod, setBillingPeriod] =
-    React.useState<SubscriptionBillingPeriod>("yearly");
+    React.useState<SubscriptionBillingPeriod>("monthly");
   const tiers = React.useMemo(() => getIcmTariffs(billingPeriod), [billingPeriod]);
 
   const startCheckout = React.useCallback(async (tariffId: string) => {

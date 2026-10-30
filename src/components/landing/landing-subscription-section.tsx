@@ -10,7 +10,7 @@ import type { SubscriptionBillingPeriod } from "@/lib/subscription-billing";
 
 export function LandingSubscriptionSection() {
   const [billingPeriod, setBillingPeriod] =
-    React.useState<SubscriptionBillingPeriod>("yearly");
+    React.useState<SubscriptionBillingPeriod>("monthly");
   const tiers = React.useMemo(() => getIcmTariffs(billingPeriod), [billingPeriod]);
 
   return (

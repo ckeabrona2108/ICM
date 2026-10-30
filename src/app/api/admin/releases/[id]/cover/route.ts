@@ -5,10 +5,36 @@ import type { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canManageReleasesSession } from "@/lib/admin-release-service";
+import { getReleaseCoverAsset } from "@/lib/release-cover";
 import {
   uploadAdminReleaseCover,
   validateAdminReleaseCoverFile
 } from "@/lib/admin-release-cover-upload";
+
+/**
+ * Thorough cover lookup for one release. The admin list sends only likely URLs; a card
+ * calls this when none of them loads, so storage is probed for that release alone.
+ */
+export async function GET(_request: Request, context: { params: { id: string } }) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!(await canManageReleasesSession({ prisma, userId: session.user.id, role: session.user.role }))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const release = await prisma.release.findUnique({
+    where: { id: context.params.id?.trim() ?? "" },
+    select: { id: true, title: true, preview: true, roles: true, userId: true }
+  });
+  if (!release) {
+    return NextResponse.json({ error: "Release not found" }, { status: 404 });
+  }
+  const cover = await getReleaseCoverAsset(release);
+  const fallback =
+    !cover.url && release.preview ? await getReleaseCoverAsset({ ...release, roles: {} }) : null;
+  return NextResponse.json({ coverUrl: (fallback?.url ? fallback : cover).url ?? null });
+}
 
 export async function POST(
   request: Request,

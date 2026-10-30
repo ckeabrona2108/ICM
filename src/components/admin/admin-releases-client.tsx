@@ -7,7 +7,8 @@ import { Check, Loader2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/releases/status-badge";
 import type { AdminReleaseDetails } from "@/lib/admin-data";
-import { resolveRenderableStoredFileUrl } from "@/lib/s3";
+
+import { AdminReleaseCover } from "./admin-release-cover";
 import { ReleaseCoverUploadButton } from "@/components/admin/release-cover-upload-button";
 
 type AdminReleaseTab =
@@ -40,11 +41,6 @@ export function AdminReleasesClient({
   const [error, setError] = React.useState<string | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [toast, setToast] = React.useState<string | null>(null);
-  const [coverBrokenById, setCoverBrokenById] = React.useState<Record<string, string>>({});
-
-  React.useEffect(() => {
-    setCoverBrokenById({});
-  }, [releases]);
 
   const [rejectModal, setRejectModal] = React.useState<{
     open: boolean;
@@ -109,10 +105,6 @@ export function AdminReleasesClient({
     const timer = setTimeout(() => setToast(null), 2200);
     return () => clearTimeout(timer);
   }, [toast]);
-
-  React.useEffect(() => {
-    setCoverBrokenById({});
-  }, [releases]);
 
   async function submitApprove() {
     if (!approveModal.release) return;
@@ -318,20 +310,6 @@ export function AdminReleasesClient({
               ["moderation", "rejected", "approved", "changes_required"].includes(release.status);
             const canReject = !hasDeletionWorkflow && release.status === "moderation";
             const isBusy = busyId === release.id;
-            const safeCoverUrl = resolveRenderableStoredFileUrl({ url: release.coverUrl || "", storageKey: null });
-            const failedCoverUrl = coverBrokenById[release.id] ?? null;
-            const activeCoverUrl = safeCoverUrl && failedCoverUrl !== safeCoverUrl ? safeCoverUrl : null;
-
-            if (process.env.NODE_ENV !== "production") {
-              console.log("[admin-release-card:image]", {
-                releaseId: release.id,
-                imageSrc: activeCoverUrl,
-                rawCoverUrl: release.coverUrl,
-                safeCoverUrl,
-                failedCoverUrl
-              });
-            }
-
             return (
               <article
                 key={release.id}
@@ -339,24 +317,12 @@ export function AdminReleasesClient({
               >
                 <div className="flex flex-wrap gap-4">
                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-white/10">
-                    {activeCoverUrl ? (
-                      <img
-                        src={activeCoverUrl}
-                        alt={release.title}
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                        onError={() => {
-                          setCoverBrokenById((prev) => ({
-                            ...prev,
-                            [release.id]: safeCoverUrl ?? release.coverUrl ?? ""
-                          }));
-                        }}
-                      />
-                    ) : (
-                      <div className="grid h-full w-full place-items-center bg-white/[0.03] text-[11px] text-white/45">
-                        Нет обложки
-                      </div>
-                    )}
+                    <AdminReleaseCover
+                      releaseId={release.id}
+                      title={release.title}
+                      coverUrl={release.coverUrl}
+                      candidates={release.coverUrlCandidates}
+                    />
                   </div>
                   <div className="min-w-0 flex-1">
                     <Link

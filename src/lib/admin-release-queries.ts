@@ -6,7 +6,7 @@ import {
   getReleaseLifecycleStatus,
   shouldTreatReleaseAsApproved
 } from "@/lib/release-counts";
-import { getReleaseCoverAsset } from "@/lib/release-cover";
+import { buildReleaseCoverCandidateUrls } from "@/lib/release-cover";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
 import { getReleaseResubmission, readReleaseUpc } from "@/lib/release-resubmission";
 
@@ -148,6 +148,10 @@ export function isAdminReleaseHidden(roles: unknown): boolean {
   return getReleaseDeletionState(roles)?.status === "deleted";
 }
 
+function unique(values: string[]) {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
 export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promise<AdminReleaseDetails[]> {
   const releases = await prisma.release.findMany({
     select: {
@@ -263,33 +267,22 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
           }))
         : [emptyTrack(`${source.id}-track`)];
 
-      const cover = await getReleaseCoverAsset({
-        id: source.id,
-        preview: source.preview,
-        roles: source.roles,
-        userId: source.userId,
-        title: source.title
-      });
-      const previewFallbackCover =
-        !cover.url && source.preview
-          ? await getReleaseCoverAsset({
-              id: source.id,
-              preview: source.preview,
-              roles: {},
-              userId: source.userId,
-              title: source.title
-            })
-          : null;
-      const resolvedCover = previewFallbackCover?.url ? previewFallbackCover : cover;
-      if (process.env.NODE_ENV !== "production") {
-        console.log("[admin-releases-api:cover]", {
-          releaseId: source.id,
-          title: source.title,
+      // The list must not probe storage for every cover: with hundreds of releases that took
+      // tens of seconds and the "All" tab timed out. It sends the likely URLs instead; the card
+      // tries them in turn and asks /api/admin/releases/[id]/cover only when none of them loads.
+      const coverCandidates = unique([
+        ...buildReleaseCoverCandidateUrls({
+          id: source.id,
           preview: source.preview,
-          coverUrl: resolvedCover.url ?? "",
-          coverStorageKey: resolvedCover.storageKey
-        });
-      }
+          roles: source.roles,
+          userId: source.userId,
+          title: source.title
+        }),
+        ...(source.preview
+          ? buildReleaseCoverCandidateUrls({ id: source.id, preview: source.preview, roles: {}, userId: source.userId, title: source.title })
+          : [])
+      ]);
+      const resolvedCover = { url: coverCandidates[0] ?? null, storageKey: null, candidateUrls: coverCandidates };
       const deletionState = getReleaseDeletionState(source.roles);
       const onModeration = isActuallyOnModeration(source);
       const resubmissionMarker = getReleaseResubmission(source.roles);

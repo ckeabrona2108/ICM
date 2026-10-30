@@ -23,6 +23,7 @@ import { HowItWorks } from "@/components/landing/how-it-works";
 import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingSubscriptionSection } from "@/components/landing/landing-subscription-section";
 import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
+import { SnippetShowcase } from "@/components/landing/snippet-showcase";
 import { TestimonialsColumns } from "@/components/landing/testimonials-columns";
 import { StandaloneSessionRedirect } from "@/components/pwa/standalone-session-redirect";
 import { authOptions } from "@/lib/auth";
@@ -427,6 +428,13 @@ export default async function HomePage() {
               </StaggerItem>
             ))}
           </Stagger>
+        </Reveal>
+      </section>
+
+      <section id="snippets" className="relative mx-auto max-w-7xl px-6 pb-18 sm:px-8 sm:pb-20 lg:pb-24">
+        <Reveal className={`relative overflow-hidden rounded-[36px] p-8 sm:p-10 lg:p-12 ${SURFACE_PANEL_GLOW}`}>
+          <div aria-hidden className="pointer-events-none absolute -right-24 -top-28 h-[380px] w-[560px] rounded-full bg-[#7b61ff]/14 blur-[130px]" />
+          <SnippetShowcase />
         </Reveal>
       </section>
 

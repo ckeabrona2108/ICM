@@ -279,6 +279,11 @@ html {
   animation: float-soft 6s ease-in-out infinite;
 }
 
+@keyframes snippet-eq {
+  from { transform: scaleY(0.45); }
+  to { transform: scaleY(1.15); }
+}
+
 @keyframes testimonials-scroll {
   to { transform: translateY(calc(-50% - 0.625rem)); }
 }

@@ -306,15 +306,15 @@ export default async function HomePage() {
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Link
                 href="/register"
-                className="free-chip group relative inline-flex max-w-full items-center gap-3 rounded-full p-2 shadow-[0_14px_44px_-14px_rgba(167,139,250,0.8)] transition-transform duration-200 hover:-translate-y-0.5"
+                className="free-chip group relative inline-flex max-w-full items-center gap-2.5 rounded-full p-1.5 shadow-[0_12px_36px_-14px_rgba(167,139,250,0.75)] transition-transform duration-200 hover:-translate-y-0.5"
               >
-                <span className="free-chip-shine relative shrink-0 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-[#c4b5fd] via-[#8b72ff] to-[#6d4dff] px-3.5 py-1.5 text-[14px] font-bold tabular-nums text-white">
+                <span className="free-chip-shine relative shrink-0 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-[#c4b5fd] via-[#8b72ff] to-[#6d4dff] px-2.5 py-1 text-[12.5px] font-bold tabular-nums text-white">
                   0 ₽
                 </span>
-                <span className="min-w-0 text-[15px] font-semibold text-white sm:text-[16px]">
-                  Первый трек бесплатно
+                <span className="min-w-0 text-[14px] font-semibold text-white sm:text-[15px]">
+                  Первый релиз бесплатно
                 </span>
-                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold text-white transition-colors group-hover:bg-[#6a4ff0]">
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#7b61ff] px-3.5 py-1.5 text-[13px] font-semibold text-white transition-colors group-hover:bg-[#6a4ff0]">
                   Начать
                   <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                 </span>

@@ -7,7 +7,6 @@ import {
   BadgeCheck,
   BarChart3,
   Clock3,
-  Gift,
   Globe2,
   Headset,
   Layers3,
@@ -161,7 +160,7 @@ const PROMO_CARDS = [
 const FAQ_ITEMS = [
   {
     q: "Можно ли выпустить первый релиз бесплатно?",
-    a: "Да, первый сингл с одним треком — бесплатно. Зарегистрируйтесь, подпишите договор, привяжите ВКонтакте в кабинете и подпишитесь на нашу группу vk.ru/icecreammusicru. После этого выпустите сингл без подписки и оплаты, караоке-текст включён. Предложение для новых артистов: один раз на человека."
+    a: "Да, первый сингл — бесплатно для новых артистов. Подпишите договор, привяжите ВКонтакте и подпишитесь на нашу группу."
   },
   {
     q: "Сколько процентов дохода остаётся артисту?",
@@ -306,11 +305,14 @@ export default async function HomePage() {
             </p>
             <Link
               href="/register"
-              className="group mt-4 flex max-w-xl items-center gap-2.5 border-l-2 border-[#7b61ff] pl-4 text-[14px] font-semibold leading-relaxed text-white/82 transition-colors hover:text-white sm:text-[16px]"
+              className="mt-6 inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] py-2 pl-2 pr-4 backdrop-blur transition-colors hover:border-[#a78bfa]/40 hover:bg-[#7b61ff]/10"
             >
-              <Gift className="h-4 w-4 shrink-0 text-[#a78bfa]" />
-              Первый трек — бесплатно
-              <ArrowRight className="h-4 w-4 text-[#a78bfa] transition-transform group-hover:translate-x-0.5" />
+              <span className="shrink-0 whitespace-nowrap rounded-xl bg-gradient-to-br from-[#a78bfa] to-[#7b61ff] px-2.5 py-1 text-[13px] font-bold tabular-nums text-white shadow-[0_6px_18px_-6px_rgba(123,97,255,0.9)]">
+                0 ₽
+              </span>
+              <span className="text-[14px] text-white/70 sm:text-[15px]">
+                <span className="font-semibold text-white">Первый трек</span> — бесплатно для новых артистов
+              </span>
             </Link>
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Link

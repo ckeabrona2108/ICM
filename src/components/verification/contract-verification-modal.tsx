@@ -354,8 +354,8 @@ export function ContractVerificationModal({
   return (
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-[#02030a]/88 p-3 backdrop-blur-xl sm:p-5">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(125,95,255,0.18),transparent_55%),radial-gradient(ellipse_at_bottom,rgba(56,189,248,0.10),transparent_52%)]" />
-      <Card className="relative w-full max-w-5xl overflow-hidden border border-white/15 bg-[#090d18] p-0 shadow-[0_55px_140px_-80px_rgba(0,0,0,0.98)]">
-        <div className="flex items-center justify-between border-b border-white/20 bg-white/[0.02] px-5 py-4 sm:px-7">
+      <Card className="relative flex max-h-[calc(100dvh-24px)] w-full max-w-5xl flex-col overflow-hidden border border-white/15 bg-[#090d18] p-0 shadow-[0_55px_140px_-80px_rgba(0,0,0,0.98)] sm:max-h-[calc(100dvh-40px)]">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/20 bg-white/[0.02] px-5 py-4 sm:px-7">
           <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-[0.16em] text-white/45">Верификация договора</p>
           </div>
@@ -364,7 +364,8 @@ export function ContractVerificationModal({
           </Button>
         </div>
 
-        <div className="max-h-[92vh] overflow-y-auto border-t border-white/[0.06] p-5 sm:p-7">
+        {/* The header plus the body must fit the screen, otherwise the sign button is cut off. */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-white/[0.06] p-5 sm:p-7">
           {step === "intro" ? (
             <div className="space-y-5 text-center">
               <div className="mx-auto max-w-4xl">

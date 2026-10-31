@@ -378,6 +378,43 @@ html {
   animation: gradient-shift 12s ease infinite;
 }
 
+/* "Первый трек бесплатно" chip on the home hero: a light runs around the border
+   and a shine crosses the price now and then. */
+@property --free-chip-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes free-chip-spin {
+  to { --free-chip-angle: 360deg; }
+}
+@keyframes free-chip-shine {
+  0%, 55% { transform: translateX(-160%) skewX(-20deg); }
+  100%    { transform: translateX(260%) skewX(-20deg); }
+}
+.free-chip {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#110f24, #110f24) padding-box,
+    conic-gradient(
+      from var(--free-chip-angle),
+      rgba(167, 139, 250, 0.18) 0deg,
+      #a78bfa 70deg,
+      #f0abfc 120deg,
+      rgba(167, 139, 250, 0.18) 190deg,
+      rgba(167, 139, 250, 0.18) 360deg
+    ) border-box;
+  animation: free-chip-spin 6s linear infinite;
+}
+.free-chip-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: free-chip-shine 3.6s ease-in-out infinite;
+}
+
 @keyframes auth-bg-zoom {
   0%, 100% { transform: scale(1.04) translate3d(0, 0, 0); }
   50% { transform: scale(1.12) translate3d(-1.5%, -1%, 0); }
@@ -398,7 +435,7 @@ html {
 @media (prefers-reduced-motion: reduce) {
   .blob-a, .blob-b, .blob-c, .float-soft, .testimonials-scroll, .gradient-shift, .spin-slow,
   .ambient-orbit-left, .ambient-orbit-right, .beam-sweep-x, .beam-sweep-y,
-  .auth-bg-video {
+  .auth-bg-video, .free-chip, .free-chip-shine::after {
     animation: none !important;
   }
   html { scroll-behavior: auto; }

@@ -305,13 +305,17 @@ export default async function HomePage() {
             </p>
             <Link
               href="/register"
-              className="mt-6 inline-flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] py-2 pl-2 pr-4 backdrop-blur transition-colors hover:border-[#a78bfa]/40 hover:bg-[#7b61ff]/10"
+              className="free-chip group relative mt-6 inline-flex max-w-full items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5 shadow-[0_12px_40px_-16px_rgba(167,139,250,0.75)] transition-transform duration-200 hover:-translate-y-0.5"
             >
-              <span className="shrink-0 whitespace-nowrap rounded-xl bg-gradient-to-br from-[#a78bfa] to-[#7b61ff] px-2.5 py-1 text-[13px] font-bold tabular-nums text-white shadow-[0_6px_18px_-6px_rgba(123,97,255,0.9)]">
+              <span className="free-chip-shine relative shrink-0 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-[#c4b5fd] via-[#8b72ff] to-[#6d4dff] px-3 py-1 text-[13px] font-bold tabular-nums text-white">
                 0 ₽
               </span>
-              <span className="text-[14px] text-white/70 sm:text-[15px]">
-                <span className="font-semibold text-white">Первый трек</span> — бесплатно для новых артистов
+              <span className="min-w-0 text-[14px] font-medium text-white/90 sm:text-[15px]">
+                Первый трек бесплатно
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.07] px-3 py-1 text-[13px] font-semibold text-[#c4b5fd] transition-colors group-hover:bg-[#7b61ff] group-hover:text-white">
+                Начать
+                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </span>
             </Link>
             <div className="mt-10 flex flex-wrap items-center gap-3">

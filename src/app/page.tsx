@@ -294,16 +294,6 @@ export default async function HomePage() {
       <section id="hero" className="relative overflow-x-clip">
         <div className="relative mx-auto grid max-w-7xl gap-10 px-6 pb-8 pt-28 sm:px-8 sm:pb-12 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-10 lg:pb-32 lg:pt-36">
           <Reveal>
-            <Link
-              href="/register"
-              className="group mb-6 inline-flex items-center gap-2 rounded-full border border-[#a78bfa]/30 bg-[#7b61ff]/12 py-1.5 pl-1.5 pr-3.5 text-[13px] font-medium text-white/85 shadow-[0_8px_30px_-12px_rgba(123,97,255,0.7)] backdrop-blur transition-colors hover:border-[#a78bfa]/55 hover:bg-[#7b61ff]/20 hover:text-white"
-            >
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#7b61ff] text-white">
-                <Gift className="h-3.5 w-3.5" />
-              </span>
-              Первый сингл — бесплатно
-              <ArrowRight className="h-3.5 w-3.5 text-[#c4b5fd] transition-transform group-hover:translate-x-0.5" />
-            </Link>
             <h1 className="max-w-2xl text-balance text-[44px] font-bold leading-[1.04] tracking-[-0.02em] sm:text-[56px] md:text-[68px] lg:text-[76px]">
               От первого трека до первого хита —
               <span className="block bg-gradient-to-r from-[#a78bfa] via-[#7b61ff] to-[#5d3dd1] bg-clip-text text-transparent">
@@ -314,9 +304,14 @@ export default async function HomePage() {
               Релиз на 240+ площадок, смарт-линки со сниппетами, промо и аналитика. Всё,
               чтобы вашу музыку не просто выпустили, а услышали.
             </p>
-            <p className="mt-4 max-w-xl border-l-2 border-[#7b61ff] pl-4 text-[14px] font-semibold leading-relaxed text-white/82 sm:text-[16px]">
-              Отгрузить трек может любой. Мы делаем так, чтобы его нашли.
-            </p>
+            <Link
+              href="/register"
+              className="group mt-4 flex max-w-xl items-center gap-2.5 border-l-2 border-[#7b61ff] pl-4 text-[14px] font-semibold leading-relaxed text-white/82 transition-colors hover:text-white sm:text-[16px]"
+            >
+              <Gift className="h-4 w-4 shrink-0 text-[#a78bfa]" />
+              Первый трек — бесплатно
+              <ArrowRight className="h-4 w-4 text-[#a78bfa] transition-transform group-hover:translate-x-0.5" />
+            </Link>
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Link
                 href="/login"

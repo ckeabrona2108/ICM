@@ -7,6 +7,7 @@ import {
   BadgeCheck,
   BarChart3,
   Clock3,
+  Gift,
   Globe2,
   Headset,
   Layers3,
@@ -159,6 +160,10 @@ const PROMO_CARDS = [
 
 const FAQ_ITEMS = [
   {
+    q: "Можно ли выпустить первый релиз бесплатно?",
+    a: "Да, первый сингл с одним треком — бесплатно. Зарегистрируйтесь, подпишите договор, привяжите ВКонтакте в кабинете и подпишитесь на нашу группу vk.ru/icecreammusicru. После этого выпустите сингл без подписки и оплаты, караоке-текст включён. Предложение для новых артистов: один раз на человека."
+  },
+  {
     q: "Сколько процентов дохода остаётся артисту?",
     a: "90% дохода с прослушиваний остаётся вам. Начисления видны в разделе «Кошелёк» личного кабинета."
   },
@@ -289,6 +294,16 @@ export default async function HomePage() {
       <section id="hero" className="relative overflow-x-clip">
         <div className="relative mx-auto grid max-w-7xl gap-10 px-6 pb-8 pt-28 sm:px-8 sm:pb-12 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-10 lg:pb-32 lg:pt-36">
           <Reveal>
+            <Link
+              href="/register"
+              className="group mb-6 inline-flex items-center gap-2 rounded-full border border-[#a78bfa]/30 bg-[#7b61ff]/12 py-1.5 pl-1.5 pr-3.5 text-[13px] font-medium text-white/85 shadow-[0_8px_30px_-12px_rgba(123,97,255,0.7)] backdrop-blur transition-colors hover:border-[#a78bfa]/55 hover:bg-[#7b61ff]/20 hover:text-white"
+            >
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#7b61ff] text-white">
+                <Gift className="h-3.5 w-3.5" />
+              </span>
+              Первый сингл — бесплатно
+              <ArrowRight className="h-3.5 w-3.5 text-[#c4b5fd] transition-transform group-hover:translate-x-0.5" />
+            </Link>
             <h1 className="max-w-2xl text-balance text-[44px] font-bold leading-[1.04] tracking-[-0.02em] sm:text-[56px] md:text-[68px] lg:text-[76px]">
               От первого трека до первого хита —
               <span className="block bg-gradient-to-r from-[#a78bfa] via-[#7b61ff] to-[#5d3dd1] bg-clip-text text-transparent">

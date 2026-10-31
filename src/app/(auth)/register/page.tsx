@@ -3,7 +3,7 @@
 import * as React from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Loader2, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, Gift, Loader2, X } from "lucide-react";
 import { signIn } from "next-auth/react";
 
 import { Button } from "@/components/ui/button";
@@ -124,6 +124,15 @@ export default function RegisterPage() {
         <p className="mx-auto mt-4 max-w-[440px] text-center text-[15px] leading-relaxed text-white/55">
           Дистрибуция, продвижение и аналитика - всё в одном месте за пару минут
         </p>
+        <div className="mx-auto mt-6 flex max-w-[460px] items-start gap-3 rounded-[16px] border border-[#a78bfa]/25 bg-[#7b61ff]/10 px-4 py-3">
+          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#7b61ff] text-white">
+            <Gift className="h-3.5 w-3.5" />
+          </span>
+          <p className="text-[13px] leading-5 text-white/70">
+            <span className="font-semibold text-white">Первый сингл — бесплатно.</span> Подпишите договор,
+            привяжите ВКонтакте и подпишитесь на нашу группу — и выпустите трек без оплаты.
+          </p>
+        </div>
 
         <form className="mt-10 space-y-5" onSubmit={onSubmit} noValidate>
 	          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">

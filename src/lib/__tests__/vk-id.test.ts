@@ -9,6 +9,7 @@ import {
   decodeVkLinkCookie,
   encodeVkLinkCookie,
   exchangeVkIdCode,
+  getVkIdConfig,
   getVkLinkRedirectUri
 } from "@/lib/vk-id";
 
@@ -74,4 +75,11 @@ test("group membership reads 1/0 and surfaces API errors", async () => {
     checkVkGroupMembership({ config, vkUserId: "1", fetchImpl: jsonFetch({ error: { error_code: 203 } }).fetchImpl }),
     /203/u
   );
+});
+
+test("config ignores quotes that docker --env-file leaves around values", () => {
+  process.env.AUTH_VK_ID = '"53141522"';
+  process.env.VK_GROUP_ID = "'197191118'";
+  process.env.VK_GROUP_TOKEN = "token";
+  assert.deepEqual(getVkIdConfig(), { clientId: "53141522", groupId: "197191118", groupToken: "token" });
 });

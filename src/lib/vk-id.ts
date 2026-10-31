@@ -27,8 +27,9 @@ export interface VkLinkCookiePayload {
 
 type FetchLike = typeof fetch;
 
+// `docker run --env-file` keeps quotes literally, so `AUTH_VK_ID="531…"` arrives with them.
 function readEnv(name: string): string {
-  return process.env[name]?.trim() ?? "";
+  return (process.env[name]?.trim() ?? "").replace(/^(["'])(.*)\1$/u, "$2").trim();
 }
 
 export function getVkIdConfig(): VkIdConfig | null {

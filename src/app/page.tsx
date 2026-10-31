@@ -303,28 +303,21 @@ export default async function HomePage() {
               Релиз на 240+ площадок, смарт-линки со сниппетами, промо и аналитика. Всё,
               чтобы вашу музыку не просто выпустили, а услышали.
             </p>
-            <Link
-              href="/register"
-              className="free-chip group relative mt-6 inline-flex max-w-full items-center gap-3 rounded-full py-1.5 pl-1.5 pr-1.5 shadow-[0_12px_40px_-16px_rgba(167,139,250,0.75)] transition-transform duration-200 hover:-translate-y-0.5"
-            >
-              <span className="free-chip-shine relative shrink-0 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-[#c4b5fd] via-[#8b72ff] to-[#6d4dff] px-3 py-1 text-[13px] font-bold tabular-nums text-white">
-                0 ₽
-              </span>
-              <span className="min-w-0 text-[14px] font-medium text-white/90 sm:text-[15px]">
-                Первый трек бесплатно
-              </span>
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-white/[0.07] px-3 py-1 text-[13px] font-semibold text-[#c4b5fd] transition-colors group-hover:bg-[#7b61ff] group-hover:text-white">
-                Начать
-                <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-              </span>
-            </Link>
             <div className="mt-10 flex flex-wrap items-center gap-3">
               <Link
-                href="/login"
-                className="group inline-flex items-center gap-2 rounded-xl bg-[#7b61ff] px-7 py-3.5 text-[15px] font-semibold text-white shadow-[0_12px_36px_-10px_rgba(123,97,255,0.7)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#6a4ff0] hover:shadow-[0_18px_44px_-10px_rgba(123,97,255,0.85)]"
+                href="/register"
+                className="free-chip group relative inline-flex max-w-full items-center gap-3 rounded-full p-2 shadow-[0_14px_44px_-14px_rgba(167,139,250,0.8)] transition-transform duration-200 hover:-translate-y-0.5"
               >
-                Войти в кабинет
-                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                <span className="free-chip-shine relative shrink-0 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-[#c4b5fd] via-[#8b72ff] to-[#6d4dff] px-3.5 py-1.5 text-[14px] font-bold tabular-nums text-white">
+                  0 ₽
+                </span>
+                <span className="min-w-0 text-[15px] font-semibold text-white sm:text-[16px]">
+                  Первый трек бесплатно
+                </span>
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold text-white transition-colors group-hover:bg-[#6a4ff0]">
+                  Начать
+                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                </span>
               </Link>
               <a
                 href="#company"

@@ -501,6 +501,7 @@ function WizardInner({
   const [submitErrors, setSubmitErrors] = React.useState<string[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [submitPhase, setSubmitPhase] = React.useState<SubmitPhase>("idle");
+  const [useFreeRelease, setUseFreeRelease] = React.useState(false);
   const [, setDraftReleaseId] = React.useState<string | undefined>(
     resolveDraftReleaseId(submissionMode, sourceReleaseId)
   );
@@ -1148,6 +1149,7 @@ function WizardInner({
             releaseId,
             currentStatus,
             moderationStarted,
+            ...(useFreeRelease && submissionMode === "new" ? { useFreeRelease: true } : {}),
             data: preparedSubmissionData
           };
 
@@ -1290,6 +1292,7 @@ function WizardInner({
     submissionDataSnapshot,
     sourceReleaseId,
     submissionMode,
+    useFreeRelease,
     router
   ]);
 
@@ -1635,6 +1638,9 @@ function WizardInner({
                   stepIssues={stepIssuesWithSubmit}
                   isSubmitting={submitting}
                   submitPhase={submitPhase}
+                  freeRelease={
+                    submissionMode === "new" ? { enabled: useFreeRelease, onChange: setUseFreeRelease } : undefined
+                  }
                 />
               ) : null}
               {step === "upload" ? (

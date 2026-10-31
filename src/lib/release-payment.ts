@@ -1,6 +1,6 @@
 import type { LimitDecision, EffectivePlan } from "@/lib/subscription-limits";
 
-export type ReleasePaymentKind = "paid" | "subscription" | "unpaid" | "partner_code";
+export type ReleasePaymentKind = "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
 
 export interface ReleasePaymentSnapshot {
   version: 1;

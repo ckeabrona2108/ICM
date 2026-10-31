@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { Suspense } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -15,6 +16,7 @@ import {
   Wallet
 } from "lucide-react";
 
+import { FreeReleaseCard } from "@/components/dashboard/free-release-card";
 import { OverviewStreamsChart } from "@/components/dashboard/overview-streams-chart";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageHeader } from "@/components/layout/page-header";
@@ -85,6 +87,10 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+
+      <Suspense fallback={null}>
+        <FreeReleaseCard />
+      </Suspense>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Link href="/dashboard/finance" className={`${TILE} transition-colors hover:border-white/[0.16]`}>

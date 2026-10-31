@@ -19,6 +19,7 @@ import { getReleasePlatformLabel } from "@/lib/release-platforms";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
 import { cn } from "@/lib/utils";
 
+import { FreeReleaseOption } from "./free-release-option";
 import { useWizard, type PersonRole, type TrackFile } from "./wizard-context";
 
 const TYPE_LABEL = {
@@ -170,7 +171,8 @@ export function StepReview({
   blockingErrors,
   stepIssues,
   isSubmitting,
-  submitPhase = "idle"
+  submitPhase = "idle",
+  freeRelease
 }: {
   onSubmit: () => void | Promise<void>;
   errors: string[];
@@ -180,6 +182,8 @@ export function StepReview({
   stepIssues: Record<ReviewStepIssueSection, string[]>;
   isSubmitting: boolean;
   submitPhase?: SubmitPhase;
+  // Offered only for new releases; edits keep the way the release was paid.
+  freeRelease?: { enabled: boolean; onChange: (value: boolean) => void };
 }) {
   const { data, set, setStep } = useWizard();
   const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
@@ -560,6 +564,8 @@ export function StepReview({
               className="mt-4 min-h-[132px] w-full rounded-[20px] border border-white/[0.10] bg-black/20 px-4 py-3 text-[14px] text-white outline-none transition-colors placeholder:text-white/32 focus:border-[var(--ux-accent)]/50"
             />
           </section>
+
+          {freeRelease ? <FreeReleaseOption enabled={freeRelease.enabled} onChange={freeRelease.onChange} /> : null}
 
           <section className="rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,21,34,0.96),rgba(11,14,25,0.98))] p-5 sm:p-6">
             <SectionTitle title="Финальная отправка" />

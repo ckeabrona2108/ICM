@@ -64,7 +64,7 @@ export interface AdminReleaseDetails {
   hidden?: boolean;
   resubmission?: { sourceReleaseId?: string; sourceReleaseTitle?: string } | null;
   paid: boolean;
-  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code";
+  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
   paymentLabel?: string;
   paymentUsage?: string | null;
   paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;

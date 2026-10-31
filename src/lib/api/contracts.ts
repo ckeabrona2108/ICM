@@ -160,6 +160,8 @@ export interface ReleaseSubmitRequest {
   releaseId?: string;
   currentStatus?: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
+  // Use the free first single instead of the subscription or a payment.
+  useFreeRelease?: boolean;
   data: ReleaseSubmissionData;
 }
 
@@ -168,6 +170,8 @@ export interface ReleaseSubmitSuccessResponse {
   releaseId?: string;
   nextStatus: ReleaseLifecycleStatus;
   message: string;
+  // Set when the free first single was requested but did not apply; the release went the usual way.
+  freeReleaseFallback?: string;
 }
 
 export interface AdminCountsResponse {

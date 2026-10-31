@@ -10,6 +10,7 @@ import {
   canRejectRelease,
   withAdminReleaseChangesRequiredState
 } from "@/lib/admin-release-service";
+import { markFreeReleaseConsumed } from "@/lib/free-release";
 import { prisma } from "@/lib/prisma";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 
@@ -126,6 +127,7 @@ export async function POST(request: Request) {
         roles: (resetNeedsChangesFlags(release.roles) ?? undefined) as Prisma.InputJsonValue | undefined
       }
     });
+    await markFreeReleaseConsumed(prisma, release.id);
 
     await deliverUserNotificationSafely(prisma, {
       id: `release-approved-${release.id}`,

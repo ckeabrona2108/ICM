@@ -29,6 +29,12 @@ import {
 } from "@/lib/release-policy";
 import { sanitizePriorityReleaseFlag } from "@/lib/release-priority";
 import {
+  isFreeReleaseClaimedBy,
+  isFreeReleaseSubmissionAllowed,
+  tryClaimFreeRelease
+} from "@/lib/free-release";
+import {
+  buildFreeFirstReleasePaymentUsage,
   buildPartnerCodePaymentUsage,
   buildSubscriptionPaymentUsage,
   getUserReleaseQuota,
@@ -96,6 +102,16 @@ function readPerformer(data: Record<string, unknown>): string | null {
 
 function readSubmissionDataCover(data: Record<string, unknown>): string | null {
   return readCoverUploadUrl(data) ?? normalizeReleaseCoverUrl(data.cover, null);
+}
+
+function pricingFailure(code: string, message: string) {
+  const issue = { code, field: "freeRelease", message };
+  const response: ReleaseSubmitFailureResponse = {
+    ok: false,
+    errors: [issue],
+    errors_by_step: { release_info: [], tracks: [], stores: [], pricing: [issue] }
+  };
+  return NextResponse.json(response, { status: 400 });
 }
 
 async function notifyReleaseSubmittedSafe(params: {
@@ -382,7 +398,17 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     submissionDataCover: readSubmissionDataCover(data)
   });
 
+  const freeReleaseShape = isFreeReleaseSubmissionAllowed({
+    releaseType: baseReleaseData.type,
+    releaseKind: submissionData.releaseKind,
+    trackCount: submissionData.tracks.length
+  });
+
   if (payload.mode === "edit") {
+    // A free single stays a one-track single after edits too.
+    if (!freeReleaseShape.ok && (await isFreeReleaseClaimedBy(db, existing.id))) {
+      return pricingFailure("free_release_shape", freeReleaseShape.message);
+    }
     const currentLifecycle =
       getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus;
     const shouldResubmit = shouldResubmitEditedRelease(currentLifecycle);
@@ -462,6 +488,52 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       message: "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
     };
 
+    return NextResponse.json(response, { status: 200 });
+  }
+
+  // If the free release does not apply for any reason, the release still goes out the usual
+  // way (subscription or payment); the artist is told why and the reason is kept for admins.
+  let freeReleaseFallback: { code: string; message: string } | null = null;
+  const freeClaim = !payload.useFreeRelease
+    ? null
+    : freeReleaseShape.ok
+      ? await tryClaimFreeRelease(db, { userId: session.user.id, releaseId: existing.id })
+      : { ok: false as const, code: "free_release_shape", message: freeReleaseShape.message };
+  if (freeClaim && !freeClaim.ok) {
+    freeReleaseFallback = { code: freeClaim.code, message: freeClaim.message };
+    existing.roles = {
+      ...((existing.roles && typeof existing.roles === "object" && !Array.isArray(existing.roles)
+        ? existing.roles
+        : {}) as Record<string, unknown>),
+      freeReleaseFallback: { ...freeReleaseFallback, at: new Date().toISOString() }
+    } as Prisma.JsonValue;
+  }
+  const fallbackNote = freeReleaseFallback
+    ? `Бесплатный релиз не применился: ${freeReleaseFallback.message.replace(/\.$/u, "")}. Релиз отправлен как обычный. `
+    : "";
+
+  if (freeClaim?.ok) {
+
+    await updateReleaseAndSyncTracks({
+      confirmed: true,
+      status: "moderating",
+      roles: withReleaseLifecycleState(
+        mergeReleaseRolesPaymentUsage(existing.roles, buildFreeFirstReleasePaymentUsage(), submissionData),
+        "moderation"
+      ) as Prisma.InputJsonValue
+    });
+    notifications.push({
+      releaseId: existing.id,
+      releaseTitle: baseReleaseData.title,
+      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+    });
+
+    const response: ReleaseSubmitSuccessResponse = {
+      ok: true,
+      releaseId: existing.id,
+      nextStatus: "moderation",
+      message: "Бесплатный релиз отправлен на модерацию."
+    };
     return NextResponse.json(response, { status: 200 });
   }
 
@@ -557,7 +629,8 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       ok: true,
       releaseId: existing.id,
       nextStatus: "moderation",
-      message: "Релиз отправлен на модерацию по партнёрскому коду."
+      message: `${fallbackNote}Релиз отправлен на модерацию по партнёрскому коду.`,
+      ...(freeReleaseFallback ? { freeReleaseFallback: freeReleaseFallback.message } : {})
     };
 
     return NextResponse.json(response, { status: 200 });
@@ -587,9 +660,10 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       nextStatus: "moderation",
       payment_required: true,
       paid: false,
-      message: quota.isActive
+      ...(freeReleaseFallback ? { freeReleaseFallback: freeReleaseFallback.message } : {}),
+      message: fallbackNote + (quota.isActive
         ? "Релиз отправлен на модерацию. Лимит подписки исчерпан, релиз нужно оплатить отдельно."
-        : "Релиз отправлен на модерацию. Активной подписки нет, релиз нужно оплатить отдельно."
+        : "Релиз отправлен на модерацию. Активной подписки нет, релиз нужно оплатить отдельно.")
     };
 
     return NextResponse.json(response, { status: 200 });
@@ -617,7 +691,8 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     ok: true,
     releaseId: existing.id,
     nextStatus: "moderation",
-    message: "Релиз отправлен на модерацию."
+    message: `${fallbackNote}Релиз отправлен на модерацию.`,
+    ...(freeReleaseFallback ? { freeReleaseFallback: freeReleaseFallback.message } : {})
   };
 
   return NextResponse.json(response, { status: 200 });

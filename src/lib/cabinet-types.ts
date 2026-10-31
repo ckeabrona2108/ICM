@@ -61,7 +61,7 @@ export interface CabinetRelease {
   genre: string;
   status: CabinetReleaseStatus;
   paid: boolean;
-  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code";
+  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
   paymentLabel?: string;
   paymentUsage?: string | null;
   paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;

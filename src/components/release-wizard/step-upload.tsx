@@ -61,6 +61,12 @@ export function StepUpload({
           </span>
           <h3 className="text-[18px] font-semibold text-[#f8f4ee]">{title}</h3>
           <p className="max-w-md text-[13px] text-[#948575]">{description}</p>
+          {submitResult?.freeReleaseFallback ? (
+            <p className="max-w-md rounded-[14px] border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-left text-[12.5px] leading-5 text-amber-100">
+              Бесплатный релиз не применился, поэтому релиз отправлен как обычный. Если вы считаете, что
+              это ошибка, напишите в поддержку — мы разберёмся.
+            </p>
+          ) : null}
           <div className="mt-2 flex items-center gap-2">
             <Link
               href={

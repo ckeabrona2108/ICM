@@ -5,7 +5,7 @@ import { prisma as defaultPrisma } from "@/lib/prisma";
 import { getReleaseResubmission } from "@/lib/release-resubmission";
 
 export type ReleaseQuotaPlan = "STANDARD" | "PRO" | "ENTERPRISE";
-export type ReleaseUsageType = "subscription" | "standalone_payment" | "partner_code";
+export type ReleaseUsageType = "subscription" | "standalone_payment" | "partner_code" | "free_first_release";
 
 export interface UserReleaseQuota {
   plan: ReleaseQuotaPlan;
@@ -96,7 +96,8 @@ export function getReleasePaymentUsageFromRoles(roles: unknown): ReleasePaymentU
   if (
     usageType === "subscription" ||
     usageType === "standalone_payment" ||
-    usageType === "partner_code"
+    usageType === "partner_code" ||
+    usageType === "free_first_release"
   ) {
     return {
       type: usageType,
@@ -237,8 +238,15 @@ export function buildPartnerCodePaymentUsage(params: {
   };
 }
 
+export function buildFreeFirstReleasePaymentUsage(params?: { usedAt?: Date }): ReleasePaymentUsage {
+  return {
+    type: "free_first_release",
+    usedAt: (params?.usedAt ?? new Date()).toISOString()
+  };
+}
+
 export function getReleasePaymentDisplayFromRoles(roles: unknown): {
-  kind: "paid" | "subscription" | "unpaid" | "partner_code";
+  kind: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
   label: string;
   usage: ReleasePaymentUsage | null;
 } {
@@ -261,6 +269,13 @@ export function getReleasePaymentDisplayFromRoles(roles: unknown): {
     return {
       kind: "partner_code",
       label: usage.partnerCode ? `Партнёрский код ${usage.partnerCode}` : "Оплачено партнёром",
+      usage
+    };
+  }
+  if (usage?.type === "free_first_release") {
+    return {
+      kind: "free_first_release",
+      label: "Бесплатный первый релиз",
       usage
     };
   }
@@ -341,6 +356,7 @@ export async function getUserReleaseQuota(
     const usage = getReleasePaymentUsageFromRoles(release.roles);
     if (usage?.type === "standalone_payment") continue;
     if (usage?.type === "partner_code") continue;
+    if (usage?.type === "free_first_release") continue;
     if (standalonePaidReleaseIds.has(release.id)) continue;
     // A resubmitted copy reuses the payment of its source release.
     if (getReleaseResubmission(release.roles)?.sourceReleaseId) continue;

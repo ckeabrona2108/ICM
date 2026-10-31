@@ -5,6 +5,7 @@ import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import type { ModerationRemark } from "@/lib/cabinet-types";
 import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
+import { markFreeReleaseConsumed } from "@/lib/free-release";
 import {
   findPaidPredecessorRelease,
   getReleaseResubmission,
@@ -351,6 +352,7 @@ export async function approveReleaseByAdmin(params: {
       roles: resetNeedsChangesFlags(release.roles)
     }
   });
+  await markFreeReleaseConsumed(params.prisma, params.releaseId);
 
   try {
     await sendReleaseDecisionEmail({

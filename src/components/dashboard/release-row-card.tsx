@@ -992,6 +992,7 @@ function StatusFieldValue({ release }: { release: CabinetRelease }) {
     release.paymentKind === "paid" ||
     release.paymentKind === "subscription" ||
     release.paymentKind === "unpaid" ||
+    release.paymentKind === "free_first_release" ||
     !release.paid;
   const statusPaymentLabel =
     release.paymentKind === "subscription" && release.paymentLabel

@@ -146,7 +146,10 @@ export async function POST(request: Request) {
     execute: (tx) => executeSubmission(request, tx, notifications)
   });
   if (!result.replayed && result.response.ok) {
-    for (const notification of notifications) await notifyReleaseSubmittedSafe(notification);
+    // Telegram retries can take a while; the artist should not wait for them.
+    void (async () => {
+      for (const notification of notifications) await notifyReleaseSubmittedSafe(notification);
+    })();
   }
   return result.response;
 }

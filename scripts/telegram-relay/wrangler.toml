@@ -1,0 +1,8 @@
+name = "icm-telegram-relay"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# After icecreammusic.net is on Cloudflare DNS, uncomment to serve the relay from a subdomain
+# (workers.dev can be blocked in Russia):
+# routes = [{ pattern = "tg.icecreammusic.net", custom_domain = true }]

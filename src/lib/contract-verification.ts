@@ -292,10 +292,14 @@ async function notifyMovedReleasesNowOnModeration(params: {
   });
 
   for (const release of releases) {
-    await notifyAdminReleaseSubmitted({
-      releaseTitle: release.title?.trim() || "Без названия",
-      artistName: deriveArtistNameFromSubmissionData(release.submissionData)
-    });
+    try {
+      await notifyAdminReleaseSubmitted({
+        releaseTitle: release.title?.trim() || "Без названия",
+        artistName: deriveArtistNameFromSubmissionData(release.submissionData)
+      });
+    } catch (error) {
+      console.error("[verification] telegram release notification failed", { releaseId: release.id, error });
+    }
   }
 }
 

@@ -70,6 +70,8 @@ Use `.env.example` as the canonical template. `.env.local` must stay uncommitted
 | `WEB_PUSH_VAPID_PRIVATE_KEY` | If push enabled | Server | Optional | Optional | Optional |
 | `TELEGRAM_BOT_TOKEN` | If Telegram notifications enabled | Server | Optional | Optional | Optional |
 | `TELEGRAM_ADMIN_CHAT_ID` | If Telegram notifications enabled | Server | Optional | Optional | Optional |
+| `TELEGRAM_API_BASE` | If the server cannot reach api.telegram.org | Server | Optional | Optional | Yes |
+| `TELEGRAM_RELAY_SECRET` | With `TELEGRAM_API_BASE` | Server | Optional | Optional | Yes |
 | `TELEGRAM_BONUS_BOT_SECRET` | If bonus bot enabled | Server | Optional | Optional | Optional |
 | `TELEGRAM_BONUS_JWT_SECRET` | If bonus bot enabled | Server | Optional | Optional | Optional |
 | `TELEGRAM_BONUS_BOT_USERNAME` | If bonus bot enabled | Server | Optional | Optional | Optional |

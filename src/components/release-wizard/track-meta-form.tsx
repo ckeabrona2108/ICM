@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowUpRight, Mic2, Plus, Trash2 } from "lucide-react";
 
+import { writeKaraokeHandoff, type KaraokeHandoff } from "@/components/karaoke/karaoke-handoff";
 import { LANGUAGES } from "@/lib/countries";
 import { trackPersonRoleOptions } from "@/lib/person-roles";
 import {
@@ -445,6 +446,7 @@ export function TrackMetaForm({
                     kind="syncedLyrics"
                     fileName={meta.syncedLyricsFile?.fileName ?? null}
                     uploading={uploadingAssetKind === "syncedLyrics"}
+                    karaokeHandoff={{ title: meta.title, lyrics: meta.lyrics, language: meta.metadataLanguage }}
                     onUploadAsset={onUploadAsset}
                     onRemoveAsset={onRemoveAsset}
                   />
@@ -480,13 +482,16 @@ function TrackAssetUploadCard({
   fileName,
   uploading,
   onUploadAsset,
-  onRemoveAsset
+  onRemoveAsset,
+  karaokeHandoff
 }: {
   title: string;
   hint: string;
   kind: TrackAssetKind;
   fileName: string | null;
   uploading: boolean;
+  /** Для TTML: если файла нет, предлагаем сделать его в нашем редакторе с текстом этого трека */
+  karaokeHandoff?: KaraokeHandoff;
   onUploadAsset: (kind: TrackAssetKind, file: File) => void;
   onRemoveAsset: (kind: TrackAssetKind) => void;
 }) {
@@ -509,6 +514,25 @@ function TrackAssetUploadCard({
       ) : (
         <p className="mt-2 text-[11px] text-white/30">Файл не загружен</p>
       )}
+
+      {!fileName && karaokeHandoff ? (
+        <a
+          href="/dashboard/karaoke"
+          target="_blank"
+          rel="noopener"
+          onClick={() => writeKaraokeHandoff(karaokeHandoff)}
+          className="group mt-3 flex items-center gap-2.5 rounded-lg border border-[#7b61ff]/30 bg-[#7b61ff]/[0.1] px-2.5 py-2 transition hover:border-[#7b61ff]/55 hover:bg-[#7b61ff]/[0.16]"
+        >
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-gradient-to-br from-[#8b73ff] to-[#6d4bff] text-white">
+            <Mic2 className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[11px] font-semibold text-white">Нет TTML? Сделайте у нас</span>
+            <span className="block text-[10px] text-white/50">Бесплатный редактор караоке — текст трека подставится сам</span>
+          </span>
+          <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-[#c4b5fd] transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+        </a>
+      ) : null}
 
       <div className="mt-3 flex items-center gap-2">
         <button

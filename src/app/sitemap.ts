@@ -87,6 +87,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: new Date(),
       changeFrequency: "monthly",
       priority: 0.8
+    },
+    {
+      url: absoluteSiteUrl("/karaoke"),
+      lastModified: new Date(),
+      changeFrequency: "monthly",
+      priority: 0.8
     }
   ];
 

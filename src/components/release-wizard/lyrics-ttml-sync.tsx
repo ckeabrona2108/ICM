@@ -29,7 +29,7 @@ function formatTtmlSeconds(sec: number): string {
 }
 
 /** Отображение как в караоке-плеерах: MM:SS:hh (минуты : секунды : сотые) */
-function formatKaraokeClock(sec: number): string {
+export function formatKaraokeClock(sec: number): string {
   const t = Math.max(0, sec);
   const hundredths = Math.floor(t * 100);
   const cs = hundredths % 100;
@@ -40,7 +40,7 @@ function formatKaraokeClock(sec: number): string {
   return `${pad(m)}:${pad(s)}:${pad(cs)}`;
 }
 
-function metadataToXmlLang(lang: string): string {
+export function metadataToXmlLang(lang: string): string {
   const map: Record<string, string> = {
     Русский: "ru",
     English: "en",
@@ -269,7 +269,8 @@ export function LyricsTtmlSyncPanel({
   metadataLanguage,
   releaseTitle,
   performersLabel,
-  trackTitle
+  trackTitle,
+  workflow = WORKFLOW_SHORT
 }: {
   lyrics: string;
   syncedLyrics?: SyncedLine[] | null;
@@ -284,6 +285,8 @@ export function LyricsTtmlSyncPanel({
   performersLabel?: string;
   /** Название трека из меты (как на площадке) */
   trackTitle?: string;
+  /** Шаги в «Справке»; по умолчанию — подсказки для мастера релиза */
+  workflow?: string[];
 }) {
   const syncedLyrics = syncedLyricsProp ?? [];
   const [localAudioUrl, setLocalAudioUrl] = React.useState<string | null>(null);
@@ -346,8 +349,11 @@ export function LyricsTtmlSyncPanel({
   }, [complete, lyricLines.length, syncedLyrics.length]);
 
   React.useEffect(() => {
+    const isTypingTarget = (t: EventTarget | null) =>
+      t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code !== "Space" && e.key !== " ") return;
+      if (isTypingTarget(e.target)) return;
       if (!effectiveUrl || complete || syncedLyrics.length >= lyricLines.length) return;
       const el = audioRef.current;
       if (!el || el.paused || e.repeat) return;
@@ -422,7 +428,7 @@ export function LyricsTtmlSyncPanel({
           <summary className="rounded border border-white/10 px-2 py-1 hover:bg-white/[0.04]">Справка</summary>
           <div className="mt-1 max-h-36 overflow-y-auto rounded border border-white/[0.06] bg-black/30 p-2 text-white/50">
             <ol className="mb-2 list-decimal space-y-1 pl-3.5">
-              {WORKFLOW_SHORT.map((s, i) => (
+              {workflow.map((s, i) => (
                 <li key={i}>{s}</li>
               ))}
             </ol>
@@ -441,7 +447,7 @@ export function LyricsTtmlSyncPanel({
         <div className="flex flex-wrap items-center gap-2 rounded border border-dashed border-white/[0.1] bg-black/25 px-2 py-1.5">
           <span className="text-[10px] text-white/45">Нет файла с шага треков:</span>
           <label className="cursor-pointer rounded bg-white/[0.08] px-2 py-1 text-[10px] text-white/85 hover:bg-white/[0.12]">
-            <input type="file" accept=".wav,.flac,audio/wav,audio/x-wav,audio/flac" className="sr-only" onChange={onLocalFile} />
+            <input type="file" accept=".wav,.mp3,.flac,audio/wav,audio/x-wav,audio/mpeg,audio/flac" className="sr-only" onChange={onLocalFile} />
             MP3 / WAV
           </label>
         </div>

@@ -19,6 +19,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   LogOut,
+  Mic2,
   Music2,
   Package,
   PanelLeftClose,
@@ -185,6 +186,7 @@ function buildNav(counts: {
       label: "Плейлисты",
       icon: Music2
     },
+    { type: "leaf", href: "/dashboard/karaoke", label: "Караоке (TTML)", icon: Mic2 },
     { type: "leaf", href: "/dashboard/faq", label: "FAQ", icon: HelpCircle },
     {
       type: "leaf",

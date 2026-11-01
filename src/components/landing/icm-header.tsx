@@ -14,6 +14,7 @@ const NAV = [
   { label: "Тарифы", href: "/#subscriptions" },
   { label: "AI Студия", href: "/dashboard/ai-studio" },
   { label: "Плагины", href: "/plugins" },
+  { label: "Караоке", href: "/karaoke" },
   { label: "FAQ", href: "/#faq" }
 ];
 
@@ -97,7 +98,7 @@ export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
             </Link>
             <Link
               href="/register"
-              className="hidden rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold tracking-[-0.01em] text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.75)] transition-all duration-200 hover:bg-[#6a4ff0] sm:inline-flex"
+              className="hidden whitespace-nowrap rounded-full bg-[#7b61ff] px-4 py-2 text-[14px] font-semibold tracking-[-0.01em] text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.75)] transition-all duration-200 hover:bg-[#6a4ff0] sm:inline-flex"
             >
               Создать аккаунт
             </Link>

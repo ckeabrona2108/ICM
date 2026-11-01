@@ -4,11 +4,10 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
 export const dynamic = "force-dynamic";
-
-const RELEASE_PAYMENT_AMOUNT_RUB = 350;
 
 function getAppBaseUrl(request: Request): string {
   const configured = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_DOMAIN?.trim();
@@ -30,19 +29,20 @@ export async function POST(request: Request, context: { params: { id: string } }
       id: releaseId,
       userId: session.user.id
     },
-    select: { id: true, title: true }
+    select: { id: true, title: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
   });
 
   if (!release) {
     return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
   }
 
+  const amountRub = calculateReleasePrice(release.track).totalRub;
   const orderId = randomUUID();
   const returnUrl = `${getAppBaseUrl(request)}/dashboard/releases/${releaseId}?pay_order=${orderId}`;
   let payment;
   try {
     payment = await createYooKassaPayment({
-      amountRub: RELEASE_PAYMENT_AMOUNT_RUB,
+      amountRub,
       description: `Оплата релиза: ${release.title}`,
       returnUrl,
       customerEmail: session.user.email,
@@ -79,6 +79,7 @@ export async function POST(request: Request, context: { params: { id: string } }
       confirmed: false,
       metadata: {
         releaseId,
+        amountRub,
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

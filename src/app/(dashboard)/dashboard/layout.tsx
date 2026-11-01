@@ -153,8 +153,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             release: 350,
             text: 75,
             karaokeText: 75,
-            videoShot: 75,
-            videoClip: 100
+            videoShot: 0,
+            videoClip: 150
           }
         };
       }

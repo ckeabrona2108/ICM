@@ -4,6 +4,8 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { CreditCard, Loader2, RefreshCw } from "lucide-react";
 
+import type { ReleasePrice } from "@/lib/release-pricing";
+
 type PaymentReturnState =
   | { kind: "none" }
   | { kind: "pending" }
@@ -11,10 +13,12 @@ type PaymentReturnState =
 
 export function ReleasePaymentPanel({
   releaseId,
+  price,
   autoStart = false,
   returnState
 }: {
   releaseId: string;
+  price: ReleasePrice | null;
   autoStart?: boolean;
   returnState: PaymentReturnState;
 }) {
@@ -66,6 +70,19 @@ export function ReleasePaymentPanel({
       }
     >
       <p>{message}</p>
+      {price && price.lines.length > 1 ? (
+        <ul className="mt-2 space-y-0.5 text-[12px] text-white/70">
+          {price.lines.map((line) => (
+            <li key={line.kind} className="flex justify-between gap-3">
+              <span>
+                {line.label}
+                {line.count > 1 ? ` × ${line.count}` : ""}
+              </span>
+              <span className="tabular-nums">{line.amountRub} ₽</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {error ? <p className="mt-2 text-rose-200">{error}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
@@ -77,7 +94,7 @@ export function ReleasePaymentPanel({
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#7b3df5] px-3 text-[13px] font-semibold text-white transition hover:bg-[#8f5bf7] disabled:opacity-60"
         >
           {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-          {returnState.kind === "failed" ? "Попробовать снова" : "Оплатить релиз"}
+          {returnState.kind === "failed" ? "Попробовать снова" : price ? `Оплатить ${price.totalRub} ₽` : "Оплатить релиз"}
         </button>
         {returnState.kind === "pending" ? (
           <button

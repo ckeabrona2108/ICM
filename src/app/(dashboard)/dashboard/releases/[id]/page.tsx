@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { ReleaseModerationStepper } from "@/components/dashboard/release-moderation-stepper";
 import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { prisma } from "@/lib/prisma";
+import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
 import Link from "next/link";
 import { ReleaseSceneSettingsClient } from "@/components/releases/release-scene-settings-client";
@@ -48,6 +49,14 @@ export default async function ReleaseDetailsPage({
   }
   const timeline = getReleaseTimelineState(release.status, release.paid);
   const awaitingPayment = !release.paid && release.status === "moderation";
+  const releasePrice = awaitingPayment
+    ? calculateReleasePrice(
+        await prisma.track.findMany({
+          where: { releaseId: release.id, release: { userId: session.user.id } },
+          select: RELEASE_PRICING_TRACK_SELECT
+        })
+      )
+    : null;
   const paymentReturnState =
     paymentResult?.status === "canceled"
       ? { kind: "failed" as const, message: describeYooKassaCancellation(paymentResult.cancellationReason) }
@@ -87,6 +96,7 @@ export default async function ReleaseDetailsPage({
             ) : awaitingPayment ? (
               <ReleasePaymentPanel
                 releaseId={release.id}
+                price={releasePrice}
                 autoStart={searchParams?.pay === "1" && !payOrderId}
                 returnState={paymentReturnState}
               />

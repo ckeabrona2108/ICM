@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { calculateReleasePrice, RELEASE_BASE_PRICE_RUB, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import {
   getSubscriptionTariffConfig,
   normalizeSubscriptionBillingPeriod
@@ -12,8 +13,6 @@ import { createYooKassaPayment } from "@/lib/yookassa";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
-
-const RELEASE_PAYMENT_AMOUNT_RUB = 350;
 
 function getAppBaseUrl(request: Request): string {
   const configured = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_DOMAIN?.trim();
@@ -53,7 +52,7 @@ export async function POST(request: Request) {
       ? `${baseUrl}/dashboard/subscription?pay_order=${orderId}`
       : `${baseUrl}/dashboard/releases${payload.releaseId ? `/${payload.releaseId}` : ""}?pay_order=${orderId}`);
 
-  let amountRub = RELEASE_PAYMENT_AMOUNT_RUB;
+  let amountRub = RELEASE_BASE_PRICE_RUB;
   let description = "Оплата релиза ICECREAMMUSIC";
   const billingPeriod = normalizeSubscriptionBillingPeriod(payload.billingPeriod);
   const subscriptionTariff =
@@ -74,7 +73,8 @@ export async function POST(request: Request) {
         userId: session.user.id
       },
       select: {
-        title: true
+        title: true,
+        track: { select: RELEASE_PRICING_TRACK_SELECT }
       }
     });
 
@@ -82,6 +82,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
     }
 
+    amountRub = calculateReleasePrice(release.track).totalRub;
     description = `Оплата релиза: ${release.title}`;
   }
 
@@ -130,7 +131,7 @@ export async function POST(request: Request) {
         tariffId: payload.tariffId ?? null,
         billingPeriod: kind === "subscription" ? billingPeriod : null,
         tariffTitle: subscriptionTariff?.title ?? null,
-        amountRub: kind === "subscription" ? amountRub : null,
+        amountRub,
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

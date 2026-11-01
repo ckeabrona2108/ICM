@@ -73,8 +73,8 @@ const PAYG_PRICING: PlanPricing = {
   release: 350,
   text: 75,
   karaokeText: 75,
-  videoShot: 75,
-  videoClip: 100
+  videoShot: 0,
+  videoClip: 150
 };
 
 function buildDefaultSubscriptionOverview(): SubscriptionOverview {

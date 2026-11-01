@@ -512,27 +512,27 @@ function TrackAssetUploadCard({
       {fileName ? (
         <p className="mt-2 truncate text-[11px] text-emerald-200/85">{fileName}</p>
       ) : (
-        <p className="mt-2 text-[11px] text-white/30">Файл не загружен</p>
+        <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[11px] text-white/30">
+          Файл не загружен
+          {karaokeHandoff ? (
+            <>
+              <span aria-hidden>·</span>
+              <a
+                href="/dashboard/karaoke"
+                target="_blank"
+                rel="noopener"
+                onClick={() => writeKaraokeHandoff(karaokeHandoff)}
+                title="Бесплатный редактор караоке: текст трека подставится сам"
+                className="group inline-flex items-center gap-1 font-medium text-[#c4b5fd] transition hover:text-white"
+              >
+                <Mic2 className="h-3 w-3" />
+                Сделать в редакторе
+                <ArrowUpRight className="h-3 w-3 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+              </a>
+            </>
+          ) : null}
+        </p>
       )}
-
-      {!fileName && karaokeHandoff ? (
-        <a
-          href="/dashboard/karaoke"
-          target="_blank"
-          rel="noopener"
-          onClick={() => writeKaraokeHandoff(karaokeHandoff)}
-          className="group mt-3 flex items-center gap-2.5 rounded-lg border border-[#7b61ff]/30 bg-[#7b61ff]/[0.1] px-2.5 py-2 transition hover:border-[#7b61ff]/55 hover:bg-[#7b61ff]/[0.16]"
-        >
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-gradient-to-br from-[#8b73ff] to-[#6d4bff] text-white">
-            <Mic2 className="h-3.5 w-3.5" />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[11px] font-semibold text-white">Нет TTML? Сделайте у нас</span>
-            <span className="block text-[10px] text-white/50">Бесплатный редактор караоке — текст трека подставится сам</span>
-          </span>
-          <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-[#c4b5fd] transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-        </a>
-      ) : null}
 
       <div className="mt-3 flex items-center gap-2">
         <button

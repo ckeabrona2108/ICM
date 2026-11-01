@@ -13,7 +13,14 @@ import { Label } from "@/components/ui/label";
 const inputClassName =
   "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
 
+function readSafeCallbackUrl() {
+  const callbackUrl = new URLSearchParams(window.location.search).get("callbackUrl");
+  return callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//") ? callbackUrl : null;
+}
+
 export default function RegisterPage() {
+  const [callbackUrl, setCallbackUrl] = React.useState<string | null>(null);
+  React.useEffect(() => setCallbackUrl(readSafeCallbackUrl()), []);
   const [created, setCreated] = React.useState(false);
   const [agree, setAgree] = React.useState(false);
   const [termsOpen, setTermsOpen] = React.useState(false);
@@ -59,7 +66,7 @@ export default function RegisterPage() {
 
       setCreated(true);
 
-      const fallbackTarget = "/dashboard";
+      const fallbackTarget = readSafeCallbackUrl() ?? "/dashboard";
       const loginResult = await signIn("credentials", {
         email: form.email,
         password: form.password,
@@ -281,7 +288,7 @@ export default function RegisterPage() {
         <p className="mt-8 text-center text-[14px] text-white/55">
           Уже есть аккаунт?{' '}
           <Link
-            href="/login"
+            href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"}
             className="font-medium text-white underline-offset-4 transition-colors hover:underline"
           >
             Войти

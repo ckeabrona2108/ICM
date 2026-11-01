@@ -19,6 +19,8 @@ function readSafeCallbackUrl() {
 }
 
 export default function LoginPage() {
+  const [callbackUrl, setCallbackUrl] = React.useState<string | null>(null);
+  React.useEffect(() => setCallbackUrl(readSafeCallbackUrl()), []);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [remember, setRemember] = React.useState(true);
@@ -185,7 +187,7 @@ export default function LoginPage() {
       <p className="mt-8 text-center text-[14px] text-white/55">
         Нет аккаунта?{' '}
         <Link
-          href="/register"
+          href={callbackUrl ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/register"}
           className="font-medium text-white underline-offset-4 transition-colors hover:underline"
         >
           Создать

@@ -43,7 +43,8 @@ function IcmTariffCardBase({
       return;
     }
     if (ctaMode === "landing" && typeof window !== "undefined") {
-      window.location.href = "/register";
+      // Subscriptions are bought in the cabinet: sign up (or in) and land on the subscription page.
+      window.location.href = "/register?callbackUrl=%2Fdashboard%2Fsubscription";
     }
   }, [ctaMode, onCtaClick]);
 

@@ -29,7 +29,7 @@ export default async function SubscriptionPage({
 }) {
   const session = await getServerSession(authOptions);
   if (!session) {
-    redirect("/login");
+    redirect("/login?callbackUrl=%2Fdashboard%2Fsubscription");
   }
 
   const payOrderId = searchParams?.pay_order?.trim();

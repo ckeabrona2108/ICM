@@ -42,7 +42,7 @@ import {
 } from "@/lib/release-policy";
 import { resolveDraftReleaseId, resolveReleaseSubmitMode } from "@/lib/release-wizard-mode";
 import { shouldGuardUnsavedChanges } from "@/lib/wizard-dirty";
-import { readPendingSubmission, savePendingSubmission, completePendingSubmission } from "@/lib/release-submission-client";
+import { readPendingSubmission, savePendingSubmission, completePendingSubmission, resolveSubmissionKey } from "@/lib/release-submission-client";
 import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
 import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import { VerificationAccessModal } from "@/components/verification/verification-access-modal";
@@ -1108,8 +1108,7 @@ function WizardInner({
         submissionMode === "new" ? draftReleaseIdRef.current : sourceReleaseId,
         submissionDataSnapshot
       );
-      const preparedSubmissionData =
-        pendingSubmission?.payload.data ?? await prepareSubmissionDataWithUploads({ strict: true });
+      const preparedSubmissionData = await prepareSubmissionDataWithUploads({ strict: true });
       const preparedIssues = validateReleaseSubmission(preparedSubmissionData);
       if (preparedIssues.length > 0) {
         setStep("review");
@@ -1144,7 +1143,7 @@ function WizardInner({
         submitForModeration: async (releaseId: string) => {
           setSubmitPhase("submitting");
 
-          const payload: ReleaseSubmitRequest = pendingSubmission?.payload ?? {
+          const payload: ReleaseSubmitRequest = {
             mode: resolveReleaseSubmitMode(submissionMode, currentStatus),
             releaseId,
             currentStatus,
@@ -1153,7 +1152,7 @@ function WizardInner({
             data: preparedSubmissionData
           };
 
-          const idempotencyKey = pendingSubmission?.key ?? crypto.randomUUID();
+          const idempotencyKey = resolveSubmissionKey(pendingSubmission, payload, () => crypto.randomUUID());
           savePendingSubmission(window.localStorage, {
             key: idempotencyKey, snapshot: submissionDataSnapshot,
             draft: savedDraft!, payload

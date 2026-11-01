@@ -4,6 +4,7 @@ const TELEGRAM_MAX_ATTEMPTS = 3;
 const TELEGRAM_MAX_RETRY_AFTER_SECONDS = 30;
 // Telegram rejects messages over 4096 characters; support tickets allow up to 6000.
 const TELEGRAM_MAX_TEXT_LENGTH = 4000;
+const TELEGRAM_REPLY_SNIPPET_LENGTH = 500;
 
 export interface TelegramNewTicketNotificationPayload {
   ticketId: string;
@@ -12,6 +13,14 @@ export interface TelegramNewTicketNotificationPayload {
   userEmail: string;
   createdAt: Date;
   firstMessage: string;
+}
+
+export interface TelegramTicketReplyNotificationPayload {
+  ticketId: string;
+  subject: string;
+  userName: string;
+  userEmail: string;
+  message: string;
 }
 
 export interface TelegramContractSignedNotificationPayload {
@@ -138,6 +147,38 @@ export async function notifyAdminNewSupportTicket(
   payload: TelegramNewTicketNotificationPayload
 ): Promise<boolean> {
   return sendTelegramMessage(buildAdminNewSupportTicketTelegramText(payload));
+}
+
+export function buildAdminSupportTicketReplyTelegramText(
+  payload: TelegramTicketReplyNotificationPayload
+): string {
+  const adminUrl = `${resolveAppUrl().replace(/\/$/, "")}/admin/support/tickets/${payload.ticketId}`;
+  const message = payload.message.trim();
+  const snippet =
+    message.length > TELEGRAM_REPLY_SNIPPET_LENGTH
+      ? `${message.slice(0, TELEGRAM_REPLY_SNIPPET_LENGTH - 1)}…`
+      : message;
+
+  return [
+    "Новый ответ в тикете",
+    "",
+    `Тикет: #${payload.ticketId}`,
+    `Тема: ${payload.subject}`,
+    `Пользователь: ${payload.userName}`,
+    `Email: ${payload.userEmail}`,
+    "",
+    "Сообщение:",
+    snippet,
+    "",
+    "Ответить в админ-панели:",
+    adminUrl
+  ].join("\n");
+}
+
+export async function notifyAdminSupportTicketReply(
+  payload: TelegramTicketReplyNotificationPayload
+): Promise<boolean> {
+  return sendTelegramMessage(buildAdminSupportTicketReplyTelegramText(payload));
 }
 
 export function buildAdminNewSupportTicketTelegramText(

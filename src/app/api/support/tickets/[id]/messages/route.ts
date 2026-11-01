@@ -55,7 +55,8 @@ export async function POST(
       prisma,
       userId: session.user.id,
       ticketId: context.params.id,
-      body: body.body
+      body: body.body,
+      notifyAdmins: session.user.role !== "ADMIN"
     });
     const response: SupportTicketMutationResponse = { ok: true, ticket };
     return NextResponse.json(response, { status: 200 });

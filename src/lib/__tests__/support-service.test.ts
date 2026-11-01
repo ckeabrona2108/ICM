@@ -448,6 +448,92 @@ test("addUserSupportMessage moves WAITING_USER to IN_PROGRESS", async () => {
   assert.equal(ticket.status, "IN_PROGRESS");
 });
 
+function makeReplyPrisma() {
+  let findUniqueCalls = 0;
+  return {
+    supportTicket: {
+      findUnique: async () => {
+        findUniqueCalls += 1;
+        if (findUniqueCalls === 1) {
+          return { id: "ticket_1", userId: "user_1", title: "Тема", status: "IN_PROGRESS" };
+        }
+        return makeTicketDetails({ id: "ticket_1", userName: "Вячеслав", userEmail: "mail@example.com" });
+      },
+      update: async () => ({})
+    },
+    message: {
+      create: async () => ({}),
+      updateMany: async () => ({ count: 1 })
+    },
+    $transaction: async (items: Promise<unknown>[]) => Promise.all(items)
+  } as any;
+}
+
+test("addUserSupportMessage sends telegram notification about the user reply", async () => {
+  const notifyCalls: any[] = [];
+
+  await addUserSupportMessage({
+    prisma: makeReplyPrisma(),
+    userId: "user_1",
+    ticketId: "ticket_1",
+    body: "  Ещё вопрос по релизу  ",
+    notify: async (payload) => {
+      notifyCalls.push(payload);
+      return true;
+    }
+  });
+
+  assert.deepEqual(notifyCalls, [
+    {
+      ticketId: "ticket_1",
+      subject: "Тема",
+      userName: "Вячеслав",
+      userEmail: "mail@example.com",
+      message: "Ещё вопрос по релизу"
+    }
+  ]);
+});
+
+test("addUserSupportMessage skips telegram notification for admin authors", async () => {
+  let notified = false;
+
+  await addUserSupportMessage({
+    prisma: makeReplyPrisma(),
+    userId: "user_1",
+    ticketId: "ticket_1",
+    body: "Ответ",
+    notifyAdmins: false,
+    notify: async () => {
+      notified = true;
+      return true;
+    }
+  });
+
+  assert.equal(notified, false);
+});
+
+test("addUserSupportMessage saves the reply when telegram notification fails", async () => {
+  const errors: string[] = [];
+
+  const ticket = await addUserSupportMessage({
+    prisma: makeReplyPrisma(),
+    userId: "user_1",
+    ticketId: "ticket_1",
+    body: "Ответ",
+    notify: async () => {
+      throw new Error("telegram_down");
+    },
+    logger: {
+      warn: () => undefined,
+      error: (message) => errors.push(message)
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(ticket.id, "ticket_1");
+  assert.deepEqual(errors, ["[support] telegram reply notification failed"]);
+});
+
 test("support fails explicitly instead of writing a local file when DB repositories are incomplete", async () => {
   const prisma = {
     supportTicket: {}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildAdminSupportTicketReplyTelegramText,
   buildContractSignedTelegramText,
   buildReleaseModerationTelegramText,
   sendTelegramMessage,
@@ -32,6 +33,31 @@ test("buildContractSignedTelegramText falls back to user id", () => {
     text,
     "Пользователь user_1 - artist@example.com подписал договор. Необходимо его проверить."
   );
+});
+
+test("buildAdminSupportTicketReplyTelegramText includes ticket, author, snippet and admin link", () => {
+  const previousAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+  process.env.NEXT_PUBLIC_APP_URL = "https://www.example.com/";
+  try {
+    const text = buildAdminSupportTicketReplyTelegramText({
+      ticketId: "ticket_1",
+      subject: "Проверка UPC",
+      userName: "Вячеслав",
+      userEmail: "mail@example.com",
+      message: "а".repeat(600)
+    });
+
+    assert.match(text, /^Новый ответ в тикете/);
+    assert.match(text, /Тикет: #ticket_1/);
+    assert.match(text, /Тема: Проверка UPC/);
+    assert.match(text, /Пользователь: Вячеслав/);
+    assert.match(text, /Email: mail@example\.com/);
+    assert.match(text, new RegExp(`\\n${"а".repeat(499)}…\\n`));
+    assert.ok(text.endsWith("https://www.example.com/admin/support/tickets/ticket_1"));
+  } finally {
+    if (previousAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = previousAppUrl;
+  }
 });
 
 test("buildReleaseModerationTelegramText formats release and artist", () => {

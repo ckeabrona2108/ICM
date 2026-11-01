@@ -10,7 +10,9 @@ import { z } from "zod";
 
 import {
   notifyAdminNewSupportTicket,
-  type TelegramNewTicketNotificationPayload
+  notifyAdminSupportTicketReply,
+  type TelegramNewTicketNotificationPayload,
+  type TelegramTicketReplyNotificationPayload
 } from "@/lib/telegram-notifier";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
@@ -403,12 +405,18 @@ async function legacyMarkUserSupportTicketsRead(prisma: PrismaClient, userId: st
   );
 }
 
-async function legacyAddUserSupportMessage(params: {
+type AddUserSupportMessageParams = {
   prisma: PrismaClient;
   userId: string;
   ticketId: string;
   body: string;
-}) {
+  // false when the author is an admin, so staff replies do not ping the admin chat.
+  notifyAdmins?: boolean;
+  notify?: (payload: TelegramTicketReplyNotificationPayload) => Promise<boolean>;
+  logger?: LoggerLike;
+};
+
+async function legacyAddUserSupportMessage(params: AddUserSupportMessageParams) {
   const ticketRows = (await (params.prisma as any).$queryRawUnsafe(
     `
       SELECT id, "userId", title, status::text AS status
@@ -472,7 +480,9 @@ async function legacyAddUserSupportMessage(params: {
     }
   });
 
-  return legacyGetSupportTicketDetails(params.prisma, params.ticketId);
+  const details = await legacyGetSupportTicketDetails(params.prisma, params.ticketId);
+  notifyAdminSupportTicketReplyDeferred(params, details);
+  return details;
 }
 
 async function legacyInsertAdminLog(
@@ -886,6 +896,24 @@ function notifyAdminNewSupportTicketDeferred(
   });
 }
 
+function notifyAdminSupportTicketReplyDeferred(
+  params: Pick<AddUserSupportMessageParams, "body" | "notifyAdmins" | "notify" | "logger">,
+  ticket: Pick<SupportTicketDto, "id" | "subject" | "userName" | "userEmail">
+): void {
+  if (params.notifyAdmins === false) return;
+  const notify = params.notify ?? notifyAdminSupportTicketReply;
+  const logger = params.logger ?? defaultLogger;
+  void notify({
+    ticketId: ticket.id,
+    subject: ticket.subject,
+    userName: ticket.userName,
+    userEmail: ticket.userEmail,
+    message: params.body.trim()
+  }).catch((error) => {
+    logger.error("[support] telegram reply notification failed", error);
+  });
+}
+
 function supportStorageUnavailable(cause?: unknown): SupportStorageUnavailableError {
   const error = new SupportStorageUnavailableError();
   if (cause !== undefined) {
@@ -1168,12 +1196,7 @@ export async function getUserSupportTicket(
   }
 }
 
-export async function addUserSupportMessage(params: {
-  prisma: PrismaClient;
-  userId: string;
-  ticketId: string;
-  body: string;
-}) {
+export async function addUserSupportMessage(params: AddUserSupportMessageParams) {
   const backend = await resolveSupportBackend(params.prisma);
 
   if (backend === "legacy") {
@@ -1222,7 +1245,9 @@ export async function addUserSupportMessage(params: {
     ];
 
     await params.prisma.$transaction(operations);
-    return loadSupportTicketDetailsOrThrow(params.prisma, ticket.id);
+    const details = await loadSupportTicketDetailsOrThrow(params.prisma, ticket.id);
+    notifyAdminSupportTicketReplyDeferred(params, details);
+    return details;
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
       throw error;

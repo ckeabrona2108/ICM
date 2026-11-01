@@ -1,0 +1,104 @@
+"use client";
+
+import * as React from "react";
+import { getProviders, signIn } from "next-auth/react";
+import { Loader2 } from "lucide-react";
+
+type SocialProviderId = "yandex" | "vk";
+
+const SOCIAL_PROVIDERS: Array<{ id: SocialProviderId; label: string }> = [
+  { id: "yandex", label: "Яндекс ID" },
+  { id: "vk", label: "VK ID" }
+];
+
+export const SOCIAL_LOGIN_ERRORS: Record<string, string> = {
+  OAuthAdminAccount: "Для этого аккаунта вход только по email и паролю",
+  OAuthAccountTaken: "К этому кабинету уже привязан другой аккаунт. Войдите по email и паролю",
+  OAuthUnavailable: "Быстрый вход сейчас недоступен. Войдите по email и паролю",
+  OAuthSignin: "Не удалось начать вход через сервис. Попробуйте ещё раз",
+  OAuthCallback: "Не удалось завершить вход через сервис. Попробуйте ещё раз",
+  AccessDenied: "Вход отменён",
+  Callback: "Не удалось завершить вход через сервис. Попробуйте ещё раз"
+};
+
+function YandexIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <circle cx="12" cy="12" r="12" fill="#FC3F1D" />
+      <path
+        fill="#fff"
+        d="M13.32 6.5h-1.1c-2 0-3.06 1.02-3.06 2.52 0 1.7.73 2.5 2.23 3.5l1.24.84-3.56 5.14H6.9l3.2-4.6c-1.84-1.32-2.87-2.6-2.87-4.77 0-2.72 1.9-4.58 4.98-4.58h3.06v13.95h-1.95V6.5Z"
+      />
+    </svg>
+  );
+}
+
+function VkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <rect width="24" height="24" rx="7" fill="#0077FF" />
+      <path
+        fill="#fff"
+        d="M12.77 17.1c-5.13 0-8.06-3.52-8.18-9.37h2.57c.08 4.3 1.98 6.12 3.48 6.5v-6.5h2.42v3.71c1.48-.16 3.04-1.85 3.56-3.71h2.42a7.15 7.15 0 0 1-3.29 4.67 7.4 7.4 0 0 1 3.85 4.7h-2.66c-.57-1.78-2-3.16-3.88-3.35v3.35h-.29Z"
+      />
+    </svg>
+  );
+}
+
+const ICONS: Record<SocialProviderId, () => React.JSX.Element> = { yandex: YandexIcon, vk: VkIcon };
+
+export function SocialLoginButtons({
+  callbackUrl,
+  disabled = false
+}: {
+  callbackUrl: string | null;
+  disabled?: boolean;
+}) {
+  const [available, setAvailable] = React.useState<SocialProviderId[]>([]);
+  const [pending, setPending] = React.useState<SocialProviderId | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getProviders()
+      .then((providers) => {
+        if (cancelled || !providers) return;
+        setAvailable(SOCIAL_PROVIDERS.map((provider) => provider.id).filter((id) => id in providers));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (available.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-4 text-[12px] uppercase tracking-[0.16em] text-white/35">
+        <span className="h-px flex-1 bg-white/10" />
+        или
+        <span className="h-px flex-1 bg-white/10" />
+      </div>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2">
+        {SOCIAL_PROVIDERS.filter((provider) => available.includes(provider.id)).map((provider) => {
+          const Icon = ICONS[provider.id];
+          return (
+            <button
+              key={provider.id}
+              type="button"
+              disabled={disabled || pending !== null}
+              onClick={() => {
+                setPending(provider.id);
+                void signIn(provider.id, { callbackUrl: callbackUrl ?? "/dashboard" });
+              }}
+              className="inline-flex h-14 items-center justify-center gap-3 rounded-2xl bg-white/[0.06] px-5 text-[15px] font-medium text-white transition-colors hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {pending === provider.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon />}
+              {provider.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

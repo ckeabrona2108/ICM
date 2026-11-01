@@ -181,6 +181,21 @@ model vk_links {
   @@schema("icecream")
 }
 
+// Quick sign-in with Yandex ID. VK sign-in uses vk_links, so one VK account always maps
+// to one cabinet whether it was linked from the cabinet or used to sign in.
+model oauth_accounts {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id             String   @db.Uuid
+  provider            String
+  provider_account_id String
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  user                user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([provider, provider_account_id])
+  @@unique([user_id, provider])
+  @@schema("icecream")
+}
+
 // The free first single. One per cabinet, per VK account and per passport. Deleting the
 // release clears release_id; the claim frees up again only if it was never consumed.
 model free_release_claims {
@@ -1097,6 +1112,7 @@ model user {
   orders                       orders[]
   partnerCodeUsages            partner_code_usages[]
   vk_link                      vk_links?
+  oauth_accounts               oauth_accounts[]
   free_release_claim           free_release_claims?
   partnerCodesAllowed          partner_codes[]                @relation("partner_codes_allowed_user")
   partnerCodesCreated          partner_codes[]                @relation("partner_codes_created_by_admin")

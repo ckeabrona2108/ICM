@@ -9,6 +9,7 @@ import { ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SOCIAL_LOGIN_ERRORS, SocialLoginButtons } from "@/components/auth/social-login-buttons";
 
 const inputClassName =
   "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
@@ -25,6 +26,12 @@ export default function LoginPage() {
   const [error, setError] = React.useState("");
   const [remember, setRemember] = React.useState(true);
   const [form, setForm] = React.useState({ email: "", password: "" });
+
+  // NextAuth sends failed Yandex/VK sign-ins back here with ?error=<code>.
+  React.useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("error");
+    if (code) setError(SOCIAL_LOGIN_ERRORS[code] ?? "Не удалось войти. Попробуйте снова");
+  }, []);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -183,6 +190,8 @@ export default function LoginPage() {
           </span>
         </Button>
       </form>
+
+      <SocialLoginButtons callbackUrl={callbackUrl} />
 
       <p className="mt-8 text-center text-[14px] text-white/55">
         Нет аккаунта?{' '}

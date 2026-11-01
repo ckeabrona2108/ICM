@@ -9,6 +9,7 @@ import {
   decodeVkLinkCookie,
   encodeVkLinkCookie,
   exchangeVkIdCode,
+  fetchVkIdUserInfo,
   getVkIdConfig,
   getVkLinkRedirectUri
 } from "@/lib/vk-id";
@@ -52,6 +53,7 @@ test("code exchange returns the VK user id and checks the state", async () => {
     clientId: "1", code: "c", codeVerifier: "v", deviceId: "d", redirectUri: "https://x/cb", state: "s", fetchImpl: ok.fetchImpl
   });
   assert.equal(result.vkUserId, "42");
+  assert.equal(result.accessToken, "t");
   assert.match(ok.calls[0]!.body, /code_verifier=v/u);
 
   const mismatch = jsonFetch({ access_token: "t", user_id: 42, state: "other" });
@@ -65,6 +67,20 @@ test("code exchange returns the VK user id and checks the state", async () => {
     exchangeVkIdCode({ clientId: "1", code: "c", codeVerifier: "v", deviceId: "d", redirectUri: "https://x/cb", state: "s", fetchImpl: failed.fetchImpl }),
     /bad code/u
   );
+});
+
+test("user info builds the name and keeps only a real email", async () => {
+  const full = jsonFetch({ user: { user_id: "42", first_name: " Иван ", last_name: "Петров", email: "Ivan@Mail.ru" } });
+  const info = await fetchVkIdUserInfo({ clientId: "1", accessToken: "t", fetchImpl: full.fetchImpl });
+  assert.deepEqual(info, { vkUserId: "42", name: "Иван Петров", email: "ivan@mail.ru" });
+  assert.match(full.calls[0]!.url, /oauth2\/user_info$/u);
+  assert.match(full.calls[0]!.body, /access_token=t/u);
+
+  const noEmail = jsonFetch({ user: { user_id: 7, first_name: "Аня", email: "" } });
+  assert.equal((await fetchVkIdUserInfo({ clientId: "1", accessToken: "t", fetchImpl: noEmail.fetchImpl })).email, null);
+
+  const failed = jsonFetch({ error: "invalid_token", error_description: "expired" }, 401);
+  await assert.rejects(fetchVkIdUserInfo({ clientId: "1", accessToken: "t", fetchImpl: failed.fetchImpl }), /expired/u);
 });
 
 test("group membership reads 1/0 and surfaces API errors", async () => {

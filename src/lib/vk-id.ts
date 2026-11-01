@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
-// VK ID (OAuth 2.1 + PKCE) for linking a VK account to a cabinet, plus the group
-// membership check. The group hides its member list, so membership is checked with
+// VK ID (OAuth 2.1 + PKCE) for linking a VK account to a cabinet and for signing in
+// with VK, plus the group membership check. The group hides its member list, so membership is checked with
 // a community access key rather than the app's service key.
 
 const VK_ID_BASE_URL = "https://id.vk.ru";
@@ -38,6 +38,11 @@ export function getVkIdConfig(): VkIdConfig | null {
   const groupToken = readEnv("VK_GROUP_TOKEN");
   if (!clientId || !groupId || !groupToken) return null;
   return { clientId, groupId, groupToken };
+}
+
+// Signing in needs only the app id; the group settings matter just for the membership check.
+export function getVkIdClientId(): string | null {
+  return readEnv("AUTH_VK_ID") || null;
 }
 
 export function getVkLinkRedirectUri(appBaseUrl: string): string {
@@ -100,7 +105,8 @@ async function fetchWithTimeout(fetchImpl: FetchLike, input: string, init?: Requ
   }
 }
 
-// Exchanges the authorization code for tokens; only the VK user id is kept.
+// Exchanges the authorization code for tokens. The access token is only used right away
+// to read the profile on sign-in; it is never stored.
 export async function exchangeVkIdCode(params: {
   clientId: string;
   code: string;
@@ -109,7 +115,7 @@ export async function exchangeVkIdCode(params: {
   redirectUri: string;
   state: string;
   fetchImpl?: FetchLike;
-}): Promise<{ vkUserId: string }> {
+}): Promise<{ vkUserId: string; accessToken: string }> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: params.code,
@@ -135,7 +141,46 @@ export async function exchangeVkIdCode(params: {
   const userId = payload.user_id;
   const vkUserId = typeof userId === "number" || typeof userId === "string" ? String(userId) : "";
   if (!/^\d+$/u.test(vkUserId)) throw new Error("vk_id_missing_user_id");
-  return { vkUserId };
+  const accessToken = typeof payload.access_token === "string" ? payload.access_token : "";
+  return { vkUserId, accessToken };
+}
+
+export interface VkIdUserInfo {
+  vkUserId: string;
+  name: string;
+  email: string | null;
+}
+
+export async function fetchVkIdUserInfo(params: {
+  clientId: string;
+  accessToken: string;
+  fetchImpl?: FetchLike;
+}): Promise<VkIdUserInfo> {
+  const body = new URLSearchParams({ client_id: params.clientId, access_token: params.accessToken });
+  const response = await fetchWithTimeout(params.fetchImpl ?? fetch, `${VK_ID_BASE_URL}/oauth2/user_info`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | { user?: Record<string, unknown>; error?: unknown; error_description?: unknown }
+    | null;
+  if (!response.ok || !payload?.user || payload.error) {
+    const reason = typeof payload?.error_description === "string" ? payload.error_description : payload?.error;
+    throw new Error(`vk_id_user_info_failed:${String(reason ?? response.status)}`);
+  }
+  const { user_id: userId, first_name: firstName, last_name: lastName, email } = payload.user;
+  const vkUserId = typeof userId === "number" || typeof userId === "string" ? String(userId) : "";
+  if (!/^\d+$/u.test(vkUserId)) throw new Error("vk_id_missing_user_id");
+  const name = [firstName, lastName]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join(" ");
+  return {
+    vkUserId,
+    name,
+    email: typeof email === "string" && email.includes("@") ? email.trim().toLowerCase() : null
+  };
 }
 
 export async function checkVkGroupMembership(params: {

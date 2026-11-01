@@ -9,6 +9,7 @@ import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SocialLoginButtons } from "@/components/auth/social-login-buttons";
 
 const inputClassName =
   "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
@@ -277,6 +278,9 @@ export default function RegisterPage() {
             </span>
           </Button>
         </form>
+
+        {/* Gated on the same checkbox: a first Yandex/VK sign-in creates the cabinet. */}
+        <SocialLoginButtons callbackUrl={callbackUrl} disabled={!agree || loading} />
 
         {created ? (
           <div className="mt-5 flex items-start gap-2.5 rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.08] px-4 py-3.5 text-[13px] text-emerald-100">

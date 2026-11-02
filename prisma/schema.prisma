@@ -168,16 +168,32 @@ model smart_link_events {
   @@schema("icecream")
 }
 
-// A VK account confirmed through VK ID; one VK account per cabinet.
+// A VK account confirmed through VK ID; one VK account per cabinet. messages_allowed: the artist
+// allowed messages from the community, so account events are also sent to VK.
 model vk_links {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id           String    @unique @db.Uuid
-  vk_user_id        String    @unique
-  is_group_member   Boolean   @default(false)
-  member_checked_at DateTime? @db.Timestamptz(6)
-  linked_at         DateTime  @default(now()) @db.Timestamptz(6)
-  user              user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id             String    @unique @db.Uuid
+  vk_user_id          String    @unique
+  is_group_member     Boolean   @default(false)
+  member_checked_at   DateTime? @db.Timestamptz(6)
+  linked_at           DateTime  @default(now()) @db.Timestamptz(6)
+  messages_allowed    Boolean   @default(false)
+  messages_allowed_at DateTime? @db.Timestamptz(6)
+  messages_checked_at DateTime? @db.Timestamptz(6)
+  user                user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@schema("icecream")
+}
+
+// Delayed reminders already sent, one row per user and key, so a cron run never repeats one.
+model user_notification_reminders {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @db.Uuid
+  key        String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, key])
   @@schema("icecream")
 }
 
@@ -1113,6 +1129,7 @@ model user {
   partnerCodeUsages            partner_code_usages[]
   vk_link                      vk_links?
   oauth_accounts               oauth_accounts[]
+  notification_reminders       user_notification_reminders[]
   free_release_claim           free_release_claims?
   partnerCodesAllowed          partner_codes[]                @relation("partner_codes_allowed_user")
   partnerCodesCreated          partner_codes[]                @relation("partner_codes_created_by_admin")

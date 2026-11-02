@@ -32,6 +32,8 @@ async function notifyUserReportReady(params: {
     title: "Новый финансовый отчёт",
     message: `${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}`,
     href: "/dashboard/finance",
+    vkMessage: `${reportPeriodLabel(params.quarter, params.year)} · ${formatRubCurrency(params.amount)}. Посмотрите отчёт и статистику прослушиваний:`,
+    vkHref: "/dashboard/statistics",
     sendEmail: true,
     resetReadState: params.resetReadState
   });

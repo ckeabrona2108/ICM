@@ -45,11 +45,19 @@ export async function GET() {
     })
   ]);
 
+  // Account events in VK messages need the callback settings too, but the free release does not.
+  const vkMessagesEnv = {
+    VK_CALLBACK_SECRET: Boolean(process.env.VK_CALLBACK_SECRET?.trim()),
+    VK_CALLBACK_CONFIRMATION: Boolean(process.env.VK_CALLBACK_CONFIRMATION?.trim()),
+    VK_API_BASE: process.env.VK_API_BASE?.trim() ? "relay" : "direct"
+  };
+
   const ok = Object.values(env).every(Boolean) && vkApi.ok && vkId.ok && tables.ok;
   return NextResponse.json(
     {
       ok,
       env,
+      vkMessagesEnv,
       checks: {
         vkApiGroupsIsMember: { ok: vkApi.ok, ms: vkApi.ms, error: vkApi.error },
         vkIdReachable: { ok: vkId.ok, ms: vkId.ms, error: vkId.error },

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { FreeReleaseCard } from "@/components/dashboard/free-release-card";
+import { VkMessagesCard } from "@/components/dashboard/vk-messages-card";
 import { OverviewStreamsChart } from "@/components/dashboard/overview-streams-chart";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageHeader } from "@/components/layout/page-header";
@@ -91,6 +92,8 @@ export default async function DashboardPage() {
       <Suspense fallback={null}>
         <FreeReleaseCard />
       </Suspense>
+
+      <VkMessagesCard />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Link href="/dashboard/finance" className={`${TILE} transition-colors hover:border-white/[0.16]`}>

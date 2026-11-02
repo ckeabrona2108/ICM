@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import { buildReleaseApprovedVkMessage, RELEASE_APPROVED_VK_HREF } from "@/lib/vk-messages";
 import type { ModerationRemark } from "@/lib/cabinet-types";
 import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
 import { markFreeReleaseConsumed } from "@/lib/free-release";
@@ -375,6 +376,8 @@ export async function approveReleaseByAdmin(params: {
     title: "Релиз принят",
     message: `Релиз «${release.title ?? "Без названия"}» принят. Загрузите 30-секундный фрагмент, чтобы попасть на витрину.`,
     href: `/dashboard/showcase?releaseId=${encodeURIComponent(release.id)}`,
+    vkMessage: buildReleaseApprovedVkMessage(release.title),
+    vkHref: RELEASE_APPROVED_VK_HREF,
     sendEmail: false,
     resetReadState: true
   });

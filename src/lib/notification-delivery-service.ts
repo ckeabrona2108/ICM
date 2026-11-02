@@ -3,6 +3,8 @@ import webpush from "web-push";
 
 import { toNotificationStorageId } from "@/lib/notification-storage-id";
 import { sendDashboardEventEmail } from "@/lib/user-event-email";
+import { isVkNotificationKind } from "@/lib/vk-messages";
+import { sendVkUserNotification } from "@/lib/vk-notification-channel";
 
 export interface UserNotificationEvent {
   id: string;
@@ -14,6 +16,11 @@ export interface UserNotificationEvent {
   sendEmail?: boolean;
   emailCta?: boolean;
   sendPush?: boolean;
+  // VK direct message from the community; by default only the artist's own account events go there.
+  sendVk?: boolean;
+  // A VK-only text and link, when the message there should differ from the cabinet one.
+  vkMessage?: string;
+  vkHref?: string;
   resetReadState?: boolean;
   sourceType?: string;
   sourceId?: string;
@@ -138,6 +145,9 @@ export async function deliverUserNotification(
   }
   if (event.sendPush !== false) {
     deliveries.push(sendPushNotifications(prisma, event));
+  }
+  if (event.sendVk ?? isVkNotificationKind(event.kind)) {
+    deliveries.push(sendVkUserNotification(prisma, event));
   }
   await Promise.all(deliveries);
 }

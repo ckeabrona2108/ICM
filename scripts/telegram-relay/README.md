@@ -29,3 +29,14 @@ Then, signed in as admin, call `POST /api/admin/support/telegram/test`: a test
 message should arrive in the admin group.
 
 Leave `TELEGRAM_API_BASE` empty to send straight to `api.telegram.org`.
+
+## VK community messages
+
+The same Worker also forwards `POST /method/messages.send` and
+`/method/messages.isMessagesFromGroupAllowed` to `api.vk.ru`. Use it only if
+`GET /api/admin/vk/test` shows that the server cannot reach VK:
+
+```
+VK_API_BASE="https://icm-telegram-relay.<account>.workers.dev"
+VK_RELAY_SECRET="<the same relay secret>"
+```

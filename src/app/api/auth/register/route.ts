@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { hashPassword } from "@/lib/password";
+import { notifyUserRegistered } from "@/lib/account-lifecycle-notifications";
 import { createLegacyUser, findLegacyUserByEmail, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
 import { prisma } from "@/lib/prisma";
 import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
@@ -144,6 +145,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Не удалось создать аккаунт" }, { status: 500 });
     }
   }
+
+  await notifyUserRegistered(prisma, user.id);
 
   return NextResponse.json(
     {

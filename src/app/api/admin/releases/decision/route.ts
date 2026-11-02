@@ -13,6 +13,7 @@ import {
 import { markFreeReleaseConsumed } from "@/lib/free-release";
 import { prisma } from "@/lib/prisma";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import { buildReleaseApprovedVkMessage, RELEASE_APPROVED_VK_HREF } from "@/lib/vk-messages";
 
 export const dynamic = "force-dynamic";
 
@@ -136,6 +137,8 @@ export async function POST(request: Request) {
       title: "Релиз принят",
       message: `Релиз «${release.title ?? "Без названия"}» принят. Загрузите 30-секундный фрагмент, чтобы попасть на витрину.`,
       href: `/dashboard/showcase?releaseId=${encodeURIComponent(release.id)}`,
+      vkMessage: buildReleaseApprovedVkMessage(release.title),
+      vkHref: RELEASE_APPROVED_VK_HREF,
       resetReadState: true
     });
 

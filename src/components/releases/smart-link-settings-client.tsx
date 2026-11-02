@@ -53,6 +53,12 @@ import {
 import { normalizeSmartLinkHref, safeSmartLinkHref } from "@/lib/smart-link-urls";
 import { formatSmartLinkReleaseDate, isSmartLinkPrerelease } from "@/lib/smart-link-release-date";
 import { SmartLinkPlatformIcon } from "@/components/smart-link/platform-icon";
+import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
+import {
+  checkHeaderVideoFile,
+  checkHeaderVideoMetadata,
+  type SmartLinkHeaderVideoSlot
+} from "@/lib/smart-link-header-video";
 
 interface SmartLinkSettingsClientProps {
   releaseId: string;
@@ -905,8 +911,9 @@ function VideosSection({ draft, patch, setVisibility }: SectionProps) {
         <div className="flex flex-col gap-1">
           <span className="text-[14px] font-semibold">Видео вместо обложки</span>
           <span className="text-[12px] text-zinc-400">
-            Собираются в Snippet Studio: 9:16 — на весь экран телефона, 16:9 — для компьютера. Без видео остаётся обычная обложка.
+            Соберите сниппет в Snippet Studio или загрузите своё видео: MP4 до 50 МБ, 3–60 секунд. 9:16 — на весь экран телефона, 16:9 — для компьютера. Без видео остаётся обычная обложка.
           </span>
+          <span className="text-[12px] text-zinc-500">Видео сразу видно всем на странице релиза — загружайте только свой контент.</span>
         </div>
         {(
           [
@@ -926,9 +933,12 @@ function VideosSection({ draft, patch, setVisibility }: SectionProps) {
                 Убрать
               </button>
             ) : (
-              <a href="/dashboard/video-snippets" className="shrink-0 text-[13px] font-medium text-violet-300 hover:text-violet-200">
-                Собрать →
-              </a>
+              <div className="flex shrink-0 items-center gap-3">
+                <a href="/dashboard/video-snippets" className="text-[13px] font-medium text-violet-300 hover:text-violet-200">
+                  Собрать →
+                </a>
+                <HeaderVideoUploadButton slot={field} onUploaded={(url) => patch({ [field]: url })} />
+              </div>
             )}
           </div>
         ))}
@@ -989,6 +999,78 @@ function VideosSection({ draft, patch, setVisibility }: SectionProps) {
 }
 
 /* ---------- Credits ---------- */
+
+function readVideoMetadata(file: File): Promise<{ duration: number; width: number; height: number }> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    const finish = (meta: { duration: number; width: number; height: number }) => {
+      URL.revokeObjectURL(url);
+      resolve(meta);
+    };
+    video.preload = "metadata";
+    video.muted = true;
+    video.onloadedmetadata = () => finish({ duration: video.duration, width: video.videoWidth, height: video.videoHeight });
+    // A codec the browser can't play (e.g. HEVC) ends up here and fails the check.
+    video.onerror = () => finish({ duration: Number.NaN, width: 0, height: 0 });
+    video.src = url;
+  });
+}
+
+function HeaderVideoUploadButton({ slot, onUploaded }: { slot: SmartLinkHeaderVideoSlot; onUploaded: (url: string) => void }) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const [progress, setProgress] = React.useState<number | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const handleFile = async (file: File) => {
+    setError(null);
+    const problem = checkHeaderVideoFile(file) ?? checkHeaderVideoMetadata(slot, await readVideoMetadata(file));
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setProgress(0);
+    try {
+      const uploaded = await uploadBrowserBlobToStorage({
+        fileName: file.name,
+        contentType: "video/mp4",
+        kind: "audio",
+        blob: file,
+        onProgress: (loaded, total) => setProgress(Math.round((loaded / Math.max(1, total)) * 100))
+      });
+      onUploaded(`/api/uploads/object/${uploaded.key.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Не удалось загрузить видео.");
+    } finally {
+      setProgress(null);
+    }
+  };
+
+  return (
+    <span className="flex flex-col items-end gap-1">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/mp4,.mp4"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void handleFile(file);
+        }}
+      />
+      <button
+        type="button"
+        disabled={progress !== null}
+        onClick={() => inputRef.current?.click()}
+        className="text-[13px] font-medium text-violet-300 hover:text-violet-200 disabled:text-zinc-500"
+      >
+        {progress !== null ? `Загрузка ${progress}%` : "Загрузить своё"}
+      </button>
+      {error ? <span className="max-w-[220px] text-right text-[11px] text-rose-300">{error}</span> : null}
+    </span>
+  );
+}
 
 function CreditsSection({ draft, patch, setVisibility }: SectionProps) {
   const updateSection = (key: string, rows: SmartLinkCreditSection["rows"]) =>

@@ -5,7 +5,15 @@ import { ArrowLeft, ArrowRight, Clock3, Lightbulb } from "lucide-react";
 
 import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
-import { GUIDES, getGuide, type GuideBlock } from "@/lib/guides";
+import {
+  GUIDE_CATEGORIES,
+  GUIDES,
+  getGuide,
+  getRelatedGuides,
+  parseGuideInline,
+  stripGuideLinks,
+  type GuideBlock
+} from "@/lib/guides";
 import { absoluteSiteUrl, serializeJsonLd, SITE_NAME } from "@/lib/site-metadata";
 
 export function generateStaticParams() {
@@ -27,7 +35,12 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
       title: guide.title,
       description: guide.description,
       publishedTime: guide.publishedAt,
-      modifiedTime: guide.updatedAt
+      modifiedTime: guide.updatedAt,
+      section: GUIDE_CATEGORIES.find((category) => category.id === guide.category)?.title,
+      tags: guide.keywords,
+      locale: "ru_RU",
+      siteName: SITE_NAME,
+      images: [{ url: absoluteSiteUrl("/icon-512.png"), width: 512, height: 512, alt: SITE_NAME }]
     }
   };
 }
@@ -40,12 +53,36 @@ function formatDate(value: string) {
   return new Date(value).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
 }
 
+function InlineText({ text }: { text: string }) {
+  return (
+    <>
+      {parseGuideInline(text).map((part, index) =>
+        part.type === "link" ? (
+          <Link
+            key={index}
+            href={part.href}
+            className="font-medium text-[#c4b5fd] underline decoration-[#7b61ff]/50 underline-offset-[3px] transition hover:text-white hover:decoration-white/60"
+          >
+            {part.text}
+          </Link>
+        ) : (
+          part.text
+        )
+      )}
+    </>
+  );
+}
+
 function Block({ block, slug }: { block: GuideBlock; slug: string }) {
   switch (block.type) {
     case "h2":
       return <h2 className="mt-12 text-[24px] font-bold leading-tight tracking-[-0.01em] text-white sm:text-[28px]">{block.text}</h2>;
     case "p":
-      return <p className="mt-4 text-[16px] leading-[1.75] text-white/72 sm:text-[17px]">{block.text}</p>;
+      return (
+        <p className="mt-4 text-[16px] leading-[1.75] text-white/72 sm:text-[17px]">
+          <InlineText text={block.text} />
+        </p>
+      );
     case "list": {
       const ListTag = block.ordered ? "ol" : "ul";
       return (
@@ -59,7 +96,9 @@ function Block({ block, slug }: { block: GuideBlock; slug: string }) {
               ) : (
                 <span className="mt-[11px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#a78bfa]" />
               )}
-              <span>{item}</span>
+              <span>
+                <InlineText text={item} />
+              </span>
             </li>
           ))}
         </ListTag>
@@ -72,7 +111,9 @@ function Block({ block, slug }: { block: GuideBlock; slug: string }) {
             <Lightbulb className="h-4 w-4" />
             {block.title}
           </p>
-          <p className="mt-2 text-[15px] leading-relaxed text-amber-50/80">{block.text}</p>
+          <p className="mt-2 text-[15px] leading-relaxed text-amber-50/80">
+            <InlineText text={block.text} />
+          </p>
         </aside>
       );
     case "cta":
@@ -97,7 +138,8 @@ export default function GuidePage({ params }: { params: { slug: string } }) {
   if (!guide) notFound();
 
   const url = absoluteSiteUrl(`/guides/${guide.slug}`);
-  const others = GUIDES.filter((item) => item.slug !== guide.slug).slice(0, 3);
+  const others = getRelatedGuides(guide, 3);
+  const categoryTitle = GUIDE_CATEGORIES.find((category) => category.id === guide.category)?.title;
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
@@ -109,6 +151,9 @@ export default function GuidePage({ params }: { params: { slug: string } }) {
         dateModified: guide.updatedAt,
         inLanguage: "ru-RU",
         mainEntityOfPage: url,
+        articleSection: categoryTitle,
+        keywords: guide.keywords.join(", "),
+        image: absoluteSiteUrl("/icon-512.png"),
         author: { "@type": "Organization", name: SITE_NAME, url: absoluteSiteUrl("/") },
         publisher: {
           "@type": "Organization",
@@ -121,7 +166,7 @@ export default function GuidePage({ params }: { params: { slug: string } }) {
         mainEntity: guide.faq.map((item) => ({
           "@type": "Question",
           name: item.q,
-          acceptedAnswer: { "@type": "Answer", text: item.a }
+          acceptedAnswer: { "@type": "Answer", text: stripGuideLinks(item.a) }
         }))
       },
       {
@@ -177,7 +222,9 @@ export default function GuidePage({ params }: { params: { slug: string } }) {
                   {item.q}
                   <span className="text-[20px] leading-none text-white/40 transition group-open:rotate-45">+</span>
                 </summary>
-                <p className="mt-3 text-[15px] leading-relaxed text-white/62">{item.a}</p>
+                <p className="mt-3 text-[15px] leading-relaxed text-white/62">
+                  <InlineText text={item.a} />
+                </p>
               </details>
             ))}
           </div>

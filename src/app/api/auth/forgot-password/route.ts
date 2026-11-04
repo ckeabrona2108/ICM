@@ -1,8 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getSmtpBzTransporter, getSmtpFromAddress } from "@/lib/smtp-bz";
+import { AccountEmailUnavailableError, canReceiveAccountEmail, issuePasswordLink, resolveAppBaseUrl } from "@/lib/account-security";
 import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
@@ -12,13 +11,6 @@ export const dynamic = "force-dynamic";
 const forgotSchema = z.object({
   email: z.string().email().transform((value) => value.trim().toLowerCase())
 });
-
-function resolveBaseUrl(request: Request): string {
-  const fromEnv = process.env.NEXTAUTH_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (fromEnv) return fromEnv.replace(/\/$/, "");
-  const url = new URL(request.url);
-  return `${url.protocol}//${url.host}`;
-}
 
 function shouldExposeDeliveryErrors() {
   return process.env.NODE_ENV !== "production" || process.env.AUTH_EXPOSE_PASSWORD_RESET_DELIVERY_ERRORS === "true";
@@ -52,14 +44,15 @@ export async function POST(request: Request) {
           mode: "insensitive"
         }
       },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, password: true },
       take: 2,
       orderBy: {
         id: "asc"
       }
     });
 
-    const user = users.length === 1 ? users[0] : null;
+    // The .invalid addresses of VK sign-ins without an email cannot receive the link.
+    const user = users.length === 1 && canReceiveAccountEmail(users[0]?.email) ? users[0] : null;
     if (users.length > 1) {
       console.error("[auth/forgot-password] ambiguous email match", {
         email: parsed.data.email
@@ -80,54 +73,16 @@ export async function POST(request: Request) {
       });
     }
 
-    const transporter = getSmtpBzTransporter();
-    const from = getSmtpFromAddress();
-    if (!transporter || !from) {
-      console.error("[auth/forgot-password] SMTP is not configured");
-      return NextResponse.json(
-        { error: shouldExposeDeliveryErrors() ? "SMTP не настроен. Проверьте SMTP_* переменные в .env." : "Почтовый сервис временно недоступен." },
-        { status: 503 }
-      );
-    }
-
-    const token = randomBytes(32).toString("hex");
-    const expires = new Date(Date.now() + 1000 * 60 * 30);
-
-    await prisma.verification_tokens.deleteMany({
-      where: {
-        user_id: user.id,
-        type: "recover"
-      }
-    });
-
-    await prisma.verification_tokens.create({
-      data: {
-        user_id: user.id,
-        token,
-        type: "recover",
-        expires
-      }
-    });
-
-    const baseUrl = resolveBaseUrl(request);
-    const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
-
     try {
-      await transporter.sendMail({
-        from,
-        to: user.email,
-        subject: "Восстановление пароля ICECREAMMUSIC",
-        text: `Здравствуйте, ${user.name}.\n\nПерейдите по ссылке для сброса пароля: ${resetUrl}\n\nСсылка действует 30 минут.`,
-        html: `<p>Здравствуйте, ${user.name}.</p><p>Перейдите по ссылке для сброса пароля:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>Ссылка действует 30 минут.</p>`
-      });
+      await issuePasswordLink({ user, baseUrl: resolveAppBaseUrl(request), kind: user.password ? "reset" : "set" });
     } catch (error) {
-      await prisma.verification_tokens.deleteMany({
-        where: {
-          user_id: user.id,
-          type: "recover",
-          token
-        }
-      });
+      if (error instanceof AccountEmailUnavailableError) {
+        console.error("[auth/forgot-password] SMTP is not configured");
+        return NextResponse.json(
+          { error: shouldExposeDeliveryErrors() ? "SMTP не настроен. Проверьте SMTP_* переменные в .env." : "Почтовый сервис временно недоступен." },
+          { status: 503 }
+        );
+      }
       console.error("[auth/forgot-password] failed to send reset email", error);
       return NextResponse.json(
         { error: shouldExposeDeliveryErrors() ? "SMTP не отправил письмо. Проверьте логин, пароль, host/port и отправителя." : "Почтовый сервис временно недоступен." },

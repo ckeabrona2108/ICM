@@ -365,7 +365,6 @@ export interface AiStudioChatSendResponse {
 
 export interface UpdateCurrentUserProfileRequest {
   name: string;
-  email?: string;
   artistProfileType?: import("@/lib/artist-profile-type").ArtistProfileType;
 }
 

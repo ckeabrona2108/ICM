@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { notifyPasswordChanged, resolveAppBaseUrl } from "@/lib/account-security";
 import { hashPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
     where: { token: parsed.data.token },
     include: {
       user: {
-        select: { id: true }
+        select: { id: true, email: true, name: true, password: true }
       }
     }
   });
@@ -61,7 +62,8 @@ export async function POST(request: Request) {
   await prisma.$transaction([
     prisma.user.updateMany({
       where: { id: tokenRecord.user.id },
-      data: { password: passwordHash }
+      // The link arrived by email, so the address is proven as well.
+      data: { password: passwordHash, emailVerified: new Date() }
     }),
     prisma.sessions.deleteMany({
       where: { user_id: tokenRecord.user.id }
@@ -73,6 +75,12 @@ export async function POST(request: Request) {
       }
     })
   ]);
+
+  await notifyPasswordChanged({
+    user: tokenRecord.user,
+    kind: tokenRecord.user.password ? "reset" : "set",
+    baseUrl: resolveAppBaseUrl(request)
+  });
 
   return NextResponse.json({ ok: true, message: "Пароль обновлён." });
 }

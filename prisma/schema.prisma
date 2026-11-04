@@ -204,11 +204,26 @@ model oauth_accounts {
   user_id             String   @db.Uuid
   provider            String
   provider_account_id String
-  created_at          DateTime @default(now()) @db.Timestamptz(6)
-  user                user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  // Telegram only: the bot last failed to write to the artist (blocked or never started).
+  messages_blocked_at DateTime? @db.Timestamptz(6)
+  user                user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([provider, provider_account_id])
   @@unique([user_id, provider])
+  @@schema("icecream")
+}
+
+// Which channels the artist wants account events in (the cabinet bell always gets them).
+// No row means every channel is on; push is switched per device through push_subscriptions.
+model user_notification_settings {
+  user_id    String   @id @db.Uuid
+  email      Boolean  @default(true)
+  vk         Boolean  @default(true)
+  telegram   Boolean  @default(true)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   @@schema("icecream")
 }
 
@@ -1129,6 +1144,7 @@ model user {
   partnerCodeUsages            partner_code_usages[]
   vk_link                      vk_links?
   oauth_accounts               oauth_accounts[]
+  notification_settings        user_notification_settings?
   notification_reminders       user_notification_reminders[]
   free_release_claim           free_release_claims?
   partnerCodesAllowed          partner_codes[]                @relation("partner_codes_allowed_user")
@@ -1937,6 +1953,7 @@ model verification_tokens {
   token   String      @id
   expires DateTime    @db.Timestamp(6)
   type    token_types
+  email   String?
   user    user        @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "verification_tokens_user_id_user_id_fk")
 
   @@schema("icecream")

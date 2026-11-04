@@ -12,11 +12,7 @@ import { useCurrentUser } from "@/components/user/user-provider";
 import { VerificationStatusBadge } from "@/components/verification/verification-status-badge";
 import { normalizeArtistProfileType, type ArtistProfileType } from "@/lib/artist-profile-type";
 import { ContractReadOnlyModal } from "@/components/verification/contract-readonly-modal";
-import {
-  userProfileEmailSchema,
-  userProfileNameSchema,
-  validateAvatarDataUrl
-} from "@/lib/user-profile-policy";
+import { userProfileNameSchema, validateAvatarDataUrl } from "@/lib/user-profile-policy";
 import { cn } from "@/lib/utils";
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -41,7 +37,7 @@ export function UserProfileForm({
   const [saving, setSaving] = React.useState(false);
   const [avatarLoading, setAvatarLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = React.useState<{ name?: string; email?: string; avatar?: string }>({});
+  const [fieldErrors, setFieldErrors] = React.useState<{ name?: string; avatar?: string }>({});
   const [success, setSuccess] = React.useState<string | null>(null);
   const [contractViewerOpen, setContractViewerOpen] = React.useState(false);
 
@@ -57,7 +53,8 @@ export function UserProfileForm({
   React.useEffect(() => {
     if (!user) return;
     setName(user.name);
-    setEmail(user.email);
+    // VK sign-ins without an email get a reserved .invalid address; show it as missing.
+    setEmail(user.email.endsWith(".invalid") ? "" : user.email);
     setArtistProfileType(normalizeArtistProfileType(user.artistProfileType));
   }, [user]);
 
@@ -73,19 +70,10 @@ export function UserProfileForm({
       return;
     }
 
-    if (email.trim()) {
-      const parsedEmail = userProfileEmailSchema.safeParse(email);
-      if (!parsedEmail.success) {
-        setFieldErrors({ email: parsedEmail.error.issues[0]?.message ?? "Проверьте email." });
-        return;
-      }
-    }
-
     setSaving(true);
     try {
       await updateProfile({
         name: parsedName.data,
-        email: email.trim() ? email.trim() : undefined,
         artistProfileType
       });
       setSuccess("Профиль обновлён.");
@@ -243,16 +231,9 @@ export function UserProfileForm({
                 />
               </Field>
 
-              <Field label="Email" error={fieldErrors.email} htmlFor="profile-email">
-                <Input
-                  id="profile-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@example.com"
-                  disabled={loading || saving}
-                  aria-invalid={fieldErrors.email ? true : undefined}
-                />
+              <Field label="Email" htmlFor="profile-email">
+                <Input id="profile-email" type="email" value={email} placeholder="Не указан" readOnly disabled />
+                <p className="text-[13px] text-white/48">Меняется в разделе «Безопасность» с подтверждением по ссылке.</p>
               </Field>
             </div>
           </section>

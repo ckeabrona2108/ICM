@@ -1,9 +1,12 @@
 import type { PrismaClient } from "@prisma/client";
 import webpush from "web-push";
 
+import { canReceiveAccountEmail } from "@/lib/account-security";
+import { readNotificationSettings } from "@/lib/notification-settings";
 import { toNotificationStorageId } from "@/lib/notification-storage-id";
 import { sendDashboardEventEmail } from "@/lib/user-event-email";
 import { isVkNotificationKind } from "@/lib/vk-messages";
+import { isTelegramNotificationKind, sendTelegramUserNotification } from "@/lib/telegram-notification-channel";
 import { sendVkUserNotification } from "@/lib/vk-notification-channel";
 
 export interface UserNotificationEvent {
@@ -18,7 +21,9 @@ export interface UserNotificationEvent {
   sendPush?: boolean;
   // VK direct message from the community; by default only the artist's own account events go there.
   sendVk?: boolean;
-  // A VK-only text and link, when the message there should differ from the cabinet one.
+  // Telegram message from the login bot; by default every event about the artist's own cabinet.
+  sendTelegram?: boolean;
+  // A messenger (VK and Telegram) text and link, when the message there should differ from the cabinet one.
   vkMessage?: string;
   vkHref?: string;
   resetReadState?: boolean;
@@ -125,15 +130,27 @@ export async function deliverUserNotification(
     }
   });
 
-  const user = event.sendEmail === false
-    ? null
-    : await prisma.user.findUnique({
+  const wantsEmail = event.sendEmail !== false;
+  const wantsVk = event.sendVk ?? isVkNotificationKind(event.kind);
+  const wantsTelegram = event.sendTelegram ?? isTelegramNotificationKind(event.kind);
+  // The artist's channel switches in the profile; the cabinet bell above always gets the event.
+  const settings = wantsEmail || wantsVk || wantsTelegram
+    ? await readNotificationSettings(prisma, event.userId).catch((error) => {
+        console.error("[notification-delivery] settings unavailable", error);
+        return { email: true, vk: true, telegram: true };
+      })
+    : null;
+
+  const user = wantsEmail && settings?.email
+    ? await prisma.user.findUnique({
         where: { id: event.userId },
         select: { email: true, name: true }
-      });
+      })
+    : null;
 
   const deliveries: Promise<unknown>[] = [];
-  if (user) {
+  // Never to the .invalid placeholder addresses of sign-ins without an email.
+  if (user && canReceiveAccountEmail(user.email)) {
     deliveries.push(sendDashboardEventEmail({
       to: user.email,
       userName: user.name,
@@ -146,8 +163,11 @@ export async function deliverUserNotification(
   if (event.sendPush !== false) {
     deliveries.push(sendPushNotifications(prisma, event));
   }
-  if (event.sendVk ?? isVkNotificationKind(event.kind)) {
+  if (wantsVk && settings?.vk) {
     deliveries.push(sendVkUserNotification(prisma, event));
+  }
+  if (wantsTelegram && settings?.telegram) {
+    deliveries.push(sendTelegramUserNotification(prisma, event));
   }
   await Promise.all(deliveries);
 }

@@ -11,7 +11,9 @@ import {
   exchangeVkIdCode,
   getVkIdConfig,
   getVkLinkRedirectUri,
-  VK_LINK_COOKIE
+  resolveVkLinkReturnPath,
+  VK_LINK_COOKIE,
+  VK_LINK_RETURN_COOKIE
 } from "@/lib/vk-id";
 
 // VK ID redirects here after the artist confirms the link. The path is fixed in the
@@ -26,8 +28,11 @@ function getAppBaseUrl(request: Request): string {
 }
 
 function finish(baseUrl: string, query: string) {
-  const response = NextResponse.redirect(`${baseUrl}/dashboard?${query}`);
+  const path = resolveVkLinkReturnPath(cookies().get(VK_LINK_RETURN_COOKIE)?.value);
+  const anchor = path === "/dashboard/profile" ? "#linked-accounts" : "";
+  const response = NextResponse.redirect(`${baseUrl}${path}?${query}${anchor}`);
   response.cookies.delete(VK_LINK_COOKIE);
+  response.cookies.delete(VK_LINK_RETURN_COOKIE);
   return response;
 }
 

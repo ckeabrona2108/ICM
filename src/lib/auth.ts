@@ -1,4 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
+import { decode } from "next-auth/jwt";
+import { cookies } from "next/headers";
 import CredentialsProvider from "next-auth/providers/credentials";
 import type { OAuthConfig, Provider } from "next-auth/providers/index";
 import YandexProvider from "next-auth/providers/yandex";
@@ -10,7 +12,16 @@ import { prisma } from "@/lib/prisma";
 import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { normalizeNextImageSrc } from "@/lib/image-src";
-import { isOAuthProvider, readOAuthEnv, resolveOAuthUser } from "@/lib/oauth-login";
+import { decodeOAuthLinkIntent, OAUTH_LINK_COOKIE } from "@/lib/oauth-link-intent";
+import {
+  isOAuthProvider,
+  linkOAuthIdentity,
+  readOAuthEnv,
+  resolveOAuthUser,
+  type OAuthProviderId
+} from "@/lib/oauth-login";
+import { getTelegramLoginConfig, verifyTelegramLogin, type TelegramLoginConfig } from "@/lib/telegram-login";
+import { markTelegramMessagesReachable } from "@/lib/telegram-notification-channel";
 import { exchangeVkIdCode, fetchVkIdUserInfo, getVkIdClientId, type VkIdUserInfo } from "@/lib/vk-id";
 
 const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
@@ -60,6 +71,8 @@ const adminEmails = new Set(
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean)
 );
+
+export const isAdminEmail = (email: string) => adminEmails.has(email.toLowerCase());
 
 function resolveUserRole(params: { email: string; isAdmin: boolean | null | undefined }) {
   if (params.isAdmin || adminEmails.has(params.email.toLowerCase())) return "ADMIN" as const;
@@ -186,6 +199,62 @@ function VkIdProvider(clientId: string): OAuthConfig<VkIdProfile> {
   };
 }
 
+// Telegram signs the widget fields with the bot token, so the check is local (see
+// telegram-login.ts). Failures carry the error code back to /login?error=<code>.
+export async function authorizeTelegramLogin(payload: unknown, config: TelegramLoginConfig) {
+  const check = verifyTelegramLogin(payload, config.botToken);
+  if (!check.ok) throw new Error("TelegramLoginInvalid");
+
+  const rateLimit = consumeRateLimit({ key: `auth:telegram:${check.telegramUserId}`, limit: 10, windowMs: 15 * 60_000 });
+  if (!rateLimit.allowed) throw new Error("TelegramLoginInvalid");
+
+  const resolution = await resolveOAuthUser(
+    { provider: "telegram", providerAccountId: check.telegramUserId, email: null, name: check.name },
+    { isAdminEmail }
+  );
+  if (!resolution.ok) throw new Error(resolution.error);
+  // The widget asked for permission to write, so the bot may message the artist again.
+  await markTelegramMessagesReachable(prisma, check.telegramUserId);
+  return toSessionUser(resolution.user);
+}
+
+function TelegramProvider(config: TelegramLoginConfig): Provider {
+  return CredentialsProvider({
+    id: "telegram",
+    name: "Telegram",
+    credentials: { payload: { label: "Telegram", type: "text" } },
+    async authorize(credentials) {
+      return authorizeTelegramLogin(credentials?.payload, config);
+    }
+  });
+}
+
+const SESSION_COOKIES = ["__Secure-next-auth.session-token", "next-auth.session-token"];
+
+// Reads the "connect this provider to my cabinet" intent set by /api/user/linked-accounts/link.
+// It only counts while the same cabinet is still signed in in this browser.
+async function readOAuthLinkIntent(provider: OAuthProviderId): Promise<{ userId: string } | "invalid" | null> {
+  let store: ReturnType<typeof cookies>;
+  try {
+    store = cookies();
+  } catch {
+    return null;
+  }
+  const raw = store.get(OAUTH_LINK_COOKIE)?.value;
+  if (!raw) return null;
+  try {
+    store.delete(OAUTH_LINK_COOKIE);
+  } catch {
+    // The cookie expires on its own within minutes.
+  }
+  const intent = decodeOAuthLinkIntent(raw, nextAuthSecret);
+  if (!intent || intent.provider !== provider) return "invalid";
+
+  const sessionToken = SESSION_COOKIES.map((name) => store.get(name)?.value).find(Boolean);
+  const session = sessionToken ? await decode({ token: sessionToken, secret: nextAuthSecret }).catch(() => null) : null;
+  return session?.sub === intent.userId ? { userId: intent.userId } : "invalid";
+}
+
 function buildOAuthProviders(): Provider[] {
   const providers: Provider[] = [];
   const yandexId = readOAuthEnv("AUTH_YANDEX_ID");
@@ -195,6 +264,8 @@ function buildOAuthProviders(): Provider[] {
   }
   const vkClientId = getVkIdClientId();
   if (vkClientId) providers.push(VkIdProvider(vkClientId));
+  const telegram = getTelegramLoginConfig();
+  if (telegram) providers.push(TelegramProvider(telegram));
   return providers;
 }
 
@@ -228,15 +299,24 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({ user, account }) {
       if (account?.type !== "oauth" || !isOAuthProvider(account.provider)) return true;
-      const resolution = await resolveOAuthUser(
-        {
-          provider: account.provider,
-          providerAccountId: account.providerAccountId,
-          email: user.email,
-          name: user.name
-        },
-        { isAdminEmail: (email) => adminEmails.has(email.toLowerCase()) }
-      );
+      const identity = {
+        provider: account.provider,
+        providerAccountId: account.providerAccountId,
+        email: user.email,
+        name: user.name
+      };
+
+      const intent = await readOAuthLinkIntent(account.provider);
+      if (intent) {
+        // Returning a URL ends the flow without touching the current session.
+        if (intent === "invalid") return "/dashboard/profile?link_error=expired#linked-accounts";
+        const link = await linkOAuthIdentity(intent.userId, identity, { isAdminEmail });
+        return link.ok
+          ? `/dashboard/profile?linked=${account.provider}#linked-accounts`
+          : `/dashboard/profile?link_error=${link.error}#linked-accounts`;
+      }
+
+      const resolution = await resolveOAuthUser(identity, { isAdminEmail });
       if (!resolution.ok) return `/login?error=${resolution.error}`;
       // Without an adapter NextAuth builds the token from this same object, so the
       // provider profile is swapped for the cabinet it belongs to.

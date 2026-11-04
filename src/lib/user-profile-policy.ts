@@ -18,6 +18,7 @@ export const userProfileEmailSchema = z
 
 export const updateUserProfileSchema = z.object({
   name: userProfileNameSchema,
+  // Accepted from older clients but ignored: email changes need a confirmation link.
   email: userProfileEmailSchema.optional(),
   artistProfileType: z.enum(ARTIST_PROFILE_TYPES).optional()
 });

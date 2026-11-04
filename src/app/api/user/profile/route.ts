@@ -13,7 +13,7 @@ import { resolveActiveSubscriptionPlan } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
 import { normalizeArtistProfileType } from "@/lib/artist-profile-type";
 import { buildStoredFileRouteUrl } from "@/lib/file-resolver";
-import { findLegacyUserById, findLegacyUserByEmail, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
+import { findLegacyUserById, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
 import { updateUserProfileSchema } from "@/lib/user-profile-policy";
 
 export const dynamic = "force-dynamic";
@@ -191,39 +191,15 @@ export async function PATCH(request: Request) {
   }
 
   try {
-    const email = parsed.data.email?.trim().toLowerCase();
-    if (email) {
-      const duplicate = await prisma.user.findFirst({
-        where: {
-          email: {
-            equals: email,
-            mode: "insensitive"
-          },
-          id: { not: userId }
-        },
-        select: { id: true }
-      }).catch(async (error) => {
-        if (!isMissingCanonicalUserTable(error)) throw error;
-        const legacyUser = await findLegacyUserByEmail(prisma, email);
-        return legacyUser && legacyUser.id !== userId ? { id: legacyUser.id } : null;
-      });
-      if (duplicate) {
-        return NextResponse.json({ error: "Этот email уже используется" }, { status: 409 });
-      }
-    }
-
+    // Email changes go through /api/user/security/email and a confirmation link.
     await prisma.user.updateMany({
       where: { id: userId },
-      data: {
-        name: parsed.data.name,
-        ...(email ? { email } : {})
-      }
+      data: { name: parsed.data.name }
     }).catch(async (error) => {
       if (!isMissingCanonicalUserTable(error)) throw error;
       await prisma.$executeRawUnsafe(
-        `UPDATE "icecream"."User" SET "name" = $1, "email" = COALESCE($2, "email"), "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $3`,
+        `UPDATE "icecream"."User" SET "name" = $1, "updatedAt" = CURRENT_TIMESTAMP WHERE "id" = $2`,
         parsed.data.name,
-        email ?? null,
         userId
       );
     });

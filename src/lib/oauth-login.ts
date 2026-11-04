@@ -4,13 +4,20 @@ import { prisma } from "@/lib/prisma";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { checkVkGroupMembership, getVkIdConfig } from "@/lib/vk-id";
 
-// Quick sign-in with Yandex ID and VK ID. A provider account maps to one cabinet: VK through
-// vk_links (the same row the free single relies on), Yandex through oauth_accounts. The first
+// Quick sign-in with Yandex ID, VK ID and Telegram. A provider account maps to one cabinet: VK
+// through vk_links (the same row the free single relies on), Yandex and Telegram through
+// oauth_accounts. The first
 // sign-in joins an existing cabinet with the same confirmed email or creates a new one.
 
-export type OAuthProviderId = "yandex" | "vk";
+export type OAuthProviderId = "yandex" | "vk" | "telegram";
 
-export type OAuthLoginError = "OAuthAdminAccount" | "OAuthAccountTaken" | "OAuthUnavailable";
+export const OAUTH_PROVIDER_IDS: readonly OAuthProviderId[] = ["yandex", "vk", "telegram"];
+
+export type OAuthLoginError =
+  | "OAuthAdminAccount"
+  | "OAuthAccountTaken"
+  | "OAuthEmailUnverified"
+  | "OAuthUnavailable";
 
 export interface OAuthIdentity {
   provider: OAuthProviderId;
@@ -36,7 +43,7 @@ const maxNameLength = 120;
 const userSelect = { id: true, email: true, name: true, avatar: true, isAdmin: true } as const;
 
 export function isOAuthProvider(value: string): value is OAuthProviderId {
-  return value === "yandex" || value === "vk";
+  return (OAUTH_PROVIDER_IDS as readonly string[]).includes(value);
 }
 
 // `docker run --env-file` keeps quotes literally, so values may arrive wrapped in them.
@@ -48,6 +55,10 @@ export function readOAuthEnv(name: string): string {
 // domain keeps mail from ever leaving for it.
 export function buildOAuthPlaceholderEmail(provider: OAuthProviderId, providerAccountId: string): string {
   return `${provider}-${providerAccountId}@${PLACEHOLDER_EMAIL_DOMAIN}`.toLowerCase();
+}
+
+export function isOAuthPlaceholderEmail(email: string | null | undefined): boolean {
+  return typeof email === "string" && email.toLowerCase().endsWith(`@${PLACEHOLDER_EMAIL_DOMAIN}`);
 }
 
 export function normalizeOAuthEmail(email: string | null | undefined): string | null {
@@ -112,6 +123,12 @@ async function hasOtherLink(userId: string, provider: OAuthProviderId): Promise<
   );
 }
 
+// `select` keeps the insert from reading back columns a pending migration may not have added yet.
+async function createLink(userId: string, link: Awaited<ReturnType<typeof linkData>>) {
+  if (link.vk) await prisma.vk_links.create({ data: { user_id: userId, ...link.vk }, select: { id: true } });
+  if (link.oauth) await prisma.oauth_accounts.create({ data: { user_id: userId, ...link.oauth }, select: { id: true } });
+}
+
 async function resolveOnce(
   identity: OAuthIdentity,
   options: { isAdminEmail: (email: string) => boolean }
@@ -125,15 +142,20 @@ async function resolveOnce(
   if (email) {
     const existing = await prisma.user.findFirst({
       where: { email: { equals: email, mode: "insensitive" } },
-      select: userSelect
+      select: { ...userSelect, emailVerified: true }
     });
     if (existing) {
       // Admin cabinets are never joined by email alone.
       if (existing.isAdmin || options.isAdminEmail(existing.email)) return { ok: false, error: "OAuthAdminAccount" };
+      // Registration does not prove the address, so anyone could have taken it first. Only a
+      // confirmed address (confirmation link, password reset, earlier OAuth sign-up) is joined.
+      if (!existing.emailVerified) return { ok: false, error: "OAuthEmailUnverified" };
       if (await hasOtherLink(existing.id, identity.provider)) return { ok: false, error: "OAuthAccountTaken" };
-      if (link.vk) await prisma.vk_links.create({ data: { user_id: existing.id, ...link.vk } });
-      if (link.oauth) await prisma.oauth_accounts.create({ data: { user_id: existing.id, ...link.oauth } });
-      return { ok: true, user: existing };
+      await createLink(existing.id, link);
+      return {
+        ok: true,
+        user: { id: existing.id, email: existing.email, name: existing.name, avatar: existing.avatar, isAdmin: existing.isAdmin }
+      };
     }
   }
 
@@ -168,5 +190,46 @@ export async function resolveOAuthUser(
     }
     console.error("[oauth-login] sign-in failed", { provider: identity.provider, error });
     return { ok: false, error: "OAuthUnavailable" };
+  }
+}
+
+// Linking from the profile, while signed in to the cabinet: no email matching, the provider
+// account simply joins this cabinet unless another cabinet already has it.
+export type OAuthLinkError = "admin" | "taken" | "already_linked" | "unavailable";
+export type OAuthLinkResult = { ok: true; created: boolean } | { ok: false; error: OAuthLinkError };
+
+async function linkOnce(
+  userId: string,
+  identity: OAuthIdentity,
+  options: { isAdminEmail: (email: string) => boolean }
+): Promise<OAuthLinkResult> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, isAdmin: true } });
+  if (!user) return { ok: false, error: "unavailable" };
+  // Admin cabinets sign in with email and password only, so they never get a provider link.
+  if (user.isAdmin || options.isAdminEmail(user.email)) return { ok: false, error: "admin" };
+
+  const linked = await findLinkedUser(identity);
+  if (linked) return linked.id === userId ? { ok: true, created: false } : { ok: false, error: "taken" };
+  if (await hasOtherLink(userId, identity.provider)) return { ok: false, error: "already_linked" };
+
+  await createLink(userId, await linkData(identity));
+  return { ok: true, created: true };
+}
+
+export async function linkOAuthIdentity(
+  userId: string,
+  identity: OAuthIdentity,
+  options: { isAdminEmail: (email: string) => boolean }
+): Promise<OAuthLinkResult> {
+  try {
+    return await linkOnce(userId, identity, options);
+  } catch (error) {
+    if (isAnyPrismaTableMissingError(error, OAUTH_TABLES)) return { ok: false, error: "unavailable" };
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const linked = await findLinkedUser(identity).catch(() => null);
+      return linked?.id === userId ? { ok: true, created: false } : { ok: false, error: "taken" };
+    }
+    console.error("[oauth-login] link failed", { provider: identity.provider, error });
+    return { ok: false, error: "unavailable" };
   }
 }

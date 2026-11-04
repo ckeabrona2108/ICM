@@ -12,6 +12,12 @@ const VK_REQUEST_TIMEOUT_MS = 10_000;
 export const VK_LINK_COOKIE = "icm_vk_link";
 export const VK_LINK_COOKIE_MAX_AGE_SECONDS = 10 * 60;
 export const VK_LINK_CALLBACK_PATH = "/api/auth/link/vk";
+// Where the link flow returns: the cabinet home by default, the profile when started there.
+export const VK_LINK_RETURN_COOKIE = "icm_vk_link_return";
+
+export function resolveVkLinkReturnPath(value: string | null | undefined): string {
+  return value === "profile" ? "/dashboard/profile" : "/dashboard";
+}
 
 export interface VkIdConfig {
   clientId: string;

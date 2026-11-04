@@ -7,6 +7,9 @@ import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { SubscriptionPurchaseStats } from "@/components/user/subscription-purchase-stats";
 import { ProfileBalanceCards } from "@/components/user/profile-balance-cards";
 import { UserProfileForm } from "@/components/user/user-profile-form";
+import { AccountSecurityCard } from "@/components/user/account-security-card";
+import { LinkedAccountsCard } from "@/components/user/linked-accounts-card";
+import { ProfileSectionNav } from "@/components/user/profile-section-nav";
 import { authOptions } from "@/lib/auth";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { getUserBalanceTotals } from "@/lib/finance-service";
@@ -176,22 +179,29 @@ export default async function ProfilePage() {
     <DashboardShell>
       <PageHeader
         title="Настройки профиля"
-        description="Управляйте личными данными, балансом и историей подписок в едином dashboard-интерфейсе."
+        description="Личные данные, вход в кабинет, уведомления и подписка — всё на одной странице."
       />
+      <ProfileSectionNav />
       <ProfileBalanceCards
         royaltyBalance={balanceTotals.value?.availableToWithdraw ?? null}
         royaltyBalanceError={balanceTotals.error}
         aiTokenBalance={aiTokenBalance}
         monthlyBonusTokens={entitlements.monthlyBonusTokens}
       />
-      <UserProfileForm contractStatus={contractStatus} />
-      <SubscriptionPurchaseStats
-        currentPlan={subscriptionUser?.isSubscribed ? normalizeUserPlan(subscriptionUser.subscribeLevel) : null}
-        currentEndsAt={
-          subscriptionUser?.isSubscribed ? subscriptionUser.expiresAt?.toISOString() ?? null : null
-        }
-        purchases={purchases}
-      />
+      <div id="profile" className="scroll-mt-28">
+        <UserProfileForm contractStatus={contractStatus} />
+      </div>
+      <AccountSecurityCard />
+      <LinkedAccountsCard />
+      <div id="subscription" className="scroll-mt-28">
+        <SubscriptionPurchaseStats
+          currentPlan={subscriptionUser?.isSubscribed ? normalizeUserPlan(subscriptionUser.subscribeLevel) : null}
+          currentEndsAt={
+            subscriptionUser?.isSubscribed ? subscriptionUser.expiresAt?.toISOString() ?? null : null
+          }
+          purchases={purchases}
+        />
+      </div>
     </DashboardShell>
   );
 }

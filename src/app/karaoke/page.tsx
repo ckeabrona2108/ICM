@@ -4,11 +4,12 @@ import { KaraokeStudio } from "@/components/karaoke/karaoke-studio";
 import { IcmHeader } from "@/components/landing/icm-header";
 import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock";
 
+const TITLE = "Караоке из своего трека: видео с текстом для историй и TTML бесплатно";
 const DESCRIPTION =
-  "Бесплатно сделайте синхронизированный текст (караоке) для своего трека: загрузите аудио, разметьте строки и скачайте TTML или LRC.";
+  "Бесплатно сделайте караоке для своего трека: разметьте текст под музыку, скачайте TTML для Apple Music и Spotify и соберите вертикальное видео с текстом песни для историй, VK Клипов, Reels и Shorts.";
 
 export const metadata: Metadata = {
-  title: "Караоке для трека — TTML синхронизация текста",
+  title: TITLE,
   description: DESCRIPTION,
   alternates: {
     canonical: "/karaoke"
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     url: "/karaoke",
-    title: "Караоке для трека — TTML синхронизация текста",
+    title: TITLE,
     description: DESCRIPTION
   }
 };
@@ -33,14 +34,14 @@ export default function KaraokePage() {
             Караоке для твоего трека
           </span>
           <h1 className="mt-5 text-balance text-[36px] font-bold leading-[1.04] tracking-[-0.02em] sm:text-[52px]">
-            Синхронизация текста{" "}
+            Караоке-видео{" "}
             <span className="bg-gradient-to-r from-[#c4b5fd] via-[#7b3df5] to-[#3b82f6] bg-clip-text text-transparent">
-              TTML
+              из своего трека
             </span>
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-[15px] leading-relaxed text-white/62 sm:text-[17px]">
-            Совместите текст с музыкой и скачайте файл для Apple Music, Spotify и других площадок. Бесплатно и без
-            регистрации — трек не покидает ваш браузер.
+            Разметьте текст под музыку — и получите вертикальное видео с текстом песни для историй, VK Клипов, Reels и
+            Shorts, а также TTML для Apple Music и Spotify. Бесплатно и без регистрации — трек не покидает ваш браузер.
           </p>
         </div>
 

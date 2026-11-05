@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ChevronDown,
   Download,
   FileAudio,
   HelpCircle,
@@ -16,9 +17,12 @@ import {
   Square,
   Undo2,
   Upload,
+  Video,
+  WandSparkles,
   X
 } from "lucide-react";
 
+import { reachGoal } from "@/lib/analytics";
 import { LANGUAGES } from "@/lib/countries";
 import { cn } from "@/lib/utils";
 import { KaraokeLyricsGuidelines } from "@/components/release-wizard/lyrics-karaoke-guidelines";
@@ -30,6 +34,8 @@ import {
 import type { SyncedLine } from "@/components/release-wizard/wizard-context";
 
 import { takeKaraokeHandoff } from "./karaoke-handoff";
+import { KaraokeVideo } from "./karaoke-video";
+import { lyricsNeedTidy, tidyLyrics } from "./tidy-lyrics";
 
 const STORAGE_KEY = "icm-karaoke-project-v1";
 const MAX_AUDIO_BYTES = 150 * 1024 * 1024;
@@ -129,8 +135,8 @@ function Panel({ className, children }: { className?: string; children: React.Re
   );
 }
 
-function Steps({ step }: { step: 1 | 2 }) {
-  const items = ["Трек и текст", "Синхронизация"];
+function Steps({ step }: { step: 1 | 2 | 3 }) {
+  const items = ["Трек и текст", "Синхронизация", "Видео"];
   return (
     <div className="mb-6 flex items-center justify-center gap-3">
       {items.map((label, i) => {
@@ -140,7 +146,7 @@ function Steps({ step }: { step: 1 | 2 }) {
         return (
           <React.Fragment key={label}>
             {i > 0 ? (
-              <span className={cn("h-px w-10 sm:w-16", done || active ? "bg-[#7b61ff]/60" : "bg-white/10")} />
+              <span className={cn("h-px w-6 sm:w-16", done || active ? "bg-[#7b61ff]/60" : "bg-white/10")} />
             ) : null}
             <span className="flex items-center gap-2">
               <span
@@ -153,7 +159,7 @@ function Steps({ step }: { step: 1 | 2 }) {
               >
                 {done ? <Check className="h-3.5 w-3.5" /> : n}
               </span>
-              <span className={cn("text-[13px] font-medium", active ? "text-white" : "text-white/45")}>{label}</span>
+              <span className={cn("text-[13px] font-medium", active ? "text-white" : "hidden text-white/45 sm:inline")}>{label}</span>
             </span>
           </React.Fragment>
         );
@@ -395,6 +401,7 @@ function SyncWorkspace({
   onBack,
   onAppend,
   onSetLines,
+  onMakeVideo,
   fileBaseName
 }: {
   file: File;
@@ -402,6 +409,7 @@ function SyncWorkspace({
   onBack: () => void;
   onAppend: (line: SyncedLine) => void;
   onSetLines: (lines: SyncedLine[]) => void;
+  onMakeVideo: () => void;
   fileBaseName: string;
 }) {
   const audioRef = React.useRef<HTMLAudioElement>(null);
@@ -521,12 +529,13 @@ function SyncWorkspace({
   const download = () => {
     const xml = buildTtmlDocument(synced, metadataToXmlLang(project.language));
     downloadText(`${fileBaseName}.ttml`, xml, "application/ttml+xml");
+    reachGoal("karaoke_ttml_download", { lines: synced.length });
   };
 
   const iconBtn =
-    "grid h-12 w-12 place-items-center rounded-2xl border border-white/[0.1] bg-white/[0.04] text-white/80 transition-all hover:border-white/20 hover:bg-white/[0.08] hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-35";
+    "grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-white/[0.1] bg-white/[0.04] text-white/80 transition-all hover:border-white/20 hover:bg-white/[0.08] hover:text-white active:scale-95 disabled:pointer-events-none disabled:opacity-35";
   const ghostBtn =
-    "inline-flex h-12 items-center gap-2 rounded-2xl border border-white/[0.1] bg-white/[0.03] px-4 text-[13px] font-medium text-white/75 transition-all hover:border-white/20 hover:bg-white/[0.07] hover:text-white active:scale-[0.98] disabled:pointer-events-none disabled:opacity-35";
+    "inline-flex h-11 shrink-0 items-center gap-2 rounded-2xl border border-white/[0.1] bg-white/[0.03] px-3.5 text-[13px] font-medium text-white/75 transition-all hover:border-white/20 hover:bg-white/[0.07] hover:text-white active:scale-[0.98] disabled:pointer-events-none disabled:opacity-35";
 
   const heading = [project.artist, project.title].filter(Boolean).join(" — ") || file.name;
   const progress = lines.length > 0 ? Math.min(1, nextIndex / lines.length) : 0;
@@ -637,12 +646,12 @@ function SyncWorkspace({
 
         <Waveform peaks={peaks} time={time} duration={duration} zoom={zoom} onSeek={seek} marks={synced} />
 
-        <div className="mt-5 flex flex-wrap items-center gap-2.5">
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={togglePlay}
             disabled={!audioUrl}
-            className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[#8b73ff] to-[#6d4bff] text-white shadow-[0_12px_30px_-10px_rgba(123,97,255,0.9)] transition-all hover:brightness-110 active:scale-95"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#8b73ff] to-[#6d4bff] text-white shadow-[0_12px_30px_-10px_rgba(123,97,255,0.9)] transition-all hover:brightness-110 active:scale-95"
             aria-label={playing ? "Пауза" : "Play"}
           >
             {playing ? <Pause className="h-5 w-5 fill-current" /> : <Play className="ml-0.5 h-5 w-5 fill-current" />}
@@ -663,15 +672,29 @@ function SyncWorkspace({
             <RotateCcw className="h-4 w-4" />
             Сбросить все
           </button>
-          <button
-            type="button"
-            onClick={download}
-            disabled={synced.length === 0}
-            className="ml-auto inline-flex h-12 items-center gap-2 rounded-2xl bg-white px-5 text-[14px] font-semibold text-[#0b0b12] shadow-[0_12px_30px_-12px_rgba(255,255,255,0.5)] transition-all hover:bg-white/90 active:scale-[0.98] disabled:pointer-events-none disabled:bg-white/10 disabled:text-white/35 disabled:shadow-none"
-          >
-            <Download className="h-4 w-4" />
-            Скачать TTML
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              onClick={download}
+              disabled={synced.length === 0}
+              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-2xl bg-white px-4 text-[13px] font-semibold text-[#0b0b12] shadow-[0_12px_30px_-12px_rgba(255,255,255,0.5)] transition-all hover:bg-white/90 active:scale-[0.98] disabled:pointer-events-none disabled:bg-white/10 disabled:text-white/35 disabled:shadow-none"
+            >
+              <Download className="h-4 w-4" />
+              Скачать TTML
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                audioRef.current?.pause();
+                onMakeVideo();
+              }}
+              disabled={synced.length === 0}
+              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-2xl bg-gradient-to-r from-[#8b73ff] to-[#6d4bff] px-4 text-[13px] font-semibold text-white shadow-[0_12px_30px_-12px_rgba(123,97,255,0.9)] transition-all hover:brightness-110 active:scale-[0.98] disabled:pointer-events-none disabled:from-white/10 disabled:to-white/10 disabled:text-white/35 disabled:shadow-none"
+            >
+              <Video className="h-4 w-4" />
+              Сделать видео
+            </button>
+          </div>
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-white/[0.06] bg-black/20 px-4 py-3">
@@ -679,7 +702,7 @@ function SyncWorkspace({
             <div className="mb-1.5 flex items-center justify-between text-[12px]">
               <span className="text-white/55">
                 {complete ? (
-                  <span className="text-emerald-300">Все строки размечены — можно скачивать TTML</span>
+                  <span className="text-emerald-300">Все строки размечены — скачайте TTML или сделайте видео для историй</span>
                 ) : playing ? (
                   <>
                     Зажмите{" "}
@@ -791,7 +814,7 @@ export function KaraokeStudio() {
   const [project, setProject] = React.useState<SavedProject>(EMPTY_PROJECT);
   const [loaded, setLoaded] = React.useState(false);
   const [file, setFile] = React.useState<File | null>(null);
-  const [step, setStep] = React.useState<1 | 2>(1);
+  const [step, setStep] = React.useState<1 | 2 | 3>(1);
 
   React.useEffect(() => {
     const handoff = takeKaraokeHandoff();
@@ -837,6 +860,15 @@ export function KaraokeStudio() {
       return { ...p, lyrics, synced: keep === -1 ? p.synced : p.synced.slice(0, keep) };
     });
 
+  const [undoLyrics, setUndoLyrics] = React.useState<string | null>(null);
+  const needsTidy = lyricsNeedTidy(project.lyrics);
+  const tidy = () => {
+    const next = tidyLyrics(project.lyrics);
+    if (next === project.lyrics) return;
+    setUndoLyrics(project.lyrics);
+    onLyricsChange(next);
+  };
+
   const newProject = () => {
     if (
       (project.lyrics || project.synced.length > 0) &&
@@ -845,6 +877,7 @@ export function KaraokeStudio() {
       return;
     }
     setFile(null);
+    setUndoLyrics(null);
     setProject(EMPTY_PROJECT);
   };
 
@@ -860,7 +893,23 @@ export function KaraokeStudio() {
   const canSync = Boolean(file) && lineCount > 0;
   const restoredName = !file && project.audioName ? project.audioName : undefined;
 
-  if (step === 2 && file) {
+  if (step === 3 && file && project.synced.length > 0) {
+    return (
+      <div>
+        <Steps step={3} />
+        <KaraokeVideo
+          file={file}
+          title={project.title}
+          artist={project.artist}
+          synced={project.synced}
+          fileBaseName={fileBaseName}
+          onBack={() => setStep(2)}
+        />
+      </div>
+    );
+  }
+
+  if (step >= 2 && file) {
     return (
       <div>
         <Steps step={2} />
@@ -870,6 +919,7 @@ export function KaraokeStudio() {
           onBack={() => setStep(1)}
           onAppend={appendLine}
           onSetLines={setLines}
+          onMakeVideo={() => setStep(3)}
           fileBaseName={fileBaseName}
         />
       </div>
@@ -927,32 +977,79 @@ export function KaraokeStudio() {
             </label>
             <label className="block">
               <span className="mb-2 block text-[13px] font-medium text-white/60">Язык</span>
-              <select
-                value={project.language}
-                onChange={(e) => update({ language: e.target.value })}
-                className={cn(fieldClass, "h-12 cursor-pointer")}
-              >
-                {LANGUAGES.filter((l) => l !== "Инструментал").map((l) => (
-                  <option key={l} value={l} className="bg-[#14151a]">
-                    {l}
-                  </option>
-                ))}
-              </select>
+              <span className="relative block">
+                <select
+                  value={project.language}
+                  onChange={(e) => update({ language: e.target.value })}
+                  className={cn(fieldClass, "h-12 cursor-pointer appearance-none pr-11")}
+                >
+                  {LANGUAGES.filter((l) => l !== "Инструментал").map((l) => (
+                    <option key={l} value={l} className="bg-[#14151a]">
+                      {l}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/45" />
+              </span>
             </label>
           </div>
 
-          <label className="block">
-            <span className="mb-2 flex items-center justify-between text-[13px] font-medium text-white/60">
-              Текст трека — по одной фразе на строку
-              {lineCount > 0 ? <span className="text-white/35">{lineCount} строк</span> : null}
-            </span>
+          <div>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[13px] font-medium text-white/60">
+              <label htmlFor="karaoke-lyrics">Текст трека — по одной фразе на строку</label>
+              <span className="flex items-center gap-3">
+                {lineCount > 0 ? <span className="text-white/35">{lineCount} строк</span> : null}
+                {project.lyrics.trim() ? (
+                  <button
+                    type="button"
+                    onClick={tidy}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-white/[0.1] px-2.5 text-[12px] font-medium text-white/70 transition-colors hover:border-[#7b61ff]/50 hover:text-white"
+                  >
+                    <WandSparkles className="h-3.5 w-3.5" />
+                    Выровнять текст
+                  </button>
+                ) : null}
+              </span>
+            </div>
+            {needsTidy ? (
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-[13px] text-amber-100/90">
+                <span>Похоже, текст вставлен абзацем. Для караоке нужна одна короткая фраза на строку.</span>
+                <button
+                  type="button"
+                  onClick={tidy}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-200 px-3 text-[13px] font-semibold text-[#1a1406] transition-colors hover:bg-amber-100"
+                >
+                  <WandSparkles className="h-4 w-4" />
+                  Разбить на строки
+                </button>
+              </div>
+            ) : null}
+            {undoLyrics != null ? (
+              <div className="mb-2 flex items-center justify-between gap-3 rounded-xl border border-emerald-300/15 bg-emerald-300/[0.06] px-4 py-2.5 text-[13px] text-emerald-200/90">
+                <span>Текст разбит на {lineCount} строк — проверьте, где нужно, поправьте вручную.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onLyricsChange(undoLyrics);
+                    setUndoLyrics(null);
+                  }}
+                  className="shrink-0 font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
+                >
+                  Вернуть как было
+                </button>
+              </div>
+            ) : null}
             <textarea
+              id="karaoke-lyrics"
               value={project.lyrics}
-              onChange={(e) => onLyricsChange(e.target.value)}
+              onChange={(e) => {
+                setUndoLyrics(null);
+                onLyricsChange(e.target.value);
+              }}
               placeholder={"Вставьте текст построчно, без меток [Куплет] и [Припев]"}
               className={cn(fieldClass, "min-h-[260px] resize-y py-3.5 leading-relaxed")}
             />
-          </label>
+          </div>
 
           <div className="flex justify-end pt-1">
             <button

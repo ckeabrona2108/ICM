@@ -40,6 +40,8 @@ export interface RenderSnippetVideoOptions {
   signal?: AbortSignal;
   /** Video-only file (Spotify Canvas): the audio still drives the visuals but is not encoded. */
   muted?: boolean;
+  /** Overrides the default bitrate, in bits per second. */
+  videoBitrate?: number;
 }
 
 const OUTPUT_SAMPLE_RATE = 48000;
@@ -149,7 +151,7 @@ export async function renderSnippetVideo(options: RenderSnippetVideoOptions): Pr
   const target = new BufferTarget();
   const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target });
   // ~8 Mbit/s for 1080×1920 at 30 fps — what Reels and TikTok re-encode to anyway; grain would otherwise balloon the file.
-  const videoBitrate = Math.round(width * height * fps * 0.13);
+  const videoBitrate = options.videoBitrate ?? Math.round(width * height * fps * 0.13);
   const videoSource = new CanvasSource(canvas, { codec: videoCodec, bitrate: videoBitrate, keyFrameInterval: 2 });
   const audioSource = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: 192_000 }) : null;
   output.addVideoTrack(videoSource, { frameRate: fps });

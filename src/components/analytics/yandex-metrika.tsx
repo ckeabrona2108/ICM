@@ -4,16 +4,13 @@ import * as React from "react";
 import Script from "next/script";
 import { usePathname, useSearchParams } from "next/navigation";
 
+import { YANDEX_METRIKA_ID as COUNTER_ID } from "@/lib/analytics";
+
 declare global {
   interface Window {
     ym?: (id: number, method: string, ...args: unknown[]) => void;
   }
 }
-
-// The counter number is public. Production counts by default; local dev only when the env var is set.
-const COUNTER_ID = Number(
-  process.env.NEXT_PUBLIC_YANDEX_METRIKA_ID || (process.env.NODE_ENV === "production" ? "113863145" : "")
-);
 
 function PageHits() {
   const pathname = usePathname();

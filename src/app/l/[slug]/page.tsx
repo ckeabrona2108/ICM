@@ -223,8 +223,9 @@ export default async function SmartLinkPublicPage({
       </div>
     </SmartLinkTiltCover>
   );
-  // Wide screens play the 16:9 studio clip when there is one; otherwise, and on phones
-  // without a vertical clip, the plain cover stays.
+  // Wide screens play the 16:9 studio clip when there is one. With only a vertical clip they
+  // play that one as a tall card in place of the cover; with no clip at all the plain cover stays.
+  const showPhoneClipOnDesktop = !hasWideSnippet && hasPhoneSnippet;
   const coverPanel = (
     <>
       {data.snippetVideoWideUrl ? (
@@ -232,7 +233,12 @@ export default async function SmartLinkPublicPage({
           <SmartLinkCoverVideo src={data.snippetVideoWideUrl} poster={data.coverUrl} title={data.title} media="(min-width: 1024px)" />
         </div>
       ) : null}
-      {hasWideSnippet ? <div className="lg:hidden">{coverPhoto}</div> : coverPhoto}
+      {showPhoneClipOnDesktop ? (
+        <div className="sl-enter-cover mx-auto hidden aspect-[9/16] w-full max-w-[280px] overflow-hidden rounded-[22px] shadow-[0_40px_90px_-30px_rgba(0,0,0,0.8)] ring-1 ring-white/10 lg:block">
+          <SmartLinkCoverVideo src={data.snippetVideoUrl} poster={data.coverUrl} title={data.title} media="(min-width: 1024px)" />
+        </div>
+      ) : null}
+      {hasWideSnippet || showPhoneClipOnDesktop ? <div className="lg:hidden">{coverPhoto}</div> : coverPhoto}
     </>
   );
 

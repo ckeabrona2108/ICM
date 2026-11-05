@@ -272,6 +272,9 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const [rejectOpen, setRejectOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [editOpen, setEditOpen] = React.useState(false);
+  // Shown right under the save button, where the admin is looking, not at the top of the page.
+  const [editError, setEditError] = React.useState<string | null>(null);
+  const [savedAt, setSavedAt] = React.useState<number | null>(null);
   const [upc, setUpc] = React.useState(details.release.upc && details.release.upc !== "-" ? details.release.upc : "");
   const [reason, setReason] = React.useState("");
   const [releaseTitle, setReleaseTitle] = React.useState(details.release.title);
@@ -344,6 +347,19 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
     setEditingTrackId(null);
     setEditOpen(false);
   }, [details.id]);
+
+  // After a save, router.refresh() brings fresh details: refill the closed form from them, so the
+  // next edit starts from what is stored (e.g. a track title that followed the release title).
+  React.useEffect(() => {
+    if (!editOpen) resetEditForm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [details]);
+
+  React.useEffect(() => {
+    if (savedAt === null) return;
+    const timer = window.setTimeout(() => setSavedAt(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [savedAt]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -450,11 +466,11 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
   const saveReleaseMeta = async () => {
     const normalizedTitle = releaseTitle.trim();
     if (!normalizedTitle) {
-      setError("Название релиза обязательно.");
+      setEditError("Название релиза обязательно.");
       return;
     }
     setBusy("edit");
-    setError(null);
+    setEditError(null);
     try {
       const response = await fetch(`/api/admin/releases/${details.id}`, {
         method: "PATCH",
@@ -497,11 +513,16 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
         })
       });
       const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      if (!response.ok) throw new Error(payload?.error ?? "Не удалось обновить релиз.");
+      if (!response.ok) throw new Error(payload?.error ?? `Не удалось обновить релиз (код ${response.status}).`);
       setEditOpen(false);
+      setSavedAt(Date.now());
       router.refresh();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Не удалось обновить релиз.");
+      setEditError(
+        actionError instanceof Error && actionError.message !== "Failed to fetch"
+          ? actionError.message
+          : "Не удалось обновить релиз: нет связи с сервером."
+      );
     } finally {
       setBusy(null);
     }
@@ -705,17 +726,26 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                   </p>
                 </div>
                 {!editOpen ? (
+                  <div className="flex items-center gap-3">
+                  {savedAt !== null ? (
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-emerald-300">
+                      <Check className="h-4 w-4" />
+                      Сохранено
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
                       setEditOpen(true);
-                      setError(null);
+                      setEditError(null);
+                      setSavedAt(null);
                     }}
                     disabled={busy !== null}
                     className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Редактировать
                   </button>
+                  </div>
                 ) : null}
               </div>
 
@@ -798,7 +828,7 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                       onClick={() => {
                         resetEditForm();
                         setEditOpen(false);
-                        setError(null);
+                        setEditError(null);
                       }}
                       disabled={busy !== null}
                       className="inline-flex h-10 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60"
@@ -806,6 +836,11 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                       Отмена
                     </button>
                   </div>
+                  {editError ? (
+                    <div className="mt-3 rounded-xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-[13px] text-rose-200">
+                      {editError}
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </div>

@@ -922,20 +922,27 @@ export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetai
   const dbTracks = asArray((release as Record<string, unknown>).tracks ?? release.track);
   const trackCount = Math.max(dbTracks.length, submissionTracks.length);
 
-  const releasePersons = mergePersonGroups(
-    parsePersons(submissionData?.persons),
-    mergePersonGroups(
-      parsePersons(release.roles),
-      parsePersons(submissionData?.roles)
-    )
-  );
+  // An admin edit (roles.adminPersons) replaces everything the artist submitted;
+  // merging would bring back names the admin renamed or removed.
+  const adminReleasePersons = asRecord(asRecord(release.roles)?.adminPersons);
+  const releasePersons = adminReleasePersons
+    ? parsePersons(adminReleasePersons)
+    : mergePersonGroups(
+        parsePersons(submissionData?.persons),
+        mergePersonGroups(
+          parsePersons(release.roles),
+          parsePersons(submissionData?.roles)
+        )
+      );
   const releaseId = asString(release.id) ?? "";
   const releasePerformer = asString(release.performer) ?? "";
   const releaseFeat = asString(release.feat) ?? "";
   const releaseRemixer = asString(release.remixer) ?? "";
   const releaseOwnerName = asString(asRecord(release.user)?.name);
   const explicitPerformers = splitNames(releasePerformer);
-  const mergedPerformers = unique([...releasePersons.performers, ...explicitPerformers]);
+  const mergedPerformers = adminReleasePersons
+    ? releasePersons.performers
+    : unique([...releasePersons.performers, ...explicitPerformers]);
   const sanitizedPerformers = removeAccountNameFromPerformersIfLeaked(
     mergedPerformers,
     releaseOwnerName,

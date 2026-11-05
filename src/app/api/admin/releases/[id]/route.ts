@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getAdminReleaseDetailsById } from "@/lib/admin-release-details";
+import { getAdminReleaseDetailsById, mapAdminReleaseDetails } from "@/lib/admin-release-details";
+import { carryReleaseEditsToTrack, joinNames, normalizePersonGroups, toWizardPersons } from "@/lib/admin-release-edit";
 import { canManageReleasesSession, deleteReleaseByAdmin } from "@/lib/admin-release-service";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -16,13 +17,6 @@ function asString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
   return normalized || null;
-}
-
-function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
 }
 
 function parseOptionalDate(value: unknown): Date | undefined {
@@ -181,25 +175,18 @@ export async function PATCH(
 
   const release = await prisma.release.findUnique({
     where: { id: releaseId },
-    select: {
-      id: true,
-      roles: true,
-      track: {
-        select: {
-          id: true,
-          title: true,
-          subtitle: true,
-          roles: true,
-          index: true
-        },
-        orderBy: { index: "asc" }
-      }
+    include: {
+      user: { select: { name: true } },
+      track: { orderBy: { index: "asc" } }
     }
   });
   if (!release) {
     return NextResponse.json({ error: "Release not found" }, { status: 404 });
   }
+  // What the page showed before this edit: used to tell which track fields still follow the release.
+  const before = mapAdminReleaseDetails(release);
 
+  const releaseGroups = normalizePersonGroups(body?.roles);
   const rolesRoot = asRecord(release.roles);
   const nextRoles = rolesRoot ? structuredClone(rolesRoot) : {};
   const submission = asRecord(nextRoles.submissionData);
@@ -207,21 +194,21 @@ export async function PATCH(
   nextSubmission.title = title;
   nextSubmission.subtitle = subtitle || null;
   nextSubmission.label = label || null;
-  nextSubmission.roles = {
-    performers: asStringArray(body?.roles?.performers),
-    feats: asStringArray(body?.roles?.feats),
-    remixers: asStringArray(body?.roles?.remixers),
-    coPerformers: asStringArray(body?.roles?.coPerformers),
-    producers: asStringArray(body?.roles?.producers),
-    musicAuthors: asStringArray(body?.roles?.musicAuthors),
-    lyricsAuthors: asStringArray(body?.roles?.lyricsAuthors)
-  };
+  nextSubmission.roles = releaseGroups;
+  // The admin's list replaces the artist's one everywhere it is read: the wizard-format `persons`
+  // (cabinet, resubmission), the `artist` string and the flat performer columns below.
+  nextSubmission.persons = toWizardPersons(releaseGroups);
+  if (typeof nextSubmission.artist === "string") {
+    nextSubmission.artist = joinNames(releaseGroups.performers) ?? "";
+  }
+  nextRoles.adminPersons = releaseGroups;
   if (body?.dates) {
     nextSubmission.preorderDate = body.dates.preorder_date?.trim() || null;
     nextSubmission.startDate = body.dates.start_date?.trim() || null;
     nextSubmission.releaseDate = body.dates.release_date?.trim() || null;
   }
 
+  const isSingle = release.track.length === 1 && /single|сингл/iu.test(before.release.release_type);
   const incomingTracks = Array.isArray(body?.tracks) ? body.tracks : [];
   const currentSubmissionTracks = Array.isArray(nextSubmission.tracks) ? structuredClone(nextSubmission.tracks) : [];
   const nextSubmissionTracks = currentSubmissionTracks as Array<Record<string, unknown>>;
@@ -230,18 +217,27 @@ export async function PATCH(
   for (const trackRow of release.track) {
     const incoming = incomingTracks.find((item) => item?.id?.trim() === trackRow.id);
     if (!incoming) continue;
-    const titleValue = asString(incoming.title) ?? trackRow.title;
+    const beforeTrack = before.tracks.find((item) => item.id === trackRow.id);
+    const incomingGroups = normalizePersonGroups(incoming.roles);
+    const carried = carryReleaseEditsToTrack({
+      isSingle,
+      releaseTitleBefore: before.release.title,
+      releaseTitleAfter: title,
+      releasePerformersBefore: before.release.roles.performers,
+      releasePerformersAfter: releaseGroups.performers,
+      trackTitleBefore: beforeTrack?.title ?? trackRow.title,
+      trackTitleIncoming: asString(incoming.title) ?? trackRow.title,
+      trackPerformersBefore: beforeTrack?.track_roles.performers ?? [],
+      trackPerformersIncoming: incomingGroups.performers
+    });
+    const titleValue = carried.title;
     const subtitleValue = typeof incoming.subtitle === "string" ? incoming.subtitle.trim() : "";
+    const trackGroups = { ...incomingGroups, performers: carried.performers };
     const nextTrackRoles = asRecord(trackRow.roles) ? structuredClone(trackRow.roles as Record<string, unknown>) : {};
-    nextTrackRoles.persons = {
-      performers: asStringArray(incoming.roles?.performers),
-      feats: asStringArray(incoming.roles?.feats),
-      remixers: asStringArray(incoming.roles?.remixers),
-      coPerformers: asStringArray(incoming.roles?.coPerformers),
-      producers: asStringArray(incoming.roles?.producers),
-      musicAuthors: asStringArray(incoming.roles?.musicAuthors),
-      lyricsAuthors: asStringArray(incoming.roles?.lyricsAuthors)
-    };
+    nextTrackRoles.persons = trackGroups;
+    if (Array.isArray(nextTrackRoles.trackPersons)) {
+      nextTrackRoles.trackPersons = toWizardPersons(trackGroups);
+    }
 
     const trackIndex = Math.max(0, trackRow.index - 1);
     const prevSubmissionTrack = asRecord(nextSubmissionTracks[trackIndex]) ?? {};
@@ -250,7 +246,9 @@ export async function PATCH(
       id: trackRow.id,
       title: titleValue,
       subtitle: subtitleValue || null,
-      roles: nextTrackRoles.persons
+      roles: trackGroups,
+      ...(Array.isArray(prevSubmissionTrack.persons) ? { persons: toWizardPersons(trackGroups) } : {}),
+      ...(Array.isArray(prevSubmissionTrack.trackPersons) ? { trackPersons: toWizardPersons(trackGroups) } : {})
     };
 
     trackUpdates.push(
@@ -277,6 +275,9 @@ export async function PATCH(
         title,
         subtitle: subtitle || null,
         labelName: label || null,
+        performer: joinNames(releaseGroups.performers),
+        feat: joinNames(releaseGroups.feats),
+        remixer: joinNames(releaseGroups.remixers),
         ...(preorderDate !== undefined ? { preorderDate } : {}),
         ...(startDate !== undefined ? { startDate } : {}),
         ...(releaseDate !== undefined ? { date: releaseDate } : {}),

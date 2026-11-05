@@ -15,6 +15,11 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   if (!isYooKassaWebhookAuthorized(request.url)) {
+    // Visible in `docker logs`: YooKassa notifications are rejected because the notification URL
+    // in the YooKassa dashboard lacks the right ?secret= (YOOKASSA_WEBHOOK_SECRET).
+    console.warn("[yookassa:webhook] rejected: secret mismatch", {
+      hasSecretParam: new URL(request.url).searchParams.has("secret")
+    });
     return NextResponse.json({ error: "Webhook secret mismatch" }, { status: 403 });
   }
 
@@ -57,12 +62,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, result }, { status: 200 });
   }
 
-  const result = await applyYooKassaWebhookOrder({
-    prisma,
-    orderId,
-    providerPaymentId,
-    status
-  });
+  console.info("[yookassa:webhook] received", { orderId, providerPaymentId, status });
+  let result: Awaited<ReturnType<typeof applyYooKassaWebhookOrder>>;
+  try {
+    result = await applyYooKassaWebhookOrder({
+      prisma,
+      orderId,
+      providerPaymentId,
+      status
+    });
+  } catch (error) {
+    // Non-2xx makes YooKassa retry; the in-app reconciliation also picks the order up.
+    console.error("[yookassa:webhook] failed to apply", { orderId, providerPaymentId, error });
+    return NextResponse.json({ error: "Failed to apply payment" }, { status: 500 });
+  }
 
   if (!result.ok && result.status === "not_found") {
     return NextResponse.json({ error: result.error ?? "Order not found" }, { status: 404 });

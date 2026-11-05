@@ -541,6 +541,7 @@ function mapRoleToBucket(roleRaw: string): keyof PersonGroups | null {
 
   const isPerformer =
     compact === "performer" ||
+    compact === "performers" ||
     compact === "artist" ||
     compact === "mainartist" ||
     compact === "исполнитель" ||
@@ -601,33 +602,29 @@ function mapRoleToBucket(roleRaw: string): keyof PersonGroups | null {
     compact === "lyricsauthors" ||
     compact === "songwriter" ||
     compact === "авторслов" ||
-    compact === "авторыслов";
+    compact === "авторыслов" ||
+    compact === "автортекста" ||
+    compact === "авторытекста";
   if (isLyricsAuthor) return "lyricsAuthors";
 
   return null;
 }
 
-function looksLikeLyricsText(value: string): boolean {
+/**
+ * Filters out lyrics text accidentally saved as an author, while keeping real names
+ * in the formats artists use: "Andrey Shvedov/Андрей Шведов", "Nick / Иванов Иван Иванович",
+ * initials such as "А. С. Пушкин".
+ */
+export function looksLikePersonName(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) return false;
-  if (trimmed.length > 200) return true;
-  if (/[\r\n]/u.test(trimmed)) return true;
-  if (/[.!?…]{2,}/u.test(trimmed)) return true;
-  const words = trimmed.split(/\s+/u).filter(Boolean);
-  if (words.length >= 12) return true;
-  if (/[а-яёa-z]{4,}\s+[а-яёa-z]{4,}\s+[а-яёa-z]{4,}\s+[а-яёa-z]{4,}/iu.test(trimmed)) return true;
-  return false;
-}
-
-function looksLikePersonName(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  if (looksLikeLyricsText(trimmed)) return false;
   if (trimmed.length > 120) return false;
-  if (/[0-9@#$%^&*_=+<>[\]{}\\/]/u.test(trimmed)) return false;
-  const words = trimmed.split(/\s+/u).filter(Boolean);
-  if (words.length === 0 || words.length > 6) return false;
-  return words.every((word) => /^[\p{L}'’-]{2,}$/u.test(word));
+  if (/[\r\n]/u.test(trimmed)) return false;
+  if (/[!?…]|\.{2,}/u.test(trimmed)) return false;
+  if (/[0-9@#$%^&*_=+<>[\]{}\\]/u.test(trimmed)) return false;
+  const words = trimmed.split(/[\s/]+/u).filter(Boolean);
+  if (words.length === 0 || words.length > 8) return false;
+  return words.every((word) => /^\p{L}[\p{L}'’.-]*$/u.test(word));
 }
 
 function onlyPersonNames(values: string[]): string[] {
@@ -949,10 +946,15 @@ export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetai
   const tracks = Array.from({ length: trackCount }).map((_, index) => {
     const dbTrack = inflateTrackRow(dbTracks[index]);
     const submissionTrack = asRecord(submissionTracks[index]) ?? {};
-    const persons = mergePersonGroups(
-      parseTrackPersons(submissionTrack),
-      parseTrackPersons(dbTrack)
-    );
+    // An admin edit (track.roles.persons) replaces what the artist submitted;
+    // merging both would bring back people the admin removed.
+    const adminPersons = asRecord(dbTrack.persons);
+    const persons = adminPersons && !Array.isArray(dbTrack.persons)
+      ? parsePersons(adminPersons)
+      : mergePersonGroups(
+          parseTrackPersons(submissionTrack),
+          parseTrackPersons(dbTrack)
+        );
     const trackId =
       asString(dbTrack.id) ??
       asString(submissionTrack.id) ??

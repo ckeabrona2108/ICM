@@ -46,6 +46,7 @@ import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
 import {
   buildSubmitTrackDiagnostics,
   buildTrackCreateManyInput,
+  planTrackSync,
   readReleaseTypeFromSubmissionData
 } from "@/lib/release-submit-tracks";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
@@ -348,12 +349,29 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
             roles: params.roles
           }
         });
-        await tx.track.deleteMany({
-          where: { releaseId: existing.id }
+        // Edit tracks in place instead of delete + create: track ids are kept, so royalty
+        // and analytics rows linked to a track stay linked after the artist edits the release.
+        const existingTracks = await tx.track.findMany({
+          where: { releaseId: existing.id },
+          select: { id: true, title: true, isrc: true, index: true, roles: true }
         });
-        if (trackRows.length > 0) {
+        const syncPlan = planTrackSync(existingTracks, trackRows);
+        if (syncPlan.deleteIds.length > 0) {
+          await tx.track.deleteMany({
+            where: { releaseId: existing.id, id: { in: syncPlan.deleteIds } }
+          });
+        }
+        for (const update of syncPlan.updates) {
+          const data: Prisma.trackUncheckedUpdateInput = { ...update.data };
+          delete data.releaseId;
+          await tx.track.update({
+            where: { id: update.id },
+            data
+          });
+        }
+        if (syncPlan.creates.length > 0) {
           await tx.track.createMany({
-            data: trackRows
+            data: syncPlan.creates
           });
         }
         const persistedCount = await tx.track.count({
@@ -457,6 +475,39 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       message: shouldResubmit
         ? "Релиз повторно отправлен на модерацию."
         : "Изменения релиза сохранены."
+    };
+
+    return NextResponse.json(response, { status: 200 });
+  }
+
+  // An already paid release (returned for changes, rejected, re-sent) goes back to moderation
+  // as paid: no new invoice, no subscription slot, no partner code or free release spent again.
+  if (existing.confirmed) {
+    await updateReleaseAndSyncTracks({
+      confirmed: true,
+      status: "moderating",
+      roles: withReleaseResubmission(
+        withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation"),
+        { previousStatus: lifecycle }
+      ) as Prisma.InputJsonValue,
+      afterSync: async (tx) => {
+        await tx.release.update({
+          where: { id: existing.id },
+          data: { rejectReason: null, moderatorComment: null }
+        });
+      }
+    });
+    notifications.push({
+      releaseId: existing.id,
+      releaseTitle: baseReleaseData.title,
+      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+    });
+
+    const response: ReleaseSubmitSuccessResponse = {
+      ok: true,
+      releaseId: existing.id,
+      nextStatus: "moderation",
+      message: "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
     };
 
     return NextResponse.json(response, { status: 200 });

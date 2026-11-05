@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
 import { ReleaseModerationStepper } from "@/components/dashboard/release-moderation-stepper";
 import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
+import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
 import { prisma } from "@/lib/prisma";
 import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
@@ -42,10 +43,25 @@ export default async function ReleaseDetailsPage({
       })
     : null;
 
-  const release = await getCabinetReleaseByIdForUser(session.user.id, params.id);
+  let release = await getCabinetReleaseByIdForUser(session.user.id, params.id);
 
   if (!release) {
     notFound();
+  }
+  // The artist may come back without the return link (closed tab, bank app) while the webhook is late:
+  // settle a payment YooKassa already took before offering to pay again.
+  if (!release.paid && release.status === "moderation" && !paymentResult?.applied) {
+    const openPayment = await settleOpenReleaseOrders({
+      prisma,
+      userId: session.user.id,
+      releaseId: params.id
+    }).catch((error) => {
+      console.error("[releases:return] failed to check open payments", error);
+      return "none" as const;
+    });
+    if (openPayment === "paid") {
+      release = (await getCabinetReleaseByIdForUser(session.user.id, params.id)) ?? release;
+    }
   }
   const timeline = getReleaseTimelineState(release.status, release.paid);
   const awaitingPayment = !release.paid && release.status === "moderation";

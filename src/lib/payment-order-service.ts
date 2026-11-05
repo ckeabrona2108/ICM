@@ -336,25 +336,39 @@ async function applyConfirmedOrder(params: {
     if (releaseId) {
       const release = await params.prisma.release.findFirst({
         where: { id: releaseId, userId: params.order.userId },
-        select: { id: true, roles: true }
+        select: { id: true, roles: true, confirmed: true }
       });
-      await params.prisma.release.updateMany({
-        where: { id: releaseId, userId: params.order.userId },
-        data: {
-          confirmed: true,
-          status: "moderating",
-          roles: markSubmittedToModeration(
-            mergeReleaseRolesPaymentUsage(
-              release?.roles ?? null,
-              buildStandalonePaymentUsage({ orderId: params.order.id })
-            )
-          )
-        }
-      });
+      const paymentRoles = mergeReleaseRolesPaymentUsage(
+        release?.roles ?? null,
+        buildStandalonePaymentUsage({ orderId: params.order.id })
+      );
+      if (release && !release.confirmed) {
+        await params.prisma.release.updateMany({
+          where: { id: releaseId, userId: params.order.userId },
+          data: {
+            confirmed: true,
+            status: "moderating",
+            roles: markSubmittedToModeration(paymentRoles)
+          }
+        });
+      } else if (release && !readMetadata(readMetadata(release.roles).paymentUsage).type) {
+        // Already marked paid (e.g. by an admin) and possibly approved: keep its status,
+        // only record which payment covered it.
+        await params.prisma.release.update({
+          where: { id: release.id },
+          data: { roles: paymentRoles as Prisma.InputJsonValue }
+        });
+      }
     }
     await params.prisma.orders.update({
       where: { id: params.order.id },
       data: { confirmed: true }
+    });
+    await setOrderPaymentStatus({
+      prisma: params.prisma,
+      orderId: params.order.id,
+      status: "completed",
+      completedAt: new Date()
     });
     return;
   }

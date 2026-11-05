@@ -67,6 +67,7 @@ const nextConfig = {
     ]
   },
   experimental: {
+    instrumentationHook: true,
     optimizePackageImports: ["lucide-react", "framer-motion", "recharts"]
   },
   webpack: (config, { dev, isServer }) => {

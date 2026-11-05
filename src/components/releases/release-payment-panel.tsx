@@ -45,8 +45,14 @@ export function ReleasePaymentPanel({
     try {
       const response = await fetch(`/api/releases/${releaseId}/pay`, { method: "POST" });
       const parsed = (await response.json().catch(() => null)) as
-        | { error?: string; confirmationUrl?: string }
+        | { error?: string; confirmationUrl?: string; alreadyPaid?: boolean }
         | null;
+      if (parsed?.alreadyPaid) {
+        // An earlier payment already went through: show the paid release instead of charging again.
+        router.refresh();
+        setPaying(false);
+        return;
+      }
       const confirmationUrl = parsed?.confirmationUrl?.trim();
       if (!response.ok || !confirmationUrl) {
         setError(parsed?.error ?? "Не удалось создать платёж. Попробуйте ещё раз.");
@@ -58,7 +64,7 @@ export function ReleasePaymentPanel({
       setError("Сервис оплаты временно недоступен. Попробуйте ещё раз через минуту.");
       setPaying(false);
     }
-  }, [releaseId]);
+  }, [releaseId, router]);
 
   const requestPayment = React.useCallback(() => {
     if (hasExtras) {
@@ -84,11 +90,25 @@ export function ReleasePaymentPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [breakdownOpen, paying]);
 
+  // The bank often confirms a few seconds after the artist is back: re-check on its own
+  // for about a minute, so the artist does not start a second payment.
+  const [recheckCount, setRecheckCount] = React.useState(0);
+  React.useEffect(() => {
+    if (returnState.kind !== "pending" || recheckCount >= 12) return;
+    const timer = window.setTimeout(() => {
+      setRecheckCount((count) => count + 1);
+      router.refresh();
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [returnState.kind, recheckCount, router]);
+
   const message =
     returnState.kind === "failed"
       ? returnState.message
       : returnState.kind === "pending"
-        ? "Платёж ещё обрабатывается YooKassa. Если деньги уже списались, проверьте статус через несколько секунд."
+        ? recheckCount < 12
+          ? "Платёж обрабатывается банком — статус обновится сам через несколько секунд. Не оплачивайте повторно."
+          : "Платёж ещё обрабатывается. Если деньги уже списались, повторно оплачивать не нужно — статус обновится автоматически."
         : "Релиз отправлен, но не оплачен. Модерация начнётся сразу после оплаты.";
 
   return (

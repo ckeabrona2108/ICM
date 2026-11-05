@@ -11,6 +11,7 @@ import {
 } from "@/lib/subscription-billing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -74,12 +75,34 @@ export async function POST(request: Request) {
       },
       select: {
         title: true,
+        confirmed: true,
         track: { select: RELEASE_PRICING_TRACK_SELECT }
       }
     });
 
     if (!release) {
       return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
+    }
+
+    if (release.confirmed) {
+      return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
+    }
+    const openPayment = await settleOpenReleaseOrders({
+      prisma,
+      userId: session.user.id,
+      releaseId: payload.releaseId
+    });
+    if (openPayment === "paid") {
+      return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
+    }
+    if (openPayment === "processing") {
+      return NextResponse.json(
+        {
+          processing: true,
+          error: "Предыдущий платёж ещё обрабатывается банком. Подождите пару минут — статус обновится сам."
+        },
+        { status: 409 }
+      );
     }
 
     amountRub = calculateReleasePrice(release.track).totalRub;

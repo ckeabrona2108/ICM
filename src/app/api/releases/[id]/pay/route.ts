@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
 import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
@@ -18,6 +20,12 @@ function getAppBaseUrl(request: Request): string {
 export async function POST(request: Request, context: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const limited = enforceRateLimit({
+    key: `payment:create:${session.user.id}`,
+    limit: 10,
+    windowMs: 10 * 60_000
+  });
+  if (limited) return limited;
 
   const releaseId = context.params.id?.trim();
   if (!releaseId) {
@@ -29,11 +37,30 @@ export async function POST(request: Request, context: { params: { id: string } }
       id: releaseId,
       userId: session.user.id
     },
-    select: { id: true, title: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
+    select: { id: true, title: true, confirmed: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
   });
 
   if (!release) {
     return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
+  }
+
+  // A paid release (including one sent back for changes or repeat moderation) is never charged again.
+  if (release.confirmed) {
+    return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
+  }
+
+  const openPayment = await settleOpenReleaseOrders({ prisma, userId: session.user.id, releaseId });
+  if (openPayment === "paid") {
+    return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
+  }
+  if (openPayment === "processing") {
+    return NextResponse.json(
+      {
+        processing: true,
+        error: "Предыдущий платёж ещё обрабатывается банком. Подождите пару минут — статус обновится сам."
+      },
+      { status: 409 }
+    );
   }
 
   const amountRub = calculateReleasePrice(release.track).totalRub;

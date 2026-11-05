@@ -124,3 +124,61 @@ export function buildTrackCreateManyInput(params: {
     index: index + 1
   }));
 }
+
+export interface ExistingTrackForSync {
+  id: string;
+  title: string;
+  isrc: string | null;
+  index: number;
+  roles: unknown;
+}
+
+export interface TrackSyncPlan {
+  updates: Array<{ id: string; data: Prisma.trackCreateManyInput }>;
+  creates: Prisma.trackCreateManyInput[];
+  deleteIds: string[];
+}
+
+function trackAudioKey(roles: unknown): string | null {
+  return resolveStoredFilePointer(asRecord(roles)?.audioFile);
+}
+
+function normalizeTitle(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase().replace(/\s+/gu, " ");
+  return normalized || null;
+}
+
+/**
+ * Matches submitted tracks to the release's existing rows so that an edit updates them in place.
+ * Track ids stay the same, so royalty and analytics rows linked to a track are not detached
+ * (deleting a track sets their track_id to NULL). Match order: ISRC, audio file, title, position.
+ */
+export function planTrackSync(existing: ExistingTrackForSync[], rows: Prisma.trackCreateManyInput[]): TrackSyncPlan {
+  const free = new Map(existing.map((track) => [track.id, track]));
+  const matched: Array<string | null> = rows.map(() => null);
+
+  const matchBy = (keyOfExisting: (track: ExistingTrackForSync) => string | null, keyOfRow: (row: Prisma.trackCreateManyInput) => string | null) => {
+    rows.forEach((row, rowIndex) => {
+      if (matched[rowIndex]) return;
+      const key = keyOfRow(row);
+      if (!key) return;
+      const hit = [...free.values()].find((track) => keyOfExisting(track) === key);
+      if (!hit) return;
+      matched[rowIndex] = hit.id;
+      free.delete(hit.id);
+    });
+  };
+
+  matchBy((track) => asString(track.isrc)?.toUpperCase() ?? null, (row) => asString(row.isrc)?.toUpperCase() ?? null);
+  matchBy((track) => trackAudioKey(track.roles), (row) => trackAudioKey(row.roles));
+  matchBy((track) => normalizeTitle(track.title), (row) => normalizeTitle(row.title));
+  matchBy((track) => String(track.index), (row) => String(row.index));
+
+  const plan: TrackSyncPlan = { updates: [], creates: [], deleteIds: [...free.keys()] };
+  rows.forEach((row, rowIndex) => {
+    const id = matched[rowIndex];
+    if (id) plan.updates.push({ id, data: row });
+    else plan.creates.push(row);
+  });
+  return plan;
+}

@@ -130,12 +130,13 @@ async function reconcilePendingReleaseOrders(
       const payment = await getYooKassaPayment(providerPaymentId);
       if (payment.status !== "succeeded") continue;
 
-      // A release that is already paid (e.g. marked by an admin) must not be pushed back to moderation.
+      // A release already marked paid (e.g. by an admin) keeps its status: applying the order only
+      // settles the order itself, so the money is still accounted for.
       const release = await prisma.release.findFirst({
         where: { id: releaseId, userId: order.userId },
         select: { confirmed: true }
       });
-      if (!release || release.confirmed) continue;
+      if (!release) continue;
 
       const applied = await applyYooKassaWebhookOrder({
         prisma,

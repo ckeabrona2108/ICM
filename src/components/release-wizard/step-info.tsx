@@ -20,7 +20,8 @@ import {
   releasePlatformDefinitions
 } from "@/lib/release-platforms";
 
-import { useWizard } from "./wizard-context";
+import { ArtistPlatformPicker } from "./artist-platform-picker";
+import { useWizard, type PersonRole } from "./wizard-context";
 import {
   DateInput,
   FieldLabel,
@@ -201,8 +202,19 @@ export function StepInfo({
 
   const updatePerson = (id: string, field: "name" | "role", value: string) => {
     patch({
-      persons: data.persons.map((p) => (p.id === id ? { ...p, [field]: value } : p))
+      persons: data.persons.map((p) => {
+        if (p.id !== id) return p;
+        // Another name is another artist: the profiles picked for the old one no longer apply.
+        if (field === "name" && value.trim() !== p.name.trim()) {
+          return { ...p, name: value, platformProfiles: [], isNewArtist: false };
+        }
+        return { ...p, [field]: value };
+      })
     });
+  };
+
+  const updatePersonProfiles = (id: string, next: Pick<PersonRole, "platformProfiles" | "isNewArtist">) => {
+    patch({ persons: data.persons.map((p) => (p.id === id ? { ...p, ...next } : p)) });
   };
 
   const removePerson = (id: string) => {
@@ -460,7 +472,8 @@ export function StepInfo({
 
                 <div className="space-y-2">
                   {data.persons.map((p) => (
-                    <div key={p.id} className="grid gap-2 sm:grid-cols-[1fr_180px_auto]">
+                    <div key={p.id} className="space-y-2">
+                    <div className="grid gap-2 sm:grid-cols-[1fr_180px_auto]">
                       <TextInput
                         placeholder="Псевдоним / имя"
                         value={p.name}
@@ -479,6 +492,8 @@ export function StepInfo({
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
+                    </div>
+                    <ArtistPlatformPicker person={p} onChange={(next) => updatePersonProfiles(p.id, next)} />
                     </div>
                   ))}
                 </div>

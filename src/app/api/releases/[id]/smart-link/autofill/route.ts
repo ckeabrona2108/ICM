@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { findSmartLinkLinksForOwner } from "@/lib/smart-link-service";
+import { findReleaseLinksForOwner } from "@/lib/platform-link-discovery-service";
+
+export const maxDuration = 60;
 
 export async function POST(
   _request: Request,
@@ -23,7 +25,7 @@ export async function POST(
   if (limited) return limited;
 
   try {
-    const result = await findSmartLinkLinksForOwner({ userId: session.user.id, releaseId });
+    const result = await findReleaseLinksForOwner({ userId: session.user.id, releaseId });
     if (!result) {
       return NextResponse.json({ error: "Release not found" }, { status: 404 });
     }

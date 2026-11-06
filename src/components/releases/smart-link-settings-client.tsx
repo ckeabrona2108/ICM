@@ -589,7 +589,7 @@ function PlatformsSection({
     setMessage(null);
     try {
       const response = await fetch(`/api/releases/${encodeURIComponent(releaseId)}/smart-link/autofill`, { method: "POST" });
-      const payload = (await response.json().catch(() => null)) as { found?: Record<string, string>; error?: string } | null;
+      const payload = (await response.json().catch(() => null)) as { found?: Record<string, string>; review?: string[]; error?: string } | null;
       if (!response.ok || !payload?.found) {
         setMessage({ kind: "error", text: payload?.error || "Не удалось выполнить поиск. Попробуйте позже." });
         return;
@@ -599,13 +599,17 @@ function PlatformsSection({
         const existing = draft.platforms.find((item) => item.code === code);
         return !existing?.url && existing?.status !== "hidden";
       });
+      const review = (payload.review ?? []).map(getSmartLinkPlatformLabel);
+      const reviewNote = review.length > 0
+        ? ` Ещё нашли похожие релизы (${review.join(", ")}) — подтвердите их в разделе Smart Links, отмечены «Это он?».`
+        : "";
       if (fresh.length === 0) {
         setMessage({
-          kind: Object.keys(payload.found).length > 0 ? "success" : "error",
+          kind: Object.keys(payload.found).length > 0 || review.length > 0 ? "success" : "error",
           text:
-            Object.keys(payload.found).length > 0
+            (Object.keys(payload.found).length > 0
               ? "Новых ссылок нет — всё найденное уже добавлено."
-              : "По UPC пока ничего не нашли. Обычно ссылки появляются в течение 1–3 дней после выхода."
+              : "Пока ничего не нашли. Обычно ссылки появляются в течение 1–3 дней после выхода — проверяем каждый день.") + reviewNote
         });
         return;
       }
@@ -614,7 +618,7 @@ function PlatformsSection({
       patch({ platforms });
       setMessage({
         kind: "success",
-        text: `Нашли ${fresh.length}: ${fresh.map(([code]) => getSmartLinkPlatformLabel(code)).join(", ")}. Проверьте и сохраните.`
+        text: `Нашли ${fresh.length}: ${fresh.map(([code]) => getSmartLinkPlatformLabel(code)).join(", ")}. Уже на смарт-ссылке.${reviewNote}`
       });
     } catch {
       setMessage({ kind: "error", text: "Не удалось выполнить поиск. Попробуйте позже." });
@@ -670,7 +674,7 @@ function PlatformsSection({
               className="inline-flex h-9 items-center gap-2 rounded-[10px] border border-violet-400/30 bg-violet-500/10 px-3 text-[13px] font-medium text-violet-200 transition hover:bg-violet-500/15 disabled:cursor-wait disabled:opacity-60"
             >
               <Sparkles className="h-4 w-4" />
-              {searching ? "Ищем…" : "Найти по UPC"}
+              {searching ? "Ищем на площадках…" : "Обновить ссылки"}
             </button>
           ) : null}
           <VisibilityToggle checked={draft.sectionVisibility.links} onChange={(value) => setVisibility("links", value)} />
@@ -680,10 +684,10 @@ function PlatformsSection({
       {view.upc ? (
         <p className="-mt-1 text-[13px] text-zinc-500">
           {prerelease
-            ? `После выхода релиза (${formatSmartLinkReleaseDate(view.releaseDate)}) сами найдём ссылки по UPC и добавим недостающие площадки. VK Музыку и Звук по UPC не найти — их ссылки вставьте вручную.`
+            ? `После выхода релиза (${formatSmartLinkReleaseDate(view.releaseDate)}) сами найдём ссылки и добавим недостающие площадки. VK Музыку и Звук найти автоматически нельзя — их ссылки вставьте вручную.`
             : view.autofillCheckedAt
-              ? `Автопоиск по UPC проверял площадки ${new Date(view.autofillCheckedAt).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })} и повторяет проверку раз в 6 часов. VK Музыку и Звук вставьте вручную.`
-              : "Автопоиск по UPC проверяет площадки раз в 6 часов и сам добавляет найденные ссылки. VK Музыку и Звук вставьте вручную."}
+              ? `Автопоиск проверял площадки ${new Date(view.autofillCheckedAt).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })} и повторяет проверку каждый день. VK Музыку и Звук вставьте вручную.`
+              : "Автопоиск проверяет площадки каждый день и сам добавляет найденные ссылки. VK Музыку и Звук вставьте вручную."}
         </p>
       ) : null}
 

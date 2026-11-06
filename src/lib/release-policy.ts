@@ -46,9 +46,20 @@ function isAcceptableUploadedFileUrl(value: string): boolean {
   }
 }
 
+/** "Это он": the artist's profile on a platform, picked in the wizard so links are found after release. */
+const personPlatformProfileSchema = z.object({
+  platform: z.string().trim().max(32),
+  externalId: z.string().trim().max(160),
+  name: z.string().trim().max(255),
+  url: z.string().trim().max(500),
+  imageUrl: z.string().trim().max(1000).nullable().optional()
+});
+
 const personSchema = z.object({
   name: z.string().trim(),
-  role: z.string().trim()
+  role: z.string().trim(),
+  platformProfiles: z.array(personPlatformProfileSchema).max(10).optional(),
+  isNewArtist: z.boolean().optional()
 });
 
 const coverMetaSchema = z.object({

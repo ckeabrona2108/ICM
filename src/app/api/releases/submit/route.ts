@@ -51,6 +51,7 @@ import {
 } from "@/lib/release-submit-tracks";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 
+import { rememberReleaseArtistProfiles } from "@/lib/platform-link-discovery-service";
 import { executeIdempotentSubmission, validSubmissionKey } from "@/lib/release-submission-idempotency";
 
 export const dynamic = "force-dynamic";
@@ -300,6 +301,11 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       isActive: quota.isActive
     })
   };
+  // "Это он" picked in the wizard: the artist confirmed these profiles, keep them on the artist card
+  // even if saving the release fails further down.
+  await rememberReleaseArtistProfiles(session.user.id, submissionData.persons).catch((error) => {
+    console.error("[release-submit] could not remember artist profiles", error);
+  });
   const preview = await resolveReleasePreviewForPersistence({
     id: existing.id,
     preview: normalizeReleaseCoverUrl(data.cover, null),

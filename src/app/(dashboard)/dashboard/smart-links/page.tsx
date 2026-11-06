@@ -7,6 +7,7 @@ import { getSmartLinksByUser, type SmartLinkOwnerView } from "@/lib/smart-link-s
 import { getSmartLinkCountDelta, getSmartLinkRateDelta, type SmartLinkDelta } from "@/lib/smart-link-stats";
 import { safeSmartLinkHref } from "@/lib/smart-link-urls";
 import { DashboardEmptyState, DashboardShell } from "@/components/layout/dashboard-shell";
+import { ReleaseLinksFinder } from "@/components/smart-link/release-links-finder";
 import { SmartLinksTable, type SmartLinkTableItem } from "@/components/smart-link/smart-links-table";
 
 export const dynamic = "force-dynamic";
@@ -126,6 +127,7 @@ export default async function SmartLinksDashboardPage() {
               </div>
             ))}
           </div>
+          <ReleaseLinksFinder />
           <SmartLinksTable items={items} />
         </>
       )}

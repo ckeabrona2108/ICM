@@ -26,10 +26,22 @@ export interface UploadedCoverRef extends UploadedFileRef {
   height?: number;
 }
 
+export interface PersonPlatformProfile {
+  platform: string;
+  externalId: string;
+  name: string;
+  url: string;
+  imageUrl?: string | null;
+}
+
 export interface PersonRole {
   id: string;
   name: string;
   role: string;
+  /** Profiles on platforms the artist marked "Это он" — links to this release are found by them. */
+  platformProfiles?: PersonPlatformProfile[];
+  /** First release: there are no profiles on platforms yet. */
+  isNewArtist?: boolean;
 }
 
 /** Строка текста с таймкодами (синхронизация), при необходимости */

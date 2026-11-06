@@ -150,6 +150,51 @@ model promo_urls {
 }
 
 // Просмотры и переходы Smart Link. Пишутся только вставкой, итоги считаются запросами.
+/// Artist profiles on streaming platforms, tied to one of the artist's names (profile_key) in a cabinet.
+/// "confirmed" profiles are searched for releases, "suggested" wait for the artist, "rejected" are never offered again.
+model artist_platform_profiles {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String   @db.Uuid
+  profile_key String   @db.VarChar(160)
+  platform    String   @db.VarChar(32)
+  external_id String   @db.VarChar(160)
+  name        String   @db.VarChar(255)
+  url         String
+  image_url   String?
+  status      String   @db.VarChar(16)
+  source      String   @db.VarChar(16)
+  details     Json     @default("{}")
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @updatedAt @db.Timestamptz(6)
+  user        user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([user_id, profile_key, platform, external_id])
+  @@index([user_id, profile_key])
+  @@index([status, platform])
+  @@schema("icecream")
+}
+
+/// Per release and platform: a found album waiting for the artist ("pending"), a link that stopped opening
+/// ("broken"), or the artist saying it is not out there yet ("waiting"). Found links themselves live in the smart link.
+model release_platform_matches {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  release_id String    @db.Uuid
+  platform   String    @db.VarChar(32)
+  status     String    @db.VarChar(16)
+  candidates Json      @default("[]")
+  rejected   Json      @default("[]")
+  last_url   String?
+  failures   Int       @default(0)
+  checked_at DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime  @updatedAt @db.Timestamptz(6)
+  release    release   @relation(fields: [release_id], references: [id], onDelete: Cascade)
+
+  @@unique([release_id, platform])
+  @@index([status])
+  @@schema("icecream")
+}
+
 model smart_link_events {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   release_id   String   @db.Uuid
@@ -668,6 +713,7 @@ model release {
   partner_code_usages          partner_code_usages[]
   promo_links                  promo_links[]
   smart_link_events            smart_link_events[]
+  platform_matches             release_platform_matches[]
   free_release_claim           free_release_claims?
   promo_submissions            promo_submissions[]
   royalty                      royalty[]
@@ -1143,6 +1189,7 @@ model user {
   orders                       orders[]
   partnerCodeUsages            partner_code_usages[]
   vk_link                      vk_links?
+  artist_platform_profiles     artist_platform_profiles[]
   oauth_accounts               oauth_accounts[]
   notification_settings        user_notification_settings?
   notification_reminders       user_notification_reminders[]

@@ -38,7 +38,9 @@ export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionD
     label: data.label,
     persons: data.persons.map((person) => ({
       name: person.name,
-      role: person.role
+      role: person.role,
+      ...(person.platformProfiles?.length ? { platformProfiles: person.platformProfiles } : {}),
+      ...(person.isNewArtist ? { isNewArtist: true } : {})
     })),
     upc: data.upc,
     partnerCode: data.partnerCode,

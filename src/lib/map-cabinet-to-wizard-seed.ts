@@ -63,7 +63,9 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
       persons: submission.persons.map((person) => ({
         id: crypto.randomUUID(),
         name: person.name,
-        role: person.role
+        role: person.role,
+        ...(person.platformProfiles?.length ? { platformProfiles: person.platformProfiles } : {}),
+        ...(person.isNewArtist ? { isNewArtist: true } : {})
       })),
       upc: createsCopy ? "" : submission.upc?.trim() || "",
       partnerCode: submission.partnerCode?.trim() || "",

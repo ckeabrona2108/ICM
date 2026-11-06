@@ -8,6 +8,7 @@ import { buildStoredFileRouteUrl } from "@/lib/file-resolver";
 import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
 import { retryPrismaSerializationConflict } from "@/lib/prisma-errors";
 import {
+  detectSmartLinkPlatform,
   getSmartLinkPlatformLabel,
   SMART_LINK_PRIMARY_PLATFORM_CODES,
   SMART_LINK_PLATFORM_CODES
@@ -2093,21 +2094,6 @@ function getMissingAutofillCodes(state: SmartLinkState): string[] {
   });
 }
 
-/** Owner-triggered search: returns found links without saving, the editor merges them into the draft. */
-export async function findSmartLinkLinksForOwner(params: {
-  userId: string;
-  releaseId: string;
-}): Promise<{ upc: string | null; found: Record<string, string> } | null> {
-  if (!isUuidLike(params.releaseId)) return null;
-  const release = await prisma.release.findFirst({
-    where: { id: params.releaseId, userId: params.userId },
-    select: { upc: true }
-  });
-  if (!release) return null;
-  const upc = normalizeSmartLinkUpc(release.upc);
-  return { upc, found: upc ? await findSmartLinkPlatformLinksByUpc(upc) : {} };
-}
-
 /**
  * After the release date, fills platforms that still have no link from the UPC search.
  * Called fire-and-forget on page views; retries at most every 6 hours per release and never
@@ -2170,4 +2156,75 @@ async function autofillSmartLink(slug: string, now: Date): Promise<void> {
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
   );
+}
+
+/** Current platform links of a release, for the "Найти мои релизы" table. */
+export function readReleasePlatformLinks(roles: unknown): Record<string, SmartLinkPlatformConfig> {
+  return readSmartLinkState(roles, getDefaultFollowLinks({}), normalizeSelectedPlatforms(roles)).platformLinks;
+}
+
+/**
+ * Saves links found on platforms. By default only fills platforms that have no link and were not hidden;
+ * `overwrite` lists platforms the artist explicitly chose a link for (confirm / paste).
+ * Returns the platforms that actually changed.
+ */
+export async function saveDiscoveredPlatformLinks(params: {
+  releaseId: string;
+  links: Record<string, string>;
+  overwrite?: string[];
+  now?: Date;
+}): Promise<string[]> {
+  const overwrite = new Set(params.overwrite ?? []);
+  let changed: string[] = [];
+  await retryPrismaSerializationConflict(() =>
+    prisma.$transaction(async (tx) => {
+      const release = await tx.release.findUnique({
+        where: { id: params.releaseId },
+        select: { roles: true, user: { select: { telegram: true, vk: true, personalSiteUrl: true } } }
+      });
+      if (!release) return;
+      const selected = normalizeSelectedPlatforms(release.roles);
+      const current = readSmartLinkState(release.roles, getDefaultFollowLinks(release.user), selected);
+      const platforms = Object.entries(params.links)
+        .map(([code, raw]) => ({ code, url: normalizeSmartLinkHref(raw) }))
+        .filter(({ code, url }) => {
+          if (!url || detectSmartLinkPlatform(url) !== code) return false;
+          const item = current.platformLinks[code];
+          if (overwrite.has(code)) return item?.url !== url;
+          return !item?.url && item?.status !== "hidden";
+        })
+        .map(({ code, url }) => ({ code, url, status: "live" as const }));
+      changed = platforms.map((item) => item.code);
+      if (platforms.length === 0) return;
+      const next = applySmartLinkOwnerInput(current, { platforms }, selected);
+      if (params.now) next.autofillCheckedAt = params.now.toISOString();
+      await tx.release.update({ where: { id: params.releaseId }, data: { roles: writeSmartLinkState(release.roles, next) } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  );
+  return changed;
+}
+
+/** Removes a link that stopped opening, but only if it is still the one we checked. */
+export async function clearPlatformLinkIfUnchanged(params: { releaseId: string; code: string; url: string }): Promise<boolean> {
+  let cleared = false;
+  await retryPrismaSerializationConflict(() =>
+    prisma.$transaction(async (tx) => {
+      const release = await tx.release.findUnique({
+        where: { id: params.releaseId },
+        select: { roles: true, user: { select: { telegram: true, vk: true, personalSiteUrl: true } } }
+      });
+      if (!release) return;
+      const selected = normalizeSelectedPlatforms(release.roles);
+      const current = readSmartLinkState(release.roles, getDefaultFollowLinks(release.user), selected);
+      const item = current.platformLinks[params.code];
+      if (!item || item.url !== params.url) return;
+      const next: SmartLinkState = {
+        ...current,
+        platformLinks: { ...current.platformLinks, [params.code]: { ...item, url: null, status: "soon" } }
+      };
+      await tx.release.update({ where: { id: params.releaseId }, data: { roles: writeSmartLinkState(release.roles, next) } });
+      cleared = true;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+  );
+  return cleared;
 }

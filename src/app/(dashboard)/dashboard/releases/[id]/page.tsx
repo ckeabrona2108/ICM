@@ -14,7 +14,6 @@ import { prisma } from "@/lib/prisma";
 import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
 import Link from "next/link";
-import { ReleaseSceneSettingsClient } from "@/components/releases/release-scene-settings-client";
 import { ReleasePaymentPanel } from "@/components/releases/release-payment-panel";
 import { describeYooKassaCancellation } from "@/lib/release-payment-followup";
 
@@ -129,13 +128,6 @@ export default async function ReleaseDetailsPage({
             <Row label="Лейбл" value={release.label || "—"} />
             <Row label="Жанр" value={release.genre || "—"} />
             <Row label="Треков" value={String(release.tracks.length)} />
-            {release.status === "approved" || release.status === "distributed" ? (
-              <ReleaseSceneSettingsClient
-                releaseId={release.id}
-                tracks={release.tracks}
-                initialState={release.sceneShowcase!}
-              />
-            ) : null}
           </CardContent>
         </Card>
 

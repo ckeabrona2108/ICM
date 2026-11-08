@@ -25,6 +25,7 @@ import { SnippetShowcase } from "@/components/landing/snippet-showcase";
 import { TestimonialsColumns } from "@/components/landing/testimonials-columns";
 import { StandaloneSessionRedirect } from "@/components/pwa/standalone-session-redirect";
 import { authOptions } from "@/lib/auth";
+import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import {
   AppleMusicLogo,
   SoundCloudLogo,
@@ -303,25 +304,26 @@ export default async function HomePage() {
               Релиз на 240+ площадок, смарт-линки со сниппетами, промо и аналитика. Всё,
               чтобы вашу музыку не просто выпустили, а услышали.
             </p>
-            <div className="mt-10 flex flex-wrap items-center gap-3">
+            <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-3">
               <Link
                 href="/register"
-                className="free-chip group relative inline-flex max-w-full items-center gap-2.5 rounded-full p-1.5 shadow-[0_12px_36px_-14px_rgba(167,139,250,0.75)] transition-transform duration-200 hover:-translate-y-0.5"
+                className="group inline-flex w-full items-center justify-center gap-2.5 rounded-2xl bg-[#7b61ff] px-6 py-4 text-[16px] font-semibold text-white transition-colors hover:bg-[#6a4ff0] sm:w-auto sm:px-7"
               >
-                <span className="free-chip-shine relative shrink-0 overflow-hidden whitespace-nowrap rounded-full bg-gradient-to-br from-[#c4b5fd] via-[#8b72ff] to-[#6d4dff] px-2.5 py-1 text-[12.5px] font-bold tabular-nums text-white">
-                  0 ₽
-                </span>
-                <span className="min-w-0 text-[14px] font-semibold text-white sm:text-[15px]">
-                  Первый релиз бесплатно
-                </span>
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#7b61ff] px-3.5 py-1.5 text-[13px] font-semibold text-white transition-colors group-hover:bg-[#6a4ff0]">
-                  Начать
-                  <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                </span>
+                Выпустить релиз бесплатно
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
+              <div className="flex items-baseline justify-center gap-2 leading-tight sm:block">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[17px] font-semibold tabular-nums text-white sm:text-[24px]">0 ₽</span>
+                  <span className="text-[14px] tabular-nums text-white/40 line-through sm:text-[15px]">
+                    {RELEASE_BASE_PRICE_RUB} ₽
+                  </span>
+                </div>
+                <div className="text-[13px] text-white/55 sm:mt-0.5">за первый релиз</div>
+              </div>
               <a
                 href="#company"
-                className="inline-flex items-center gap-2 rounded-xl px-5 py-3.5 text-[15px] font-medium text-white/85 transition-colors hover:text-white"
+                className="hidden items-center gap-2 py-2 text-[15px] font-medium text-white/85 transition-colors hover:text-white sm:inline-flex"
               >
                 Узнать больше
                 <ArrowRight className="h-4 w-4" />

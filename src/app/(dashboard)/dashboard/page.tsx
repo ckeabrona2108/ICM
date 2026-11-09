@@ -16,6 +16,7 @@ import {
   Wallet
 } from "lucide-react";
 
+import { CabinetNoticeBanner } from "@/components/dashboard/cabinet-notice-banner";
 import { FreeReleaseCard } from "@/components/dashboard/free-release-card";
 import { VkMessagesCard } from "@/components/dashboard/vk-messages-card";
 import { OverviewStreamsChart } from "@/components/dashboard/overview-streams-chart";
@@ -24,8 +25,10 @@ import { PageHeader } from "@/components/layout/page-header";
 import { GlazePluginsBanner } from "@/components/plugins/glaze-plugins-banner";
 import { StatusBadge } from "@/components/releases/status-badge";
 import { authOptions } from "@/lib/auth";
+import { readCabinetNotice, visibleCabinetNotice } from "@/lib/cabinet-notice";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { getDashboardOverview } from "@/lib/dashboard-overview";
+import { prisma } from "@/lib/prisma";
 
 const TILE =
   "rounded-[24px] border border-white/[0.09] bg-[#13151d] p-5 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.9)]";
@@ -67,7 +70,10 @@ export default async function DashboardPage() {
     redirect("/admin");
   }
 
-  const overview = await getDashboardOverview(session.user.id);
+  const [overview, cabinetNotice] = await Promise.all([
+    getDashboardOverview(session.user.id),
+    readCabinetNotice(prisma).then(visibleCabinetNotice)
+  ]);
   const firstName = session.user.name?.trim().split(/\s+/)[0];
   const streams = overview.streams;
   const releases = overview.releases;
@@ -88,6 +94,8 @@ export default async function DashboardPage() {
           </Link>
         }
       />
+
+      {cabinetNotice ? <CabinetNoticeBanner notice={cabinetNotice} /> : null}
 
       <Suspense fallback={null}>
         <FreeReleaseCard />

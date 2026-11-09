@@ -15,6 +15,7 @@ import {
 	  Flag,
 	  Headset,
 	  LogOut,
+  Megaphone,
   Music2,
 	  UserRound,
   Verified
@@ -26,6 +27,7 @@ import { cn } from "@/lib/utils";
 const items = [
   { href: "/admin", label: "Дашборд", icon: FileText },
   { href: "/admin/news", label: "Новости сервиса", icon: FileText },
+  { href: "/admin/cabinet-notice", label: "Срочное уведомление", icon: Megaphone },
   { href: "/admin/users", label: "Пользователи", icon: UserRound },
   { href: "/admin/releases", label: "Релизы", icon: Music2 },
   { href: "/admin/ai-tokens", label: "AI-токены пользователей", icon: CreditCard },

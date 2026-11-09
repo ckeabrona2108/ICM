@@ -11,6 +11,7 @@ import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { prisma } from "@/lib/prisma";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { getUserReleaseQuota } from "@/lib/release-quota";
+import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionOverview, type EffectivePlan } from "@/lib/subscription-limits";
 
 type TariffId = "standard" | "pro" | "enterprise";
@@ -71,7 +72,7 @@ export default async function SubscriptionPage({
           lastAiResetDay: null
         },
         pricing: {
-          release: 350,
+          release: RELEASE_BASE_PRICE_RUB,
           text: 75,
           karaokeText: 75,
           videoShot: 0,

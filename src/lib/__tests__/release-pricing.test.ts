@@ -6,7 +6,7 @@ import { calculateReleasePrice } from "@/lib/release-pricing";
 test("a release without extras costs the base price", () => {
   const price = calculateReleasePrice([{ text: null }, { text: "   " }]);
 
-  assert.equal(price.totalRub, 350);
+  assert.equal(price.totalRub, 450);
   assert.deepEqual(price.lines.map((line) => line.kind), ["base"]);
 });
 
@@ -14,7 +14,7 @@ test("extras are charged per track", () => {
   const tracks = Array.from({ length: 10 }, () => ({ text: "Куплет" }));
   const price = calculateReleasePrice(tracks);
 
-  assert.equal(price.totalRub, 350 + 750);
+  assert.equal(price.totalRub, 450 + 750);
   assert.deepEqual(price.lines[1], { kind: "lyrics", label: "Текст трека", unitRub: 75, count: 10, amountRub: 750 });
 });
 
@@ -24,12 +24,12 @@ test("lyrics, karaoke and video add up", () => {
     { text: "Припев" }
   ]);
 
-  assert.equal(price.totalRub, 350 + 2 * 75 + 75 + 150);
+  assert.equal(price.totalRub, 450 + 2 * 75 + 75 + 150);
 });
 
 test("one video per track even when both video columns are filled", () => {
   const price = calculateReleasePrice([{ video: null, video_shot: "video/legacy.mp4" }]);
 
-  assert.equal(price.totalRub, 350 + 150);
+  assert.equal(price.totalRub, 450 + 150);
   assert.equal(price.lines[1]?.count, 1);
 });

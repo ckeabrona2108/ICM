@@ -6,6 +6,7 @@ import { Reveal } from "@/components/landing/reveal";
 import { IcmTariffCard } from "@/components/tariffs/icm-tariff-card";
 import { SubscriptionPeriodToggle } from "@/components/tariffs/subscription-period-toggle";
 import { getIcmTariffs } from "@/lib/icm-tariffs";
+import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import type { SubscriptionBillingPeriod } from "@/lib/subscription-billing";
 
 export function LandingSubscriptionSection() {
@@ -44,6 +45,13 @@ export function LandingSubscriptionSection() {
             />
           ))}
         </div>
+      </Reveal>
+
+      <Reveal delay={0.1} className="mt-6 text-center">
+        <p className="text-[14px] text-white/55 sm:text-[15px]">
+          Без подписки — <span className="font-semibold text-white">{RELEASE_BASE_PRICE_RUB} ₽ за релиз</span>: сингл,
+          EP или альбом. Первый сингл — бесплатно.
+        </p>
       </Reveal>
     </section>
   );

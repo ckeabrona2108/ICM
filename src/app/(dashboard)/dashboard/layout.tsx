@@ -15,6 +15,7 @@ import { getUserBalanceTotals } from "@/lib/finance-service";
 import { prisma } from "@/lib/prisma";
 import { isPrismaConnectionError, isPrismaPoolTimeoutError, isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { getReleaseSidebarCountsForUser } from "@/lib/release-counts";
+import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionOverview } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
 
@@ -150,7 +151,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             aiEnabled: false
           },
           pricing: {
-            release: 350,
+            release: RELEASE_BASE_PRICE_RUB,
             text: 75,
             karaokeText: 75,
             videoShot: 0,

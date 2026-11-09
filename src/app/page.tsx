@@ -321,13 +321,6 @@ export default async function HomePage() {
                 </div>
                 <div className="text-[13px] text-white/55 sm:mt-0.5">за первый релиз</div>
               </div>
-              <a
-                href="#company"
-                className="hidden items-center gap-2 py-2 text-[15px] font-medium text-white/85 transition-colors hover:text-white sm:inline-flex"
-              >
-                Узнать больше
-                <ArrowRight className="h-4 w-4" />
-              </a>
             </div>
 
             <div

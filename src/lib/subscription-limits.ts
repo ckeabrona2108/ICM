@@ -6,6 +6,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { addDays, addMonths } from "date-fns";
 import { isPrismaConnectionError, isPrismaPoolTimeoutError, isPrismaTableMissingError } from "@/lib/prisma-errors";
+import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionEffectiveEndDate } from "@/lib/subscription-service";
 
 export type EffectivePlan = "STANDARD" | "PRO" | "ENTERPRISE";
@@ -70,7 +71,7 @@ type SubscriptionPlan = "STANDARD" | "PRO" | "ENTERPRISE" | "LABEL";
 type SubscriptionStatus = "ACTIVE" | "TRIALING" | "CANCELED";
 
 const PAYG_PRICING: PlanPricing = {
-  release: 350,
+  release: RELEASE_BASE_PRICE_RUB,
   text: 75,
   karaokeText: 75,
   videoShot: 0,

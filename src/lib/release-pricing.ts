@@ -1,6 +1,6 @@
 /** Pay-as-you-go release price: a base fee plus per-track extras.
  * Subscribers within their release quota never reach this price. */
-export const RELEASE_BASE_PRICE_RUB = 350;
+export const RELEASE_BASE_PRICE_RUB = 450;
 export const RELEASE_LYRICS_PRICE_RUB = 75;
 export const RELEASE_KARAOKE_PRICE_RUB = 75;
 export const RELEASE_VIDEO_PRICE_RUB = 150;

@@ -3,6 +3,12 @@ import { getServerSession } from "next-auth";
 import * as xlsx from "xlsx";
 
 import { authOptions } from "@/lib/auth";
+import {
+  detectPlaylistPlatform,
+  matchPlaylistRowToRelease,
+  parsePlaylistReportRow,
+  placementTrackKey
+} from "@/lib/playlist-import";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(request: Request) {
@@ -16,80 +22,101 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
-    const file = formData.get("file") as File;
-    const platform = formData.get("platform") as string;
+    const file = formData.get("file");
+    const selectedPlatform = String(formData.get("platform") ?? "").trim();
+    // "Full report": placements of this platform that are not in the file have left their playlists.
+    const removeMissing = formData.get("removeMissing") === "1";
 
-    if (!file || !platform) {
-      return NextResponse.json({ error: "Не указан файл или площадка" }, { status: 400 });
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "Не выбран файл" }, { status: 400 });
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = xlsx.read(arrayBuffer, { type: "array" });
-    const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
-    const rows: any[] = xlsx.utils.sheet_to_json(worksheet);
+    const workbook = xlsx.read(await file.arrayBuffer(), { type: "array" });
+    const worksheet = workbook.Sheets[workbook.SheetNames[0]!];
+    const rawRows = worksheet ? xlsx.utils.sheet_to_json<Record<string, unknown>>(worksheet) : [];
 
-    let successCount = 0;
-    let errorCount = 0;
+    let skipped = 0;
+    let added = 0;
+    let updated = 0;
+    const unmatched: Array<{ artistName: string; trackTitle: string; playlistName: string }> = [];
+    const seen = new Map<string, Set<string>>();
 
-    for (const row of rows) {
-      const upcRaw = row["UPC"] || row["ISRC"] || "";
-      const upc = String(upcRaw).trim();
-      const artistName = String(row["Артист"] || "").trim();
-      const trackTitle = String(row["Наименование"] || row["Трек"] || "").trim();
-      const position = String(row["Позиция"] || "").trim();
-      const playlistName = String(row["Плейлист"] || "").trim();
-      const playlistUrl = String(row["Ссылка на"] || row["Ссылка"] || row["Ссылка на плейлист"] || "").trim();
-
-      if (!upc || !playlistName || !playlistUrl) {
-        errorCount++;
+    for (const raw of rawRows) {
+      const row = parsePlaylistReportRow(raw);
+      const platform = selectedPlatform || (row ? detectPlaylistPlatform(row.playlistUrl) : null);
+      if (!row || !platform) {
+        skipped++;
         continue;
       }
 
-      // Находим релиз по UPC для привязки к пользователю
-      const release = await prisma.release.findFirst({
-        where: { upc: upc },
-        select: { id: true, userId: true }
-      });
+      const match = await matchPlaylistRowToRelease(prisma, row);
+      if (!match) {
+        unmatched.push({ artistName: row.artistName, trackTitle: row.trackTitle, playlistName: row.playlistName });
+      }
+
+      const key = placementTrackKey(row);
+      const data = {
+        artistName: row.artistName || null,
+        trackTitle: row.trackTitle || null,
+        position: row.position || null,
+        playlistName: row.playlistName,
+        releaseId: match?.releaseId ?? null,
+        userId: match?.userId ?? null
+      };
 
       try {
-        // @ts-ignore: модель будет добавлена пользователем
-        await prisma.playlist_placements.upsert({
-          where: {
-            platform_upc_playlistUrl: {
-              platform: platform,
-              upc: upc,
-              playlistUrl: playlistUrl
-            }
-          },
-          update: {
-            artistName,
-            trackTitle,
-            position,
-            playlistName,
-            releaseId: release?.id || null,
-            userId: release?.userId || null
-          },
-          create: {
-            platform,
-            upc,
-            artistName,
-            trackTitle,
-            position,
-            playlistName,
-            playlistUrl,
-            releaseId: release?.id || null,
-            userId: release?.userId || null
-          }
+        const existing = await prisma.playlist_placements.findUnique({
+          where: { platform_upc_playlistUrl: { platform, upc: key, playlistUrl: row.playlistUrl } },
+          select: { id: true, releaseId: true, userId: true }
         });
-        successCount++;
-      } catch (e) {
-        console.error("[playlists] Failed to insert placement", e);
-        errorCount++;
+        if (existing) {
+          await prisma.playlist_placements.update({
+            where: { id: existing.id },
+            // A placement the admin tied by hand keeps that link when the file finds nothing.
+            data: match ? data : { ...data, releaseId: existing.releaseId, userId: existing.userId }
+          });
+          updated++;
+        } else {
+          await prisma.playlist_placements.create({
+            data: { ...data, platform, upc: key, playlistUrl: row.playlistUrl }
+          });
+          added++;
+        }
+        const ids = seen.get(platform) ?? new Set<string>();
+        ids.add(`${key}\u0000${row.playlistUrl}`);
+        seen.set(platform, ids);
+      } catch (error) {
+        console.error("[playlists] Failed to save placement", error);
+        skipped++;
       }
     }
 
-    return NextResponse.json({ ok: true, successCount, errorCount });
+    let removed = 0;
+    if (removeMissing) {
+      for (const [platform, keep] of seen) {
+        const current = await prisma.playlist_placements.findMany({
+          where: { platform },
+          select: { id: true, upc: true, playlistUrl: true }
+        });
+        const stale = current.filter((item) => !keep.has(`${item.upc}\u0000${item.playlistUrl}`)).map((item) => item.id);
+        if (stale.length > 0) {
+          const result = await prisma.playlist_placements.deleteMany({ where: { id: { in: stale } } });
+          removed += result.count;
+        }
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      added,
+      updated,
+      removed,
+      skipped,
+      unmatched,
+      // Kept for older clients of this endpoint.
+      successCount: added + updated,
+      errorCount: skipped
+    });
   } catch (error) {
     console.error("[playlists] Upload error:", error);
     return NextResponse.json({ error: "Ошибка при загрузке" }, { status: 500 });

@@ -44,6 +44,7 @@ test("authenticated playlist access scopes records to the session user", async (
 
   const response = await buildPlaylistsResponse({
     session: { user: { id: "user_1" } },
+    loadMeta: async () => new Map(),
     prismaClient: {
       playlist_placements: {
         findMany: async (args: { where: unknown; orderBy: unknown }) => {
@@ -61,7 +62,50 @@ test("authenticated playlist access scopes records to the session user", async (
   assert.deepEqual(await response.json(), {
     placements: [{
       ...placements[0],
+      releaseTitle: null,
+      playlistCoverUrl: null,
+      playlistFollowers: null,
       createdAt: "2026-07-30T10:00:00.000Z"
     }]
   });
+});
+
+test("a placement imported without UPC shows the release's UPC, not the internal key", async () => {
+  const response = await buildPlaylistsResponse({
+    session: { user: { id: "user_1" } },
+    loadMeta: async () => new Map(),
+    prismaClient: {
+      playlist_placements: {
+        findMany: async () => [
+          {
+            id: "p2",
+            upc: "track:phil mahart|портреты",
+            release: { title: "Портреты", upc: "5063635044004" },
+            createdAt: new Date("2026-11-09T10:00:00.000Z")
+          },
+          { id: "p3", upc: "track:a|b", release: null, createdAt: new Date("2026-11-09T10:00:00.000Z") }
+        ]
+      }
+    } as never
+  });
+  const body = (await response.json()) as { placements: Array<{ upc: string; releaseTitle: string | null }> };
+  assert.equal(body.placements[0]?.upc, "5063635044004");
+  assert.equal(body.placements[0]?.releaseTitle, "Портреты");
+  assert.equal(body.placements[1]?.upc, "");
+});
+
+test("each placement gets its playlist cover and followers", async () => {
+  const url = "https://music.yandex.ru/users/yandexmusic/playlists/1131";
+  const response = await buildPlaylistsResponse({
+    session: { user: { id: "user_1" } },
+    loadMeta: async () => new Map([[url, { coverUrl: "https://avatars.yandex.net/x/400x400", followers: 10064 }]]),
+    prismaClient: {
+      playlist_placements: {
+        findMany: async () => [{ id: "p1", upc: "1", playlistUrl: url, release: null, createdAt: new Date() }]
+      }
+    } as never
+  });
+  const body = (await response.json()) as { placements: Array<{ playlistCoverUrl: string; playlistFollowers: number }> };
+  assert.equal(body.placements[0]?.playlistCoverUrl, "https://avatars.yandex.net/x/400x400");
+  assert.equal(body.placements[0]?.playlistFollowers, 10064);
 });

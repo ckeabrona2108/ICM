@@ -679,3 +679,24 @@ export function parseArtistProfileUrl(platform: string, input: string): { extern
   parsed.hash = "";
   return { externalId: id, url: parsed.toString() };
 }
+
+export interface YandexPlaylistInfo {
+  title: string | null;
+  coverUrl: string | null;
+  /** Yandex shows a playlist's likes as its followers. */
+  followers: number | null;
+}
+
+/** Cover and followers of a public Yandex Music playlist (`/users/{owner}/playlists/{kind}`). */
+export async function getYandexPlaylistInfo(owner: string, kind: string): Promise<YandexPlaylistInfo | null> {
+  const result = await yandexGet(`users/${encodeURIComponent(owner)}/playlists/${encodeURIComponent(kind)}`);
+  if (!result) return null;
+  const cover = asRecord(result.cover);
+  const coverUri =
+    asText(cover?.uri) ?? asText(asArray(cover?.itemsUri)[0]) ?? asText(result.ogImage) ?? null;
+  return {
+    title: asText(result.title),
+    coverUrl: yandexImage(coverUri, "400x400"),
+    followers: asCount(result.likesCount)
+  };
+}

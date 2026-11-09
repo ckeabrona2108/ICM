@@ -43,6 +43,7 @@ import {
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
 import { findPaidPredecessorRelease, withReleaseResubmission } from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import {
   buildSubmitTrackDiagnostics,
   buildTrackCreateManyInput,
@@ -352,7 +353,7 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
             ...baseReleaseData,
             confirmed: params.confirmed,
             status: params.status,
-            roles: params.roles
+            roles: withReleaseTimelineStamp(params.roles, "submittedAt") as Prisma.InputJsonValue
           }
         });
         // Edit tracks in place instead of delete + create: track ids are kept, so royalty

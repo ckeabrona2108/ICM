@@ -16,6 +16,20 @@ import { formatAiTokenAmount } from "@/lib/ai-studio";
 import { cn } from "@/lib/utils";
 import type { UserArtistProfileSettings } from "@/lib/artist-profile-service";
 
+function formatMoscow(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 type FinanceReportStatusValue = "READY_TO_CONFIRM" | "AGREED";
 type ReleaseStatusFilterValue = "moderating" | "approved" | "rejected";
 type TransactionStatusValue = "COMPLETED" | "FAILED" | "PENDING" | "PROCESSING";
@@ -26,8 +40,9 @@ type UserReleasesPayload = {
     id: string;
     title: string;
     status: string;
-    createdAt: string;
-    updatedAt: string;
+    releaseDate: string;
+    createdAt: string | null;
+    updatedAt: string | null;
     moderationStartedAt: string | null;
     approvedAt: string | null;
     rejectedAt: string | null;
@@ -549,7 +564,7 @@ export function AdminUserDetailClient({
               <p>ID: {profile.id}</p>
               <p>Роль: {profile.role}</p>
               <p>Статус аккаунта: {profile.accountStatus}</p>
-              <p>Дата регистрации: {new Date(profile.createdAt).toLocaleString("ru-RU")}</p>
+              <p>Дата регистрации: {new Date(profile.createdAt).getTime() > 0 ? formatMoscow(profile.createdAt) : "неизвестна"}</p>
               <p>Подписка: {profile.subscriptionPlan ?? "Нет"} {profile.subscriptionStatus ?? ""}</p>
               <p>Баланс: {formatRubCurrency(profile.balance)}</p>
               <p>AI-токены: {formatAiTokenAmount(profile.aiTokenBalance)}</p>
@@ -978,18 +993,15 @@ export function AdminUserDetailClient({
                 <div>
                   <p className="text-[15px] font-medium text-white">{release.title}</p>
                   <p className="text-[12px] text-white/55">
-                    Создан: {new Date(release.createdAt).toLocaleString("ru-RU")} · Обновлен:{" "}
-                    {new Date(release.updatedAt).toLocaleString("ru-RU")}
+                    Дата выхода: {new Date(release.releaseDate).toLocaleDateString("ru-RU", { timeZone: "UTC" })}
+                    {release.createdAt ? ` · Создан: ${formatMoscow(release.createdAt)}` : ""}
+                    {release.updatedAt ? ` · Изменён: ${formatMoscow(release.updatedAt)}` : ""}
                   </p>
                   <p className="text-[12px] text-white/45">
-                    Отправлен:{" "}
-                    {release.moderationStartedAt
-                      ? new Date(release.moderationStartedAt).toLocaleString("ru-RU")
-                      : "—"}{" "}
-                    · Принят:{" "}
-                    {release.approvedAt ? new Date(release.approvedAt).toLocaleString("ru-RU") : "—"}{" "}
-                    · Отклонён:{" "}
-                    {release.rejectedAt ? new Date(release.rejectedAt).toLocaleString("ru-RU") : "—"}
+                    Отправлен: {formatMoscow(release.moderationStartedAt) || "—"}
+                    {release.approvedAt ? ` · Принят: ${formatMoscow(release.approvedAt)}` : ""}
+                    {release.rejectedAt ? ` · Отклонён: ${formatMoscow(release.rejectedAt)}` : ""}
+                    <span className="text-white/30"> (МСК)</span>
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

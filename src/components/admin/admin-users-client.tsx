@@ -178,7 +178,7 @@ export function AdminUsersClient({ initialData }: { initialData: AdminUsersListR
                     </td>
                     <td className="px-3 py-3 text-[12px] text-white/65">{user.id}</td>
                     <td className="px-3 py-3 text-[13px] text-white/75">
-                      {new Date(user.createdAt).toLocaleDateString("ru-RU")}
+                      {new Date(user.createdAt).getTime() > 0 ? new Date(user.createdAt).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow" }) : "неизвестна"}
                     </td>
                     <td className="px-3 py-3 text-[13px] text-white/75">
                       {user.subscriptionPlan && user.subscriptionStatus

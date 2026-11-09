@@ -6,6 +6,7 @@ import { deliverUserNotificationSafely } from "@/lib/notification-delivery-servi
 import { buildReleaseApprovedVkMessage, RELEASE_APPROVED_VK_HREF } from "@/lib/vk-messages";
 import type { ModerationRemark } from "@/lib/cabinet-types";
 import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { markFreeReleaseConsumed } from "@/lib/free-release";
 import {
   findPaidPredecessorRelease,
@@ -211,7 +212,7 @@ async function mergeResubmittedCopyIntoSource(params: {
         upc: params.upc,
         rejectReason: null,
         moderatorComment: null,
-        roles: mergedRoles ?? (sourceRoles as Prisma.InputJsonValue)
+        roles: withReleaseTimelineStamp(mergedRoles ?? sourceRoles, "approvedAt") as Prisma.InputJsonValue
       }
     });
 
@@ -350,7 +351,7 @@ export async function approveReleaseByAdmin(params: {
       upc: normalizedUpc,
       rejectReason: null,
       moderatorComment: null,
-      roles: resetNeedsChangesFlags(release.roles)
+      roles: withReleaseTimelineStamp(resetNeedsChangesFlags(release.roles) ?? release.roles, "approvedAt") as Prisma.InputJsonValue
     }
   });
   await markFreeReleaseConsumed(params.prisma, params.releaseId);
@@ -434,7 +435,11 @@ export async function rejectReleaseByAdmin(params: {
       rejectReason: reason,
       moderatorComment: reason,
       roles: withAdminReleaseChangesRequiredState(
-        release.roles,
+        withReleaseTimelineStamp(
+          release.roles,
+          params.action === "request_changes" ? "changesRequestedAt" : "rejectedAt",
+          new Date(returnedAt)
+        ),
         reason,
         {
           remarks: moderationRemarks,

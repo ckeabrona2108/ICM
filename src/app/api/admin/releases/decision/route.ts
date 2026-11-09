@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin-release-service";
 import { markFreeReleaseConsumed } from "@/lib/free-release";
 import { prisma } from "@/lib/prisma";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import { buildReleaseApprovedVkMessage, RELEASE_APPROVED_VK_HREF } from "@/lib/vk-messages";
 
@@ -125,7 +126,7 @@ export async function POST(request: Request) {
         upc: upc ?? release.upc,
         rejectReason: null,
         moderatorComment: null,
-        roles: (resetNeedsChangesFlags(release.roles) ?? undefined) as Prisma.InputJsonValue | undefined
+        roles: withReleaseTimelineStamp(resetNeedsChangesFlags(release.roles) ?? release.roles, "approvedAt") as Prisma.InputJsonValue
       }
     });
     await markFreeReleaseConsumed(prisma, release.id);
@@ -172,7 +173,11 @@ export async function POST(request: Request) {
       rejectReason: comment,
       moderatorComment: comment,
       roles: withAdminReleaseChangesRequiredState(
-        release.roles,
+        withReleaseTimelineStamp(
+          release.roles,
+          parsed.data.action === "reject" ? "rejectedAt" : "changesRequestedAt",
+          moderationReturnedAt
+        ),
         comment,
         {
           remarks,

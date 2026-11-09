@@ -8,6 +8,12 @@ import {
 } from "@/lib/release-counts";
 import { buildReleaseCoverCandidateUrls } from "@/lib/release-cover";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
+import {
+  formatMoscowDateTime,
+  isMergedResubmissionCopy,
+  loadReleaseDecisionDates,
+  readReleaseTimeline
+} from "@/lib/release-timeline";
 import { getReleaseResubmission, readReleaseUpc } from "@/lib/release-resubmission";
 
 export type AdminReleaseStatusFilter =
@@ -23,10 +29,6 @@ function formatDate(value: Date): string {
   const mm = String(value.getUTCMonth() + 1).padStart(2, "0");
   const yyyy = value.getUTCFullYear();
   return `${dd}.${mm}.${yyyy}`;
-}
-
-function formatDateTime(value: Date): string {
-  return value.toISOString().slice(0, 16).replace("T", " ");
 }
 
 export function toAdminStatus(status: string, roles?: unknown): AdminReleaseStatus {
@@ -178,9 +180,11 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
       rejectReason: true,
       moderatorComment: true,
       userId: true,
+      moderationStartedAt: true,
       user: {
         select: {
           name: true,
+          email: true,
           isAdmin: true
         }
       },
@@ -214,8 +218,15 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
     paidReleaseByUserUpc.set(`${release.userId}:${upc}`, { id: release.id, title: release.title });
   }
 
+  const decisionDates = await loadReleaseDecisionDates(
+    prisma,
+    releases.map((release) => release.id)
+  );
+
   const mapped = await Promise.all(
     releases
+      // A resubmitted copy merged into its original lives on as the original: listing it too duplicates the release.
+      .filter((release) => !isMergedResubmissionCopy(release.roles))
       .filter((release) => {
       const resolvedUpc = resolveReleaseUpc({
         upc: release.upc,
@@ -284,6 +295,10 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
       ]);
       const resolvedCover = { url: coverCandidates[0] ?? null, storageKey: null, candidateUrls: coverCandidates };
       const deletionState = getReleaseDeletionState(source.roles);
+      const timeline = readReleaseTimeline(source.roles, {
+        moderationStartedAt: source.moderationStartedAt,
+        decisions: decisionDates.get(source.id)
+      });
       const onModeration = isActuallyOnModeration(source);
       const resubmissionMarker = getReleaseResubmission(source.roles);
       const predecessor = resolvedUpc ? paidReleaseByUserUpc.get(`${source.userId}:${resolvedUpc}`) : undefined;
@@ -318,9 +333,14 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         platformsCount: 0,
         genre: source.genre,
         status: accepted ? "approved" : toAdminStatus(source.status, source.roles),
-        submittedAt: formatDateTime(source.date),
-        approvedAt: source.status === "approved" ? formatDateTime(source.date) : undefined,
-        rejectedAt: source.status === "rejected" ? formatDateTime(source.date) : undefined,
+        owner: { id: source.userId, name: source.user.name, email: source.user.email },
+        createdAt: formatMoscowDateTime(timeline.createdAt) || undefined,
+        submittedAt: formatMoscowDateTime(timeline.submittedAt) || undefined,
+        approvedAt: accepted ? formatMoscowDateTime(timeline.approvedAt) || undefined : undefined,
+        rejectedAt:
+          source.status === "rejected"
+            ? formatMoscowDateTime(timeline.rejectedAt ?? timeline.changesRequestedAt) || undefined
+            : undefined,
         rejectionReason: source.rejectReason ?? undefined,
         moderationComment: source.moderatorComment ?? undefined,
         moderationRemarks: undefined,

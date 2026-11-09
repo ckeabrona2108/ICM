@@ -4,6 +4,8 @@ import { resolveStoredFileUrl } from "@/lib/s3";
 import { hasUserAiTokenBalanceColumn } from "@/lib/ai-token-balance-column";
 import { getAiTokenBalance, getUserAiPendingTokenBalance } from "@/lib/ai-token-service";
 import { getUserBalanceTotals } from "@/lib/finance-service";
+import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import { isMergedResubmissionCopy, loadReleaseDecisionDates, readReleaseTimeline } from "@/lib/release-timeline";
 
 export type AdminUserAccountStatus = "ACTIVE" | "INACTIVE";
 
@@ -51,8 +53,11 @@ export interface AdminUserRelease {
   id: string;
   title: string;
   status: string;
-  createdAt: string;
-  updatedAt: string;
+  /** Planned release date (date only). */
+  releaseDate: string;
+  /** Real moments, ISO; null when nothing was recorded. */
+  createdAt: string | null;
+  updatedAt: string | null;
   moderationStartedAt: string | null;
   approvedAt: string | null;
   rejectedAt: string | null;
@@ -354,34 +359,58 @@ export async function listUserReleasesForAdmin(
     ...(params.status ? { status: params.status } : {})
   };
 
-  const [total, releases] = await Promise.all([
-    prisma.release.count({ where }),
-    prisma.release.findMany({
+  // An artist has few releases: load them all so merged resubmission copies can be left out
+  // before paging (they live on as the original release and would show up as duplicates).
+  const all = (
+    await prisma.release.findMany({
       where,
       orderBy: { date: "desc" },
-      skip: (params.page - 1) * params.perPage,
-      take: params.perPage,
       select: {
         id: true,
         title: true,
         status: true,
-        date: true
+        confirmed: true,
+        upc: true,
+        date: true,
+        roles: true,
+        moderationStartedAt: true
       }
     })
-  ]);
+  ).filter((release) => !isMergedResubmissionCopy(release.roles));
+
+  const total = all.length;
+  const releases = all.slice((params.page - 1) * params.perPage, params.page * params.perPage);
+  const decisions = await loadReleaseDecisionDates(
+    prisma,
+    releases.map((release) => release.id)
+  );
+  const iso = (value: Date | null) => (value ? value.toISOString() : null);
 
   const totalPages = Math.max(1, Math.ceil(total / params.perPage));
   return {
-    items: releases.map((release) => ({
-      id: release.id,
-      title: release.title,
-      status: release.status,
-      createdAt: release.date.toISOString(),
-      updatedAt: release.date.toISOString(),
-      moderationStartedAt: null,
-      approvedAt: release.status === "approved" ? release.date.toISOString() : null,
-      rejectedAt: release.status === "rejected" ? release.date.toISOString() : null
-    })),
+    items: releases.map((release) => {
+      const timeline = readReleaseTimeline(release.roles, {
+        moderationStartedAt: release.moderationStartedAt,
+        decisions: decisions.get(release.id)
+      });
+      const accepted = shouldTreatReleaseAsApproved({
+        status: release.status,
+        confirmed: release.confirmed,
+        upc: release.upc,
+        roles: release.roles
+      });
+      return {
+        id: release.id,
+        title: release.title,
+        status: accepted ? "approved" : release.status,
+        releaseDate: release.date.toISOString(),
+        createdAt: iso(timeline.createdAt),
+        updatedAt: iso(timeline.updatedAt),
+        moderationStartedAt: iso(timeline.submittedAt),
+        approvedAt: accepted ? iso(timeline.approvedAt) : null,
+        rejectedAt: release.status === "rejected" ? iso(timeline.rejectedAt ?? timeline.changesRequestedAt) : null
+      };
+    }),
     page: params.page,
     perPage: params.perPage,
     total,

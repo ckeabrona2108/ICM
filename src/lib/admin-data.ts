@@ -50,6 +50,9 @@ export interface AdminReleaseDetails {
   platformsCount: number;
   genre: string;
   status: AdminReleaseStatus;
+  /** Who sent the release (the cabinet owner). */
+  owner?: { id: string; name: string; email: string };
+  createdAt?: string;
   submittedAt?: string;
   approvedAt?: string;
   rejectedAt?: string;

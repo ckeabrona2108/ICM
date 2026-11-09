@@ -365,18 +365,35 @@ export function AdminReleasesClient({
                           Повторная модерация
                         </span>
                       ) : null}
-                      {release.rejectedAt ? (
-                        <span className="text-[12px] text-white/55">Отклонён: {release.rejectedAt}</span>
-                      ) : null}
-                      {release.approvedAt ? (
-                        <span className="text-[12px] text-white/55">Принят: {release.approvedAt}</span>
-                      ) : null}
                     </div>
+                    {release.owner ? (
+                      <p className="mt-2 truncate text-[13px] text-white/60">
+                        Отправил:{" "}
+                        <Link
+                          href={`/admin/users/${release.owner.id}`}
+                          className="font-medium text-white/90 underline-offset-2 hover:text-indigo-300 hover:underline"
+                        >
+                          {release.owner.name || "Без имени"}
+                        </Link>{" "}
+                        <span className="text-white/45">{release.owner.email}</span>
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-[12px] text-white/50">
+                      {[
+                        release.createdAt ? `Создан: ${release.createdAt}` : null,
+                        `Отправлен: ${release.submittedAt ?? "—"}`,
+                        release.approvedAt ? `Принят: ${release.approvedAt}` : null,
+                        release.rejectedAt ? `Отклонён: ${release.rejectedAt}` : null
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                      <span className="text-white/35"> (МСК)</span>
+                    </p>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-[12.5px] text-white/65 sm:grid-cols-4">
                       <p>Артист: <span className="text-white/85">{release.artists || "—"}</span></p>
                       <p>UPC: <span className="text-white/85">{release.upc || "—"}</span></p>
                       <p>Жанр: <span className="text-white/85">{release.genre}</span></p>
-                      <p>Дата релиза: <span className="text-white/85">{release.releaseDate}</span></p>
+                      <p>Дата выхода: <span className="text-white/85">{release.releaseDate}</span></p>
                       <p>Площадки: <span className="text-white/85">{release.platformsCount}</span></p>
                     </div>
                     {release.status === "rejected" ? (

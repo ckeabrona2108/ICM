@@ -7,6 +7,7 @@ import type { ReleaseDraftSaveRequest, ReleaseDraftSaveResponse } from "@/lib/ap
 import { authOptions } from "@/lib/auth";
 import { withDraftLastChangedAt } from "@/lib/draft-retention";
 import { prisma } from "@/lib/prisma";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { normalizeReleaseCoverUrl, resolveReleasePreviewForPersistence } from "@/lib/release-cover";
 import {
   getReleaseSidebarCountsForUser,
@@ -166,7 +167,7 @@ export async function POST(request: Request) {
       confirmed: false,
       status: "moderating",
       roles: withReleaseLifecycleState(
-        withDraftPersistenceState({}, payload.data as Record<string, unknown>, now),
+        withDraftPersistenceState(withReleaseTimelineStamp({}, "createdAt", now), payload.data as Record<string, unknown>, now),
         "draft"
       ) as Prisma.InputJsonValue
     },

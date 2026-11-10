@@ -3,6 +3,7 @@ import Link from "next/link";
 import { isVerificationSignatureUnavailable, listContractSignaturesForAdmin } from "@/lib/contract-verification";
 import { CONTRACT_VERSION } from "@/lib/contract-verification-shared";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 function statusView(status: string) {
   if (status === "update_required") return { label: "Договор обновлён", className: "border-amber-300/30 bg-amber-500/12 text-amber-100" };
@@ -19,6 +20,7 @@ function statusView(status: string) {
 }
 
 export default async function AdminVerificationPage() {
+  await requireAdminPage();
   const items = await listContractSignaturesForAdmin({ prisma });
 
   return (

@@ -11,8 +11,10 @@ import { prisma } from "@/lib/prisma";
 import { listUserReports } from "@/lib/report-service";
 import { getUserSubscription } from "@/lib/subscription-service";
 import { getUserArtistProfileSettings } from "@/lib/artist-profile-service";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminUserDetailsPage({ params }: { params: { id: string } }) {
+  await requireAdminPage();
   const profile = await getAdminUserProfileDetails(prisma, params.id);
   if (!profile) {
     notFound();

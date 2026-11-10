@@ -1,8 +1,10 @@
 import { AdminPartnerCodesClient } from "@/components/admin/admin-partner-codes-client";
 import { listPartnerCodes } from "@/lib/partner-codes";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminPartnerCodesPage() {
+  await requireAdminPage();
   const initialItems = await listPartnerCodes(prisma);
 
   return (

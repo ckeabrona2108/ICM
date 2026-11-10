@@ -1,8 +1,10 @@
 import { AdminPayoutScheduleClient } from "@/components/admin/admin-payout-schedule-client";
 import { getCurrentPayoutWindowState } from "@/lib/payout-schedule";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminPayoutSchedulePage() {
+  await requireAdminPage();
   const state = await getCurrentPayoutWindowState(prisma);
 
   return (

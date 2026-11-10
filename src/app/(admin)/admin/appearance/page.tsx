@@ -1,10 +1,12 @@
 import { AdminAppearanceClient } from "@/components/admin/admin-appearance-client";
 import { prisma } from "@/lib/prisma";
 import { isNewYearThemeEnabled } from "@/lib/seasonal-theme";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminAppearancePage() {
+  await requireAdminPage();
   const newYearTheme = await isNewYearThemeEnabled(prisma);
   const envOverride = process.env.NEW_YEAR_THEME?.trim().toLowerCase();
 

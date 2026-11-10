@@ -3,8 +3,10 @@ import Link from "next/link";
 import { listContractSignaturesForAdmin } from "@/lib/contract-verification";
 import { CONTRACT_VERSION } from "@/lib/contract-verification-shared";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminContractUpdatesPage() {
+  await requireAdminPage();
   const allItems = await listContractSignaturesForAdmin({ prisma });
   const awaitingRenewal = allItems.filter(
     (item) => (item.status === "pending" || item.status === "approved") && item.contractVersion !== CONTRACT_VERSION

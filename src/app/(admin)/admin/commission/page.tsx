@@ -6,10 +6,12 @@ import {
   readGlobalCommissionRate
 } from "@/lib/commission-settings";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminCommissionPage() {
+  await requireAdminPage();
   const [globalRate, artists, report] = await Promise.all([
     readGlobalCommissionRate(prisma),
     listArtistCommissionRates(prisma),

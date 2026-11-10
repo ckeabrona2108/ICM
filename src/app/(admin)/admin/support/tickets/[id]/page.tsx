@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { AdminSupportTicketDetail } from "@/components/admin/admin-support-ticket-detail";
 import { getAdminSupportTicket, SupportNotFoundError } from "@/lib/support-service";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminSupportTicketPage({
   params
 }: {
   params: { id: string };
 }) {
+  await requireAdminPage();
   let ticket;
   try {
     ticket = await getAdminSupportTicket(prisma, params.id);

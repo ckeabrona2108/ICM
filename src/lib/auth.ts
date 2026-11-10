@@ -10,7 +10,8 @@ import { verifyPassword } from "@/lib/password";
 import { findLegacyUsersForLogin, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
 import { prisma } from "@/lib/prisma";
 import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
-import { consumeRateLimit } from "@/lib/rate-limit";
+import { resolveNextAuthSecret } from "@/lib/auth-secret";
+import { consumeRateLimit, getRequestIp } from "@/lib/rate-limit";
 import { normalizeNextImageSrc } from "@/lib/image-src";
 import { decodeOAuthLinkIntent, OAUTH_LINK_COOKIE } from "@/lib/oauth-link-intent";
 import {
@@ -24,8 +25,7 @@ import { getTelegramLoginConfig, verifyTelegramLogin, type TelegramLoginConfig }
 import { markTelegramMessagesReachable } from "@/lib/telegram-notification-channel";
 import { exchangeVkIdCode, fetchVkIdUserInfo, getVkIdClientId, type VkIdUserInfo } from "@/lib/vk-id";
 
-const devFallbackSecret = "icm-dev-nextauth-secret-change-me";
-const nextAuthSecret = process.env.NEXTAUTH_SECRET ?? devFallbackSecret;
+const nextAuthSecret = resolveNextAuthSecret();
 const sessionMaxAgeSeconds = Number(process.env.NEXTAUTH_SESSION_MAX_AGE ?? 60 * 60 * 24 * 30);
 const maxSessionEmailLength = 254;
 const maxSessionNameLength = 160;
@@ -97,15 +97,35 @@ function toSessionUser(user: {
   };
 }
 
-export async function authorizeUserCredentials(credentials: unknown) {
+const LOGIN_IP_LIMIT = 30;
+const LOGIN_WINDOW_MS = 15 * 60_000;
+
+/** Caps password attempts per client IP, so one source cannot spray passwords across many accounts. */
+export function consumeLoginIpAttempt(ip: string | null | undefined, now = Date.now()) {
+  if (!ip || ip === "unknown") return true;
+  return consumeRateLimit({ key: `auth:login-ip:${ip}`, limit: LOGIN_IP_LIMIT, windowMs: LOGIN_WINDOW_MS }, now).allowed;
+}
+
+export function readLoginRequestIp(req: { headers?: unknown } | null | undefined) {
+  const headers = req?.headers;
+  if (!headers || typeof headers !== "object") return null;
+  const source = headers instanceof Headers
+    ? headers
+    : new Headers(Object.entries(headers as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  return getRequestIp(new Request("http://localhost/", { headers: source }));
+}
+
+export async function authorizeUserCredentials(credentials: unknown, options: { ip?: string | null } = {}) {
   const parsed = loginSchema.safeParse(credentials);
   if (!parsed.success) return null;
+  if (!consumeLoginIpAttempt(options.ip)) return null;
 
   const identifier = normalizeLoginIdentifier(parsed.data.email);
   const rateLimit = consumeRateLimit({
     key: `auth:login:${identifier}`,
     limit: 10,
-    windowMs: 15 * 60_000
+    windowMs: LOGIN_WINDOW_MS
   });
   if (!rateLimit.allowed) return null;
 
@@ -247,6 +267,7 @@ async function readOAuthLinkIntent(provider: OAuthProviderId): Promise<{ userId:
   } catch {
     // The cookie expires on its own within minutes.
   }
+  if (!nextAuthSecret) return "invalid";
   const intent = decodeOAuthLinkIntent(raw, nextAuthSecret);
   if (!intent || intent.provider !== provider) return "invalid";
 
@@ -290,8 +311,8 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" }
       },
-      async authorize(credentials) {
-        return authorizeUserCredentials(credentials);
+      async authorize(credentials, req) {
+        return authorizeUserCredentials(credentials, { ip: readLoginRequestIp(req) });
       }
     }),
     ...buildOAuthProviders()

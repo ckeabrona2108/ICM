@@ -1,8 +1,10 @@
 import { AdminPayoutsClient } from "@/components/admin/admin-payouts-client";
 import { listAdminPayoutRequests } from "@/lib/admin-payouts-service";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminPaymentsPage() {
+  await requireAdminPage();
   const payouts = await listAdminPayoutRequests(prisma, 200);
 
   return (

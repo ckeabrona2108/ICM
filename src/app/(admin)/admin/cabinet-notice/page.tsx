@@ -1,10 +1,12 @@
 import { AdminCabinetNoticeClient } from "@/components/admin/admin-cabinet-notice-client";
 import { readCabinetNotice } from "@/lib/cabinet-notice";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminCabinetNoticePage() {
+  await requireAdminPage();
   const notice = await readCabinetNotice(prisma);
   return (
     <div className="pb-10">

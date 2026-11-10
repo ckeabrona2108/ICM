@@ -5,6 +5,7 @@ import { AdminReportPreviewButton } from "@/components/admin/admin-report-previe
 import { formatRubCurrency } from "@/lib/currency-format";
 import { prisma } from "@/lib/prisma";
 import { listAdminFinanceReports, type AdminFinanceReportItem } from "@/lib/report-service";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -28,6 +29,7 @@ function lifecycleClass(report: AdminFinanceReportItem) {
 }
 
 export default async function AdminFinanceReportsPage() {
+  await requireAdminPage();
   const reports = await listAdminFinanceReports(prisma, 500, { includeDetails: false });
   const pendingCount = reports.filter((report) => report.lifecycleState === "ready_to_confirm").length;
   const reworkCount = reports.filter((report) => report.lifecycleState === "changes_requested").length;

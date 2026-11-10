@@ -1,8 +1,10 @@
 import { AdminUsersClient } from "@/components/admin/admin-users-client";
 import { listAdminUsers } from "@/lib/admin-user-service";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminUsersPage() {
+  await requireAdminPage();
   const initial = await listAdminUsers(prisma, {
     q: undefined,
     subscription: undefined,

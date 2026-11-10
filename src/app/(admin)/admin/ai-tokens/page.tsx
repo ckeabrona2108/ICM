@@ -3,8 +3,10 @@ import { PageHeader } from "@/components/layout/page-header";
 import { getAiStudioSystemStatus, listPreparingAiTokenOrders } from "@/lib/ai-studio-activation";
 import { listAdminUsers } from "@/lib/admin-user-service";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminAiTokensPage() {
+  await requireAdminPage();
   const [initial, aiStudioStatus, preparingOrders] = await Promise.all([
     listAdminUsers(prisma, {
       q: undefined,

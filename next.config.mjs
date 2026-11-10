@@ -30,6 +30,10 @@ if (configuredDistDir && (
 const nextConfig = {
   distDir: configuredDistDir || ".next",
   output: "standalone",
+  // Never publish browser source maps: they would hand out the original, commented source.
+  productionBrowserSourceMaps: false,
+  // Drop the "X-Powered-By: Next.js" header that advertises the framework.
+  poweredByHeader: false,
   async headers() {
     return [
       {

@@ -1,5 +1,6 @@
 import { AdminReleasesClient } from "@/components/admin/admin-releases-client";
 import { getAdminReleases, type AdminReleaseStatusFilter } from "@/lib/admin-release-queries";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 const ADMIN_RELEASE_TABS = new Set<AdminReleaseStatusFilter>([
   "moderation",
@@ -22,6 +23,7 @@ export default async function AdminReleasesPage({
 }: {
   searchParams?: Promise<{ status?: string | string[] }>;
 }) {
+  await requireAdminPage();
   const params = await searchParams;
   const initialTab = normalizeInitialTab(params?.status);
   const releases = await getAdminReleases(initialTab);

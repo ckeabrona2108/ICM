@@ -8,6 +8,7 @@ import {
   isVerificationSignatureUnavailable
 } from "@/lib/contract-verification";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 function formatDate(value: string | null) {
   if (!value) return "—";
@@ -105,6 +106,7 @@ export default async function VerificationDetailsPage({
 }: {
   params: { id: string };
 }) {
+  await requireAdminPage();
   const item = await getContractSignatureById({ prisma, id: params.id });
   if (!item) {
     notFound();

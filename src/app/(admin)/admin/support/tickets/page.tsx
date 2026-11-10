@@ -3,8 +3,10 @@ import { PageHeader } from "@/components/layout/page-header";
 import { AdminSupportTicketsList } from "@/components/admin/admin-support-tickets-list";
 import { listAdminSupportTickets } from "@/lib/support-service";
 import { prisma } from "@/lib/prisma";
+import { requireAdminPage } from "@/lib/admin-page-guard";
 
 export default async function AdminSupportTicketsPage() {
+  await requireAdminPage();
   const tickets = await listAdminSupportTickets(prisma);
 
   return (

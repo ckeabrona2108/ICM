@@ -11,6 +11,7 @@ import {
   type SmartCanonicalColumn
 } from "@/lib/smart-catalog-sync-config";
 import { createAdminLog } from "@/lib/admin-log-service";
+import { readGlobalCommissionRate } from "@/lib/commission-settings";
 import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import { prisma } from "@/lib/prisma";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
@@ -2066,14 +2067,7 @@ async function resolvePlatformCommissionRate(userId: string | null | undefined, 
     if (contractRate) return numberFromLoose(contractRate.commission_rate);
   }
 
-  if (labelName) {
-    const labelRate = await prisma.label_commission_rates.findFirst({
-      where: { label_name: labelName, active: true },
-      orderBy: { created_at: "desc" }
-    });
-    if (labelRate) return numberFromLoose(labelRate.commission_rate);
-  }
-
+  // An artist's individual rate (admin "Комиссия" page) wins over a label rate.
   if (userId) {
     const userRate = await prisma.user_commission_rates.findFirst({
       where: { user_id: userId, active: true },
@@ -2082,11 +2076,16 @@ async function resolvePlatformCommissionRate(userId: string | null | undefined, 
     if (userRate) return numberFromLoose(userRate.commission_rate);
   }
 
-  const globalRate = await prisma.platform_settings.findUnique({
-    where: { key: "platform_commission_rate" }
-  });
+  if (labelName) {
+    const labelRate = await prisma.label_commission_rates.findFirst({
+      where: { label_name: labelName, active: true },
+      orderBy: { created_at: "desc" }
+    });
+    if (labelRate) return numberFromLoose(labelRate.commission_rate);
+  }
 
-  return numberFromLoose(globalRate?.value_number) || SMART_DEFAULT_PLATFORM_COMMISSION_RATE;
+  // Set in the admin "Комиссия" page; 0% is a valid global rate.
+  return readGlobalCommissionRate(prisma);
 }
 
 async function resolvePlatformCommissionRateCached(

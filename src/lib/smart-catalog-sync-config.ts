@@ -152,7 +152,7 @@ export const SMART_SUPPORTED_ENCODINGS = ["utf-8", "utf-8-bom", "windows-1251"] 
 
 export const SMART_SUPPORTED_DELIMITERS = [",", ";", "\t", "|"] as const;
 
-export const SMART_DEFAULT_PLATFORM_COMMISSION_RATE = 0.4;
+export const SMART_DEFAULT_PLATFORM_COMMISSION_RATE = 0.1;
 
 export const SMART_CATALOG_UPDATABLE_FIELDS = [
   "isrc",

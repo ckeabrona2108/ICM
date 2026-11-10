@@ -17,6 +17,7 @@ import {
 	  LogOut,
   Megaphone,
   Music2,
+  Percent,
 	  UserRound,
   Verified
 } from "lucide-react";
@@ -40,6 +41,7 @@ const items = [
   { href: "/admin/faq", label: "FAQ", icon: CircleHelp },
   { href: "/admin/verification", label: "Верификация", icon: Verified },
   { href: "/admin/verification/updates", label: "Обновления договоров", icon: FileWarning },
+  { href: "/admin/commission", label: "Комиссия", icon: Percent },
   { href: "/admin/payments", label: "Заявки на выплаты", icon: CreditCard },
   { href: "/admin/reports", label: "Финансовые отчёты", icon: FileText, exact: true },
   { href: "/admin/reports/changes-requested", label: "Отчёты на доработке", icon: FileWarning },

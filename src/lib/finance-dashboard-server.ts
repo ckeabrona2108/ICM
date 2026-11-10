@@ -26,7 +26,6 @@ export interface FinanceDashboardViewData {
   pendingPayout: number;
   accruals: number;
   accrualSeries: Array<{ period: string; amount: number }>;
-  deductionsAndCommission: number;
   pendingReportsCount: number;
   minimumPayoutAmount: number;
   payoutWindow: PayoutWindowState;
@@ -137,18 +136,12 @@ export async function getFinanceDashboardViewData(
   userId: string
 ): Promise<FinanceDashboardViewData> {
   let balanceTransactionsRaw;
-  let commissionTotalRaw;
   const balanceTransactionsRepo = getRepo<{
     findMany: (args: unknown) => Promise<unknown[]>;
     aggregate?: (args: unknown) => Promise<{
       _sum: { amount?: number | null };
     }>;
   }>(prisma, "balance_transactions");
-  const royaltyTransactionsRepo = getRepo<{
-    aggregate?: (args: unknown) => Promise<{
-      _sum: { platform_commission_amount?: number | null };
-    }>;
-  }>(prisma, "royalty_transactions");
   const monthBuckets = buildRecentMonthBuckets(6);
   const accrualWindowStart = monthBuckets[0]?.start ?? new Date();
 
@@ -159,7 +152,7 @@ export async function getFinanceDashboardViewData(
     listUserPayoutRequests(prisma, userId)
   ]);
 
-  if (!balanceTransactionsRepo || !royaltyTransactionsRepo?.aggregate) {
+  if (!balanceTransactionsRepo) {
     throw new Error("Финансовые данные временно недоступны.");
   }
   balanceTransactionsRaw = await balanceTransactionsRepo.findMany({
@@ -170,8 +163,6 @@ export async function getFinanceDashboardViewData(
             royalty_transaction: {
               select: {
                 id: true,
-                gross_amount: true,
-                platform_commission_amount: true,
                 net_amount: true,
                 currency: true,
                 platform_name: true,
@@ -197,19 +188,6 @@ export async function getFinanceDashboardViewData(
             }
           }
         });
-  commissionTotalRaw = await royaltyTransactionsRepo.aggregate({
-    where: {
-      user_id: userId,
-      reversed_at: null,
-      import: {
-        is: {
-          status: "CONFIRMED"
-        }
-      }
-    },
-    _sum: { platform_commission_amount: true }
-  });
-
   const reports: FinanceReportClientItem[] = reportsRaw.map((report) => ({
     id: report.id,
     periodStart: report.periodStart,
@@ -333,10 +311,6 @@ export async function getFinanceDashboardViewData(
     amount: roundMoney(accrualByMonth.get(bucket.key) ?? 0)
   }));
 
-  const deductionsAndCommission = Number(
-    decimalToNumber(commissionTotalRaw?._sum?.platform_commission_amount).toFixed(2)
-  );
-
   return {
     reports,
     transactions,
@@ -344,7 +318,6 @@ export async function getFinanceDashboardViewData(
     pendingPayout: totals.pendingPayout,
     accruals,
     accrualSeries,
-    deductionsAndCommission,
     pendingReportsCount,
     minimumPayoutAmount: readMinimumPayoutAmount(),
     payoutWindow,

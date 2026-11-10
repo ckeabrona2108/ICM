@@ -36,6 +36,18 @@ const CARDS = [
     parallaxFactor: 1.4
   },
   {
+    id: "flesh",
+    pos: "left-[calc(62%-5.5rem)] top-[calc(40%-5.5rem)] sm:left-[calc(62%-6rem)] sm:top-[calc(40%-6rem)] md:left-[calc(62%-7rem)] md:top-[calc(40%-7rem)] lg:left-[calc(62%-7.5rem)] lg:top-[calc(40%-7.5rem)]",
+    size: "h-44 w-44 sm:h-48 sm:w-48 md:h-56 md:w-56 lg:h-60 lg:w-60",
+    rotate: -6,
+    z: "z-10",
+    image: "/hero/flesh-2022.jpg",
+    alt: "TigerGid x Flesh — 2022",
+    delay: 0.31,
+    floatDelay: "2.5s",
+    parallaxFactor: 1.2
+  },
+  {
     id: "love",
     pos: "right-0 top-2 md:right-2 md:top-4",
     size: "h-40 w-40 sm:h-48 sm:w-48 md:h-52 md:w-52 lg:h-56 lg:w-56",

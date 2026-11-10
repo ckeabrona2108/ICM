@@ -24,7 +24,12 @@ import { LandingScrollUnlock } from "@/components/landing/landing-scroll-unlock"
 import { SnippetShowcase } from "@/components/landing/snippet-showcase";
 import { TestimonialsColumns } from "@/components/landing/testimonials-columns";
 import { StandaloneSessionRedirect } from "@/components/pwa/standalone-session-redirect";
+import { NewYearBranch } from "@/components/seasonal/new-year-branch";
+import { NewYearHat } from "@/components/seasonal/new-year-hat";
+import { NewYearSnow } from "@/components/seasonal/new-year-snow";
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { isNewYearThemeEnabled } from "@/lib/seasonal-theme";
 import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import {
   AppleMusicLogo,
@@ -270,6 +275,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
 
 export default async function HomePage() {
   const session = await getServerSession(authOptions);
+  const newYear = await isNewYearThemeEnabled(prisma);
   const standaloneRedirectTarget = session?.user?.id
     ? session.user.role === "ADMIN"
       ? "/admin"
@@ -289,14 +295,27 @@ export default async function HomePage() {
         <div className="ambient-orbit-left absolute left-1/2 top-[14%] h-[420px] w-[760px] -translate-x-1/2 rounded-full border border-[#7b61ff]/10 bg-[#7b61ff]/10 blur-[140px]" />
       </div>
 
-      <IcmHeader user={session?.user ?? null} />
+      {newYear ? (
+        <>
+          <NewYearSnow />
+          <NewYearBranch className="absolute -left-6 top-0 z-[3] w-32 opacity-90 sm:w-48 lg:w-60" />
+          <NewYearBranch mirrored className="absolute -right-6 top-0 z-[3] w-32 opacity-90 sm:w-48 lg:w-60" />
+        </>
+      ) : null}
+      <IcmHeader user={session?.user ?? null} newYear={newYear} />
 
       <section id="hero" className="relative overflow-x-clip">
         <div className="relative mx-auto grid max-w-7xl gap-10 px-6 pb-8 pt-28 sm:px-8 sm:pb-12 sm:pt-32 lg:grid-cols-[1fr_1.05fr] lg:gap-10 lg:pb-32 lg:pt-36">
           <Reveal>
             <h1 className="max-w-2xl text-balance text-[44px] font-bold leading-[1.04] tracking-[-0.02em] sm:text-[56px] md:text-[68px] lg:text-[76px]">
-              От первого трека до первого хита —
-              <span className="block bg-gradient-to-r from-[#a78bfa] via-[#7b61ff] to-[#5d3dd1] bg-clip-text text-transparent">
+              <span className="relative inline-block">
+                О
+                {newYear ? (
+                  <NewYearHat className="absolute left-[-0.06em] top-[-0.2em] w-[0.72em] -rotate-[14deg]" />
+                ) : null}
+              </span>
+              т первого трека до первого хита —
+              <span className={`block bg-gradient-to-r bg-clip-text text-transparent ${newYear ? "from-[#a78bfa] via-[#8ce8ff] to-[#7b61ff]" : "from-[#a78bfa] via-[#7b61ff] to-[#5d3dd1]"}`}>
                 один кабинет
               </span>
             </h1>

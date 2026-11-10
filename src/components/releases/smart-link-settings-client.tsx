@@ -73,6 +73,7 @@ interface SmartLinkDraft {
   accent: SmartLinkAccent;
   buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
+  seasonalDecor: boolean;
   platforms: SmartLinkPlatformConfig[];
   followLinks: SmartLinkFollowLinks;
   newsFeedLinks: SmartLinkNewsFeedLinks;
@@ -165,6 +166,7 @@ function draftFromView(view: SmartLinkOwnerView): SmartLinkDraft {
     accent: view.accent,
     buttonShape: view.buttonShape,
     allowWaveDownload: view.allowWaveDownload,
+    seasonalDecor: view.seasonalDecor,
     platforms: view.platforms.slice().sort((left, right) => left.order - right.order),
     followLinks,
     newsFeedLinks: { vk: cleanLinkValue(view.newsFeedLinks.vk) },
@@ -768,6 +770,20 @@ function PlatformsSection({
           checked={draft.allowWaveDownload}
           onChange={(value) => patch({ allowWaveDownload: value })}
           label="Кнопка «Скачать WAV»"
+        />
+      </Panel>
+
+      <Panel className="flex items-center gap-4 px-4 py-3.5">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium">Праздничное оформление</div>
+          <div className="mt-0.5 text-[13px] text-zinc-400">
+            Снег и гирлянда на странице, пока на ICECREAMMUSIC идёт новогодняя тема.
+          </div>
+        </div>
+        <Switch
+          checked={draft.seasonalDecor}
+          onChange={(value) => patch({ seasonalDecor: value })}
+          label="Праздничное оформление"
         />
       </Panel>
     </>

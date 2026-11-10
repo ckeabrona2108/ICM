@@ -141,6 +141,8 @@ export interface SmartLinkState {
   accent: SmartLinkAccent;
   buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
+  /** Seasonal decoration (snow, garland) while the site-wide seasonal theme is on. The artist can turn it off. */
+  seasonalDecor: boolean;
   platformLinks: Record<string, SmartLinkPlatformConfig>;
   platformOrder: string[];
   followLinks: SmartLinkFollowLinks;
@@ -173,6 +175,7 @@ export interface SmartLinkOwnerView {
   accent: SmartLinkAccent;
   buttonShape: SmartLinkButtonShape;
   allowWaveDownload: boolean;
+  seasonalDecor: boolean;
   coverUrl: string | null;
   releaseDate: string;
   genre: string;
@@ -227,6 +230,7 @@ export interface SmartLinkOwnerUpdateInput {
   accent?: SmartLinkAccent;
   buttonShape?: SmartLinkButtonShape;
   allowWaveDownload?: boolean;
+  seasonalDecor?: boolean;
   platforms?: Array<{
     code: string;
     url?: string | null;
@@ -692,6 +696,7 @@ function readSmartLinkState(
     accent: normalizeAccent(raw?.accent),
     buttonShape: normalizeButtonShape(raw?.buttonShape),
     allowWaveDownload: asBoolean(raw?.allowWaveDownload) ?? false,
+    seasonalDecor: asBoolean(raw?.seasonalDecor) ?? true,
     platformLinks,
     platformOrder: normalizePlatformOrder(raw?.platformOrder, platformLinks, selectedCodes),
     followLinks: normalizeFollowLinks(raw?.followLinks, userDefaults),
@@ -1297,6 +1302,7 @@ async function buildOwnerViewFromRelease(params: {
     accent: state.accent,
     buttonShape: state.buttonShape,
     allowWaveDownload: state.allowWaveDownload,
+    seasonalDecor: state.seasonalDecor,
     coverUrl: cover.url,
     releaseDate: toIsoDate(params.release.date),
     genre: params.release.genre,
@@ -1879,6 +1885,7 @@ function applySmartLinkOwnerInput(
     accent: input.accent ? normalizeAccent(input.accent) : currentState.accent,
     buttonShape: input.buttonShape ? normalizeButtonShape(input.buttonShape) : currentState.buttonShape,
     allowWaveDownload: input.allowWaveDownload ?? currentState.allowWaveDownload,
+    seasonalDecor: typeof input.seasonalDecor === "boolean" ? input.seasonalDecor : currentState.seasonalDecor,
     sectionVisibility: input.sectionVisibility
       ? normalizeSectionVisibility({ ...currentState.sectionVisibility, ...input.sectionVisibility })
       : currentState.sectionVisibility,

@@ -774,3 +774,13 @@ html {
     animation: none !important;
   }
 }
+
+/* New Year theme: garland bulbs blink softly; static for reduced-motion visitors. */
+@keyframes ny-bulb-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.ny-bulb { animation: ny-bulb-blink 2.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ny-bulb { animation: none; }
+}

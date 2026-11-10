@@ -14,6 +14,11 @@ import { SmartLinkPixels } from "@/components/smart-link/smart-link-pixels";
 import { SmartLinkPublicModeSwitcher } from "@/components/smart-link/smart-link-public-mode-switcher";
 import { SmartLinkShareButton } from "@/components/smart-link/smart-link-share-button";
 import { SmartLinkViewTracker } from "@/components/smart-link/smart-link-view-tracker";
+import { NewYearBranch } from "@/components/seasonal/new-year-branch";
+import { NewYearGarland } from "@/components/seasonal/new-year-garland";
+import { NewYearSnow } from "@/components/seasonal/new-year-snow";
+import { prisma } from "@/lib/prisma";
+import { isNewYearThemeEnabled } from "@/lib/seasonal-theme";
 import { getSmartLinkAccentColors, getSmartLinkShapeRadius } from "@/lib/smart-link-appearance";
 import { getSmartLinkPublicView, type SmartLinkPageStyle } from "@/lib/smart-link-service";
 import { decodeSmartLinkSlug, parseSmartLinkPixelIds, safeSmartLinkHref } from "@/lib/smart-link-urls";
@@ -172,6 +177,7 @@ export default async function SmartLinkPublicPage({
   // (requested in next.config.mjs); browsers without client hints get the dark theme.
   const prefersLight = headers().get("sec-ch-prefers-color-scheme")?.trim().replace(/"/g, "") === "light";
   const isLightTheme = data.theme === "light" || (data.theme === "auto" && prefersLight);
+  const newYear = data.seasonalDecor && (await isNewYearThemeEnabled(prisma));
   const accentColors = getSmartLinkAccentColors(data.accent, isLightTheme);
   const shapeRadius = getSmartLinkShapeRadius(data.buttonShape);
   const showCoverBackground = data.background === "cover" && Boolean(data.coverUrl);
@@ -211,7 +217,11 @@ export default async function SmartLinkPublicPage({
   const hasWideSnippet = Boolean(data.snippetVideoWideUrl);
   const coverPhoto = (
     <SmartLinkTiltCover className="sl-enter-cover mx-auto aspect-square w-full max-w-[240px]">
-      <div className="h-full w-full overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10">
+      <div
+        className={`h-full w-full overflow-hidden rounded-[18px] shadow-[0_30px_60px_-20px_rgba(0,0,0,0.7)] ${
+          newYear ? "ring-2 ring-[#8ce8ff]/45 shadow-[0_0_44px_-6px_rgba(140,232,255,0.55)]" : "ring-1 ring-white/10"
+        }`}
+      >
         {data.coverUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={data.coverUrl} alt={data.title} className="h-full w-full object-cover" />
@@ -445,9 +455,17 @@ export default async function SmartLinkPublicPage({
           }`}
         />
       )}
+      {newYear ? (
+        <>
+          <NewYearBranch className="pointer-events-none absolute -left-4 top-0 z-[2] w-28 opacity-90 sm:w-40" />
+          <NewYearBranch mirrored className="pointer-events-none absolute -right-4 top-0 z-[2] w-28 opacity-90 sm:w-40" />
+        </>
+      ) : null}
+      {newYear ? <NewYearSnow density={0.8} color={isLightTheme ? "#a9c3e6" : "#ffffff"} className="pointer-events-none fixed inset-0 z-[2]" /> : null}
       <SmartLinkViewTracker slug={data.publicSlug} />
       {pixelIds ? <SmartLinkPixels ids={pixelIds} /> : null}
       <div className={`relative z-[1] mx-auto max-w-[440px] pb-8 ${hasWideSnippet ? "lg:max-w-[620px]" : ""}`}>
+        {newYear ? <NewYearGarland bulbs={11} className="mb-2" /> : null}
         {phoneHero}
         <div className={`mb-3 justify-end ${hasPhoneSnippet ? "hidden lg:flex" : "flex"}`}>
           <SmartLinkShareButton links={shareLinks} publicUrl={data.publicUrl} theme={isLightTheme ? "light" : "dark"} />

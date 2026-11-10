@@ -18,6 +18,7 @@ import {
   Megaphone,
   Music2,
   Percent,
+  Sparkles,
 	  UserRound,
   Verified
 } from "lucide-react";
@@ -29,6 +30,7 @@ const items = [
   { href: "/admin", label: "Дашборд", icon: FileText },
   { href: "/admin/news", label: "Новости сервиса", icon: FileText },
   { href: "/admin/cabinet-notice", label: "Срочное уведомление", icon: Megaphone },
+  { href: "/admin/appearance", label: "Оформление", icon: Sparkles },
   { href: "/admin/users", label: "Пользователи", icon: UserRound },
   { href: "/admin/releases", label: "Релизы", icon: Music2 },
   { href: "/admin/ai-tokens", label: "AI-токены пользователей", icon: CreditCard },

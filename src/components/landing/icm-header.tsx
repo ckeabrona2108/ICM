@@ -6,6 +6,8 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 
+import { NewYearGarland } from "@/components/seasonal/new-year-garland";
+
 const NAV = [
   { label: "Главная", href: "/#hero" },
   { label: "Отзывы", href: "/#reviews" },
@@ -26,7 +28,7 @@ type HeaderUser = {
   role?: "USER" | "ADMIN" | "MODERATOR" | null;
 } | null;
 
-export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
+export function IcmHeader({ user: _user = null, newYear = false }: { user?: HeaderUser; newYear?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const [scrolled, setScrolled] = React.useState(false);
   void _user;
@@ -45,7 +47,12 @@ export function IcmHeader({ user: _user = null }: { user?: HeaderUser }) {
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
       className="fixed inset-x-0 top-0 z-[220] px-4 pt-[max(env(safe-area-inset-top),1rem)] sm:px-6 sm:pt-4 lg:px-8"
     >
-      <div className="mx-auto max-w-7xl">
+      <div className="relative mx-auto max-w-7xl">
+        {newYear ? (
+          <div className="pointer-events-none absolute inset-x-8 top-[calc(100%-0.6rem)] sm:inset-x-14 lg:inset-x-20">
+            <NewYearGarland bulbs={24} />
+          </div>
+        ) : null}
         <div
           className={`relative flex items-center justify-between gap-3 rounded-full border px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.30)] backdrop-blur-2xl transition-all duration-300 sm:px-5 lg:px-6 ${
             scrolled

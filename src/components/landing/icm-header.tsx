@@ -50,7 +50,7 @@ export function IcmHeader({ user: _user = null, newYear = false }: { user?: Head
       <div className="relative mx-auto max-w-7xl">
         {newYear ? (
           <div className="pointer-events-none absolute inset-x-8 top-[calc(100%-0.6rem)] sm:inset-x-14 lg:inset-x-20">
-            <NewYearGarland bulbs={24} />
+            <NewYearGarland bulbs={24} curtain />
           </div>
         ) : null}
         <div

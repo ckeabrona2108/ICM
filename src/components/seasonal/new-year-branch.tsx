@@ -1,6 +1,7 @@
 /**
  * A lush fir branch coming in from a top corner with glossy baubles in the brand palette
- * (violet, ice blue, gold). Decorative only; mirror it for the right corner.
+ * (violet, ice blue, gold). Decorative only; mirror it for the right corner. The branch sways
+ * gently and the baubles swing on their threads (still for reduced-motion visitors, see globals.css).
  * The shape is generated once at module load from a fixed seed, so server and client match.
  */
 
@@ -141,6 +142,7 @@ export function NewYearBranch({ mirrored = false, className = "" }: { mirrored?:
         </radialGradient>
       </defs>
 
+      <g className="ny-branch">
       <g fill="none" strokeLinecap="round">
         <path d={NEEDLES_BACK} stroke="url(#ny-needles-back)" strokeWidth="2.2" />
         <path d={WOOD} stroke="#3a2a22" strokeWidth="2.6" />
@@ -151,7 +153,15 @@ export function NewYearBranch({ mirrored = false, className = "" }: { mirrored?:
       {BAUBLES.map((bauble) => {
         const cy = bauble.at.y + bauble.radius + 9;
         return (
-          <g key={bauble.gradient} style={{ filter: `drop-shadow(0 0 7px ${bauble.glow})` }}>
+          <g
+            key={bauble.gradient}
+            className="ny-bauble"
+            style={{
+              filter: `drop-shadow(0 0 7px ${bauble.glow})`,
+              transformOrigin: `${bauble.at.x}px ${bauble.at.y}px`,
+              animationDelay: `${bauble.radius * -0.3}s`
+            }}
+          >
             <line x1={bauble.at.x} y1={bauble.at.y} x2={bauble.at.x} y2={cy - bauble.radius - 2} stroke="#f5c86a" strokeWidth="0.9" opacity="0.8" />
             <rect x={bauble.at.x - 2.6} y={cy - bauble.radius - 3.2} width="5.2" height="4" rx="1.2" fill="#e9c877" />
             <circle cx={bauble.at.x} cy={cy} r={bauble.radius} fill={`url(#${bauble.gradient})`} />
@@ -167,6 +177,7 @@ export function NewYearBranch({ mirrored = false, className = "" }: { mirrored?:
           </g>
         );
       })}
+      </g>
     </svg>
   );
 }

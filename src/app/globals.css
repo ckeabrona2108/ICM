@@ -780,7 +780,22 @@ html {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
+@keyframes ny-strand-sway {
+  0%, 100% { transform: rotate(-1.6deg); }
+  50% { transform: rotate(1.6deg); }
+}
 .ny-bulb { animation: ny-bulb-blink 2.6s ease-in-out infinite; }
+.ny-strand { transform-origin: top center; animation: ny-strand-sway 4.6s ease-in-out infinite; }
+@keyframes ny-branch-sway {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(1.8deg); }
+}
+@keyframes ny-bauble-swing {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+.ny-branch { transform-box: view-box; transform-origin: 0 0; animation: ny-branch-sway 6.5s ease-in-out infinite; }
+.ny-bauble { transform-box: view-box; animation: ny-bauble-swing 3.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .ny-bulb { animation: none; }
+  .ny-bulb, .ny-strand, .ny-branch, .ny-bauble { animation: none; }
 }

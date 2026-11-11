@@ -520,6 +520,8 @@ test("addUserSupportMessage saves the reply when telegram notification fails", a
     userId: "user_1",
     ticketId: "ticket_1",
     body: "Ответ",
+    // Working hours, so the off-hours auto-reply never runs here whatever the real clock says.
+    now: new Date("2026-11-11T12:00:00+03:00"),
     notify: async () => {
       throw new Error("telegram_down");
     },

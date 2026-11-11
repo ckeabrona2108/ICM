@@ -34,6 +34,14 @@ type ParsedSheet = {
   headerRowIndex: number;
   headers: string[];
   rows: Array<Record<string, string>>;
+  meta?: ParsedSheetMeta;
+};
+
+/** What surrounds the table itself: label/value lines above the header and the totals line under it. */
+type ParsedSheetMeta = {
+  preamble: Array<{ label: string; value: string }>;
+  footerTotals: Record<string, number>;
+  skippedFooterRows: number;
 };
 
 type DetectedColumnMap = Partial<Record<SmartCanonicalColumn, string>>;
@@ -389,17 +397,74 @@ function parseDelimitedRows(text: string, delimiter: string): string[][] {
   return rows.filter((entries) => entries.some((entry) => entry.trim() !== ""));
 }
 
+const FOOTER_TOTAL_CELL = /^(итого|всего|total|grand total)\s*:?$/i;
+const HEADER_SCAN_ROWS = 30;
+const MIN_DETECTED_HEADER_COLUMNS = 3;
+
+/**
+ * Distributor reports often start with a few "Контрагент: …" lines before the real table header.
+ * Picks the first row (within the first 30) that looks most like a header; -1 when nothing does.
+ */
+export function findHeaderRowIndex(matrix: string[][]): number {
+  let bestIndex = -1;
+  let bestCount = 0;
+  const limit = Math.min(matrix.length, HEADER_SCAN_ROWS);
+  for (let index = 0; index < limit; index += 1) {
+    const count = Object.keys(detectSmartColumns(matrix[index] ?? [])).length;
+    if (count >= MIN_DETECTED_HEADER_COLUMNS && count > bestCount) {
+      bestIndex = index;
+      bestCount = count;
+    }
+  }
+  return bestIndex;
+}
+
+function isFooterTotalRow(cells: string[]): boolean {
+  return cells.some((cell) => FOOTER_TOTAL_CELL.test(String(cell ?? "").trim()));
+}
+
+function readPreamble(rows: string[][]): ParsedSheetMeta["preamble"] {
+  const preamble: ParsedSheetMeta["preamble"] = [];
+  for (const cells of rows) {
+    const filled = cells.map((cell) => String(cell ?? "").trim()).filter(Boolean);
+    if (filled.length === 0) continue;
+    const [first, ...rest] = filled;
+    const label = first.replace(/:\s*$/, "").trim();
+    const value = rest.join(" ").trim();
+    if (label) preamble.push({ label, value });
+  }
+  return preamble;
+}
+
 function buildRecordsFromMatrix(matrix: string[][], delimiter: string | null): ParsedSheet {
-  const firstRow = matrix[0] ?? [];
+  const detectedHeaderIndex = findHeaderRowIndex(matrix);
+  const headerIndex = detectedHeaderIndex > 0 ? detectedHeaderIndex : 0;
+  const firstRow = matrix[headerIndex] ?? [];
   const hasHeaders =
-    firstRow.length > 0 &&
-    new Set(firstRow.map((value) => normalizeToken(value)).filter(Boolean)).size >=
-      Math.max(1, Math.floor(firstRow.length / 2));
+    detectedHeaderIndex >= 0 ||
+    (firstRow.length > 0 &&
+      new Set(firstRow.map((value) => normalizeToken(value)).filter(Boolean)).size >=
+        Math.max(1, Math.floor(firstRow.length / 2)));
 
   const headers = hasHeaders
     ? firstRow.map((header, index) => header || `Column ${index + 1}`)
     : firstRow.map((_, index) => `Column ${index + 1}`);
-  const dataRows = hasHeaders ? matrix.slice(1) : matrix;
+  const bodyRows = hasHeaders ? matrix.slice(headerIndex + 1) : matrix;
+  const footerTotals: Record<string, number> = {};
+  let skippedFooterRows = 0;
+  const dataRows = bodyRows.filter((cells) => {
+    if (!isFooterTotalRow(cells)) return true;
+    skippedFooterRows += 1;
+    headers.forEach((header, headerIndex) => {
+      const value = String(cells[headerIndex] ?? "").trim();
+      if (!value || FOOTER_TOTAL_CELL.test(value)) return;
+      const numeric = numberFromLoose(value);
+      if (numeric || /^0+([.,]0+)?$/.test(value)) {
+        footerTotals[header] = Number(((footerTotals[header] ?? 0) + numeric).toFixed(2));
+      }
+    });
+    return false;
+  });
 
   const rows = dataRows.map((cells) => {
     const record: Record<string, string> = {};
@@ -413,9 +478,14 @@ function buildRecordsFromMatrix(matrix: string[][], delimiter: string | null): P
     fileFormat: delimiter === "\t" ? "tsv" : "csv",
     encoding: null,
     delimiter,
-    headerRowIndex: hasHeaders ? 0 : -1,
+    headerRowIndex: hasHeaders ? headerIndex : -1,
     headers,
-    rows
+    rows,
+    meta: {
+      preamble: hasHeaders ? readPreamble(matrix.slice(0, headerIndex)) : [],
+      footerTotals,
+      skippedFooterRows
+    }
   };
 }
 
@@ -443,7 +513,7 @@ function parseWorkbook(buffer: Buffer): ParsedSheet {
   };
 }
 
-async function parseInputFile(fileName: string, arrayBuffer: ArrayBuffer | Buffer): Promise<ParsedSheet> {
+export async function parseInputFile(fileName: string, arrayBuffer: ArrayBuffer | Buffer): Promise<ParsedSheet> {
   const buffer = Buffer.isBuffer(arrayBuffer) ? arrayBuffer : Buffer.from(arrayBuffer);
   const fileFormat = detectFileFormat(fileName);
 
@@ -538,6 +608,8 @@ function normalizeBoolean(value: string | undefined): string | undefined {
   return undefined;
 }
 
+const ISRC_PATTERN = /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/i;
+
 function normalizeRow(
   raw: Record<string, string>,
   detectedColumns: DetectedColumnMap,
@@ -556,6 +628,15 @@ function normalizeRow(
     }
 
     normalized[key] = value;
+  }
+
+  // Mixed "code/ISRC" columns: keep real ISRCs as ISRC and distributor codes (GUT12980) as the internal code.
+  if (normalized.isrc && !ISRC_PATTERN.test(normalized.isrc.replace(/[\s-]/g, ""))) {
+    normalized.internal_code ??= normalized.isrc;
+    delete normalized.isrc;
+  }
+  if (normalized.internal_code && !normalized.isrc && ISRC_PATTERN.test(normalized.internal_code.replace(/[\s-]/g, ""))) {
+    normalized.isrc = normalized.internal_code.replace(/[\s-]/g, "").toUpperCase();
   }
 
   const hasTrackSignals = Boolean(normalized.isrc || normalized.track_number || normalized.title);
@@ -1149,6 +1230,7 @@ function extractFinancialIncomingValues(normalized: NormalizedRow) {
     author_rights_share: normalized.author_rights_share ?? null,
     related_rights_share: normalized.related_rights_share ?? null,
     licensee_code: normalized.licensee_code ?? null,
+    internal_code: normalized.internal_code ?? null,
     royalty_author: normalized.royalty_author ?? null,
     royalty_related: normalized.royalty_related ?? null,
     royalty_total: normalized.royalty_total ?? null
@@ -1271,12 +1353,7 @@ async function findFinancialMatchWithContext(
   const title = String(normalized.title ?? "").trim();
 
   if (!upc) {
-    return {
-      action: "SKIP",
-      confidence: 0,
-      reason: "Financial row is missing UPC.",
-      rule: "MISSING_UPC"
-    };
+    return findFinancialMatchWithoutUpc(normalized, context);
   }
 
   const release = await getMemoized(context.releaseByUpc, upc, () =>
@@ -1359,7 +1436,178 @@ async function findFinancialMatchWithContext(
   };
 }
 
-function buildFinancialRowPreview(raw: Record<string, string>, normalized: NormalizedRow, match: MatchOutcome): PreviewRow {
+type FinancialTrackCandidate = {
+  id: string;
+  title: string;
+  isrc?: string | null;
+  partner_code?: string | null;
+  releaseId: string;
+  release: {
+    id: string;
+    title: string;
+    upc?: string | null;
+    userId: string;
+    performer?: string | null;
+    feat?: string | null;
+    labelName?: string | null;
+    confirmed?: boolean | null;
+    user?: { name?: string | null; label?: string | null } | null;
+  };
+};
+
+const FINANCE_TRACK_INCLUDE = {
+  release: { include: { user: { select: { name: true, label: true } } } }
+} as const;
+
+function financeArtistScore(artist: string, candidate: FinancialTrackCandidate): number {
+  if (!artist.trim()) return 0;
+  const names = [
+    candidate.release.performer,
+    [candidate.release.performer, candidate.release.feat].filter(Boolean).join(", "),
+    candidate.release.user?.name,
+    candidate.release.user?.label
+  ].filter((value): value is string => Boolean(value?.trim()));
+  // "Artist A, Artist B" in the report matches a release whose performer is either of them.
+  const parts = artist.split(/\s*(?:,|&|feat\.?|ft\.?|\bx\b)\s*/i).filter(Boolean);
+  let best = 0;
+  for (const name of names) {
+    best = Math.max(best, titleSimilarity(artist, name));
+    for (const part of parts) best = Math.max(best, titleSimilarity(part, name) * 0.95);
+  }
+  return best;
+}
+
+function financeTrackOutcome(
+  candidate: FinancialTrackCandidate,
+  rule: string,
+  confidence: number,
+  reason: string
+): MatchOutcome {
+  return {
+    action: "MATCH",
+    confidence,
+    reason,
+    rule,
+    matchedReleaseId: candidate.releaseId,
+    matchedTrackId: candidate.id,
+    release: candidate.release,
+    track: candidate,
+    ownerUserId: candidate.release.userId
+  };
+}
+
+function describeFinanceCandidate(candidate: FinancialTrackCandidate): string {
+  const performer = candidate.release.performer?.trim() || "без артиста";
+  return `«${candidate.title}» — ${performer}${candidate.release.upc ? ` (UPC ${candidate.release.upc})` : ""}`;
+}
+
+/**
+ * Reports keyed by a distributor code instead of UPC: code → ISRC → partner code → exact title + artist.
+ * Only confident matches become MATCH; anything doubtful is SKIP with a hint, so money never lands on a guess.
+ */
+export function pickFinancialTrackByTitleArtist(params: {
+  title: string;
+  artist: string;
+  candidates: FinancialTrackCandidate[];
+}): { outcome: "match"; candidate: FinancialTrackCandidate; confidence: number; reason: string }
+  | { outcome: "ambiguous" | "weak"; hint: string }
+  | { outcome: "none" } {
+  const titleKey = normalizeCompact(params.title);
+  const sameTitle = params.candidates.filter((candidate) => normalizeCompact(candidate.title) === titleKey);
+  if (sameTitle.length === 0) return { outcome: "none" };
+
+  const scored = sameTitle
+    .map((candidate) => ({ candidate, artistScore: financeArtistScore(params.artist, candidate) }))
+    .sort(
+      (left, right) =>
+        right.artistScore - left.artistScore ||
+        Number(Boolean(right.candidate.release.confirmed)) - Number(Boolean(left.candidate.release.confirmed)) ||
+        Number(Boolean(right.candidate.release.upc)) - Number(Boolean(left.candidate.release.upc))
+    );
+  const best = scored[0];
+  const owners = new Set(scored.filter((item) => item.artistScore >= best.artistScore - 0.05).map((item) => item.candidate.release.userId));
+
+  if (best.artistScore >= 0.8 && owners.size === 1) {
+    return {
+      outcome: "match",
+      candidate: best.candidate,
+      confidence: confidenceFromSimilarity(0.5 + best.artistScore / 2),
+      reason: "Совпали название трека и артист"
+    };
+  }
+
+  const hint = scored.slice(0, 3).map((item) => describeFinanceCandidate(item.candidate)).join("; ");
+  if (best.artistScore >= 0.8) {
+    return { outcome: "ambiguous", hint: `Несколько артистов с таким треком: ${hint}` };
+  }
+  return { outcome: "weak", hint: `Название совпало, артист — нет. Возможно: ${hint}` };
+}
+
+async function findFinancialMatchWithoutUpc(
+  normalized: NormalizedRow,
+  context: SmartMatchContext
+): Promise<MatchOutcome> {
+  const code = String(normalized.internal_code ?? "").trim();
+  const isrc = String(normalized.isrc ?? "").trim().toUpperCase();
+  const title = String(normalized.title ?? "").trim();
+  const artist = String(normalized.artist ?? "").trim();
+
+  if (!code && !isrc && !title) {
+    return { action: "SKIP", confidence: 0, reason: "В строке нет ни UPC, ни кода, ни названия.", rule: "MISSING_UPC" };
+  }
+
+  if (isrc) {
+    const byIsrc = (await getMemoized(context.isrcMatches, `finance::${isrc}`, () =>
+      prisma.track.findMany({ where: { isrc: { equals: isrc, mode: "insensitive" } }, include: FINANCE_TRACK_INCLUDE, take: 5 })
+    )) as FinancialTrackCandidate[];
+    const owners = new Set(byIsrc.map((candidate) => candidate.release.userId));
+    if (byIsrc.length > 0 && owners.size === 1) {
+      return financeTrackOutcome(byIsrc[0], "FINANCIAL_ISRC", 100, "Совпал ISRC");
+    }
+  }
+
+  if (code) {
+    const byCode = (await getMemoized(context.isrcMatches, `finance-code::${code.toUpperCase()}`, () =>
+      prisma.track.findMany({ where: { partner_code: { equals: code, mode: "insensitive" } }, include: FINANCE_TRACK_INCLUDE, take: 5 })
+    )) as FinancialTrackCandidate[];
+    const owners = new Set(byCode.map((candidate) => candidate.release.userId));
+    if (byCode.length > 0 && owners.size === 1) {
+      return financeTrackOutcome(byCode[0], "FINANCIAL_CODE", 100, "Совпал код партнёра у трека");
+    }
+  }
+
+  if (!title) {
+    return { action: "SKIP", confidence: 0, reason: "Код не найден в каталоге, а названия в строке нет.", rule: "NOT_FOUND" };
+  }
+
+  const candidates = (await getMemoized(context.titleMatches, `finance-title::${normalizeCompact(title)}`, () =>
+    prisma.track.findMany({
+      where: { title: { equals: title, mode: "insensitive" } },
+      include: FINANCE_TRACK_INCLUDE,
+      take: 50
+    })
+  )) as FinancialTrackCandidate[];
+  const picked = pickFinancialTrackByTitleArtist({ title, artist, candidates });
+
+  if (picked.outcome === "match") {
+    return financeTrackOutcome(picked.candidate, "FINANCIAL_TITLE_ARTIST", picked.confidence, picked.reason);
+  }
+  if (picked.outcome === "none") {
+    return { action: "SKIP", confidence: 0, reason: "Трек с таким названием не найден в каталоге.", rule: "NOT_FOUND" };
+  }
+  return {
+    action: "SKIP",
+    confidence: 0,
+    reason: picked.hint,
+    rule: picked.outcome === "ambiguous" ? "AMBIGUOUS" : "ARTIST_MISMATCH"
+  };
+}
+
+function buildFinancialRowPreview(raw: Record<string, string>, normalizedInput: NormalizedRow, match: MatchOutcome): PreviewRow {
+  // Code-keyed rows carry the matched release's UPC so artist reports still show it.
+  const releaseUpc = typeof match.release?.upc === "string" ? match.release.upc.trim() : "";
+  const normalized: NormalizedRow =
+    !normalizedInput.upc && releaseUpc && match.action === "MATCH" ? { ...normalizedInput, upc: releaseUpc } : normalizedInput;
   const grossAmount = resolveFinancialNetAmount(normalized as Record<string, unknown>);
 
   return {
@@ -1605,7 +1853,18 @@ async function writeFinancialPreviewImport(params: {
       net_amount_total: netAmountTotal,
       commission_total: commissionTotal,
       auto_detected_map: params.detectedColumns,
-      summary: { ...summary, commissionAlreadyDeducted: params.commissionAlreadyDeducted },
+      summary: {
+        ...summary,
+        commissionAlreadyDeducted: params.commissionAlreadyDeducted,
+        fileMeta: {
+          headerRowIndex: params.parsed.headerRowIndex,
+          sourceRows: params.parsed.rows.length,
+          headers: params.parsed.headers,
+          preamble: params.parsed.meta?.preamble ?? [],
+          footerTotals: params.parsed.meta?.footerTotals ?? {},
+          skippedFooterRows: params.parsed.meta?.skippedFooterRows ?? 0
+        }
+      },
       started_at: new Date(),
       created_by_admin_id: params.adminId,
       rows: {
@@ -1814,7 +2073,7 @@ function buildGroupedFinancialSourceRow(
   };
 }
 
-function buildGroupedFinancialPreviewInputs(
+export function buildGroupedFinancialPreviewInputs(
   rows: Array<Record<string, string>>,
   detectedColumns: DetectedColumnMap
 ): GroupedFinancialPreviewInput[] {
@@ -1822,6 +2081,12 @@ function buildGroupedFinancialPreviewInputs(
     string,
     {
       upc: string;
+      code: string;
+      quantity: number;
+      authorAmount: number;
+      relatedAmount: number;
+      hasAuthor: boolean;
+      hasRelated: boolean;
       firstRowNumber: number;
       rowNumbers: number[];
       rowsCount: number;
@@ -1842,8 +2107,14 @@ function buildGroupedFinancialPreviewInputs(
     const grossAmount = resolveFinancialNetAmount(normalized as Record<string, unknown>);
     const sourceRow = buildGroupedFinancialSourceRow(index + 1, normalized, grossAmount);
     const upc = normalizeAnalyticsUpc(normalized.upc ?? "");
+    // Reports without UPC (e.g. "ПО КОД/ISRC" = GUT12980) are grouped by that code instead.
+    const code = upc ? "" : String(normalized.internal_code ?? normalized.isrc ?? "").trim().toUpperCase();
+    const groupKey = upc ? `upc:${upc}` : code ? `code:${code}` : "";
+    const quantity = numberFromLoose(normalized.quantity);
+    const authorAmount = optionalNumberFromLoose(normalized.royalty_author);
+    const relatedAmount = optionalNumberFromLoose(normalized.royalty_related);
 
-    if (!upc) {
+    if (!groupKey) {
       previewInputs.push({
         raw: {
           ...raw,
@@ -1854,10 +2125,15 @@ function buildGroupedFinancialPreviewInputs(
       continue;
     }
 
-    const existing = grouped.get(upc);
+    const existing = grouped.get(groupKey);
     if (existing) {
       existing.rowNumbers.push(index + 1);
       existing.rowsCount += 1;
+      existing.quantity += quantity;
+      existing.authorAmount += authorAmount ?? 0;
+      existing.relatedAmount += relatedAmount ?? 0;
+      existing.hasAuthor ||= authorAmount !== null;
+      existing.hasRelated ||= relatedAmount !== null;
       existing.grossAmount = Number((existing.grossAmount + grossAmount).toFixed(2));
       existing.sourceRows.push(sourceRow);
       if (normalized.title?.trim()) existing.titles.push(normalized.title.trim());
@@ -1872,8 +2148,14 @@ function buildGroupedFinancialPreviewInputs(
     const releaseDate = parseDateLoose(normalized.release_date ?? null);
     const endDate = parseDateLoose(normalized.end_date ?? null);
 
-    grouped.set(upc, {
+    grouped.set(groupKey, {
       upc,
+      code,
+      quantity,
+      authorAmount: authorAmount ?? 0,
+      relatedAmount: relatedAmount ?? 0,
+      hasAuthor: authorAmount !== null,
+      hasRelated: relatedAmount !== null,
       firstRowNumber: index + 1,
       rowNumbers: [index + 1],
       rowsCount: 1,
@@ -1893,10 +2175,13 @@ function buildGroupedFinancialPreviewInputs(
       const normalized: NormalizedRow = {
         ...group.sample,
         row_number: group.firstRowNumber,
-        upc: group.upc,
         gross_amount: group.grossAmount.toFixed(2),
         royalty_total: group.grossAmount.toFixed(2)
       };
+      if (group.upc) normalized.upc = group.upc;
+      if (group.quantity) normalized.quantity = String(group.quantity);
+      if (group.hasAuthor) normalized.royalty_author = group.authorAmount.toFixed(2);
+      if (group.hasRelated) normalized.royalty_related = group.relatedAmount.toFixed(2);
       const uniqueTitles = [...new Set(group.titles.filter(Boolean))];
       const uniquePlatforms = [...new Set(group.platforms.filter(Boolean))];
       if (uniqueTitles.length > 0) {
@@ -1918,7 +2203,7 @@ function buildGroupedFinancialPreviewInputs(
 
       return {
         raw: {
-          UPC: group.upc,
+          ...(group.upc ? { UPC: group.upc } : { Код: group.code }),
           Rows: String(group.rowsCount),
           SourceRows: group.rowNumbers.join(", "),
           SourceRowsData: group.sourceRows,

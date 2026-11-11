@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
+import { FinanceImportOverviewPanel } from "@/components/admin/finance-import-overview-panel";
 import { FinanceOrphanAccrualsPanel } from "@/components/admin/finance-orphan-accruals-panel";
+import { FINANCE_RULE_LABELS, type FinanceFileMeta } from "@/lib/finance-import-overview";
 
 type SmartKind = "catalog" | "finance";
 
@@ -14,6 +16,7 @@ type ImportSummary = {
   skipped_rows?: number;
   error_rows?: number;
   commissionAlreadyDeducted?: boolean;
+  fileMeta?: FinanceFileMeta | null;
 };
 
 type CatalogRow = {
@@ -31,6 +34,7 @@ type CatalogRow = {
   commission_rate?: string | number | null;
   net_amount?: string | number | null;
   normalized_data?: Record<string, unknown> | null;
+  raw_data?: Record<string, unknown> | null;
   matched_release?: {
     id: string;
     title?: string | null;
@@ -81,6 +85,7 @@ type ImportItem = {
   reportQuarter?: number | null;
   reportYear?: number | null;
   summary?: ImportSummary | null;
+  auto_detected_map?: Record<string, string> | null;
   rows?: CatalogRow[];
   conflicts?: CatalogConflict[];
   matching_logs?: Array<{ id: string; rule_name: string; matched: boolean; confidence_score: number }>;
@@ -117,12 +122,6 @@ function resolveQuarterYear(value?: string | null) {
     quarter: Math.floor(safeDate.getUTCMonth() / 3) + 1,
     year: safeDate.getUTCFullYear()
   };
-}
-
-function isLikelyUpc(value?: string | null) {
-  if (!value) return false;
-  const normalized = value.trim().replace(/\s+/g, "");
-  return /^\d{8,18}$/.test(normalized);
 }
 
 function normalizedText(row: CatalogRow, key: string) {
@@ -180,7 +179,7 @@ function rowRuleLabel(row: CatalogRow) {
     case "TITLE_ARTIST":
       return "Название + артист";
     default:
-      return row.detected_match_rule ?? "—";
+      return (row.detected_match_rule && FINANCE_RULE_LABELS[row.detected_match_rule]) || row.detected_match_rule || "—";
   }
 }
 
@@ -214,66 +213,13 @@ function computeFinanceEffectiveValues(row: CatalogRow, editedNetAmount?: string
   };
 }
 
-function collectFinanceProgress(rows: CatalogRow[]) {
-  const identifiersInFile = new Set<string>();
-  const matchedReleaseIds = new Set<string>();
-  const matchedIdentifiers = new Set<string>();
-  const unmatchedUpcs = new Set<string>();
-  const unmatchedCodes = new Set<string>();
-  const unmatchedAmountByIdentifier = new Map<string, number>();
-  let unmatchedNetAmount = 0;
-  let matchedRows = 0;
-  let hasRealUpc = false;
-
-  for (const row of rows) {
-    const rawUpc = normalizedText(row, "upc");
-    const validUpc = isLikelyUpc(rawUpc) ? rawUpc : null;
-    const rowNet = typeof row.net_amount === "number" ? row.net_amount : Number(row.net_amount ?? 0);
-    const rowGross = typeof row.gross_amount === "number" ? row.gross_amount : Number(row.gross_amount ?? 0);
-    const effectiveAmount = Number.isFinite(rowNet) && rowNet > 0 ? rowNet : Number.isFinite(rowGross) ? rowGross : 0;
-    const identifier = validUpc;
-    const isMatched = Boolean(row.matched_release?.id || row.matched_release_id);
-
-    if (validUpc) {
-      hasRealUpc = true;
-      identifiersInFile.add(validUpc);
-    }
-
-    if (isMatched) {
-      matchedRows += 1;
-      if (row.matched_release?.id) {
-        matchedReleaseIds.add(row.matched_release.id);
-      } else if (row.matched_release_id) {
-        matchedReleaseIds.add(row.matched_release_id);
-      }
-      if (identifier) {
-        matchedIdentifiers.add(identifier);
-      }
-    } else {
-      if (validUpc) {
-        unmatchedUpcs.add(validUpc);
-        unmatchedAmountByIdentifier.set(validUpc, (unmatchedAmountByIdentifier.get(validUpc) ?? 0) + effectiveAmount);
-      }
-      unmatchedNetAmount += effectiveAmount;
-    }
-  }
-
-  const unmatchedItems = [...unmatchedAmountByIdentifier.entries()]
-    .map(([identifier, amount]) => ({ identifier, amount }))
-    .sort((left, right) => right.amount - left.amount || left.identifier.localeCompare(right.identifier));
-
-  return {
-    hasRealUpc,
-    uniqueUpcTotal: identifiersInFile.size,
-    uniqueMatchedUpcTotal: matchedIdentifiers.size,
-    uniqueMatchedReleaseTotal: matchedReleaseIds.size,
-    matchedRows,
-    uniqueUnmatchedUpcTotal: unmatchedUpcs.size,
-    uniqueUnmatchedCodeTotal: unmatchedCodes.size,
-    unmatchedIdentifiers: (hasRealUpc ? [...unmatchedUpcs] : [...unmatchedCodes]).slice(0, 24),
-    unmatchedAmountTotal: unmatchedNetAmount,
-    unmatchedItems
-  };
+function statusLabel(kind: SmartKind, status: string) {
+  if (kind !== "finance") return status;
+  if (status === "PREVIEW") return "Черновик";
+  if (status === "CONFIRMED") return "Начислено";
+  if (status === "ROLLED_BACK") return "Откатан";
+  if (status === "FAILED") return "Ошибка";
+  return status;
 }
 
 function statusTone(status: string) {
@@ -311,12 +257,6 @@ export function AdminCatalogSyncClient() {
   const [financeReportYear, setFinanceReportYear] = React.useState<number>(defaultQuarterYear.year);
 
   const imports = activeKind === "catalog" ? catalogImports : financeImports;
-  const financeProgress = React.useMemo(() => {
-    if (selectedKind !== "finance" || !selectedImport?.rows?.length) {
-      return null;
-    }
-    return collectFinanceProgress(selectedImport.rows);
-  }, [selectedImport, selectedKind]);
   const visibleRows = React.useMemo(() => {
     const rows = selectedImport?.rows ?? [];
     if (previewRowLimit < 0) {
@@ -673,6 +613,23 @@ export function AdminCatalogSyncClient() {
           </button>
         </div>
 
+        {activeKind === "finance" ? (
+          <ol className="mt-4 grid gap-2 text-[12px] leading-relaxed text-white/55 md:grid-cols-3">
+            <li className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+              <b className="text-white/85">1. Загрузите отчёт</b> дистрибьютора (XLSX или CSV). Подходят файлы с UPC или с кодами
+              вида GUT12980 — шапку и строку «ИТОГО» система найдёт сама.
+            </li>
+            <li className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+              <b className="text-white/85">2. Проверьте сводку</b>: сверку с итогом файла, сколько уйдёт артистам и что не
+              сопоставилось. На этом шаге деньги никому не начисляются.
+            </li>
+            <li className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+              <b className="text-white/85">3. Нажмите «Применить»</b> — артистам начислятся суммы и появится отчёт за выбранный
+              квартал. Если что-то не так, импорт можно откатить.
+            </li>
+          </ol>
+        ) : null}
+
         {error ? <p className="mt-3 text-[13px] text-rose-300">{error}</p> : null}
         {success ? <p className="mt-3 text-[13px] text-emerald-300">{success}</p> : null}
       </section>
@@ -736,18 +693,42 @@ export function AdminCatalogSyncClient() {
                           statusTone(item.status)
                         )}
                       >
-                        {item.status}
+                        {statusLabel(activeKind, item.status)}
                       </span>
                     </div>
- 
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] text-white/60">
-                      <span>Rows: {formatNumber(item.total_rows)}</span>
-                      <span>Matched: {formatNumber(item.matched_rows)}</span>
-                      <span>Update: {formatNumber(item.update_rows)}</span>
-                      <span>Create: {formatNumber(item.create_rows)}</span>
-                      <span>Conflict: {formatNumber(item.conflict_rows)}</span>
-                      <span>Errors: {formatNumber(item.error_rows)}</span>
-                    </div>
+
+                    {activeKind === "finance" ? (
+                      <div className="mt-3 space-y-1.5 text-[12px] text-white/60">
+                        <div className="flex justify-between gap-3">
+                          <span>Сумма в отчёте</span>
+                          <span className="tabular-nums text-white">{formatNumber(item.gross_amount_total)} ₽</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span>Артистам</span>
+                          <span className="tabular-nums text-emerald-300">{formatNumber(item.net_amount_total)} ₽</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span>Сопоставлено</span>
+                          <span className="tabular-nums text-white/80">
+                            {formatNumber(item.matched_rows)} из {formatNumber(item.total_rows)}
+                          </span>
+                        </div>
+                        {item.reportQuarter && item.reportYear ? (
+                          <div className="text-white/40">
+                            Отчёт за {item.reportQuarter} квартал {item.reportYear}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] text-white/60">
+                        <span>Rows: {formatNumber(item.total_rows)}</span>
+                        <span>Matched: {formatNumber(item.matched_rows)}</span>
+                        <span>Update: {formatNumber(item.update_rows)}</span>
+                        <span>Create: {formatNumber(item.create_rows)}</span>
+                        <span>Conflict: {formatNumber(item.conflict_rows)}</span>
+                        <span>Errors: {formatNumber(item.error_rows)}</span>
+                      </div>
+                    )}
                   </button>
 
                   <div className="mt-3 flex justify-end">
@@ -778,15 +759,13 @@ export function AdminCatalogSyncClient() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-[18px] font-semibold text-white">{selectedImport.source_file_name}</h2>
-                  <p className="mt-1 text-[13px] text-white/55">
-                    {selectedKind === "catalog" ? "Catalog preview" : "Financial preview"} ·{" "}
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] text-white/55">
+                    {selectedKind === "catalog" ? "Catalog preview" : "Финансовый отчёт"} ·{" "}
                     {selectedImport.file_format.toUpperCase()}
+                    <span className={cn("rounded-full border px-2 py-0.5 text-[11px] font-medium", statusTone(selectedImport.status))}>
+                      {statusLabel(selectedKind, selectedImport.status)}
+                    </span>
                   </p>
-                  {selectedKind === "finance" && selectedImport.summary?.commissionAlreadyDeducted ? (
-                    <p className="mt-1 text-[12px] text-amber-200">
-                      Комиссия не удерживается: сумма в файле уже указана за её вычетом.
-                    </p>
-                  ) : null}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -838,7 +817,7 @@ export function AdminCatalogSyncClient() {
                     disabled={actionBusy !== null || selectedImport.status === "CONFIRMED"}
                     className="rounded-full bg-emerald-500 px-4 py-2 text-[13px] font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {actionBusy === "apply" ? "Применение..." : "Применить"}
+                    {actionBusy === "apply" ? "Применение..." : selectedKind === "finance" ? "Применить и начислить" : "Применить"}
                   </button>
                   <button
                     type="button"
@@ -853,26 +832,17 @@ export function AdminCatalogSyncClient() {
                 </div>
               </div>
 
+              {selectedKind === "catalog" ? (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {[
                   ["Всего строк", selectedImport.total_rows],
-                  [
-                    "Сопоставлено",
-                    selectedKind === "finance" && financeProgress
-                      ? financeProgress.matchedRows
-                      : selectedImport.matched_rows
-                  ],
+                  ["Сопоставлено", selectedImport.matched_rows],
                   ["Обновление", selectedImport.update_rows],
                   ["Создание", selectedImport.create_rows],
                   ["Конфликты", selectedImport.conflict_rows],
                   ["Пропущено", selectedImport.skipped_rows],
                   ["Ошибки", selectedImport.error_rows],
-                  [
-                    selectedKind === "finance" ? "К начислению артистам" : "Encoding",
-                    selectedKind === "finance"
-                      ? formatNumber(selectedImport.net_amount_total)
-                      : selectedImport.detected_encoding ?? "—"
-                  ]
+                  ["Encoding", selectedImport.detected_encoding ?? "—"]
                 ].map(([label, value]) => (
                   <div key={label} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
                     <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">{label}</div>
@@ -880,156 +850,26 @@ export function AdminCatalogSyncClient() {
                   </div>
                 ))}
               </div>
-
-              {selectedKind === "finance" ? (
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                      Вознаграждение Лицензиара
-                    </div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(selectedImport.gross_amount_total)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">Комиссия ICECREAMMUSIC</div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(selectedImport.commission_total)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">К начислению артистам</div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(selectedImport.net_amount_total)}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {selectedKind === "finance" && financeProgress ? (
-                <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                  <div className="rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.05] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                      {financeProgress.hasRealUpc ? "UPC в файле" : "Кодов в файле"}
-                    </div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(financeProgress.uniqueUpcTotal)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.05] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                      {financeProgress.hasRealUpc ? "UPC сопоставлено" : "Кодов сопоставлено"}
-                    </div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(financeProgress.uniqueMatchedUpcTotal)} / {formatNumber(financeProgress.uniqueUpcTotal)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-amber-500/15 bg-amber-500/[0.05] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">
-                      {financeProgress.hasRealUpc ? "UPC не учтено" : "Кодов не учтено"}
-                    </div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(
-                        financeProgress.hasRealUpc
-                          ? financeProgress.uniqueUnmatchedUpcTotal
-                          : financeProgress.uniqueUnmatchedCodeTotal
-                      )}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-violet-500/15 bg-violet-500/[0.05] px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-white/40">Релизов найдено</div>
-                    <div className="mt-2 text-[18px] font-semibold text-white">
-                      {formatNumber(financeProgress.uniqueMatchedReleaseTotal)} / {formatNumber(financeProgress.uniqueUpcTotal)}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {selectedKind === "finance" && financeProgress && financeProgress.unmatchedIdentifiers.length > 0 ? (
-                <div className="rounded-2xl border border-amber-500/15 bg-amber-500/[0.05] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[15px] font-semibold text-white">
-                        {financeProgress.hasRealUpc ? "UPC не учтены" : "Неучтённые коды"}
-                      </div>
-                      <div className="mt-1 text-[13px] text-white/65">
-                        {financeProgress.hasRealUpc
-                          ? `Уникальных UPC без сопоставления: ${formatNumber(financeProgress.uniqueUnmatchedUpcTotal)}`
-                          : `Уникальных кодов без сопоставления: ${formatNumber(financeProgress.uniqueUnmatchedCodeTotal)}`}
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-amber-400/20 bg-amber-400/10 px-4 py-2 text-[13px] font-semibold text-amber-200">
-                      Не учтено: {formatNumber(financeProgress.unmatchedAmountTotal)}
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {financeProgress.unmatchedIdentifiers.map((identifier) => (
-                      <span
-                        key={identifier}
-                        className="rounded-full border border-white/10 bg-[#11131a] px-3 py-1.5 text-[12px] text-white/80"
-                      >
-                        {identifier}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {selectedKind === "finance" && financeProgress && financeProgress.unmatchedItems.length > 0 ? (
-                <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[15px] font-semibold text-white">
-                        {financeProgress.hasRealUpc ? "Неучтённые UPC" : "Неучтённые коды"}
-                      </div>
-                      <div className="mt-1 text-[13px] text-white/55">
-                        Уникальные идентификаторы без сопоставленного релиза и сумма, которая пока не попадёт в начисление.
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-white/10 bg-[#11131a] px-3 py-1.5 text-[12px] text-white/70">
-                      Всего: {formatNumber(financeProgress.unmatchedItems.length)}
-                    </div>
-                  </div>
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="min-w-full text-left text-[12px] text-white/70">
-                      <thead>
-                        <tr className="border-b border-white/[0.08] text-white/45">
-                          <th className="px-3 py-2 font-medium">{financeProgress.hasRealUpc ? "UPC" : "Код"}</th>
-                          <th className="px-3 py-2 font-medium">Не учтено</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {financeProgress.unmatchedItems.map((item) => (
-                          <tr key={item.identifier} className="border-b border-white/[0.05]">
-                            <td className="px-3 py-2 text-white">{item.identifier}</td>
-                            <td className="px-3 py-2 text-amber-300">{formatNumber(item.amount)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
               ) : null}
 
               {selectedKind === "finance" ? (
-                <div className="rounded-2xl border border-emerald-500/15 bg-emerald-500/[0.05] p-4">
-                  <div className="text-[15px] font-semibold text-white">Финансовый preview</div>
-                  <div className="mt-2 text-[13px] text-white/65">
-                    Сейчас проверяется, какие строки сматчились с релизами, какая комиссия ICECREAMMUSIC будет удержана
-                    и какая сумма будет начислена артистам. До нажатия{" "}
-                    <span className="font-semibold text-white">«Применить»</span> баланс пользователей не меняется.
-                  </div>
-                  <div className="mt-3 rounded-xl border border-white/[0.08] bg-[#11131a] px-3 py-2 text-[12px] text-white/62">
-                    После применения пользователям сразу будет создан отчет за{" "}
-                    <span className="font-semibold text-white">
-                      {financeReportQuarter} квартал {financeReportYear}
-                    </span>
-                    .
-                  </div>
-                  <div className="mt-3 text-[12px] text-white/55">
-                    `Сопоставлено` выше показывает строки файла. Блоки по UPC и кодам показывают уникальные найденные и
-                    неучтённые идентификаторы без дублей.
-                  </div>
+                <FinanceImportOverviewPanel
+                  key={selectedImport.id}
+                  rows={selectedImport.rows ?? []}
+                  fileMeta={selectedImport.summary?.fileMeta ?? null}
+                  detectedColumns={selectedImport.auto_detected_map ?? null}
+                  commissionAlreadyDeducted={selectedImport.summary?.commissionAlreadyDeducted === true}
+                  status={selectedImport.status}
+                />
+              ) : null}
+
+              {selectedKind === "finance" ? (
+                <div className="rounded-xl border border-white/[0.08] bg-[#11131a] px-4 py-3 text-[12px] text-white/62">
+                  После «Применить и начислить» каждому артисту появится отчёт за{" "}
+                  <span className="font-semibold text-white">
+                    {financeReportQuarter} квартал {financeReportYear}
+                  </span>{" "}
+                  — квартал можно поменять вверху, рядом с кнопками.
                 </div>
               ) : null}
 
@@ -1037,13 +877,13 @@ export function AdminCatalogSyncClient() {
                 <div className="space-y-4 rounded-2xl border border-cyan-500/15 bg-cyan-500/[0.05] p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <div className="text-[15px] font-semibold text-white">Распределение до отправки</div>
+                      <div className="text-[15px] font-semibold text-white">По артистам</div>
                       <div className="mt-1 text-[13px] text-white/60">
-                        Сводка по пользователям и отдельный итог сервиса с учётом ручных правок в колонке начисления.
+                        Кому и сколько начислится. Учитывает ручные правки в построчной детализации ниже.
                       </div>
                     </div>
                     <div className="rounded-full border border-white/10 bg-[#11131a] px-3 py-1.5 text-[12px] text-white/75">
-                      Пользователей: {formatNumber(financeDistribution.userSummaries.length)}
+                      Артистов: {formatNumber(financeDistribution.userSummaries.length)}
                     </div>
                   </div>
 
@@ -1132,7 +972,7 @@ export function AdminCatalogSyncClient() {
               <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="text-[15px] font-semibold text-white">
-                    {selectedKind === "finance" ? "Финансовая детализация" : "Preview rows"}
+                    {selectedKind === "finance" ? "Построчно — здесь можно вручную поправить начисление" : "Preview rows"}
                   </div>
                   <label className="flex items-center gap-2 text-[12px] text-white/60">
                     <span>Показывать</span>
@@ -1159,7 +999,7 @@ export function AdminCatalogSyncClient() {
                         <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Уверенность" : "Confidence"}</th>
                         <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Правило" : "Rule"}</th>
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Пользователь</th> : null}
-                        {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">UPC</th> : null}
+                        {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">UPC / код</th> : null}
                         <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Релиз" : "Release"}</th>
                         <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Трек" : "Track"}</th>
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Площадка</th> : null}
@@ -1167,18 +1007,28 @@ export function AdminCatalogSyncClient() {
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Комиссия ICECREAMMUSIC</th> : null}
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Комиссия %</th> : null}
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">К начислению артисту</th> : null}
-                        <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Ошибка" : "Error"}</th>
+                        <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Почему пропущено" : "Error"}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {visibleRows.map((row) => (
                         <tr key={row.id} className="border-b border-white/[0.05] align-top">
                           <td className="px-3 py-2">{row.row_number}</td>
-                          <td className="px-3 py-2">{row.action}</td>
+                          <td className="px-3 py-2">
+                            {selectedKind === "finance"
+                              ? row.user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action)
+                                ? "Начислить"
+                                : "Пропустить"
+                              : row.action}
+                          </td>
                           <td className="px-3 py-2">{formatNumber(row.confidence_score)}</td>
                           <td className="px-3 py-2">{selectedKind === "finance" ? rowRuleLabel(row) : row.detected_match_rule ?? "—"}</td>
                           {selectedKind === "finance" ? <td className="px-3 py-2">{rowUserLabel(row)}</td> : null}
-                          {selectedKind === "finance" ? <td className="px-3 py-2">{rowUpcLabel(row)}</td> : null}
+                          {selectedKind === "finance" ? (
+                            <td className="px-3 py-2">
+                              {rowUpcLabel(row) !== "—" ? rowUpcLabel(row) : rowInternalCodeLabel(row)}
+                            </td>
+                          ) : null}
                           <td className="px-3 py-2">{selectedKind === "finance" ? rowReleaseLabel(row) : row.matched_release_id ?? "—"}</td>
                           <td className="px-3 py-2">{selectedKind === "finance" ? rowTrackLabel(row) : row.matched_track_id ?? "—"}</td>
                           {selectedKind === "finance" ? <td className="px-3 py-2">{rowPlatformLabel(row)}</td> : null}
@@ -1214,7 +1064,12 @@ export function AdminCatalogSyncClient() {
                               )}
                             </td>
                           ) : null}
-                          <td className="px-3 py-2 text-rose-300">{row.error_message ?? "—"}</td>
+                          <td className="px-3 py-2 text-rose-300">
+                            {row.error_message ??
+                              (selectedKind === "finance" && row.action === "SKIP"
+                                ? String((row.normalized_data?.__preview as { reason?: string } | undefined)?.reason ?? "—")
+                                : "—")}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

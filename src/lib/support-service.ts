@@ -16,6 +16,7 @@ import {
 } from "@/lib/telegram-notifier";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import { buildSupportAutoReply, isSupportWorkingTime, lastSupportClose } from "@/lib/support-hours";
 
 export const createSupportTicketSchema = z.object({
   subject: z.string().trim().min(3, "Укажите тему тикета.").max(160, "Тема слишком длинная."),
@@ -414,7 +415,49 @@ type AddUserSupportMessageParams = {
   notifyAdmins?: boolean;
   notify?: (payload: TelegramTicketReplyNotificationPayload) => Promise<boolean>;
   logger?: LoggerLike;
+  /** Clock for the off-hours auto-reply; tests pass a fixed time. */
+  now?: Date;
 };
+
+/**
+ * Outside working hours the artist gets an automatic reply once per off-hours stretch: no second
+ * auto-reply (and none at all if staff already answered) since support last closed. The ticket keeps
+ * its status, so it still waits for a real answer. Never throws: the artist's message is already saved.
+ */
+async function sendSupportAutoReplyIfOffHours(
+  prisma: PrismaClient,
+  ticket: { id: string; userId: string; title: string },
+  now: Date,
+  logger: LoggerLike = defaultLogger
+): Promise<SupportTicketMessageDto | null> {
+  if (isSupportWorkingTime(now)) return null;
+  try {
+    const answeredSinceClose = await prisma.message.findFirst({
+      where: { ticketId: ticket.id, direction: MESSAGE_DIRECTION.OUTBOUND, createdAt: { gte: lastSupportClose(now) } },
+      select: { id: true }
+    });
+    if (answeredSinceClose) return null;
+
+    const createdAt = new Date(now.getTime() + 1);
+    const message = await prisma.message.create({
+      data: {
+        id: randomUUID(),
+        userId: ticket.userId,
+        ticketId: ticket.id,
+        subject: ticket.title,
+        body: buildSupportAutoReply(now),
+        direction: MESSAGE_DIRECTION.OUTBOUND,
+        // The artist sees it right away in the open chat: no unread badge or extra notification.
+        isRead: true,
+        createdAt
+      }
+    });
+    return toSupportMessageDto(message, ticket.id);
+  } catch (error) {
+    logger.error?.("[support] off-hours auto-reply failed", { ticketId: ticket.id, error });
+    return null;
+  }
+}
 
 async function legacyAddUserSupportMessage(params: AddUserSupportMessageParams) {
   const ticketRows = (await (params.prisma as any).$queryRawUnsafe(
@@ -931,6 +974,8 @@ export async function createSupportTicket(params: {
   body: string;
   notify?: (payload: TelegramNewTicketNotificationPayload) => Promise<boolean>;
   logger?: LoggerLike;
+  /** Clock for the off-hours auto-reply; tests pass a fixed time. */
+  now?: Date;
 }): Promise<SupportTicketDto> {
   const backend = await resolveSupportBackend(params.prisma);
 
@@ -978,6 +1023,13 @@ export async function createSupportTicket(params: {
       };
     });
 
+    const autoReply = await sendSupportAutoReplyIfOffHours(
+      params.prisma,
+      { id: ticket.id, userId: params.userId, title: ticket.subject },
+      params.now ?? new Date(),
+      logger
+    );
+
     notifyAdminNewSupportTicketDeferred(
       notify,
       {
@@ -1000,14 +1052,17 @@ export async function createSupportTicket(params: {
       userEmail: params.userEmail,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
-      lastMessage: params.body.trim(),
-      messages: [toSupportMessageDto({
-        id: ticket.firstMessageId,
-        ticketId: ticket.id,
-        direction: MESSAGE_DIRECTION.INBOUND,
-        body: params.body.trim(),
-        createdAt: ticket.createdAt
-      }, ticket.id)]
+      lastMessage: autoReply?.body ?? params.body.trim(),
+      messages: [
+        toSupportMessageDto({
+          id: ticket.firstMessageId,
+          ticketId: ticket.id,
+          direction: MESSAGE_DIRECTION.INBOUND,
+          body: params.body.trim(),
+          createdAt: ticket.createdAt
+        }, ticket.id),
+        ...(autoReply ? [autoReply] : [])
+      ]
     });
   } catch (error) {
     if (!isSupportTablesMissingError(error)) {
@@ -1245,6 +1300,9 @@ export async function addUserSupportMessage(params: AddUserSupportMessageParams)
     ];
 
     await params.prisma.$transaction(operations);
+    if (params.notifyAdmins !== false) {
+      await sendSupportAutoReplyIfOffHours(params.prisma, ticket, params.now ?? new Date(), params.logger);
+    }
     const details = await loadSupportTicketDetailsOrThrow(params.prisma, ticket.id);
     notifyAdminSupportTicketReplyDeferred(params, details);
     return details;

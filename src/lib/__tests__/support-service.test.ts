@@ -598,3 +598,85 @@ test("listUserSupportTickets falls back to legacy public support tables when ice
   assert.equal(tickets[0]?.userEmail, "legacy@example.com");
   assert.equal(tickets[0]?.lastMessage, "Последнее сообщение");
 });
+
+function makeAutoReplyPrisma(existingOutboundSince: Date | null = null) {
+  const created: any[] = [];
+  let findUniqueCalls = 0;
+  const prisma = {
+    supportTicket: {
+      findUnique: async () => {
+        findUniqueCalls += 1;
+        if (findUniqueCalls === 1) return { id: "ticket_1", userId: "user_1", title: "Тема", status: "OPEN" };
+        return makeTicketDetails();
+      },
+      update: async () => ({})
+    },
+    message: {
+      create: async ({ data }: any) => {
+        created.push(data);
+        return { ...data, createdAt: data.createdAt ?? new Date() };
+      },
+      findFirst: async ({ where }: any) =>
+        existingOutboundSince && existingOutboundSince >= where.createdAt.gte ? { id: "earlier_reply" } : null,
+      updateMany: async () => ({ count: 1 })
+    },
+    $transaction: async (items: any) =>
+      typeof items === "function"
+        ? items({
+            supportTicket: { create: async () => ({ id: "ticket_1", title: "Тема", createdAt: new Date() }) },
+            message: { create: async ({ data }: any) => created.push(data) }
+          })
+        : Promise.all(items)
+  } as any;
+  return { prisma, created };
+}
+
+const SATURDAY_NOON = new Date("2026-11-14T12:00:00+03:00");
+const WEDNESDAY_NOON = new Date("2026-11-11T12:00:00+03:00");
+const outbound = (created: any[]) => created.filter((m) => m.direction === "OUTBOUND");
+
+test("a user message on a day off gets one auto-reply about the weekend", async () => {
+  const { prisma, created } = makeAutoReplyPrisma();
+  await addUserSupportMessage({ prisma, userId: "user_1", ticketId: "ticket_1", body: "Вопрос", notify: async () => true, now: SATURDAY_NOON });
+  const replies = outbound(created);
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].body, /Сегодня выходной/);
+  assert.equal(replies[0].isRead, true);
+});
+
+test("no auto-reply during working hours", async () => {
+  const { prisma, created } = makeAutoReplyPrisma();
+  await addUserSupportMessage({ prisma, userId: "user_1", ticketId: "ticket_1", body: "Вопрос", notify: async () => true, now: WEDNESDAY_NOON });
+  assert.equal(outbound(created).length, 0);
+});
+
+test("no second auto-reply in the same off-hours stretch", async () => {
+  // Something outbound (the first auto-reply or a staff answer) already went out on Saturday morning.
+  const { prisma, created } = makeAutoReplyPrisma(new Date("2026-11-14T10:00:00+03:00"));
+  await addUserSupportMessage({ prisma, userId: "user_1", ticketId: "ticket_1", body: "Ещё", notify: async () => true, now: SATURDAY_NOON });
+  assert.equal(outbound(created).length, 0);
+});
+
+test("staff writing through the user route never gets an auto-reply", async () => {
+  const { prisma, created } = makeAutoReplyPrisma();
+  await addUserSupportMessage({ prisma, userId: "user_1", ticketId: "ticket_1", body: "Ответ", notifyAdmins: false, now: SATURDAY_NOON });
+  assert.equal(outbound(created).length, 0);
+});
+
+test("a new ticket on a day off shows the auto-reply in the chat right away", async () => {
+  const { prisma } = makeAutoReplyPrisma();
+  const ticket = await createSupportTicket({
+    prisma,
+    userId: "user_1",
+    userName: "User",
+    userEmail: "user@example.com",
+    subject: "Тема",
+    body: "Помогите",
+    notify: async () => true,
+    now: SATURDAY_NOON
+  });
+  const messages = ticket.messages ?? [];
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1]?.senderType, "ADMIN");
+  assert.match(messages[1]?.body ?? "", /Сегодня выходной/);
+});

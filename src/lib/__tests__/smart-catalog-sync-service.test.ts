@@ -207,3 +207,17 @@ test("financial detail export omits columns that are absent from the source repo
   assert.equal("Название альбома" in row, false);
   assert.equal("Все прослушивания" in row, false);
 });
+
+test("duplicate report error names the artist, amount and the import that created it", async () => {
+  const { describeDuplicateFinancialReports } = await import("@/lib/smart-catalog-sync-service");
+  const message = describeDuplicateFinancialReports({
+    quarter: 3,
+    year: 2026,
+    reports: [
+      { userLabel: "13Killa", amount: 1196.58, createdAt: new Date("2026-10-05T10:00:00Z"), sourceFiles: ["3 кв.xlsx"] },
+      { userLabel: "evian@example.com", amount: 10, createdAt: new Date("2026-10-06T10:00:00Z"), sourceFiles: [] }
+    ]
+  });
+  assert.match(message, /^За 3 квартал 2026 отчёт уже есть: 13Killa — 1\s?196,58 ₽, создан 05\.10\.2026, импорт «3 кв\.xlsx»/);
+  assert.match(message, /evian@example\.com — 10,00 ₽, создан 06\.10\.2026, не из импорта/);
+});

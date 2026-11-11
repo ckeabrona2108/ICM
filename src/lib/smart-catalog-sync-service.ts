@@ -150,6 +150,61 @@ export function resolveSelectedReportQuarterPeriod(input: {
   };
 }
 
+/** Confirmed finance imports that created a report for these users in the given quarter, by user. */
+async function findConfirmedImportsForReportPeriod(params: {
+  userIds: string[];
+  quarter: number | null;
+  year: number | null;
+  excludeImportId: string;
+}): Promise<Map<string, string[]>> {
+  const imports = await prisma.financial_imports.findMany({
+    where: {
+      id: { not: params.excludeImportId },
+      status: "CONFIRMED",
+      rows: { some: { user_id: { in: params.userIds } } }
+    },
+    select: {
+      id: true,
+      source_file_name: true,
+      rows: { where: { user_id: { in: params.userIds } }, select: { user_id: true } }
+    }
+  });
+  const selections = await resolveFinancialReportSelections(imports.map((item) => item.id));
+  const byUser = new Map<string, string[]>();
+  for (const item of imports) {
+    const selection = selections.get(item.id);
+    if (selection && (selection.reportQuarter !== params.quarter || selection.reportYear !== params.year)) continue;
+    for (const row of item.rows) {
+      if (!row.user_id) continue;
+      const files = byUser.get(row.user_id) ?? [];
+      if (!files.includes(item.source_file_name)) files.push(item.source_file_name);
+      byUser.set(row.user_id, files);
+    }
+  }
+  return byUser;
+}
+
+export function describeDuplicateFinancialReports(params: {
+  quarter: number | null;
+  year: number | null;
+  reports: Array<{ userLabel: string; amount: number; createdAt: Date; sourceFiles: string[] }>;
+}): string {
+  const period = params.quarter && params.year ? `${params.quarter} квартал ${params.year}` : "выбранный период";
+  const lines = params.reports.slice(0, 10).map((report) => {
+    const amount = report.amount.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const date = report.createdAt.toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow" });
+    const source = report.sourceFiles.length
+      ? `импорт «${report.sourceFiles.join("», «")}»`
+      : "не из импорта — загружен вручную";
+    return `${report.userLabel} — ${amount} ₽, создан ${date}, ${source}`;
+  });
+  const more = params.reports.length > 10 ? ` И ещё ${params.reports.length - 10}.` : "";
+  return (
+    `За ${period} отчёт уже есть: ${lines.join("; ")}.${more} ` +
+    "Откатите тот импорт (или удалите отчёт на странице /admin/reports) либо выберите другой квартал."
+  );
+}
+
 export function getDuplicateFinancialReportUserIds(
   importedUserIds: string[],
   existingReports: Array<{ userId: string }>
@@ -2766,12 +2821,34 @@ export async function applyFinancialImport(params: {
         periodStart: selectedReportPeriod.periodStart,
         periodEnd: selectedReportPeriod.periodEnd
       },
-      select: { userId: true }
+      select: {
+        userId: true,
+        amount: true,
+        createdAt: true,
+        user: { select: { name: true, email: true } }
+      }
     });
     const duplicateUserIds = getDuplicateFinancialReportUserIds(matchedUserIds, existingReports);
     if (duplicateUserIds.length) {
+      const sources = await findConfirmedImportsForReportPeriod({
+        userIds: duplicateUserIds,
+        quarter: reportQuarter,
+        year: reportYear,
+        excludeImportId: importJob.id
+      });
       throw new Error(
-        `За выбранный период уже есть отчет для ${duplicateUserIds.length} ${duplicateUserIds.length === 1 ? "пользователя" : "пользователей"}. Перед повторной загрузкой откатите прежний импорт.`
+        describeDuplicateFinancialReports({
+          quarter: reportQuarter,
+          year: reportYear,
+          reports: existingReports
+            .filter((report) => duplicateUserIds.includes(report.userId))
+            .map((report) => ({
+              userLabel: report.user?.name?.trim() || report.user?.email?.trim() || report.userId,
+              amount: Number(report.amount ?? 0),
+              createdAt: report.createdAt,
+              sourceFiles: sources.get(report.userId) ?? []
+            }))
+        })
       );
     }
   }

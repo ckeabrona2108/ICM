@@ -578,7 +578,7 @@ export const MONEY_GUIDES: Guide[] = [
       },
       {
         type: "p",
-        text: "Как устроены права на музыку в целом, разобрано в гайде [авторские и смежные права](/guides/avtorskie-i-smezhnye-prava-na-muzyku). Если бит нужен прямо сейчас, посмотрите [чек-лист готовности трека](/guides/gotov-li-trek-k-relizu) — там есть пункт про права."
+        text: "Как устроены права на музыку в целом, разобрано в гайде [авторские и смежные права](/guides/avtorskie-i-smezhnye-prava-na-muzyku). Если бит нужен прямо сейчас, посмотрите [чек-лист готовности трека](/guides/gotov-li-trek-k-relizu) — там есть пункт про права. Если вы сами битмейкер, читайте гайд [как продавать биты](/guides/kak-prodavat-bity)."
       },
       {
         type: "cta",

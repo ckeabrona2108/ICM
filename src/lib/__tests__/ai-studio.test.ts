@@ -79,23 +79,24 @@ test("subscription bonus tokens respect billing period for PRO and ENTERPRISE", 
 });
 
 test("video duration pricing matches the AI Studio matrix", () => {
+  // Video price = model cost per second × duration × 1000 tokens per dollar.
   assert.equal(
     resolveAiStudioGenerationCostTokens({
       section: "video",
-      modelCode: "xai/grok-imagine-video/text-to-video",
-      modelPriceTokens: 500,
+      modelCode: "kling/v4/text-to-video",
+      modelPriceTokens: 790,
       parameters: { Duration: "5 sec" }
     }),
-    250
+    790
   );
   assert.equal(
     resolveAiStudioGenerationCostTokens({
       section: "video",
-      modelCode: "veo3.1",
-      modelPriceTokens: 4000,
+      modelCode: "google/gemini-omni-flash/v1.2/text-to-video",
+      modelPriceTokens: 140,
       parameters: { Duration: "10 sec" }
     }),
-    4000
+    270
   );
   assert.equal(
     resolveAiStudioGenerationCostTokens({

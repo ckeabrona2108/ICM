@@ -6,6 +6,7 @@ import { callFalEndpoint } from "@/lib/fal";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { spendAiTokensForGeneration } from "@/lib/ai-token-service";
 import { resolveAiStudioGenerationCostTokens } from "@/lib/ai-studio";
+import { buildStudioModelInput } from "@/lib/ai-studio-fal-models";
 
 export const aiStudioReferenceFileSchema = z.object({
   name: z.string().trim().min(1, "Reference file name is required."),
@@ -126,7 +127,7 @@ function parseDurationSeconds(value: string | undefined): number | null {
   return Number.isFinite(duration) && duration > 0 ? duration : null;
 }
 
-function mapSectionFalInput(params: {
+export function mapSectionFalInput(params: {
   section: "image" | "video" | "audio";
   prompt: string;
   modelName: string;
@@ -156,8 +157,14 @@ function mapSectionFalInput(params: {
     return result;
   }
 
+  // Music models read one free-text prompt, so the user's style tags and "no vocals" go into it.
+  const style = parameters.Style?.trim();
+  const instrumental = parameters.Type === "Инструментал";
+  result.prompt = [params.prompt.trim(), style ? `Style: ${style}` : "", instrumental ? "Instrumental, no vocals" : ""]
+    .filter(Boolean)
+    .join(". ");
   if (parameters.Type) result.type = parameters.Type;
-  if (parameters.Style) result.style = parameters.Style;
+  if (style) result.style = style;
   if (parameters.Length) result.length = parameters.Length;
   result.model = params.modelName;
   return result;
@@ -222,17 +229,27 @@ async function buildMediaPreview(params: {
   modelId: string;
   parameters?: Record<string, string>;
 }): Promise<{ resultUrl: string; assistantText: string | null }> {
-  const falInput = mapSectionFalInput({
-    section: params.section,
+  // Catalog models get an input built for their own schema; anything else keeps the generic mapping.
+  const catalogRequest = buildStudioModelInput({
+    modelId: params.modelId,
     prompt: params.prompt,
-    modelName: params.modelName,
     parameters: params.parameters
   });
-  const timeoutMs = params.section === "video" ? 90_000 : params.section === "audio" ? 45_000 : 30_000;
+  const falInput =
+    catalogRequest?.input ??
+    mapSectionFalInput({
+      section: params.section,
+      prompt: params.prompt,
+      modelName: params.modelName,
+      parameters: params.parameters
+    });
+  const endpointId = catalogRequest?.endpointId ?? params.modelId;
+  // New video/music models often take minutes; images with high quality up to a minute.
+  const timeoutMs = params.section === "video" ? 240_000 : params.section === "audio" ? 150_000 : 90_000;
 
   try {
     const result = await callFalEndpoint({
-      modelId: params.modelId,
+      modelId: endpointId,
       input: falInput,
       timeoutMs
     });

@@ -9,7 +9,6 @@ import {
   AudioLines,
   Bot,
   ChevronDown,
-  ChevronUp,
   CheckCircle2,
   CircleAlert,
   ImagePlus,
@@ -17,11 +16,12 @@ import {
   Loader2,
   Music2,
   PlayCircle,
-  Settings2,
+  RefreshCw,
   Sparkles,
-  UploadCloud,
   Video,
-  X
+  Plus,
+  X,
+  Zap
 } from "lucide-react";
 
 import type { AiStudioWorkspaceTab } from "@/app/(dashboard)/dashboard/ai-studio/page-data";
@@ -46,40 +46,30 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { getAiStudioVideoDurationTokenCost, resolveAiStudioGenerationCostTokens } from "@/lib/ai-studio";
 import { cn } from "@/lib/utils";
+import {
+  getAiStudioModelHint,
+  getAiStudioParamGroupLabel,
+  getAiStudioParamOptionHint,
+  getAiStudioParamOptionLabel
+} from "@/lib/ai-studio-ui";
 
 const WORKSPACE_TABS: Array<{
   id: AiStudioWorkspaceTab;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { id: "chat", label: "Чаты", icon: Bot },
-  { id: "image", label: "Изображения", icon: ImagePlus },
+  { id: "chat", label: "Чат", icon: Bot },
+  { id: "image", label: "Обложки и арт", icon: ImagePlus },
   { id: "video", label: "Видео", icon: Video },
-  { id: "audio", label: "Аудио", icon: Music2 },
-  { id: "uploads", label: "Загрузки", icon: UploadCloud },
-  { id: "archive", label: "Архив", icon: Archive }
+  { id: "audio", label: "Музыка", icon: Music2 }
 ];
 
-const SECTION_LABELS: Record<AiStudioSection, string> = {
-  chat: "Чаты",
-  image: "Изображения",
-  video: "Видео",
-  audio: "Аудио"
-};
+const CLIENT_SWITCH_TABS = new Set<AiStudioWorkspaceTab>(["chat", "image", "video", "audio"]);
 
-const SECTION_EMPTY_TITLES: Record<AiStudioSection, string> = {
-  chat: "Чем помочь?",
-  image: "Создайте обложку или промо-арт",
-  video: "Создайте видео для клипа или сниппета",
-  audio: "Создайте трек или бит"
-};
-
-const SECTION_EMPTY_HINTS: Record<AiStudioSection, string> = {
-  chat: "Задайте вопрос или попросите помочь с текстом.",
-  image: "Опишите обложку или промо-арт — результат появится здесь.",
-  video: "Опишите сцену для клипа или сниппета — видео появится здесь.",
-  audio: "Опишите звучание, жанр и настроение — трек появится здесь."
-};
+const LIBRARY_TABS: Array<{ id: AiStudioWorkspaceTab; label: string }> = [
+  { id: "archive", label: "Генерации" },
+  { id: "uploads", label: "Мои загрузки" }
+];
 
 const CHAT_EXAMPLE_PROMPTS = [
   "Напиши описание релиза для площадок",
@@ -127,11 +117,8 @@ const MODEL_PARAM_PRESETS: Record<AiStudioSection, { label: string; options: str
     { label: "Quality", options: ["480p", "720p", "1080p"] },
     { label: "Format", options: ["9:16", "16:9", "1:1"] }
   ],
-  audio: [
-    { label: "Type", options: ["Песня", "Инструментал", "Кавер"] },
-    { label: "Style", options: ["Pop", "Trap", "R&B", "Ambient"] },
-    { label: "Length", options: ["Short", "Standard", "Extended"] }
-  ]
+  // Music has no preset pickers: the style is free text with suggested tags (see MusicCreatePanel).
+  audio: []
 };
 
 const SECTION_PROMPTS: Record<AiStudioSection, string> = {
@@ -325,7 +312,7 @@ interface AiStudioMediaConversationItem {
 }
 
 export function AiStudioPage({
-  activeTab,
+  activeTab: activeTabProp,
   userName,
   aiStudioStatus,
   aiTokenBalance,
@@ -345,11 +332,29 @@ export function AiStudioPage({
   const pathname = usePathname();
   const router = useRouter();
   const { refresh: refreshUser } = useCurrentUser();
+  // Чат, обложки, видео и музыка переключаются на клиенте (history.pushState): без перезагрузки
+  // и без скелетона dashboard/loading.tsx. Вкладка берётся из адреса, поэтому «назад» тоже работает.
+  const pathTab = pathname?.split("/").filter(Boolean).pop() ?? "";
+  const activeTab: AiStudioWorkspaceTab =
+    CLIENT_SWITCH_TABS.has(activeTabProp) && CLIENT_SWITCH_TABS.has(pathTab as AiStudioWorkspaceTab)
+      ? (pathTab as AiStudioWorkspaceTab)
+      : activeTabProp;
+  const switchTool = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>, tab: AiStudioWorkspaceTab) => {
+      if (!CLIENT_SWITCH_TABS.has(activeTabProp) || !CLIENT_SWITCH_TABS.has(tab)) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+      event.preventDefault();
+      if (tab === activeTab) return;
+      window.history.pushState(null, "", `/dashboard/ai-studio/${tab}`);
+    },
+    [activeTab, activeTabProp]
+  );
   const activeSection = TAB_TO_SECTION[activeTab] ?? null;
   const isStudioPreparing = aiStudioStatus === "preparing";
   const modelWorkspaceSection =
     activeSection === "image" || activeSection === "video" || activeSection === "audio" ? activeSection : null;
   const showModelWorkspace = activeTab === "image" || activeTab === "video" || activeTab === "audio";
+  const isLibraryTab = activeTab === "archive" || activeTab === "uploads";
   const [modelCatalog, setModelCatalog] = React.useState(initialModelCatalog);
   const [earlyAccess, setEarlyAccess] = React.useState(false);
   const [aiTokenBalanceValue, setAiTokenBalanceValue] = React.useState(aiTokenBalance);
@@ -366,7 +371,6 @@ export function AiStudioPage({
     video: [],
     audio: []
   });
-  const [composerCollapsed, setComposerCollapsed] = React.useState(false);
   const [activationModalOpen, setActivationModalOpen] = React.useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = React.useState(searchParams.get("buyTokens") === "1");
   const [purchaseConfirmPackage, setPurchaseConfirmPackage] = React.useState<AiTokenPackageResponse | null>(null);
@@ -408,8 +412,7 @@ export function AiStudioPage({
     },
     audio: {
       Type: "Песня",
-      Style: "Pop",
-      Length: "Short"
+      Style: ""
     }
   });
   const [selectionOpen, setSelectionOpen] = React.useState(false);
@@ -418,7 +421,10 @@ export function AiStudioPage({
   const [generationProgress, setGenerationProgress] = React.useState(0);
   const [generationBusy, setGenerationBusy] = React.useState(false);
   const [chatThreadsState, setChatThreadsState] = React.useState(chatThreads);
-  const [activeChatThreadState, setActiveChatThreadState] = React.useState(activeChatThread);
+  // The thread the chat is showing now; null = a new chat. Changes on the client when a chat is opened.
+  const [currentChatThreadId, setCurrentChatThreadId] = React.useState<string | null>(
+    activeChatThread?.id ?? activeChatThreadId
+  );
   const [chatMessages, setChatMessages] = React.useState<AiStudioChatMessageResponse[]>(
     activeChatThread?.messages ?? []
   );
@@ -524,14 +530,14 @@ export function AiStudioPage({
   }, [chatThreads]);
 
   React.useEffect(() => {
-    setActiveChatThreadState(activeChatThread);
+    setCurrentChatThreadId(activeChatThread?.id ?? activeChatThreadId);
     setChatMessages(activeChatThread?.messages ?? []);
     setChatModelId(activeChatThread?.modelCode || getDefaultModelId(initialModelCatalog.sections.chat));
     setPromptBySection((current) => ({
       ...current,
       chat: ""
     }));
-  }, [activeChatThread, initialModelCatalog.sections.chat]);
+  }, [activeChatThread, activeChatThreadId, initialModelCatalog.sections.chat]);
 
   React.useEffect(() => {
     setSelectionOpen(false);
@@ -661,10 +667,10 @@ export function AiStudioPage({
     activeSection && activeSection !== "chat"
       ? latestGenerationBySection[activeSection] ?? null
       : null;
-  const currentMediaConversation =
-    activeSection && activeSection !== "chat"
-      ? mediaConversationBySection[activeSection] ?? []
-      : [];
+  const currentMediaConversation = React.useMemo(
+    () => (activeSection && activeSection !== "chat" ? mediaConversationBySection[activeSection] ?? [] : []),
+    [activeSection, mediaConversationBySection]
+  );
   const mediaModelPrice =
     activeSection && activeSection !== "chat" && selectedModel
       ? resolveAiStudioGenerationCostTokens({
@@ -708,11 +714,53 @@ export function AiStudioPage({
   const chatDisabledHint = shouldShowPreparingState
     ? "AI Studio подготавливается"
     : requiresStudioActivation
-      ? "Отправка станет доступна после активации AI Studio"
+      ? "Чтобы отправить сообщение, получите токены — кнопки выше"
       : aiTokenBalanceValue < chatModelPrice
         ? `Недостаточно токенов: нужно ${formatAiTokenAmount(chatModelPrice)}`
         : null;
   const toolbarParams = activeSection && activeSection !== "chat" ? MODEL_PARAM_PRESETS[activeSection] : [];
+  const mediaBlockedAction: { label: string; onClick: () => void } | null = requiresStudioActivation
+    ? { label: "Получить токены", onClick: () => setActivationModalOpen(true) }
+    : !shouldShowPreparingState && modelWorkspaceSection && aiTokenBalanceValue < mediaModelPrice
+      ? { label: "Пополнить токены", onClick: () => openPurchaseModal() }
+      : null;
+  const recentWorks = React.useMemo(() => {
+    if (!modelWorkspaceSection) return [];
+    const sessionIds = new Set(currentMediaConversation.map((item) => item.id));
+    return history.filter(
+      (item) => item.section === modelWorkspaceSection && item.resultUrl && !sessionIds.has(item.id)
+    );
+  }, [currentMediaConversation, history, modelWorkspaceSection]);
+  // Newest first: this session's generations (including ones still running), then saved works.
+  const mediaResultRows = React.useMemo<MediaResultRow[]>(
+    () => [
+      ...[...currentMediaConversation].reverse().map((item) => ({
+        id: item.id,
+        section: item.section,
+        prompt: item.prompt,
+        modelCode: item.modelCode,
+        createdAt: item.createdAt,
+        resultUrl: item.resultUrl,
+        pending: item.status === "pending"
+      })),
+      ...recentWorks.map((item) => ({
+        id: item.id,
+        section: item.section,
+        prompt: item.prompt,
+        modelCode: item.modelCode,
+        createdAt: item.createdAt,
+        resultUrl: item.resultUrl,
+        pending: false
+      }))
+    ],
+    [currentMediaConversation, recentWorks]
+  );
+  const repeatPrompt = (prompt: string) =>
+    setPromptBySection((current) => ({
+      ...current,
+      [modelWorkspaceSection ?? "image"]: prompt
+    }));
+  const mediaComposerPrice = mediaModelPrice || (typeof composerCost === "number" ? composerCost : 0);
   const handleGenerate = React.useCallback(async () => {
     if (shouldShowPreparingState) {
       showToast("AI Studio ещё подготавливается. Проверьте статус немного позже.");
@@ -871,7 +919,7 @@ export function AiStudioPage({
 
     try {
       const payload = {
-        threadId: activeChatThreadState?.id ?? activeChatThreadId,
+        threadId: currentChatThreadId,
         modelId: selectedChatModel.id,
         prompt
       };
@@ -906,13 +954,13 @@ export function AiStudioPage({
       setChatMessages((current) =>
         [...current, result.userMessage, result.assistantMessage].filter(Boolean) as AiStudioChatMessageResponse[]
       );
-      setActiveChatThreadState(result.thread as AiStudioChatThreadPayload);
+      setCurrentChatThreadId(result.thread.id);
       setChatThreadsState((current) => {
         const next = current.filter((item) => item.id !== result.thread?.id);
         return [result.thread as AiStudioChatThreadResponse, ...next];
       });
       setChatModelId(result.thread.modelCode);
-      router.replace(`/dashboard/ai-studio/chat?chat=${result.thread.id}`);
+      window.history.replaceState(null, "", `/dashboard/ai-studio/chat?chat=${result.thread.id}`);
       showToast("Сообщение отправлено");
       await refreshUser(true);
     } catch (error) {
@@ -924,7 +972,7 @@ export function AiStudioPage({
     }
   }, [
     activeChatThreadId,
-    activeChatThreadState?.id,
+    currentChatThreadId,
     activeTab,
     aiTokenBalanceValue,
     canSendChat,
@@ -937,15 +985,36 @@ export function AiStudioPage({
     showToast
   ]);
 
+  // Chats open in place: no server render of the whole page, just one small request for the thread.
+  const [chatLoadingId, setChatLoadingId] = React.useState<string | null>(null);
   const openNewChat = React.useCallback(() => {
-    router.push("/dashboard/ai-studio/chat?chat=new");
-  }, [router]);
+    setCurrentChatThreadId(null);
+    setChatMessages([]);
+    setPromptBySection((current) => ({ ...current, chat: "" }));
+    window.history.pushState(null, "", "/dashboard/ai-studio/chat?chat=new");
+  }, []);
 
   const selectChatThread = React.useCallback(
-    (threadId: string) => {
-      router.push(`/dashboard/ai-studio/chat?chat=${threadId}`);
+    async (threadId: string) => {
+      if (threadId === currentChatThreadId) return;
+      setCurrentChatThreadId(threadId);
+      setChatMessages([]);
+      setChatLoadingId(threadId);
+      window.history.pushState(null, "", `/dashboard/ai-studio/chat?chat=${encodeURIComponent(threadId)}`);
+      try {
+        const response = await fetch(`/api/ai/chat?threadId=${encodeURIComponent(threadId)}`, { cache: "no-store" });
+        const payload = (await response.json().catch(() => null)) as { thread?: AiStudioChatThreadPayload } | null;
+        if (!response.ok || !payload?.thread) throw new Error("Не удалось открыть чат.");
+        setChatMessages(payload.thread.messages ?? []);
+        if (payload.thread.modelCode) setChatModelId(payload.thread.modelCode);
+        setPromptBySection((current) => ({ ...current, chat: "" }));
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : "Не удалось открыть чат.");
+      } finally {
+        setChatLoadingId(null);
+      }
     },
-    [router]
+    [currentChatThreadId, showToast]
   );
 
   const onChooseModel = (modelId: string) => {
@@ -1007,12 +1076,6 @@ export function AiStudioPage({
     }
   };
 
-  const onSelectToolbarField = (field: "model" | "mode" | "priority" | "param", label?: string) => {
-    if (!activeSection) return;
-    setSelectionOpen(true);
-    setSelectionField(field);
-    setSelectionParamLabel(label ?? null);
-  };
 
   const uploadReferenceFile = React.useCallback(async (section: "image" | "video" | "audio", file: File) => {
     const contentType = inferUploadContentType(file);
@@ -1176,72 +1239,190 @@ export function AiStudioPage({
     openPurchaseModal();
   }, [openPurchaseModal]);
 
-  const composerControls = modelWorkspaceSection ? (
-      <div className="flex flex-wrap items-center gap-2">
-        <ToolbarDropdown
-          label={selectedModel?.label ?? MODEL_FALLBACKS[modelWorkspaceSection][0]}
-          onClick={() => onSelectToolbarField("model")}
-          accent
-        />
+  const modelMenuItems = (models: AiStudioModelOptionResponse[]): ChipMenuItem[] =>
+    models.map((model) => ({
+      id: model.id,
+      label: model.label,
+      description: getAiStudioModelHint(model.label),
+      meta: model.priceTokens != null ? `${formatAiTokenAmount(model.priceTokens)} ток.` : null
+    }));
+  const setSectionParam = (section: AiStudioSection, key: string, value: string) =>
+    setSelectedParamsBySection((current) => ({
+      ...current,
+      [section]: { ...current[section], [key]: value }
+    }));
+  const modelChipFor = (placement: "up" | "down", align: "left" | "right" = "right") =>
+    modelWorkspaceSection ? (
+      <ChipMenu
+        title="Модель"
+        label={selectedModel?.label ?? MODEL_FALLBACKS[modelWorkspaceSection][0]}
+        items={modelMenuItems(visibleModels)}
+        value={selectedModel?.id ?? null}
+        onSelect={(id) =>
+          setSelectedModelBySection((current) => ({ ...current, [modelWorkspaceSection]: id }))
+        }
+        accent
+        placement={placement}
+        align={align}
+      />
+    ) : null;
+  const modelChip = modelChipFor("up");
+  const paramChips = modelWorkspaceSection ? (
+      <>
         {toolbarParams.map((param) => (
-          <ToolbarDropdown
+          <ChipMenu
             key={param.label}
-            label={selectedParamsBySection[modelWorkspaceSection][param.label] ?? param.label}
-            onClick={() => onSelectToolbarField("param", param.label)}
+            title={getAiStudioParamGroupLabel(modelWorkspaceSection, param.label)}
+            label={formatComposerParamChip(
+              param.label,
+              selectedParamsBySection[modelWorkspaceSection][param.label] ?? param.label
+            )}
+            items={param.options.map((option) => {
+              const durationCost =
+                modelWorkspaceSection === "video" && param.label === "Duration" && selectedModel
+                  ? getAiStudioVideoDurationTokenCost(selectedModel.id, option)
+                  : null;
+              return {
+                id: option,
+                label: formatComposerParamChip(param.label, option),
+                description: param.label === "Format" ? null : getAiStudioParamOptionHint(param.label, option),
+                meta: durationCost != null ? `${formatAiTokenAmount(durationCost)} ток.` : null
+              };
+            })}
+            value={selectedParamsBySection[modelWorkspaceSection][param.label] ?? null}
+            onSelect={(value) => setSectionParam(modelWorkspaceSection, param.label, value)}
           />
         ))}
-      </div>
+      </>
     ) : null;
+  const composerControls = (
+    <>
+      {paramChips}
+      <span className="ml-auto" />
+      {modelChip}
+    </>
+  );
+  const mediaComposer = (
+    <GptComposer
+      value={currentPrompt}
+      onChange={(value) =>
+        setPromptBySection((current) => ({
+          ...current,
+          [modelWorkspaceSection ?? "image"]: value
+        }))
+      }
+      placeholder={SECTION_PROMPTS[modelWorkspaceSection ?? "image"]}
+      onSubmit={handleGenerate}
+      canSubmit={canGenerateMedia}
+      busy={generationBusy}
+      chips={composerControls}
+      onAttach={modelWorkspaceSection !== "video" ? onPickReferenceFiles : undefined}
+      attachBusy={uploadingReferenceCount > 0}
+      referenceFiles={referenceFiles}
+      onRemoveReference={onRemoveReferenceFile}
+      priceLabel={mediaComposerPrice > 0 ? formatTokenCost(mediaComposerPrice) : null}
+      blockedAction={mediaBlockedAction}
+      progress={generationProgress}
+      hint={generationBusy || mediaBlockedAction ? null : mediaDisabledHint}
+    />
+  );
   return (
     <>
       {/* Desktop: the studio fits the viewport and only its inner areas scroll, so nothing jumps. */}
       <div className="flex flex-col gap-4 pb-28 motion-safe:animate-[aiStudioEnter_160ms_cubic-bezier(0.22,1,0.36,1)] xl:h-[calc(100dvh-136px)] xl:pb-0">
         <div className="flex min-h-0 flex-1 flex-col gap-4 xl:overflow-y-auto">
           <section className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-3 rounded-[24px] border border-white/[0.08] bg-[#11131b] px-4 py-3 sm:px-5">
-            <h1 className="font-display text-[22px] font-bold tracking-[-0.02em] text-white">AI Студия</h1>
-            {/* Segmented tabs instead of the old left column (21st.dev "Segmented Control"). */}
+            <div className="min-w-0">
+              <h1 className="font-display text-[22px] font-bold leading-tight tracking-[-0.02em] text-white">AI Студия</h1>
+              <p className="text-[12px] font-medium text-white/50">Обложки, клипы и музыка для релиза</p>
+            </div>
             <nav
               aria-label="Инструменты AI Студии"
-              className="-mx-1 flex max-w-full gap-0.5 overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.04] p-1"
+              className="flex w-full gap-1 overflow-x-auto rounded-2xl border border-white/[0.08] bg-black/20 p-1 sm:w-auto"
             >
               {WORKSPACE_TABS.map((tab) => {
                 const isActive = activeTab === tab.id;
+                const Icon = tab.icon;
                 return (
                   <Link
                     key={tab.id}
                     href={`/dashboard/ai-studio/${tab.id}`}
+                    scroll={false}
+                    onClick={(event) => switchTool(event, tab.id)}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
-                      "whitespace-nowrap rounded-xl px-3.5 py-2 text-[13px] font-semibold transition-colors",
+                      "inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 text-[13.5px] font-semibold transition-colors sm:flex-none sm:px-3.5",
                       isActive
-                        ? "bg-[#7b61ff] text-white shadow-[0_8px_20px_-10px_rgba(123,97,255,0.95)]"
-                        : "text-white/55 hover:text-white"
+                        ? "bg-[#6b4ef0] text-white shadow-[0_8px_20px_-10px_rgba(123,97,255,0.95)]"
+                        : "text-white/60 hover:bg-white/[0.05] hover:text-white"
                     )}
                   >
-                    {tab.label}
+                    <Icon className="hidden h-4 w-4 sm:block" />
+                    <span className="sm:hidden">{tab.id === "image" ? "Обложки" : tab.label}</span>
+                    <span className="hidden sm:inline">{tab.label}</span>
                   </Link>
                 );
               })}
             </nav>
-            <div className="ml-auto flex items-center gap-4">
-              <div className="flex items-center gap-1.5 whitespace-nowrap text-[13px] text-white/50">
-                AI-токены <span className="text-[15px] font-bold tabular-nums text-white">{formatAiTokenAmount(aiTokenBalanceValue)}</span>
-                {pendingAiTokenBalanceValue > 0 ? (
-                  <>
-                    · ожидают <span className="font-bold tabular-nums text-amber-200">{formatAiTokenAmount(pendingAiTokenBalanceValue)}</span>
-                  </>
-                ) : null}
-                · тариф <span className="text-[15px] font-bold text-white">{entitlements.plan}</span>
-              </div>
-              <button
-                type="button"
-                onClick={openPurchaseModal}
-                className="inline-flex h-10 items-center rounded-xl bg-[#7b61ff] px-4 text-[13px] font-semibold text-white shadow-[0_10px_24px_-12px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff]"
+            <div className="flex w-full items-center justify-between gap-2.5 sm:ml-auto sm:w-auto sm:justify-end">
+              <Link
+                href="/dashboard/ai-studio/archive"
+                aria-current={isLibraryTab ? "page" : undefined}
+                className={cn(
+                  "inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-[13.5px] font-semibold transition-colors",
+                  isLibraryTab
+                    ? "border-[#8f7bff]/60 bg-[#7b61ff]/15 text-white"
+                    : "border-white/[0.1] text-white/80 hover:bg-white/[0.05] hover:text-white"
+                )}
               >
-                Пополнить
-              </button>
+                <Archive className="h-4 w-4" />
+                Мои работы
+              </Link>
+              <div className="flex h-10 items-center gap-2 rounded-xl border border-[#7b61ff]/35 bg-[#7b61ff]/[0.12] pl-3 pr-1">
+                <Zap className="h-4 w-4 text-[#b9abff]" aria-hidden="true" />
+                <span className="text-[15px] font-bold tabular-nums text-white">{formatAiTokenAmount(aiTokenBalanceValue)}</span>
+                <span className="hidden text-[12.5px] text-[#c9c2f5] sm:inline">токенов</span>
+                {pendingAiTokenBalanceValue > 0 ? (
+                  <span className="text-[12.5px] text-amber-200">
+                    +{formatAiTokenAmount(pendingAiTokenBalanceValue)} ожидают
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={openPurchaseModal}
+                  className="ml-1 inline-flex h-8 items-center rounded-[9px] bg-[#6b4ef0] px-3 text-[12.5px] font-semibold text-white transition hover:bg-[#7b61ff]"
+                >
+                  Пополнить
+                </button>
+              </div>
             </div>
           </section>
+
+          {requiresStudioActivation && activeTab !== "archive" && activeTab !== "uploads" ? (
+            <AiStudioActivationBanner
+              section={activeSection ?? "image"}
+              onOpenSubscription={handleOpenSubscription}
+              onOpenTokenPurchase={handleOpenTokenPurchase}
+            />
+          ) : null}
+
+          {isLibraryTab ? (
+            <nav aria-label="Мои работы" className="flex gap-1 self-start rounded-2xl border border-white/[0.08] bg-[#11131b] p-1">
+              {LIBRARY_TABS.map((tab) => (
+                <Link
+                  key={tab.id}
+                  href={`/dashboard/ai-studio/${tab.id}`}
+                  aria-current={activeTab === tab.id ? "page" : undefined}
+                  className={cn(
+                    "inline-flex h-9 items-center rounded-xl px-4 text-[13px] font-semibold transition-colors",
+                    activeTab === tab.id ? "bg-white/[0.1] text-white" : "text-white/60 hover:text-white"
+                  )}
+                >
+                  {tab.label}
+                </Link>
+              ))}
+            </nav>
+          ) : null}
 
           {paymentStatus && paymentBannerVisible ? (
             <PaymentStatusBanner
@@ -1258,11 +1439,22 @@ export function AiStudioPage({
               <ChatWorkspace
                 userName={userName}
                 chatThreads={chatThreadsState}
-                activeChatThreadId={activeChatThreadState?.id ?? activeChatThreadId}
-                onSelectChatThread={selectChatThread}
+                activeChatThreadId={currentChatThreadId}
+                onSelectChatThread={(threadId) => void selectChatThread(threadId)}
+                loadingThreadId={chatLoadingId}
                 modelLabel={selectedChatModel?.label ?? "GPT-4o"}
                 modelPrice={chatModelPrice}
                 aiTokenBalance={aiTokenBalanceValue}
+                modelMenu={
+                  <ChipMenu
+                    title="Модель"
+                    label={selectedChatModel?.label ?? "GPT-4o"}
+                    items={modelMenuItems(chatModels)}
+                    value={selectedChatModel?.id ?? null}
+                    onSelect={setChatModelId}
+                    accent
+                  />
+                }
                 onOpenModelSelector={() => {
                   setSelectionOpen(true);
                   setSelectionField("model");
@@ -1286,86 +1478,73 @@ export function AiStudioPage({
             )
           ) : null}
 
-          {showModelWorkspace ? (
-            <section className="flex min-h-[640px] flex-1 flex-col overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#11131b] xl:min-h-0">
-              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/[0.07] px-5 py-3">
-                <h2 className="text-[16px] font-semibold text-white">{SECTION_LABELS[modelWorkspaceSection ?? "image"]}</h2>
-                <Link
-                  href="/dashboard/ai-studio/archive"
-                  className="inline-flex h-9 items-center rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 text-[12.5px] font-semibold text-white/75 transition hover:bg-white/[0.08] hover:text-white"
-                >
-                  История генераций
-                </Link>
-              </div>
-              <div className="min-h-[320px] flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_50%_0%,rgba(123,97,255,0.12),transparent_55%)] p-4 sm:p-6 xl:min-h-0">
-                {shouldShowPreparingState ? (
-                  <AiStudioPreparingState
-                    pendingTokens={pendingAiTokenBalanceValue}
-                    onRefresh={() => router.refresh()}
-                    compact
-                  />
-                ) : currentMediaConversation.length > 0 ? (
-                  <MediaWorkspace conversation={currentMediaConversation} modelLabelLookup={modelLabelLookup} />
-                ) : (
-                  <div className="flex h-full min-h-[280px] items-center justify-center rounded-[20px] border border-dashed border-white/[0.1] px-6 text-center">
-                    <div className="max-w-lg">
-                      <div className="text-[22px] font-bold tracking-[-0.01em] text-white">
-                        {SECTION_EMPTY_TITLES[modelWorkspaceSection ?? "image"]}
-                      </div>
-                      <p className="mt-2 text-[14px] font-medium leading-6 text-white/50">
-                        {SECTION_EMPTY_HINTS[modelWorkspaceSection ?? "image"]}
-                      </p>
-                      {SECTION_EXAMPLE_PROMPTS[modelWorkspaceSection ?? "image"].length > 0 ? (
-                        <div className="mt-5 flex flex-wrap justify-center gap-2">
-                          {SECTION_EXAMPLE_PROMPTS[modelWorkspaceSection ?? "image"].map((example) => (
-                            <button
-                              key={example}
-                              type="button"
-                              onClick={() =>
-                                setPromptBySection((current) => ({
-                                  ...current,
-                                  [modelWorkspaceSection ?? "image"]: example
-                                }))
-                              }
-                              className="rounded-full border border-white/[0.08] bg-white/[0.04] px-3.5 py-2 text-[13px] font-medium text-white/70 transition hover:border-[#7b61ff]/40 hover:bg-[#7b61ff]/12 hover:text-white"
-                            >
-                              {example}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+          {showModelWorkspace && shouldShowPreparingState ? (
+            <section className="flex-1 overflow-y-auto rounded-[24px] border border-white/[0.06] bg-[#15161d] p-4 sm:p-6">
+              <AiStudioPreparingState
+                pendingTokens={pendingAiTokenBalanceValue}
+                onRefresh={() => router.refresh()}
+                compact
+              />
+            </section>
+          ) : null}
+
+          {showModelWorkspace && !shouldShowPreparingState && modelWorkspaceSection === "audio" ? (
+            <section className="grid min-h-[640px] flex-1 overflow-hidden rounded-[24px] border border-white/[0.06] bg-[#15161d] lg:grid-cols-[400px_minmax(0,1fr)] xl:min-h-0">
+              <MusicCreatePanel
+                prompt={currentPrompt}
+                onPromptChange={repeatPrompt}
+                modelChip={modelChipFor("down")}
+                styleValue={selectedParamsBySection.audio.Style ?? ""}
+                onStyleChange={(value) => setSectionParam("audio", "Style", value)}
+                instrumental={selectedParamsBySection.audio.Type === "Инструментал"}
+                onInstrumentalChange={(value) => setSectionParam("audio", "Type", value ? "Инструментал" : "Песня")}
+                onAttach={onPickReferenceFiles}
+                attachBusy={uploadingReferenceCount > 0}
+                referenceFiles={referenceFiles}
+                onRemoveReference={onRemoveReferenceFile}
+                price={mediaComposerPrice}
+                canGenerate={canGenerateMedia}
+                generationBusy={generationBusy}
+                generationProgress={generationProgress}
+                onGenerate={handleGenerate}
+                blockedAction={mediaBlockedAction}
+                hint={generationBusy || mediaBlockedAction ? null : mediaDisabledHint}
+              />
+              <TrackList items={mediaResultRows} modelLabelLookup={modelLabelLookup} onRepeat={repeatPrompt} />
+            </section>
+          ) : null}
+
+          {showModelWorkspace && !shouldShowPreparingState && modelWorkspaceSection !== "audio" ? (
+            <section className="flex min-h-[640px] flex-1 flex-col overflow-hidden rounded-[24px] border border-white/[0.06] bg-[#15161d] xl:min-h-0">
+              {mediaResultRows.length > 0 ? (
+                <>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+                    <MediaWorksGrid items={mediaResultRows} modelLabelLookup={modelLabelLookup} onRepeat={repeatPrompt} />
                   </div>
-                )}
-              </div>
-              {!shouldShowPreparingState ? (
-                <ComposerBar
-                  className="m-4 mt-0 shrink-0 sm:mx-6 sm:mb-5"
-                  activeSection={modelWorkspaceSection ?? "image"}
-                  prompt={currentPrompt}
-                  onPromptChange={(value) =>
-                    setPromptBySection((current) => ({
-                      ...current,
-                      [modelWorkspaceSection ?? "image"]: value
-                    }))
-                  }
-                  modelPrice={mediaModelPrice}
-                  canGenerate={canGenerateMedia}
-                  costLabel={composerCost}
-                  controls={composerControls}
-                  onGenerate={handleGenerate}
-                  canAddReferences={modelWorkspaceSection !== "video"}
-                  referenceFiles={referenceFiles}
-                  onAddReference={onPickReferenceFiles}
-                  onRemoveReference={onRemoveReferenceFile}
-                  generationProgress={generationProgress}
-                  generationBusy={generationBusy}
-                  onOpenSettings={() => onSelectToolbarField("param", toolbarParams[0]?.label)}
-                  collapsed={composerCollapsed}
-                  onToggleCollapsed={() => setComposerCollapsed((value) => !value)}
-                  disabledHint={generationBusy ? null : mediaDisabledHint}
-                />
-              ) : null}
+                  <div className="flex shrink-0 justify-center px-4 pb-4 pt-2 sm:px-6">{mediaComposer}</div>
+                </>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4">
+                  <div className="my-auto flex flex-col items-center py-8">
+                    <h2 className="text-center font-display text-[34px] font-extrabold uppercase tracking-[-0.02em] text-white/90 sm:text-[44px]">
+                      С чего начнём?
+                    </h2>
+                    <div className="mt-8 flex max-w-[760px] flex-wrap justify-center gap-2">
+                      {SECTION_EXAMPLE_PROMPTS[modelWorkspaceSection ?? "image"].map((example) => (
+                        <button
+                          key={example}
+                          type="button"
+                          onClick={() => repeatPrompt(example)}
+                          className="rounded-2xl bg-white/[0.05] px-3.5 py-2.5 text-[13px] font-medium text-white/70 transition hover:bg-white/[0.09] hover:text-white"
+                        >
+                          {example}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex w-full justify-center">{mediaComposer}</div>
+                  </div>
+                </div>
+              )}
             </section>
           ) : null}
 
@@ -1497,6 +1676,55 @@ function AiStudioPreparingState({
         </Button>
       </div>
     </div>
+  );
+}
+
+const ACTIVATION_BANNER_TEXT: Record<AiStudioSection, string> = {
+  chat: "Получите токены, чтобы писать AI-ассистенту",
+  image: "Получите токены, чтобы создавать обложки и арт",
+  video: "Получите токены, чтобы создавать видео",
+  audio: "Получите токены, чтобы создавать биты и треки"
+};
+
+/** Compact strip: the workspace below must stay fully visible without scrolling. */
+function AiStudioActivationBanner({
+  section,
+  onOpenSubscription,
+  onOpenTokenPurchase
+}: {
+  section: AiStudioSection;
+  onOpenSubscription: () => void;
+  onOpenTokenPurchase: () => void;
+}) {
+  return (
+    <section
+      aria-label="Студия ещё не активна"
+      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-[#8f7bff]/30 bg-[#151327] px-4 py-2.5"
+    >
+      <span className="inline-flex shrink-0 rounded-full bg-amber-300/[0.14] px-2.5 py-1 text-[12px] font-semibold text-amber-200">
+        Студия не активна
+      </span>
+      <p className="min-w-0 flex-[1_1_260px] text-[13.5px] leading-5 text-white/75">
+        <span className="font-semibold text-white">{ACTIVATION_BANNER_TEXT[section]}.</span>{" "}
+        <span className="hidden md:inline">Цена каждого действия видна на кнопке заранее.</span>
+      </p>
+      <div className="flex shrink-0 gap-2">
+        <button
+          type="button"
+          onClick={onOpenTokenPurchase}
+          className="inline-flex h-9 items-center rounded-xl border border-white/[0.12] px-3.5 text-[13px] font-semibold text-white/85 transition hover:bg-white/[0.06] hover:text-white"
+        >
+          Купить токены
+        </button>
+        <button
+          type="button"
+          onClick={onOpenSubscription}
+          className="inline-flex h-9 items-center rounded-xl bg-[#6b4ef0] px-3.5 text-[13px] font-semibold text-white transition hover:bg-[#7b61ff]"
+        >
+          Оформить подписку
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -1701,118 +1929,427 @@ function PaymentStatusBanner({
   );
 }
 
-function ComposerBar({
-  className,
-  activeSection,
-  prompt,
-  onPromptChange,
-  modelPrice,
-  canGenerate,
-  costLabel,
-  controls,
-  onGenerate,
-  onAddReference,
-  canAddReferences,
-  referenceFiles,
+function formatComposerParamChip(key: string, value: string): string {
+  const label = getAiStudioParamOptionLabel(key, value);
+  const hint = key === "Format" ? getAiStudioParamOptionHint(key, value) : null;
+  return hint ? `${hint} ${value}` : label;
+}
+
+/** ChatGPT-style prompt box shared by the chat and the media tools. */
+function GptComposer({
+  value,
+  onChange,
+  placeholder,
+  onSubmit,
+  canSubmit,
+  busy,
+  chips,
+  onAttach,
+  attachBusy = false,
+  referenceFiles = [],
   onRemoveReference,
-  generationProgress,
-  generationBusy,
-  onOpenSettings,
-  collapsed,
-  onToggleCollapsed,
-  disabledHint
+  priceLabel,
+  blockedAction,
+  progress = 0,
+  hint,
+  submitOnEnter = false
 }: {
-  className?: string;
-  activeSection: AiStudioSection;
-  prompt: string;
-  onPromptChange: (value: string) => void;
-  modelPrice: number;
-  canGenerate: boolean;
-  costLabel: string | number;
-  controls: React.ReactNode;
-  onGenerate: () => void;
-  canAddReferences: boolean;
-  referenceFiles: AiStudioReferenceFile[];
-  onAddReference: (files: FileList | File[]) => void;
-  onRemoveReference: (name: string) => void;
-  generationProgress: number;
-  generationBusy: boolean;
-  onOpenSettings: () => void;
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
-  disabledHint?: string | null;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  onSubmit: () => void;
+  canSubmit: boolean;
+  busy: boolean;
+  chips?: React.ReactNode;
+  onAttach?: (files: FileList | File[]) => void;
+  attachBusy?: boolean;
+  referenceFiles?: AiStudioReferenceFile[];
+  onRemoveReference?: (id: string) => void;
+  priceLabel?: string | null;
+  blockedAction?: { label: string; onClick: () => void } | null;
+  progress?: number;
+  hint?: string | null;
+  submitOnEnter?: boolean;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-
-  const openFilePicker = () => {
-    if (!canAddReferences) return;
-    fileInputRef.current?.click();
-  };
-
-  const onFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files && files.length > 0) {
-      onAddReference(files);
-    }
-    event.target.value = "";
-  };
-
-  if (collapsed) {
-    return (
+  return (
+    <div className="w-full max-w-[760px]">
       <div
-        className={cn(
-          "perf-fixed-layer perf-paint-contain rounded-[28px] border border-white/[0.08] bg-[#10131a]/96 p-3 shadow-[0_14px_40px_-28px_rgba(11,14,24,0.82)] backdrop-blur-[6px]",
-          className
-        )}
+        className="rounded-[28px] bg-[#23252f] px-3 pb-2.5 pt-3 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_12px_40px_-20px_rgba(0,0,0,0.8)] transition-shadow focus-within:shadow-[0_0_0_1px_rgba(255,255,255,0.16),0_12px_40px_-20px_rgba(0,0,0,0.8)]"
+        onDragOver={onAttach ? (event) => event.preventDefault() : undefined}
+        onDrop={
+          onAttach
+            ? (event) => {
+                event.preventDefault();
+                if (event.dataTransfer.files.length > 0) onAttach(event.dataTransfer.files);
+              }
+            : undefined
+        }
       >
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-[13px] font-medium text-white/64">Панель скрыта</div>
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            className="inline-flex items-center gap-2 rounded-full border border-white/[0.10] bg-white/[0.03] px-3 py-2 text-[13px] font-medium text-white/72 transition-[background-color,border-color,transform,color] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-          >
-            <ChevronUp className="h-4 w-4" />
-            Показать
-          </button>
+        {onAttach ? (
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            multiple
+            accept="image/*,audio/*"
+            onChange={(event) => {
+              if (event.target.files && event.target.files.length > 0) onAttach(event.target.files);
+              event.target.value = "";
+            }}
+          />
+        ) : null}
+        {referenceFiles.length > 0 ? (
+          <div className="mb-1 flex flex-wrap gap-1.5 px-1">
+            {referenceFiles.map((file) => (
+              <span
+                key={file.id}
+                className="inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[0.08] px-2.5 text-[12px] font-medium text-white/80"
+              >
+                <span className="max-w-[180px] truncate">{file.name}</span>
+                {onRemoveReference ? (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveReference(file.id)}
+                    className="text-white/45 transition-colors hover:text-white"
+                    aria-label={`Удалить ${file.name}`}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <Textarea
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (!submitOnEnter) return;
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              if (canSubmit && !busy) onSubmit();
+            }
+          }}
+          placeholder={placeholder}
+          className="max-h-[200px] min-h-[52px] resize-none border-0 bg-transparent px-2 text-[15.5px] leading-6 text-white shadow-none placeholder:text-white/40 focus-visible:ring-0"
+        />
+        <div className="mt-1 flex items-center gap-1">
+          {onAttach ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Добавить референс"
+              title="Добавить референс"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white/70 transition hover:bg-white/[0.08] hover:text-white"
+            >
+              {attachBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
+            </button>
+          ) : null}
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">{chips}</div>
+          {priceLabel && !blockedAction ? (
+            <span className="hidden shrink-0 px-1 text-[12px] text-white/45 sm:inline">{priceLabel}</span>
+          ) : null}
+          {blockedAction ? (
+            <button
+              type="button"
+              onClick={blockedAction.onClick}
+              className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-white px-4 text-[13.5px] font-semibold text-[#111218] transition hover:bg-white/85"
+            >
+              <Zap className="h-4 w-4" aria-hidden="true" />
+              {blockedAction.label}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={!canSubmit || busy}
+              aria-label="Создать"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-[#111218] transition hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/20 disabled:text-white/50"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.6} />}
+            </button>
+          )}
         </div>
+        {busy || progress > 0 ? (
+          <div className="mx-2 mt-2 h-0.5 overflow-hidden rounded-full bg-white/[0.08]">
+            <div
+              className="h-full rounded-full bg-white/70 transition-[width] duration-200 ease-out motion-reduce:transition-none"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        ) : null}
       </div>
-    );
-  }
+      {hint ? <p className="mt-2 text-center text-[12px] font-medium text-amber-200/80">{hint}</p> : null}
+    </div>
+  );
+}
+
+interface MediaResultRow {
+  id: string;
+  section: string;
+  prompt: string;
+  modelCode: string;
+  createdAt: string;
+  resultUrl: string | null;
+  pending: boolean;
+}
+
+/** Image / video: a grid of works above the centered composer. */
+function MediaWorksGrid({
+  items,
+  modelLabelLookup,
+  onRepeat
+}: {
+  items: MediaResultRow[];
+  modelLabelLookup: Map<string, string>;
+  onRepeat: (prompt: string) => void;
+}) {
+  return (
+    <div className="mx-auto grid w-full max-w-[1040px] grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+      {items.map((item) => {
+        const kind = getResultPreviewKind(item.resultUrl, item.section);
+        return (
+          <figure key={item.id} className="group relative m-0 overflow-hidden rounded-2xl bg-white/[0.04]">
+            {item.pending ? (
+              <div className="grid aspect-square place-items-center">
+                <Loader2 className="h-6 w-6 animate-spin text-white/50" />
+              </div>
+            ) : kind === "image" && item.resultUrl ? (
+              <img src={item.resultUrl} alt={item.prompt} loading="lazy" className="aspect-square w-full object-cover" />
+            ) : kind === "video" && item.resultUrl ? (
+              <video src={item.resultUrl} controls playsInline preload="metadata" className="aspect-square w-full bg-black object-cover" />
+            ) : (
+              <div className="grid aspect-square place-items-center text-[12px] text-white/40">Нет предпросмотра</div>
+            )}
+            <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-3 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+              <p className="line-clamp-2 text-[12px] leading-4 text-white/90">{item.prompt}</p>
+              <p className="mt-1 text-[11px] text-white/50">{getModelDisplayName(item.modelCode, modelLabelLookup)}</p>
+              {!item.pending ? (
+                <div className="pointer-events-auto mt-2 flex gap-1.5">
+                  {item.resultUrl ? (
+                    <a
+                      href={item.resultUrl}
+                      download={getResultDownloadName({ modelCode: item.modelCode, section: item.section }, item.resultUrl)}
+                      className="inline-flex h-7 items-center rounded-full bg-white px-3 text-[12px] font-semibold text-[#111218]"
+                    >
+                      Скачать
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => onRepeat(item.prompt)}
+                    className="inline-flex h-7 items-center rounded-full bg-white/15 px-3 text-[12px] font-semibold text-white backdrop-blur"
+                  >
+                    Повторить
+                  </button>
+                </div>
+              ) : null}
+            </figcaption>
+          </figure>
+        );
+      })}
+    </div>
+  );
+}
+
+const MUSIC_PROMPT_LIMIT = 500;
+
+const MUSIC_STYLE_SUGGESTIONS = [
+  "поп",
+  "хип-хоп",
+  "трэп",
+  "drill",
+  "phonk",
+  "r&b",
+  "soul",
+  "lo-fi",
+  "house",
+  "techno",
+  "drum & bass",
+  "рок",
+  "инди",
+  "акустика",
+  "эмбиент",
+  "synthwave",
+  "hyperpop",
+  "afrobeats",
+  "reggaeton",
+  "808",
+  "мужской вокал",
+  "женский вокал",
+  "90 bpm",
+  "120 bpm",
+  "140 bpm",
+  "мрачный",
+  "летний",
+  "меланхоличный",
+  "энергичный",
+  "гитара",
+  "пианино",
+  "синтезаторы"
+];
+const MUSIC_STYLE_PAGE = 8;
+
+/** Music: the creation form on the left, Suno-style: description + free-text style with suggested tags. */
+function MusicCreatePanel({
+  prompt,
+  onPromptChange,
+  modelChip,
+  styleValue,
+  onStyleChange,
+  instrumental,
+  onInstrumentalChange,
+  onAttach,
+  attachBusy,
+  referenceFiles,
+  onRemoveReference,
+  price,
+  canGenerate,
+  generationBusy,
+  generationProgress,
+  onGenerate,
+  blockedAction,
+  hint
+}: {
+  prompt: string;
+  onPromptChange: (value: string) => void;
+  modelChip: React.ReactNode;
+  styleValue: string;
+  onStyleChange: (value: string) => void;
+  instrumental: boolean;
+  onInstrumentalChange: (value: boolean) => void;
+  onAttach: (files: FileList | File[]) => void;
+  attachBusy: boolean;
+  referenceFiles: AiStudioReferenceFile[];
+  onRemoveReference: (id: string) => void;
+  price: number;
+  canGenerate: boolean;
+  generationBusy: boolean;
+  generationProgress: number;
+  onGenerate: () => void;
+  blockedAction: { label: string; onClick: () => void } | null;
+  hint: string | null;
+}) {
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [suggestionPage, setSuggestionPage] = React.useState(0);
+  const usedTags = new Set(
+    styleValue
+      .split(",")
+      .map((tag) => tag.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const pageCount = Math.ceil(MUSIC_STYLE_SUGGESTIONS.length / MUSIC_STYLE_PAGE);
+  const suggestions = MUSIC_STYLE_SUGGESTIONS.slice(
+    (suggestionPage % pageCount) * MUSIC_STYLE_PAGE,
+    (suggestionPage % pageCount) * MUSIC_STYLE_PAGE + MUSIC_STYLE_PAGE
+  ).filter((tag) => !usedTags.has(tag));
+  const addTag = (tag: string) => {
+    const trimmed = styleValue.trim().replace(/,\s*$/u, "");
+    onStyleChange(trimmed ? `${trimmed}, ${tag}` : tag);
+  };
 
   return (
-    <div
-      className={cn(
-        "rounded-[22px] border border-white/[0.1] bg-[#161925] p-3 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.9),0_0_0_4px_rgba(123,97,255,0.06)] transition focus-within:border-[#7b61ff]/45",
-        className
-      )}
-    >
+    <div className="flex min-h-0 flex-col gap-3 overflow-y-auto border-b border-white/[0.06] bg-[#0e0f14] p-3 lg:border-b-0 lg:border-r">
       <input
         ref={fileInputRef}
         type="file"
         hidden
         multiple
         accept="image/*,audio/*"
-        onChange={onFileInputChange}
+        onChange={(event) => {
+          if (event.target.files && event.target.files.length > 0) onAttach(event.target.files);
+          event.target.value = "";
+        }}
       />
-      <Textarea
-        value={prompt}
-        onChange={(event) => onPromptChange(event.target.value)}
-        placeholder={SECTION_PROMPTS[activeSection]}
-        className="min-h-[60px] resize-none border-0 bg-transparent px-2 text-[15px] text-white shadow-none placeholder:text-white/38 focus-visible:ring-0"
-      />
-      {referenceFiles.length > 0 ? (
-        <div className="mt-1 flex flex-wrap gap-1.5 px-1">
-          {referenceFiles.map((file) => (
-            <span
-              key={file.id}
-              className="inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[0.06] px-2.5 text-[12px] font-medium text-white/75"
+      <div className="flex items-center justify-between gap-2 rounded-2xl bg-white/[0.04] px-2 py-1.5">
+        <span className="px-2 text-[12px] font-semibold text-white/50">Модель</span>
+        {modelChip}
+      </div>
+
+      <div className="flex min-h-[150px] flex-1 flex-col rounded-2xl bg-white/[0.04] p-3">
+        <label htmlFor="ai-studio-music-prompt" className="text-[14px] font-semibold text-white">
+          Описание
+        </label>
+        <Textarea
+          id="ai-studio-music-prompt"
+          value={prompt}
+          maxLength={MUSIC_PROMPT_LIMIT}
+          onChange={(event) => onPromptChange(event.target.value)}
+          placeholder="О чём трек, настроение, история. Можно вставить свой текст песни."
+          className="mt-2 min-h-[90px] flex-1 resize-none rounded-xl border-0 bg-black/25 px-3 py-2.5 text-[14.5px] leading-6 text-white shadow-none placeholder:text-white/35 focus-visible:ring-1 focus-visible:ring-white/15"
+        />
+        <div className="mt-1 text-right text-[11px] tabular-nums text-white/35">
+          {prompt.length}/{MUSIC_PROMPT_LIMIT}
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-white/[0.04] p-3">
+        <label htmlFor="ai-studio-music-style" className="text-[14px] font-semibold text-white">
+          Стиль
+        </label>
+        <Textarea
+          id="ai-studio-music-style"
+          value={styleValue}
+          maxLength={200}
+          onChange={(event) => onStyleChange(event.target.value)}
+          placeholder="phonk, мрачный, 808, мужской вокал, 140 bpm"
+          className="mt-2 min-h-[56px] resize-none rounded-xl border-0 bg-black/25 px-3 py-2 text-[14px] leading-6 text-white shadow-none placeholder:text-white/30 focus-visible:ring-1 focus-visible:ring-white/15"
+        />
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
+          <button
+            type="button"
+            onClick={() => setSuggestionPage((current) => current + 1)}
+            aria-label="Другие подсказки"
+            title="Другие подсказки"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.06] text-white/70 transition hover:bg-white/[0.1] hover:text-white"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+          {suggestions.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => addTag(tag)}
+              className="h-8 shrink-0 whitespace-nowrap rounded-full bg-white/[0.06] px-3 text-[12.5px] text-white/80 transition hover:bg-white/[0.12] hover:text-white"
             >
-              <span className="max-w-[160px] truncate">{file.name}</span>
+              {tag}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={instrumental}
+          onClick={() => onInstrumentalChange(!instrumental)}
+          className={cn(
+            "inline-flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-medium transition",
+            instrumental ? "bg-white text-[#111218]" : "bg-white/[0.06] text-white/75 hover:bg-white/[0.1] hover:text-white"
+          )}
+        >
+          Без слов
+        </button>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white/[0.06] px-3.5 text-[13px] font-medium text-white/75 transition hover:bg-white/[0.1] hover:text-white"
+        >
+          {attachBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          Референс
+        </button>
+      </div>
+      {referenceFiles.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {referenceFiles.map((file) => (
+            <span key={file.id} className="inline-flex h-7 items-center gap-1.5 rounded-full bg-white/[0.08] px-2.5 text-[12px] text-white/80">
+              <span className="max-w-[200px] truncate">{file.name}</span>
               <button
                 type="button"
                 onClick={() => onRemoveReference(file.id)}
-                className="text-white/40 transition-colors hover:text-white"
+                className="text-white/45 hover:text-white"
                 aria-label={`Удалить ${file.name}`}
               >
                 ×
@@ -1821,47 +2358,223 @@ function ComposerBar({
           ))}
         </div>
       ) : null}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {controls}
-        {canAddReferences ? (
+
+      <div className="mt-auto space-y-1.5">
+        {blockedAction ? (
           <button
             type="button"
-            onClick={openFilePicker}
-            className="inline-flex h-8 items-center rounded-full border border-white/[0.08] bg-white/[0.04] px-3 text-[12.5px] font-semibold text-white/78 transition-colors hover:bg-white/[0.08]"
+            onClick={blockedAction.onClick}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#5b45e0] text-[15px] font-semibold text-white transition hover:bg-[#6b55f0]"
           >
-            + Референс
+            <Zap className="h-4 w-4" aria-hidden="true" />
+            {blockedAction.label}
           </button>
-        ) : null}
-        <div className="ml-auto flex items-center gap-2">
+        ) : (
           <button
             type="button"
-            onClick={onOpenSettings}
-            aria-label="Настройки генерации"
-            className="grid h-8 w-8 place-items-center rounded-full text-white/55 transition-colors hover:bg-white/[0.06] hover:text-white"
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
-          <span className="text-[12px] text-white/42">{modelPrice || costLabel} токенов</span>
-          <button
-            type="button"
-            disabled={!canGenerate || generationBusy}
             onClick={onGenerate}
-            className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#7b61ff] px-4 text-[13px] font-semibold text-white shadow-[0_10px_24px_-12px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
+            disabled={!canGenerate || generationBusy}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[#5b45e0] text-[15px] font-semibold text-white transition hover:bg-[#6b55f0] disabled:cursor-not-allowed disabled:bg-white/[0.06] disabled:text-white/45"
           >
-            {generationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {generationBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" aria-hidden="true" />}
+            {price > 0 ? <span className="tabular-nums opacity-80">{formatAiTokenAmount(price)}</span> : null}
             {generationBusy ? "Создаём…" : "Создать"}
           </button>
-        </div>
+        )}
+        {generationBusy || generationProgress > 0 ? (
+          <div className="h-0.5 overflow-hidden rounded-full bg-white/[0.08]">
+            <div className="h-full rounded-full bg-white/70 transition-[width] duration-200" style={{ width: `${generationProgress}%` }} />
+          </div>
+        ) : null}
+        {hint ? <p className="text-center text-[12px] font-medium text-amber-200/80">{hint}</p> : null}
       </div>
-      {disabledHint ? (
-        <p className="mt-2 text-right text-[12px] font-medium text-amber-200/80">{disabledHint}</p>
-      ) : null}
-      {generationBusy || generationProgress > 0 ? (
-        <div className="mt-2 h-1 rounded-full bg-white/[0.06]">
-          <div
-            className="h-1 rounded-full bg-[#7b61ff] transition-[width] duration-200 ease-out motion-reduce:transition-none"
-            style={{ width: `${generationProgress}%` }}
-          />
+    </div>
+  );
+}
+
+/** Music: the track list on the right, with search. */
+function TrackList({
+  items,
+  modelLabelLookup,
+  onRepeat
+}: {
+  items: MediaResultRow[];
+  modelLabelLookup: Map<string, string>;
+  onRepeat: (prompt: string) => void;
+}) {
+  const [query, setQuery] = React.useState("");
+  const normalized = query.trim().toLowerCase();
+  const visible = normalized ? items.filter((item) => item.prompt.toLowerCase().includes(normalized)) : items;
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col p-3">
+      <label className="sr-only" htmlFor="ai-studio-track-search">
+        Поиск по трекам
+      </label>
+      <input
+        id="ai-studio-track-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Поиск…"
+        className="h-11 w-full shrink-0 rounded-2xl bg-white/[0.04] px-4 text-[14px] text-white outline-none placeholder:text-white/35 focus:bg-white/[0.06]"
+      />
+      <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
+        {visible.length === 0 ? (
+          <div className="flex h-full min-h-[240px] flex-col items-center justify-center text-center">
+            <div className="text-[17px] font-semibold text-white/60">{normalized ? "Ничего не найдено" : "Треков пока нет"}</div>
+            {!normalized ? <div className="mt-1 text-[14px] text-white/40">Создайте первый!</div> : null}
+          </div>
+        ) : (
+          <ul className="space-y-1">
+            {visible.map((item) => (
+              <li key={item.id} className="flex gap-3 rounded-2xl p-2 transition-colors hover:bg-white/[0.03]">
+                <span className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-[#5b45e0]/25 text-[#c9c2f5]">
+                  {item.pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Music2 className="h-5 w-5" />}
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-[14px] font-medium text-white">{item.prompt}</span>
+                    <span className="shrink-0 rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-white/50">
+                      {getModelDisplayName(item.modelCode, modelLabelLookup)}
+                    </span>
+                  </div>
+                  {item.pending ? (
+                    <span className="text-[12px] text-white/45">Создаём…</span>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {item.resultUrl ? (
+                        <audio controls preload="none" src={item.resultUrl} className="h-8 min-w-0 max-w-md flex-1" />
+                      ) : null}
+                      {item.resultUrl ? (
+                        <a
+                          href={item.resultUrl}
+                          download={getResultDownloadName({ modelCode: item.modelCode, section: item.section }, item.resultUrl)}
+                          className="inline-flex h-7 items-center rounded-full bg-white/[0.06] px-3 text-[12px] text-white/75 hover:bg-white/[0.1] hover:text-white"
+                        >
+                          Скачать
+                        </a>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => onRepeat(item.prompt)}
+                        className="inline-flex h-7 items-center rounded-full bg-white/[0.06] px-3 text-[12px] text-white/75 hover:bg-white/[0.1] hover:text-white"
+                      >
+                        Повторить
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ChipMenuItem {
+  id: string;
+  label: string;
+  description?: string | null;
+  meta?: string | null;
+}
+
+/** GPT-style dropdown: a chip that opens a small anchored menu instead of a modal. */
+function ChipMenu({
+  label,
+  items,
+  value,
+  onSelect,
+  accent = false,
+  placement = "up",
+  align = "left",
+  title
+}: {
+  label: string;
+  items: ChipMenuItem[];
+  value: string | null;
+  onSelect: (id: string) => void;
+  accent?: boolean;
+  placement?: "up" | "down";
+  align?: "left" | "right";
+  title?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          "inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition-colors hover:bg-white/[0.08]",
+          open ? "bg-white/[0.08]" : "",
+          accent ? "text-white" : "text-white/65 hover:text-white"
+        )}
+      >
+        <span className="max-w-[180px] truncate">{label}</span>
+        <ChevronDown className={cn("h-3.5 w-3.5 text-white/45 transition-transform", open ? "rotate-180" : "")} />
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className={cn(
+            "absolute z-50 max-h-[360px] w-[300px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-2xl border border-white/[0.08] bg-[#22242e] p-1.5 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.9)]",
+            placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
+            align === "right" ? "right-0" : "left-0"
+          )}
+        >
+          {title ? <div className="px-2.5 pb-1 pt-1.5 text-[11.5px] font-medium text-white/45">{title}</div> : null}
+          {items.map((item) => {
+            const selected = item.id === value;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  onSelect(item.id);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-white/[0.06]",
+                  selected ? "bg-white/[0.05]" : ""
+                )}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-[13.5px] font-medium text-white">{item.label}</span>
+                    {item.meta ? <span className="shrink-0 text-[11.5px] text-white/45">{item.meta}</span> : null}
+                  </span>
+                  {item.description ? (
+                    <span className="mt-0.5 block text-[12px] leading-4 text-white/50">{item.description}</span>
+                  ) : null}
+                </span>
+                <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center">
+                  {selected ? <CheckCircle2 className="h-4 w-4 text-white" /> : null}
+                </span>
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -1883,10 +2596,8 @@ function ToolbarDropdown({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] font-semibold transition-colors",
-        accent
-          ? "border-[#7b61ff]/35 bg-[#7b61ff]/14 text-[#ddd6fe] hover:bg-[#7b61ff]/22"
-          : "border-white/[0.08] bg-white/[0.04] text-white/78 hover:bg-white/[0.08]"
+        "inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition-colors hover:bg-white/[0.08]",
+        accent ? "text-white" : "text-white/65 hover:text-white"
       )}
     >
       <span>{label}</span>
@@ -1980,6 +2691,11 @@ function SelectionPopover({
               ) satisfies SelectionItem[])
             : [];
 
+  const cheapestModelPrice = models.reduce<number | null>(
+    (min, model) => (model.priceTokens != null && (min == null || model.priceTokens < min) ? model.priceTokens : min),
+    null
+  );
+
   return (
     <div className="fixed inset-0 z-50 bg-black/40 p-4 backdrop-blur-[1px]" onClick={onClose}>
       <div
@@ -1988,12 +2704,18 @@ function SelectionPopover({
       >
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/40">
-              {field === "param" ? "Параметры" : label ?? (field === "model" ? "Модель" : "Параметр")}
+            <div className="text-[20px] font-bold text-white">
+              {field === "model"
+                ? "Выберите модель"
+                : field === "param" && label
+                  ? getAiStudioParamGroupLabel(section, label)
+                  : "Настройки"}
             </div>
-            <div className="mt-1 text-[18px] font-semibold text-white">
-              {field === "param" ? "Настройки" : field === "model" ? "Модели" : "Опции"}
-            </div>
+            {field === "model" ? (
+              <p className="mt-1 text-[13px] text-white/55">
+                Разные модели лучше справляются с разными задачами. Цена указана за одну генерацию.
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -2018,10 +2740,23 @@ function SelectionPopover({
                       : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.14] hover:bg-white/[0.05]"
                   )}
                   >
-                  <div className="text-[16px] font-semibold text-white">{model.label}</div>
-                  <div className="mt-1 text-[13px] font-medium text-white/52">{model.provider ?? "fal"}</div>
-                  <div className="mt-2 text-[13px] font-medium text-white/72">{formatTokenCost(model.priceTokens ?? 0)}</div>
-                  <div className="mt-3 text-[13px] text-white/66">{getModelInputs(model)}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[16px] font-bold text-white">{model.label}</span>
+                    {currentModelId === model.id ? (
+                      <span className="rounded-full bg-[#6b4ef0] px-2 py-0.5 text-[11px] font-bold text-white">Выбрана</span>
+                    ) : model.priceTokens != null && model.priceTokens === cheapestModelPrice && models.length > 1 ? (
+                      <span className="rounded-full bg-emerald-400/15 px-2 py-0.5 text-[11px] font-bold text-emerald-300">Самая дешёвая</span>
+                    ) : null}
+                  </div>
+                  {getAiStudioModelHint(model.label) ? (
+                    <div className="mt-1.5 text-[13px] leading-5 text-white/75">{getAiStudioModelHint(model.label)}</div>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-white/55">
+                    <span>
+                      <b className="font-bold text-white">{formatAiTokenAmount(model.priceTokens ?? 0)}</b> ток.
+                    </span>
+                    <span>{getModelInputs(model)}</span>
+                  </div>
                 </button>
               ))
             : field === "param"
@@ -2029,18 +2764,26 @@ function SelectionPopover({
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => onChooseValue(item.label)}
+                    onClick={() => onChooseValue(item.id)}
                     className={cn(
                       "rounded-2xl border p-4 text-left transition-[background-color,border-color,transform] duration-150 ease-out motion-reduce:transition-none",
-                      currentParamValue === item.label
+                      currentParamValue === item.id
                         ? "border-[#7b3df5]/45 bg-[#171b26]"
                         : "border-white/[0.08] bg-white/[0.03] hover:border-white/[0.14] hover:bg-white/[0.05]"
                     )}
                   >
-                    <div className="text-[16px] font-semibold text-white">{item.label}</div>
-                    <div className="mt-1 text-[13px] font-medium text-white/52">
-                      {item.priceTokens != null ? formatTokenCost(item.priceTokens) : "Параметр генерации"}
+                    <div className="text-[16px] font-semibold text-white">
+                      {label ? getAiStudioParamOptionLabel(label, item.id) : item.label}
                     </div>
+                    {item.priceTokens != null || (label && getAiStudioParamOptionHint(label, item.id)) ? (
+                      <div className="mt-1 text-[13px] font-medium text-white/55">
+                        {item.priceTokens != null
+                          ? formatTokenCost(item.priceTokens)
+                          : label
+                            ? getAiStudioParamOptionHint(label, item.id)
+                            : null}
+                      </div>
+                    ) : null}
                   </button>
                 ))
             : content.map((item) => (
@@ -2352,18 +3095,25 @@ function isSameLocalDay(value: string, now: Date): boolean {
 
 function ChatHistoryPanel({
   chatThreads,
+  loadingThreadId,
   activeChatThreadId,
   onNewChat,
   onSelectChatThread
 }: {
   chatThreads: AiStudioChatThreadResponse[];
+  loadingThreadId: string | null;
   activeChatThreadId: string | null;
   onNewChat: () => void;
   onSelectChatThread: (threadId: string) => void;
 }) {
+  const [query, setQuery] = React.useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredThreads = normalizedQuery
+    ? chatThreads.filter((thread) => thread.title.toLowerCase().includes(normalizedQuery))
+    : chatThreads;
   const now = new Date();
-  const today = chatThreads.filter((thread) => isSameLocalDay(thread.lastMessageAt ?? thread.createdAt, now));
-  const earlier = chatThreads.filter((thread) => !isSameLocalDay(thread.lastMessageAt ?? thread.createdAt, now));
+  const today = filteredThreads.filter((thread) => isSameLocalDay(thread.lastMessageAt ?? thread.createdAt, now));
+  const earlier = filteredThreads.filter((thread) => !isSameLocalDay(thread.lastMessageAt ?? thread.createdAt, now));
 
   const renderThread = (thread: AiStudioChatThreadResponse) => (
     <button
@@ -2372,10 +3122,13 @@ function ChatHistoryPanel({
       onClick={() => onSelectChatThread(thread.id)}
       className={cn(
         "w-full rounded-xl px-3 py-2 text-left transition-colors",
-        activeChatThreadId === thread.id ? "bg-[#7b61ff]/16" : "hover:bg-white/[0.05]"
+        activeChatThreadId === thread.id ? "bg-white/[0.08]" : "hover:bg-white/[0.05]"
       )}
     >
-      <div className="truncate text-[13px] font-medium text-white">{thread.title}</div>
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white">{thread.title}</span>
+        {loadingThreadId === thread.id ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-white/50" /> : null}
+      </div>
       <div className="mt-0.5 truncate text-[11px] text-white/40">
         {thread.modelCode} · {formatDate(thread.lastMessageAt ?? thread.createdAt)}
       </div>
@@ -2383,16 +3136,27 @@ function ChatHistoryPanel({
   );
 
   return (
-    <aside className="flex max-h-[300px] min-h-0 flex-col border-b border-white/[0.07] p-3 lg:max-h-none lg:border-b-0 lg:border-r">
+    <aside className="flex max-h-[300px] min-h-0 flex-col border-b border-white/[0.06] bg-[#0e0f14] p-2.5 lg:max-h-none lg:border-b-0 lg:border-r">
       <button
         type="button"
         onClick={onNewChat}
-        className="mb-2 flex h-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-[#7b61ff]/50 text-[13px] font-semibold text-[#c4b5fd] transition hover:bg-[#7b61ff]/10 hover:text-white"
+        className="flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-[#5b45e0] text-[14px] font-semibold text-white transition hover:bg-[#6b55f0]"
       >
-        + Новый чат
+        <Plus className="h-4 w-4" />
+        Новый чат
       </button>
+      <label className="sr-only" htmlFor="ai-studio-chat-search">
+        Поиск по чатам
+      </label>
+      <input
+        id="ai-studio-chat-search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Поиск…"
+        className="mb-2 mt-2 h-10 w-full shrink-0 rounded-xl bg-white/[0.04] px-3 text-[13.5px] text-white outline-none placeholder:text-white/35 focus:bg-white/[0.06]"
+      />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {chatThreads.length === 0 ? (
+        {filteredThreads.length === 0 ? (
           <p className="px-3 py-3 text-[12px] leading-5 text-white/45">Здесь появится история диалогов.</p>
         ) : (
           <>
@@ -2425,8 +3189,10 @@ function ChatComposer({
   modelLabel,
   modelPrice,
   onOpenModelSelector,
-  disabledHint
+  disabledHint,
+  modelMenu
 }: {
+  modelMenu?: React.ReactNode;
   prompt: string;
   onPromptChange: (value: string) => void;
   onSend: () => void;
@@ -2438,39 +3204,18 @@ function ChatComposer({
   disabledHint?: string | null;
 }) {
   return (
-    <div className="w-full max-w-[760px]">
-      <div className="rounded-[22px] border border-white/[0.1] bg-[#161925] p-3 shadow-[0_30px_60px_-30px_rgba(0,0,0,0.9),0_0_0_4px_rgba(123,97,255,0.06)] transition focus-within:border-[#7b61ff]/45">
-        <Textarea
-          value={prompt}
-          onChange={(event) => onPromptChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              if (canSend && !sending) onSend();
-            }
-          }}
-          placeholder="Спросите что-нибудь…"
-          className="min-h-[56px] resize-none border-0 bg-transparent px-2 text-[15px] text-white shadow-none placeholder:text-white/38 focus-visible:ring-0"
-        />
-        <div className="mt-1 flex items-center gap-2">
-          <ToolbarDropdown label={modelLabel} onClick={onOpenModelSelector} accent />
-          <div className="flex-1" />
-          <span className="text-[12px] text-white/42">{modelPrice} токенов</span>
-          <button
-            type="button"
-            onClick={onSend}
-            disabled={!canSend || sending}
-            aria-label="Отправить"
-            className="grid h-9 w-9 place-items-center rounded-full bg-[#7b61ff] text-white shadow-[0_8px_20px_-8px_rgba(123,97,255,0.95)] transition hover:bg-[#8f7bff] disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none"
-          >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.6} />}
-          </button>
-        </div>
-      </div>
-      {disabledHint ? (
-        <p className="mt-2 text-center text-[12px] font-medium text-amber-200/80">{disabledHint}</p>
-      ) : null}
-    </div>
+    <GptComposer
+      value={prompt}
+      onChange={onPromptChange}
+      placeholder="Спросите что-нибудь…"
+      onSubmit={onSend}
+      canSubmit={canSend}
+      busy={sending}
+      chips={modelMenu ?? <ToolbarDropdown label={modelLabel} onClick={onOpenModelSelector} accent />}
+      priceLabel={formatTokenCost(modelPrice)}
+      hint={disabledHint}
+      submitOnEnter
+    />
   );
 }
 
@@ -2489,8 +3234,12 @@ function ChatWorkspace({
   sending,
   canSend,
   onNewChat,
-  disabledHint
+  disabledHint,
+  loadingThreadId = null,
+  modelMenu
 }: {
+  loadingThreadId?: string | null;
+  modelMenu?: React.ReactNode;
   userName: string;
   chatThreads: AiStudioChatThreadResponse[];
   activeChatThreadId: string | null;
@@ -2520,6 +3269,7 @@ function ChatWorkspace({
   const firstName = userName.trim().split(/\s+/u)[0] ?? "";
   const composer = (
     <ChatComposer
+      modelMenu={modelMenu}
       prompt={prompt}
       onPromptChange={onPromptChange}
       onSend={onSend}
@@ -2533,28 +3283,22 @@ function ChatWorkspace({
   );
 
   return (
-    <section className="grid min-h-[640px] flex-1 overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#11131b] lg:grid-cols-[260px_minmax(0,1fr)] xl:min-h-0">
+    <section className="grid min-h-[640px] flex-1 overflow-hidden rounded-[24px] border border-white/[0.06] bg-[#15161d] lg:grid-cols-[260px_minmax(0,1fr)] xl:min-h-0">
       <ChatHistoryPanel
         chatThreads={chatThreads}
+        loadingThreadId={loadingThreadId}
         activeChatThreadId={activeChatThreadId}
         onNewChat={onNewChat}
         onSelectChatThread={onSelectChatThread}
       />
 
-      <div className="flex min-h-0 min-w-0 flex-col bg-[radial-gradient(ellipse_at_50%_0%,rgba(123,97,255,0.12),transparent_55%)]">
+      <div className="flex min-h-0 min-w-0 flex-col">
         {messages.length === 0 ? (
           // Empty chat: greeting, centered composer and suggestions (21st.dev "Prompt Input with Suggestions").
           <div className="flex flex-1 flex-col items-center justify-center px-4 py-10">
-            <h2 className="text-center text-[28px] font-bold tracking-[-0.02em] text-white sm:text-[30px]">
-              Чем помочь{firstName ? ", " : ""}
-              {firstName ? (
-                <span className="bg-gradient-to-r from-[#c4b5fd] to-[#f9a8d4] bg-clip-text text-transparent">{firstName}</span>
-              ) : null}
-              ?
+            <h2 className="text-center font-display text-[34px] font-extrabold uppercase tracking-[-0.02em] text-white/90 sm:text-[44px]">
+              Чем помочь{firstName ? `, ${firstName}` : ""}?
             </h2>
-            <p className="mt-1.5 text-center text-[14px] text-white/50">
-              Тексты песен, описания релизов, посты и идеи для продвижения
-            </p>
             <div className="mt-6 flex w-full justify-center">{composer}</div>
             <div className="mt-4 flex max-w-[760px] flex-wrap justify-center gap-2">
               {CHAT_EXAMPLE_PROMPTS.map((example) => (
@@ -2562,7 +3306,7 @@ function ChatWorkspace({
                   key={example}
                   type="button"
                   onClick={() => onPromptChange(example)}
-                  className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3.5 py-2 text-[13px] font-medium text-white/70 transition hover:border-[#7b61ff]/40 hover:bg-[#7b61ff]/12 hover:text-white"
+                  className="rounded-full border border-white/[0.1] px-3.5 py-2 text-[13px] font-medium text-white/70 transition hover:bg-white/[0.06] hover:text-white"
                 >
                   {example}
                 </button>
@@ -2577,16 +3321,14 @@ function ChatWorkspace({
                 {messages.map((message) =>
                   message.role === "user" ? (
                     <div key={message.id} className="flex justify-end">
-                      <div className="max-w-[80%] whitespace-pre-wrap rounded-[18px] rounded-br-md border border-[#7b61ff]/35 bg-[linear-gradient(180deg,rgba(123,97,255,0.32),rgba(123,97,255,0.2))] px-4 py-2.5 text-[14px] leading-6 text-white">
+                      <div className="max-w-[80%] whitespace-pre-wrap rounded-[22px] bg-[#2a2c38] px-4 py-2.5 text-[14.5px] leading-6 text-white">
                         {message.content}
                       </div>
                     </div>
                   ) : (
-                    <div key={message.id} className="flex gap-3">
-                      <span aria-hidden className="mt-0.5 h-7 w-7 shrink-0 rounded-[9px] bg-gradient-to-br from-[#7b61ff] to-[#ec4899]" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11.5px] text-white/38">AI Studio · {modelLabel}</div>
-                        <div className="mt-0.5 whitespace-pre-wrap text-[14.5px] leading-7 text-white/88">{message.content}</div>
+                    <div key={message.id} className="min-w-0">
+                      <div className="min-w-0">
+                        <div className="whitespace-pre-wrap text-[15px] leading-7 text-white/90">{message.content}</div>
                         <button
                           type="button"
                           onClick={() => {
@@ -2595,7 +3337,7 @@ function ChatWorkspace({
                               window.setTimeout(() => setCopiedId((current) => (current === message.id ? null : current)), 1500);
                             });
                           }}
-                          className="mt-2 rounded-lg border border-white/[0.08] px-2 py-1 text-[11.5px] font-medium text-white/45 transition hover:bg-white/[0.05] hover:text-white"
+                          className="mt-1.5 rounded-lg px-2 py-1 text-[12px] font-medium text-white/45 transition hover:bg-white/[0.06] hover:text-white"
                         >
                           {copiedId === message.id ? "Скопировано" : "Копировать"}
                         </button>
@@ -2605,7 +3347,6 @@ function ChatWorkspace({
                 )}
                 {sending ? (
                   <div className="flex items-center gap-3 text-[13px] text-white/50">
-                    <span aria-hidden className="h-7 w-7 shrink-0 rounded-[9px] bg-gradient-to-br from-[#7b61ff] to-[#ec4899] opacity-70" />
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Думаю над ответом…
                   </div>
@@ -2617,48 +3358,6 @@ function ChatWorkspace({
         )}
       </div>
     </section>
-  );
-}
-
-function MediaWorkspace({
-  conversation,
-  modelLabelLookup
-}: {
-  conversation: AiStudioMediaConversationItem[];
-  modelLabelLookup: Map<string, string>;
-}) {
-  return (
-    <div className="space-y-5">
-      {conversation.map((item) => (
-        <div key={item.id} className="space-y-3">
-          <div className="flex justify-end">
-            <div className="max-w-[82%] rounded-[24px] border border-[#7b3df5]/25 bg-[#7b3df5]/14 px-4 py-3 text-[14px] leading-6 text-white shadow-[0_20px_50px_-38px_rgba(0,0,0,0.85)]">
-              {item.prompt}
-            </div>
-          </div>
-
-          <div className="flex justify-start">
-            <div className="w-full max-w-5xl">
-              {item.status === "ready" ? (
-                <MediaConversationResult
-                  item={{
-                    ...item,
-                    modelCode: getModelDisplayName(item.modelCode, modelLabelLookup)
-                  }}
-                />
-              ) : (
-                <div className="grid min-h-[320px] place-items-center rounded-[24px] border border-dashed border-white/[0.08] bg-white/[0.03] p-8 shadow-[0_20px_50px_-38px_rgba(0,0,0,0.85)]">
-                  <div className="flex flex-col items-center gap-3 text-center">
-                    <Loader2 className="h-7 w-7 animate-spin text-white/70" />
-                    <div className="text-[16px] font-medium text-white/80">Генерируем ответ</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -2704,59 +3403,6 @@ function getResultDownloadName(generation: { modelCode: string; section: string 
               ? "txt"
               : "bin";
   return `${generation.modelCode}-${generation.section}.${extension}`;
-}
-
-function MediaConversationResult({ item }: { item: AiStudioMediaConversationItem }) {
-  const kind = getResultPreviewKind(item.resultUrl, item.section);
-
-  return (
-    <div className="space-y-3">
-      <div className="overflow-hidden rounded-[24px] border border-white/[0.08] bg-black/20 shadow-[0_20px_50px_-38px_rgba(0,0,0,0.85)]">
-        {kind === "image" ? (
-          <img src={item.resultUrl ?? undefined} alt={item.prompt} className="h-full w-full object-cover" />
-        ) : kind === "audio" ? (
-          <div className="flex min-h-[180px] items-center justify-center p-6">
-            <audio controls src={item.resultUrl ?? undefined} className="w-full" />
-          </div>
-        ) : kind === "video" || kind === "html" ? (
-          <video
-            controls
-            playsInline
-            src={item.resultUrl ?? undefined}
-            className="h-full max-h-[72vh] w-full bg-black object-contain"
-          />
-        ) : kind === "text" ? (
-          <div className="p-4">
-            <pre className="whitespace-pre-wrap rounded-[18px] border border-white/[0.08] bg-white/[0.03] p-4 text-[14px] leading-6 text-white/82">
-              {decodeDataTextUrl(item.resultUrl)}
-            </pre>
-          </div>
-        ) : (
-          <div className="flex min-h-[220px] items-center justify-center p-8 text-white/70">Предпросмотр недоступен</div>
-        )}
-      </div>
-
-      {item.resultUrl ? (
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={item.resultUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-full border border-white/[0.10] bg-white/[0.03] px-4 py-2 text-[13px] font-medium text-white/80 transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-          >
-            Открыть
-          </a>
-          <a
-            href={item.resultUrl}
-            download={getResultDownloadName({ modelCode: item.modelCode, section: item.section }, item.resultUrl)}
-            className="rounded-full border border-white/[0.10] bg-white/[0.03] px-4 py-2 text-[13px] font-medium text-white/80 transition-[background-color,border-color,transform] duration-150 ease-out hover:-translate-y-0.5 hover:border-white/[0.16] hover:bg-white/[0.05] motion-reduce:transition-none"
-          >
-            Скачать
-          </a>
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function GenerationPreviewCard({

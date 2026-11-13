@@ -3,7 +3,9 @@ import type { PrismaClient } from "@prisma/client";
 
 import { getAiStudioModelCatalog } from "@/lib/ai-studio-model-service";
 import { buildChatAssistantText } from "@/lib/ai-generation-service";
-import { spendAiTokensForChat } from "@/lib/ai-token-service";
+import { generateChatReply } from "@/lib/ai-chat-llm";
+import { getAiTokenBalance, spendAiTokensForChat } from "@/lib/ai-token-service";
+import { hasFalApiKey } from "@/lib/fal";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 
 export type AiChatRole = "user" | "assistant";
@@ -393,6 +395,39 @@ export async function sendAiChatMessage(params: {
   const effectiveModelLabel = selectedModel?.label ?? params.modelCode;
   const costTokens = Math.max(1, Math.trunc(selectedModel?.priceTokens ?? 25));
 
+  // Do not pay for a model answer the user cannot afford.
+  const balance = await getAiTokenBalance(params.prisma, params.userId).catch(() => null);
+  if (balance !== null && balance < costTokens) {
+    return { ok: false as const, error: `Недостаточно токенов: нужно ${costTokens}.` };
+  }
+
+  // Ask the model first: if it fails, nothing is saved and nothing is charged.
+  let assistantText: string;
+  try {
+    const previous =
+      params.threadId && params.threadId !== "new"
+        ? await getAiChatThread(params.prisma, params.userId, params.threadId)
+        : null;
+    assistantText = hasFalApiKey()
+      ? await generateChatReply({
+          modelCode: effectiveModelCode,
+          prompt,
+          history: (previous?.messages ?? [])
+            .filter((message) => message.role === "user" || message.role === "assistant")
+            .map((message) => ({ role: message.role as "user" | "assistant", content: message.content }))
+        })
+      : buildChatAssistantText(prompt);
+  } catch (error) {
+    console.error("[ai-chat] model_error", {
+      modelCode: effectiveModelCode,
+      error: error instanceof Error ? error.message : String(error ?? "unknown")
+    });
+    return {
+      ok: false as const,
+      error: "Модель сейчас не ответила. Попробуйте ещё раз или выберите другую модель."
+    };
+  }
+
   try {
     await ensureAiChatStorageSchema(params.prisma);
 
@@ -418,7 +453,6 @@ export async function sendAiChatMessage(params: {
       `);
       const insertedUserMessage = insertedUserMessages[0];
 
-      const assistantText = buildChatAssistantText(prompt);
       const insertedAssistantMessages = await db.$queryRaw<AiChatMessageRow[]>(Prisma.sql`
         INSERT INTO "icecream"."ai_chat_messages" ("thread_id", "user_id", "role", "content", "model_code")
         VALUES (CAST(${createdThread.id} AS uuid), CAST(${params.userId} AS uuid), 'assistant', ${assistantText}, ${effectiveModelCode})
@@ -513,8 +547,6 @@ export async function sendAiChatMessage(params: {
         },
         select: { id: true, title: true, model_code: true, created_at: true, updated_at: true, last_message_at: true }
       }));
-
-    const assistantText = buildChatAssistantText(prompt);
 
     const [userMessage, assistantMessage] = await params.prisma.$transaction(async (tx) => {
       const insertedUserMessage = await tx.ai_chat_messages.create({

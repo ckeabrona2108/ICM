@@ -3,11 +3,28 @@ import { NextResponse } from "next/server";
 
 import { getAiStudioSystemStatus } from "@/lib/ai-studio-activation";
 import { authOptions } from "@/lib/auth";
-import { sendAiChatMessage } from "@/lib/ai-chat-service";
+import { getAiChatThread, sendAiChatMessage } from "@/lib/ai-chat-service";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+/** Loads one chat thread so the studio can open it without a full page navigation. */
+export async function GET(request: Request) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const threadId = new URL(request.url).searchParams.get("threadId")?.trim();
+  if (!threadId) {
+    return NextResponse.json({ error: "threadId is required" }, { status: 400 });
+  }
+  const thread = await getAiChatThread(prisma, session.user.id, threadId);
+  if (!thread) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  return NextResponse.json({ thread });
+}
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);

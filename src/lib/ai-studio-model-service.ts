@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { hasFalApiKey } from "@/lib/fal";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import type { AiStudioSection } from "@/lib/ai-studio";
+import { STUDIO_MODELS_BY_SECTION, type StudioModelSpec } from "@/lib/ai-studio-fal-models";
 
 export interface AiStudioModelOption {
   id: string;
@@ -24,210 +25,29 @@ export interface AiStudioModelCatalogResponse {
   sections: Record<AiStudioSection, AiStudioModelOption[]>;
 }
 
+function toModelOption(spec: StudioModelSpec, index: number): AiStudioModelOption {
+  const inputType = spec.supportsReference ? "text,image" : "text";
+  return {
+    id: spec.id,
+    label: spec.label,
+    provider: spec.section === "chat" ? "openrouter" : "fal",
+    task: detectTask(spec.section, inputType),
+    supportsReference: Boolean(spec.supportsReference),
+    supportsAudio: false,
+    supportsVideo: false,
+    supportsImage: Boolean(spec.supportsReference),
+    recommended: index === 0,
+    priceTokens: spec.priceTokens,
+    inputType
+  };
+}
+
+// The studio catalog lives in ai-studio-fal-models.ts (one place for ids, prices and input formats).
 const FALLBACK_MODEL_CATALOG: Record<AiStudioSection, AiStudioModelOption[]> = {
-  chat: [
-    {
-      id: "gpt-4o",
-      label: "GPT-4o",
-      provider: "openai",
-      task: "chat",
-      supportsReference: false,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: true,
-      priceTokens: 25,
-      inputType: "text"
-    },
-    {
-      id: "claude-3-5-sonnet",
-      label: "Claude 3.5 Sonnet",
-      provider: "anthropic",
-      task: "chat",
-      supportsReference: false,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: false,
-      priceTokens: 28,
-      inputType: "text"
-    },
-    {
-      id: "gemini-2.5-pro",
-      label: "Gemini 2.5 Pro",
-      provider: "google",
-      task: "chat",
-      supportsReference: false,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: false,
-      priceTokens: 22,
-      inputType: "text"
-    }
-  ],
-  image: [
-    {
-      id: "flux-pro/v1.1-ultra",
-      label: "FLUX Ultra",
-      provider: "fal",
-      task: "text-to-image",
-      supportsReference: false,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: true,
-      recommended: true,
-      priceTokens: 60,
-      inputType: "text"
-    },
-    {
-      id: "ideogram/v4",
-      label: "Ideogram v4",
-      provider: "fal",
-      task: "text-to-image",
-      supportsReference: false,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: true,
-      recommended: false,
-      priceTokens: 10,
-      inputType: "text"
-    },
-    {
-      id: "gemini-3-pro-image-preview",
-      label: "Gemini 3 Pro Image",
-      provider: "fal",
-      task: "text-to-image",
-      supportsReference: true,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: true,
-      recommended: false,
-      priceTokens: 150,
-      inputType: "text+image"
-    },
-    {
-      id: "gpt-image-1.5",
-      label: "GPT Image 1.5",
-      provider: "fal",
-      task: "text-to-image",
-      supportsReference: true,
-      supportsAudio: false,
-      supportsVideo: false,
-      supportsImage: true,
-      recommended: false,
-      priceTokens: 100,
-      inputType: "text+image"
-    }
-  ],
-  video: [
-    {
-      id: "xai/grok-imagine-video/text-to-video",
-      label: "Grok Imagine Video",
-      provider: "fal",
-      task: "text-to-video",
-      supportsReference: true,
-      supportsAudio: true,
-      supportsVideo: false,
-      supportsImage: true,
-      recommended: true,
-      priceTokens: 500,
-      inputType: "text+image"
-    },
-    {
-      id: "bytedance/seedance-2.0/text-to-video",
-      label: "Seedance 2.0",
-      provider: "fal",
-      task: "text-to-video",
-      supportsReference: true,
-      supportsAudio: true,
-      supportsVideo: true,
-      supportsImage: true,
-      recommended: false,
-      priceTokens: 600,
-      inputType: "text+image+video"
-    },
-    {
-      id: "kling-video/v3/pro/text-to-video",
-      label: "Kling 3 Pro",
-      provider: "fal",
-      task: "text-to-video",
-      supportsReference: true,
-      supportsAudio: true,
-      supportsVideo: false,
-      supportsImage: true,
-      recommended: false,
-      priceTokens: 1500,
-      inputType: "text+image"
-    },
-    {
-      id: "veo3.1",
-      label: "Veo 3",
-      provider: "fal",
-      task: "text-to-video",
-      supportsReference: false,
-      supportsAudio: true,
-      supportsVideo: true,
-      supportsImage: false,
-      recommended: false,
-      priceTokens: 4000,
-      inputType: "text"
-    }
-  ],
-  audio: [
-    {
-      id: "minimax-music/v2.6",
-      label: "MiniMax Music",
-      provider: "fal",
-      task: "text-to-audio",
-      supportsReference: false,
-      supportsAudio: true,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: true,
-      priceTokens: 150,
-      inputType: "text"
-    },
-    {
-      id: "lyria2",
-      label: "Lyria 2",
-      provider: "fal",
-      task: "text-to-audio",
-      supportsReference: false,
-      supportsAudio: true,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: false,
-      priceTokens: 200,
-      inputType: "text"
-    },
-    {
-      id: "elevenlabs/music",
-      label: "ElevenLabs Music",
-      provider: "fal",
-      task: "text-to-audio",
-      supportsReference: false,
-      supportsAudio: true,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: false,
-      priceTokens: 200,
-      inputType: "text"
-    },
-    {
-      id: "stable-audio-25/text-to-audio",
-      label: "Stable Audio 2.5",
-      provider: "fal",
-      task: "text-to-audio",
-      supportsReference: false,
-      supportsAudio: true,
-      supportsVideo: false,
-      supportsImage: false,
-      recommended: false,
-      priceTokens: 150,
-      inputType: "text"
-    }
-  ]
+  chat: STUDIO_MODELS_BY_SECTION.chat.map(toModelOption),
+  image: STUDIO_MODELS_BY_SECTION.image.map(toModelOption),
+  video: STUDIO_MODELS_BY_SECTION.video.map(toModelOption),
+  audio: STUDIO_MODELS_BY_SECTION.audio.map(toModelOption)
 };
 
 function isAiStudioSection(value: string): value is AiStudioSection {

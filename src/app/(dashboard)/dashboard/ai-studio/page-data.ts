@@ -91,8 +91,16 @@ export async function getAiStudioPageData(
   }
 
   const shouldLoadArchive = activeTab === "archive";
+  // Media tabs show the user's recent works for that tool right in the workspace.
+  const recentSection =
+    activeTab === "image" || activeTab === "video" || activeTab === "audio" ? activeTab : null;
+  // Чат и медиа-вкладки переключаются на клиенте без перезагрузки, поэтому любая из них
+  // заранее получает список чатов и недавние работы всех медиа-инструментов.
+  const isStudioToolTab = activeTab === "chat" || recentSection !== null;
+  const shouldLoadHistory = shouldLoadArchive || isStudioToolTab;
   const shouldLoadUploads = activeTab === "uploads";
-  const shouldLoadChats = activeTab === "chat";
+  const shouldLoadChats = isStudioToolTab;
+  const shouldLoadActiveChat = activeTab === "chat";
 
   const [user, history, uploads, modelCatalog, chatThreads, balanceTotals] = await Promise.all([
     prisma.user.findUnique({
@@ -116,16 +124,17 @@ export async function getAiStudioPageData(
     }),
     safeFindMany(
       () =>
-        shouldLoadArchive && hasPrismaDelegate(prisma, "ai_generations", "findMany")
+        shouldLoadHistory && hasPrismaDelegate(prisma, "ai_generations", "findMany")
           ? prisma.ai_generations.findMany({
               where: {
                 user_id: userId,
+                ...(isStudioToolTab ? { section: { in: ["image", "video", "audio"] }, status: "completed" } : {}),
                 created_at: {
                   gte: archiveCutoff
                 }
               },
               orderBy: { created_at: "desc" },
-              take: 12,
+              take: isStudioToolTab ? 36 : 12,
               select: {
                 id: true,
                 created_at: true,
@@ -177,13 +186,13 @@ export async function getAiStudioPageData(
   ]);
 
   const activeChatThreadId =
-    shouldLoadChats && requestedChatThreadId === "new"
+    shouldLoadActiveChat && requestedChatThreadId === "new"
       ? null
-      : shouldLoadChats
+      : shouldLoadActiveChat
         ? requestedChatThreadId ?? null
         : null;
   const activeChatThread =
-    shouldLoadChats && activeChatThreadId !== null ? await getAiChatThread(prisma, userId, activeChatThreadId) : null;
+    shouldLoadActiveChat && activeChatThreadId !== null ? await getAiChatThread(prisma, userId, activeChatThreadId) : null;
 
   if (!user) return null;
 

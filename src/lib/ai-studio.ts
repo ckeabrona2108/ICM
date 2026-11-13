@@ -1,4 +1,5 @@
 import type { subscribe_level } from "@prisma/client";
+import { VIDEO_DURATION_OPTIONS, VIDEO_MODELS, videoDurationTokens } from "@/lib/ai-studio-fal-models";
 
 export type AiStudioPlan = "FREE" | "PRO" | "ENTERPRISE";
 export type AiStudioSection = "chat" | "image" | "video" | "audio";
@@ -100,28 +101,12 @@ export const AI_CHAT_TEMPLATES = [
   "Улучшить lyrics"
 ];
 
-export const AI_STUDIO_VIDEO_DURATION_TOKEN_COSTS: Record<string, Record<string, number>> = {
-  "xai/grok-imagine-video/text-to-video": {
-    "5 sec": 250,
-    "8 sec": 400,
-    "10 sec": 500
-  },
-  "bytedance/seedance-2.0/text-to-video": {
-    "5 sec": 300,
-    "8 sec": 500,
-    "10 sec": 600
-  },
-  "kling-video/v3/pro/text-to-video": {
-    "5 sec": 700,
-    "8 sec": 1120,
-    "10 sec": 1500
-  },
-  "veo3.1": {
-    "5 sec": 2000,
-    "8 sec": 3200,
-    "10 sec": 4000
-  }
-};
+export const AI_STUDIO_VIDEO_DURATION_TOKEN_COSTS: Record<string, Record<string, number>> = Object.fromEntries(
+  VIDEO_MODELS.map((model) => [
+    model.id,
+    Object.fromEntries(VIDEO_DURATION_OPTIONS.map((duration) => [duration, videoDurationTokens(model, duration)]))
+  ])
+);
 
 export function getAiStudioVideoDurationTokenCost(modelCode: string, duration: string | null | undefined): number | null {
   if (!duration) return null;

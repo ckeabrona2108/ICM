@@ -14,6 +14,20 @@ import { createAdminLog } from "@/lib/admin-log-service";
 import { readGlobalCommissionRate } from "@/lib/commission-settings";
 import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import { prisma } from "@/lib/prisma";
+import {
+  SUPPLEMENT_FILE_FORMAT,
+  SUPPLEMENT_KIND,
+  SUPPLEMENT_RULES,
+  collectClaimedSourceRowIds,
+  describeSourceRollbackBlock,
+  findActiveSupplementsOf,
+  groupSupplementCandidates,
+  readSupplementSummary,
+  summarizeUnallocated,
+  supplementReportComment,
+  type CandidateRow
+} from "@/lib/finance-unallocated";
+import { getPayoutPeriod, isActivePayoutStatus } from "@/lib/payout-request";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import {
   REPORT_PAYLOAD_DESCRIPTION,
@@ -2807,7 +2821,13 @@ export async function applyFinancialImport(params: {
 
   // A report period may be imported only once per user. Reapplying the same
   // source period otherwise creates a second set of technical accrual rows.
-  const matchedUserIds = Array.from(
+  // A supplement is the deliberate exception: a second, separate report for money found later.
+  const supplement = readSupplementSummary(importJob.summary);
+  const supplementComment =
+    supplement && typeof (importJob.summary as Record<string, unknown>)?.reportComment === "string"
+      ? String((importJob.summary as Record<string, unknown>).reportComment)
+      : null;
+  const matchedUserIds = supplement ? [] : Array.from(
     new Set(
       importJob.rows
         .filter((row) => row.user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action))
@@ -3260,7 +3280,7 @@ export async function applyFinancialImport(params: {
               quarter: reportQuarter,
               year: reportYear,
               fallbackDate: reportPeriodEnd,
-              adminComment: null,
+              adminComment: supplementComment,
               items: reportItems
             })
           },
@@ -3331,6 +3351,12 @@ export async function rollbackFinancialImport(params: {
   const importJob = await financialImportsRepo.findUniqueOrThrow({
     where: { id: params.importId }
   });
+  if (importJob.status === "CONFIRMED" && !readSupplementSummary(importJob.summary)) {
+    const activeSupplements = findActiveSupplementsOf(importJob.id, await loadSupplementImports());
+    if (activeSupplements.length) {
+      throw new Error(describeSourceRollbackBlock(activeSupplements));
+    }
+  }
   const reportQuarter = normalizeReportQuarter(params.reportQuarter);
   const reportYear = normalizeReportYear(params.reportYear);
 
@@ -3660,4 +3686,274 @@ export async function getSmartCatalogSyncImportDetails(kind: SmartImportKind, im
 
   const selections = await resolveFinancialReportSelections([item.id]);
   return attachFinancialReportSelection(item, selections);
+}
+
+// ---------------------------------------------------------------------------
+// Unallocated money and supplements: money from applied imports that matched no artist,
+// found again once the release appears in the catalog, and paid out as a separate report.
+
+const APPLIED_FINANCE_ACTIONS = ["MATCH", "UPDATE", "NEEDS_REVIEW"];
+
+async function loadSupplementImports() {
+  return prisma.financial_imports.findMany({
+    where: { file_format: SUPPLEMENT_FILE_FORMAT },
+    select: { id: true, status: true, summary: true, source_file_name: true }
+  });
+}
+
+async function loadUnallocatedSources(importId?: string) {
+  const imports = await prisma.financial_imports.findMany({
+    where: {
+      status: "CONFIRMED",
+      file_format: { not: SUPPLEMENT_FILE_FORMAT },
+      ...(importId ? { id: importId } : {})
+    },
+    select: { id: true, source_file_name: true, confirmed_at: true, created_at: true, summary: true, auto_detected_map: true }
+  });
+  const selections = await resolveFinancialReportSelections(imports.map((item) => item.id));
+  return imports.map((item) => {
+    const selection = selections.get(item.id);
+    return {
+      ...item,
+      quarter: selection?.reportQuarter ?? null,
+      year: selection?.reportYear ?? null
+    };
+  });
+}
+
+function unallocatedRowsWhere(importIds: string[]) {
+  return {
+    import_id: { in: importIds },
+    gross_amount: { gt: 0 },
+    OR: [{ user_id: null }, { action: { notIn: APPLIED_FINANCE_ACTIONS } }]
+  };
+}
+
+export async function getFinanceUnallocatedOverview() {
+  const [sources, supplements] = await Promise.all([loadUnallocatedSources(), loadSupplementImports()]);
+  if (!sources.length) return { totalAmount: 0, totalRows: 0, imports: [] };
+  const rows = await prisma.financial_import_rows.findMany({
+    where: unallocatedRowsWhere(sources.map((item) => item.id)),
+    select: { id: true, import_id: true, action: true, user_id: true, gross_amount: true }
+  });
+  return summarizeUnallocated({ imports: sources, rows, claimed: collectClaimedSourceRowIds(supplements) });
+}
+
+type ScannedCandidateRow = CandidateRow & {
+  trackId: string | null;
+  confidence: number;
+  reason: string;
+};
+
+async function scanUnallocatedRows(params: { importId?: string; userId?: string } = {}) {
+  const [sources, supplements] = await Promise.all([loadUnallocatedSources(params.importId), loadSupplementImports()]);
+  const stats = { scannedRows: 0, notFound: 0, notApproved: 0, conflicts: 0 };
+  if (!sources.length) return { sources, rows: [] as ScannedCandidateRow[], stats };
+
+  const claimed = collectClaimedSourceRowIds(supplements);
+  const sourceById = new Map(sources.map((item) => [item.id, item]));
+  const poolRows = (
+    await prisma.financial_import_rows.findMany({
+      where: unallocatedRowsWhere(sources.map((item) => item.id)),
+      select: { id: true, import_id: true, gross_amount: true, normalized_data: true },
+      orderBy: { row_number: "asc" }
+    })
+  ).filter((row) => !claimed.has(row.id));
+  stats.scannedRows = poolRows.length;
+
+  const context = createSmartMatchContext();
+  const upcOwners = new Map<string, Promise<Set<string>>>();
+  const createdByCatalog = new Map<string, Promise<boolean>>();
+  const matched = await mapWithConcurrency(poolRows, 8, async (row) => {
+    const normalized = { ...((row.normalized_data ?? {}) as NormalizedRow) };
+    const match = await findFinancialMatchWithContext(normalized, context);
+    if (match.action !== "MATCH" || !match.ownerUserId || !match.matchedReleaseId || !SUPPLEMENT_RULES.has(match.rule ?? "")) {
+      stats.notFound += 1;
+      return null;
+    }
+    if (params.userId && match.ownerUserId !== params.userId) return null;
+    const release = (match.release ?? {}) as Record<string, unknown>;
+    // Money goes only to releases that passed moderation or that an admin created by catalog import.
+    const trusted =
+      release.status === "approved" ||
+      (await getMemoized(createdByCatalog, match.matchedReleaseId, async () =>
+        (await prisma.catalog_import_rows.count({ where: { created_release_id: match.matchedReleaseId } })) > 0
+      ));
+    if (!trusted) {
+      stats.notApproved += 1;
+      return null;
+    }
+    const releaseUpc = typeof release.upc === "string" && release.upc.trim() ? release.upc.trim() : null;
+    const upcKey = normalizeAnalyticsUpc(releaseUpc ?? "");
+    if (upcKey) {
+      const owners = await getMemoized(upcOwners, upcKey, async () => {
+        const releases = await prisma.release.findMany({ where: { upc: upcKey }, select: { userId: true } });
+        return new Set(releases.map((item) => item.userId));
+      });
+      if (owners.size > 1) {
+        stats.conflicts += 1;
+        return null;
+      }
+    }
+    const source = sourceById.get(row.import_id);
+    const appliedAt = source?.confirmed_at ?? source?.created_at ?? null;
+    const releaseDate = release.date instanceof Date ? release.date : release.date ? new Date(String(release.date)) : null;
+    return {
+      rowId: row.id,
+      importId: row.import_id,
+      userId: match.ownerUserId,
+      userLabel: "",
+      releaseId: match.matchedReleaseId,
+      releaseTitle: typeof release.title === "string" ? release.title : "Без названия",
+      upc: releaseUpc,
+      rule: match.rule ?? "",
+      amount: Number(numberFromLoose(row.gross_amount as unknown as string).toFixed(2)),
+      releaseAddedAfterImport: Boolean(appliedAt && releaseDate && releaseDate > appliedAt),
+      trackId: match.matchedTrackId ?? null,
+      confidence: match.confidence,
+      reason: match.reason
+    } satisfies ScannedCandidateRow;
+  });
+
+  const rows = matched.filter((row): row is ScannedCandidateRow => row !== null);
+  const userIds = [...new Set(rows.map((row) => row.userId))];
+  if (userIds.length) {
+    const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true } });
+    const labels = new Map(users.map((user) => [user.id, user.name?.trim() || user.email?.trim() || user.id]));
+    for (const row of rows) row.userLabel = labels.get(row.userId) ?? row.userId;
+  }
+  return { sources, rows, stats };
+}
+
+/** Finds which unallocated money now matches a release. Read-only: nothing is paid. */
+export async function scanFinanceUnallocatedCandidates(params: { importId?: string; userId?: string } = {}) {
+  const { sources, rows, stats } = await scanUnallocatedRows(params);
+  const userIds = [...new Set(rows.map((row) => row.userId))];
+  const [accruals, payouts] = userIds.length
+    ? await Promise.all([
+        prisma.royalty_transactions.findMany({
+          where: { user_id: { in: userIds }, reversed_at: null },
+          select: { user_id: true },
+          distinct: ["user_id"]
+        }),
+        prisma.payouts.findMany({
+          where: { userId: { in: userIds } },
+          select: { userId: true, status: true, confirmed: true, requisites: true }
+        })
+      ])
+    : [[], []];
+  const payoutQuarters = new Map<string, Set<string>>();
+  for (const payout of payouts) {
+    if (!(isActivePayoutStatus(payout.status) || payout.status === "PAID" || payout.confirmed === true)) continue;
+    const period = getPayoutPeriod(payout.requisites);
+    if (!period.quarter || !period.year) continue;
+    const set = payoutQuarters.get(payout.userId) ?? new Set<string>();
+    set.add(`${period.year}-${period.quarter}`);
+    payoutQuarters.set(payout.userId, set);
+  }
+  const candidates = groupSupplementCandidates({
+    rows,
+    imports: new Map(sources.map((item) => [item.id, { fileName: item.source_file_name, quarter: item.quarter, year: item.year }])),
+    usersWithAccruals: new Set(accruals.map((item) => item.user_id)),
+    payoutQuarters
+  });
+  return {
+    candidates,
+    stats: { ...stats, candidates: candidates.length, amount: Number(candidates.reduce((sum, item) => sum + item.amount, 0).toFixed(2)) }
+  };
+}
+
+let supplementQueue: Promise<unknown> = Promise.resolve();
+
+function withSupplementLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = supplementQueue.then(task, task);
+  supplementQueue = run.catch(() => undefined);
+  return run;
+}
+
+/** Pays one candidate (one artist, one source import) as a separate supplement report. */
+export async function applyFinanceSupplement(params: {
+  sourceImportId: string;
+  userId: string;
+  adminId: string;
+  reportQuarter?: number | null;
+  reportYear?: number | null;
+}) {
+  return withSupplementLock(async () => {
+    const { sources, rows } = await scanUnallocatedRows({ importId: params.sourceImportId, userId: params.userId });
+    const source = sources[0];
+    if (!source) throw new Error("Исходный импорт не найден или не применён.");
+    if (!rows.length) {
+      throw new Error("Для этого артиста в импорте больше нет нераспределённых строк: возможно, их уже начислили.");
+    }
+
+    const reportQuarter = normalizeReportQuarter(params.reportQuarter) ?? source.quarter;
+    const reportYear = normalizeReportYear(params.reportYear) ?? source.year;
+    if (!reportQuarter || !reportYear) throw new Error("Выберите квартал для доначисления.");
+
+    const sourceRows = await prisma.financial_import_rows.findMany({
+      where: { id: { in: rows.map((row) => row.rowId) } },
+      orderBy: { row_number: "asc" }
+    });
+    const matchByRow = new Map(rows.map((row) => [row.rowId, row]));
+    const commissionAlreadyDeducted = (source.summary as Record<string, unknown> | null)?.commissionAlreadyDeducted === true;
+    const userLabel = rows[0].userLabel;
+    const grossTotal = Number(rows.reduce((sum, row) => sum + row.amount, 0).toFixed(2));
+
+    const created = await prisma.financial_imports.create({
+      data: {
+        source_file_name: `Доначисление · ${userLabel} · ${source.source_file_name}`,
+        file_format: SUPPLEMENT_FILE_FORMAT,
+        status: "PREVIEW",
+        total_rows: sourceRows.length,
+        matched_rows: sourceRows.length,
+        gross_amount_total: grossTotal,
+        auto_detected_map: source.auto_detected_map ?? undefined,
+        created_by_admin_id: params.adminId,
+        summary: {
+          kind: SUPPLEMENT_KIND,
+          sourceImportId: source.id,
+          sourceFileName: source.source_file_name,
+          sourceRowIds: sourceRows.map((row) => row.id),
+          userId: params.userId,
+          commissionAlreadyDeducted,
+          reportComment: supplementReportComment(reportQuarter, reportYear, source.quarter, source.year)
+        },
+        rows: {
+          create: sourceRows.map((row) => {
+            const match = matchByRow.get(row.id)!;
+            const normalized = { ...((row.normalized_data ?? {}) as Record<string, unknown>) };
+            const preview = { ...((normalized.__preview ?? {}) as Record<string, unknown>), status: "MATCH", reason: match.reason };
+            const gross = Number(numberFromLoose(row.gross_amount as unknown as string).toFixed(2));
+            return {
+              row_number: row.row_number,
+              action: "MATCH",
+              confidence_score: match.confidence,
+              raw_data: row.raw_data ?? {},
+              normalized_data: {
+                ...normalized,
+                upc: (typeof normalized.upc === "string" && normalized.upc.trim()) || match.upc || null,
+                supplement_source_row_id: row.id,
+                __preview: preview
+              },
+              detected_match_rule: match.rule,
+              matched_release_id: match.releaseId,
+              matched_track_id: match.trackId,
+              user_id: match.userId,
+              gross_amount: gross,
+              ...(commissionAlreadyDeducted ? { net_amount: gross, commission_amount: 0, commission_rate: 0 } : {})
+            };
+          })
+        }
+      },
+      select: { id: true }
+    });
+
+    try {
+      return await applyFinancialImport({ importId: created.id, adminId: params.adminId, reportQuarter, reportYear });
+    } catch (error) {
+      await prisma.financial_imports.delete({ where: { id: created.id } }).catch(() => undefined);
+      throw error;
+    }
+  });
 }

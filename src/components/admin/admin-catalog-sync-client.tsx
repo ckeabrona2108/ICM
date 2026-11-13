@@ -3,6 +3,7 @@
 import * as React from "react";
 import { FinanceImportOverviewPanel } from "@/components/admin/finance-import-overview-panel";
 import { FinanceOrphanAccrualsPanel } from "@/components/admin/finance-orphan-accruals-panel";
+import { FinanceUnallocatedPanel } from "@/components/admin/finance-unallocated-panel";
 import { FINANCE_RULE_LABELS, type FinanceFileMeta } from "@/lib/finance-import-overview";
 
 type SmartKind = "catalog" | "finance";
@@ -633,6 +634,14 @@ export function AdminCatalogSyncClient() {
         {error ? <p className="mt-3 text-[13px] text-rose-300">{error}</p> : null}
         {success ? <p className="mt-3 text-[13px] text-emerald-300">{success}</p> : null}
       </section>
+
+      {activeKind === "finance" ? (
+        <FinanceUnallocatedPanel
+          onApplied={() => {
+            void loadImports();
+          }}
+        />
+      ) : null}
 
       <section className="grid gap-6 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
         <div className="rounded-2xl border border-white/[0.08] bg-[#161720] p-5">

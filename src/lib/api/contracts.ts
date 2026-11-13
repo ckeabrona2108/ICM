@@ -193,6 +193,8 @@ export interface ReleaseSubmitFailureResponse {
 
 export interface ReleaseDraftSaveRequest {
   releaseId?: string;
+  /** New draft only: the approved release this draft is an edited copy of. */
+  copyOfReleaseId?: string;
   data: ReleaseSubmissionData;
 }
 
@@ -485,6 +487,11 @@ export interface AdminReleaseDetailsResponse {
       early_russia_start: boolean;
       real_time_delivery: boolean;
       yandex_pre_release_date: string;
+      /** Empty: the common start date. */
+      vk_start_date?: string;
+      vk_start_time?: string;
+      vk_pre_save?: boolean;
+      vk_pre_save_date?: string;
     };
   };
   tracks: Array<{

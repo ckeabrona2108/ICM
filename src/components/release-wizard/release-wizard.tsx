@@ -18,12 +18,16 @@ import {
   type WizardSubmissionMode
 } from "./wizard-context";
 import { StepIntro } from "./step-intro";
+import { StepChanges, StepLyrics } from "./change-request";
+import { StepNumberContext } from "./step-number";
 import { StepInfo } from "./step-info";
 import { StepTracks } from "./step-tracks";
 import { StepExtras } from "./step-extras";
 import { StepReview } from "./step-review";
 import { StepUpload } from "./step-upload";
 import { buildReleaseSubmissionData } from "./release-submission";
+import { validateReleaseChangeRequest } from "@/lib/release-copy-changes";
+import { defaultPreSaveDate, resolveVkStartDate } from "@/lib/release-presave";
 import type {
   ReleaseDraftSaveRequest,
   ReleaseDraftSaveResponse,
@@ -40,7 +44,11 @@ import {
   mapReleaseValidationStep,
   validateReleaseSubmission
 } from "@/lib/release-policy";
-import { resolveDraftReleaseId, resolveReleaseSubmitMode } from "@/lib/release-wizard-mode";
+import {
+  resolveCopyWizardSteps,
+  resolveDraftReleaseId,
+  resolveReleaseSubmitMode
+} from "@/lib/release-wizard-mode";
 import { shouldGuardUnsavedChanges } from "@/lib/wizard-dirty";
 import { readPendingSubmission, savePendingSubmission, completePendingSubmission, resolveSubmissionKey } from "@/lib/release-submission-client";
 import { submitReleaseWithLatestDraft } from "@/lib/release-submit-flow";
@@ -75,7 +83,35 @@ const WIZARD_TIMELINE = [
   { key: "final", label: "Финал" }
 ] as const;
 
+const COPY_STEP_LABELS: Partial<Record<StepId, string>> = {
+  changes: "Что вы хотите изменить?",
+  cover: "Новая обложка",
+  lyrics: "Текст песни"
+};
+
+function stepLabelOf(stepId: StepId): string {
+  return STEPS.find((item) => item.id === stepId)?.label ?? COPY_STEP_LABELS[stepId] ?? stepId;
+}
+
 const STEP_CHROME: Record<StepId, { title: string; description: string; section: string; timelineIndex: number }> = {
+  changes: {
+    title: "Что вы хотите изменить?",
+    description: "Отметьте, что меняете в опубликованном релизе. Дальше откроются только нужные шаги.",
+    section: "Шаг 1",
+    timelineIndex: 0
+  },
+  cover: {
+    title: "Новая обложка",
+    description: "Загрузите обложку, которая заменит опубликованную.",
+    section: "Шаг 2",
+    timelineIndex: 1
+  },
+  lyrics: {
+    title: "Текст песни",
+    description: "Добавьте или исправьте тексты треков.",
+    section: "Шаг 6",
+    timelineIndex: 5
+  },
   intro: {
     title: "Что загружаем?",
     description: "Выберите формат релиза и проверьте базовые условия перед заполнением карточки.",
@@ -132,8 +168,14 @@ const STEP_CHROME: Record<StepId, { title: string; description: string; section:
   }
 };
 
-function ReleaseWizardTimeline({ step }: { step: StepId }) {
-  const activeIndex = STEP_CHROME[step].timelineIndex;
+function ReleaseWizardTimeline({
+  items,
+  activeIndex
+}: {
+  items: ReadonlyArray<{ key: string; label: string }>;
+  activeIndex: number;
+}) {
+  const gaps = Math.max(items.length - 1, 1);
 
   return (
     <div className="rounded-[28px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.86),rgba(13,16,30,0.82))] px-5 py-5 shadow-[var(--ux-shadow-soft)] backdrop-blur-xl sm:px-7">
@@ -141,10 +183,10 @@ function ReleaseWizardTimeline({ step }: { step: StepId }) {
         <div className="absolute left-[18px] right-[18px] top-[18px] h-px bg-white/[0.08]" />
         <div
           className="absolute left-[18px] top-[18px] h-px bg-[var(--ux-accent)] transition-all duration-300"
-          style={{ width: `calc(${Math.max(activeIndex, 0)} * ((100% - 36px) / 8))` }}
+          style={{ width: `calc(${Math.max(activeIndex, 0)} * ((100% - 36px) / ${gaps}))` }}
         />
-        <div className="grid grid-cols-9 gap-2">
-          {WIZARD_TIMELINE.map((item, index) => {
+        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+          {items.map((item, index) => {
             const completed = index < activeIndex;
             const active = index == activeIndex;
             return (
@@ -178,7 +220,7 @@ function ReleaseWizardTimeline({ step }: { step: StepId }) {
 
 type WizardValidatedStep = "intro" | "info" | "persons" | "codes" | "stores" | "tracks" | "extras";
 type WizardErrorSection = "release_info" | "tracks" | "stores" | "pricing";
-type WizardAnchorId = "info-cover" | "info-basics" | "info-persons" | "info-codes" | "info-platforms" | "info-territories" | "tracks-upload" | "tracks-list" | "extras-general" | "extras-yandex" | "extras-comment";
+type WizardAnchorId = "info-cover" | "info-basics" | "info-persons" | "info-codes" | "info-platforms" | "info-territories" | "tracks-upload" | "tracks-list" | "extras-general" | "extras-yandex" | "extras-vk" | "extras-comment";
 
 const VALIDATED_STEPS: WizardValidatedStep[] = ["intro", "info", "persons", "codes", "stores", "tracks", "extras"];
 
@@ -222,6 +264,7 @@ function resolveValidationAnchor(issue: ReleaseValidationIssue): WizardAnchorId 
   const field = issue.field;
 
   if (field === "cover") return "info-cover";
+  if (field === "vkStartDate" || field === "vkStartTime" || field === "vkPreSaveDate") return "extras-vk";
 
   if (
     field === "title" ||
@@ -246,6 +289,7 @@ function resolveValidationAnchor(issue: ReleaseValidationIssue): WizardAnchorId 
 
 function mapIssueToWizardStep(issue: ReleaseValidationIssue): WizardValidatedStep | null {
   if (issue.field === "yandexPreReleaseDate") return "extras";
+  if (issue.field === "vkStartDate" || issue.field === "vkStartTime" || issue.field === "vkPreSaveDate") return "extras";
   if (issue.field === "releaseKind" && issue.code === "invalid") {
     return "tracks";
   }
@@ -344,6 +388,8 @@ function hasDraftContent(data: WizardData): boolean {
       data.persons.length > 0 ||
       data.realTimeDelivery ||
       data.yandexPreReleaseDate.trim() ||
+      data.vkStartDate.trim() ||
+      data.vkPreSave ||
       data.moderatorComment.trim() ||
       data.priorityRelease
   );
@@ -461,6 +507,8 @@ export function ReleaseWizard({
   submissionMode = "new",
   pageTitle,
   sourceReleaseId,
+  copyOfReleaseId,
+  copyOriginal,
   currentStatus,
   moderationStarted
 }: {
@@ -468,6 +516,10 @@ export function ReleaseWizard({
   submissionMode?: WizardSubmissionMode;
   pageTitle?: string;
   sourceReleaseId?: string;
+  /** New-mode wizard editing a copy of this approved release. */
+  copyOfReleaseId?: string;
+  /** Published version an edited copy is compared with on the review step. */
+  copyOriginal?: ReleaseSubmissionData | null;
   currentStatus?: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
 }) {
@@ -476,6 +528,8 @@ export function ReleaseWizard({
       <WizardInner
         pageTitle={pageTitle ?? (submissionMode === "edit" ? "Редактирование релиза" : "Новый релиз")}
         sourceReleaseId={sourceReleaseId}
+        copyOfReleaseId={copyOfReleaseId}
+        copyOriginal={copyOriginal}
         currentStatus={currentStatus}
         moderationStarted={moderationStarted}
       />
@@ -486,18 +540,47 @@ export function ReleaseWizard({
 function WizardInner({
   pageTitle,
   sourceReleaseId,
+  copyOfReleaseId,
+  copyOriginal,
   currentStatus,
   moderationStarted
 }: {
   pageTitle: string;
   sourceReleaseId?: string;
+  copyOfReleaseId?: string;
+  copyOriginal?: ReleaseSubmissionData | null;
   currentStatus?: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const { step, setStep, set, updateTracks, data, submissionMode } = useWizard();
-  const idx = STEPS.findIndex((s) => s.id === step);
+  // Pre-save dates follow their start date: when it changes, they go back to 7 days before it.
+  const vkStartDate = resolveVkStartDate(data);
+  const previousStartDatesRef = React.useRef({ common: data.startDate, vk: vkStartDate });
+  React.useEffect(() => {
+    const previous = previousStartDatesRef.current;
+    previousStartDatesRef.current = { common: data.startDate, vk: vkStartDate };
+    // A cleared start date keeps the last pre-save date instead of switching pre-save off.
+    const yandexDefault = defaultPreSaveDate(data.startDate);
+    if (previous.common !== data.startDate && data.yandexPreReleaseDate && yandexDefault) {
+      set("yandexPreReleaseDate", yandexDefault);
+    }
+    const vkDefault = defaultPreSaveDate(vkStartDate);
+    if (previous.vk !== vkStartDate && data.vkPreSave && vkDefault) {
+      set("vkPreSaveDate", vkDefault);
+    }
+  }, [data.startDate, data.vkPreSave, data.yandexPreReleaseDate, set, vkStartDate]);
+  // An edited copy of an approved release walks only the screens for what the artist changes.
+  const copyAreas = data.changeRequest?.areas;
+  const steps = React.useMemo(
+    () =>
+      copyAreas
+        ? resolveCopyWizardSteps(copyAreas, step === "upload" ? undefined : step).map((id) => ({ id, label: stepLabelOf(id) }))
+        : STEPS,
+    [copyAreas, step]
+  );
+  const idx = steps.findIndex((s) => s.id === step);
   const [submitErrors, setSubmitErrors] = React.useState<string[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [submitPhase, setSubmitPhase] = React.useState<SubmitPhase>("idle");
@@ -636,6 +719,12 @@ function WizardInner({
   );
 
   const getCurrentStepValidation = React.useCallback((): StepValidationState | null => {
+    if (step === "changes") {
+      const changeRequestMessage = validateReleaseChangeRequest(data.changeRequest);
+      return changeRequestMessage
+        ? { step: "intro", issues: [], message: changeRequestMessage, anchorId: null }
+        : null;
+    }
     if (!VALIDATED_STEPS.includes(step as WizardValidatedStep)) return null;
 
     const currentStep = step as WizardValidatedStep;
@@ -665,11 +754,11 @@ function WizardInner({
       message: `Заполните обязательные поля: ${formatValidationList(messages)}.`,
       anchorId: issues[0] ? resolveValidationAnchor(issues[0]) : null
     };
-  }, [data.type, issuesByStep, step, stepIssues]);
+  }, [data.changeRequest, data.type, issuesByStep, step, stepIssues]);
 
   const getStepLabel = React.useCallback((stepId: WizardValidatedStep) => {
-    return STEPS.find((stepMeta) => stepMeta.id === stepId)?.label ?? stepId;
-  }, []);
+    return steps.find((stepMeta) => stepMeta.id === stepId)?.label ?? stepLabelOf(stepId);
+  }, [steps]);
 
   const scrollToAnchor = React.useCallback((anchorId: WizardAnchorId | null) => {
     if (!anchorId || typeof document === "undefined") return;
@@ -689,8 +778,8 @@ function WizardInner({
 
   const isStepIndexEnabled = React.useCallback(
     (targetIndex: number): boolean => {
-      if (targetIndex < 0 || targetIndex >= STEPS.length) return false;
-      const targetId = STEPS[targetIndex]?.id;
+      if (targetIndex < 0 || targetIndex >= steps.length) return false;
+      const targetId = steps[targetIndex]?.id;
       if (!targetId) return false;
       if (step === "upload") {
         return targetId === "upload";
@@ -700,12 +789,12 @@ function WizardInner({
       if (currentValidation) return false;
       return targetIndex === idx + 1;
     },
-    [getCurrentStepValidation, idx, step]
+    [getCurrentStepValidation, idx, step, steps]
   );
 
   const goToStepIndex = React.useCallback(
     (targetIndex: number) => {
-      const target = STEPS[targetIndex];
+      const target = steps[targetIndex];
       if (!target) return;
 
       if (targetIndex <= idx || isStepIndexEnabled(targetIndex)) {
@@ -722,7 +811,7 @@ function WizardInner({
 
       setStepNavError("Невозможно перейти на этот шаг, пока не заполнены обязательные поля.");
     },
-    [announceValidationFailure, getCurrentStepValidation, idx, isStepIndexEnabled, setStep]
+    [announceValidationFailure, getCurrentStepValidation, idx, isStepIndexEnabled, setStep, steps]
   );
 
   React.useEffect(() => {
@@ -758,7 +847,7 @@ function WizardInner({
     }
 
     const nextIndex = idx + 1;
-    if (nextIndex < STEPS.length) {
+    if (nextIndex < steps.length) {
       goToStepIndex(nextIndex);
     }
   };
@@ -771,7 +860,7 @@ function WizardInner({
   const goPrev = () => {
     if (idx > 0) {
       setStepNavError(null);
-      setStep(STEPS[idx - 1].id);
+      setStep(steps[idx - 1].id);
     }
   };
 
@@ -822,7 +911,8 @@ function WizardInner({
           const resolvedMethod = resolvedReleaseId ? "PATCH" : next.method;
           const resolvedPayload: ReleaseDraftSaveRequest = {
             ...next.payload,
-            releaseId: resolvedReleaseId
+            releaseId: resolvedReleaseId,
+            ...(!resolvedReleaseId && submissionMode === "new" && copyOfReleaseId ? { copyOfReleaseId } : {})
           };
 
           const parsed = await saveDraftToBackend(resolvedMethod, resolvedPayload);
@@ -848,7 +938,7 @@ function WizardInner({
         }
       }
     },
-    [saveDraftToBackend, sourceReleaseId, submissionMode, updateDraftReleaseId]
+    [copyOfReleaseId, saveDraftToBackend, sourceReleaseId, submissionMode, updateDraftReleaseId]
   );
 
   const trackUploadQueueRef = React.useRef(new TrackUploadQueue<UploadedFileRef>());
@@ -1080,6 +1170,13 @@ function WizardInner({
       autosaveTimerRef.current = null;
     }
 
+    const changeRequestMessage = data.changeRequest ? validateReleaseChangeRequest(data.changeRequest) : null;
+    if (changeRequestMessage) {
+      setStep("changes");
+      setStepNavError(changeRequestMessage);
+      return;
+    }
+
     const localIssues = validateReleaseSubmission(submissionData).filter(
       (issue) => !isPendingLocalAudioIssue(issue, data.tracks)
     );
@@ -1283,6 +1380,7 @@ function WizardInner({
     }
   }, [
     currentStatus,
+    data.changeRequest,
     data.tracks,
     moderationStarted,
     prepareSubmissionDataWithUploads,
@@ -1530,7 +1628,18 @@ function WizardInner({
     }
   };
 
-  const currentChrome = STEP_CHROME[step];
+  const timelineItems = copyAreas
+    ? steps.map((item, index) => ({ key: item.id, label: item.id === "upload" ? "Финал" : `Шаг ${index + 1}` }))
+    : WIZARD_TIMELINE;
+  const timelineIndex = copyAreas ? Math.max(idx, 0) : STEP_CHROME[step].timelineIndex;
+  const currentChrome = copyAreas
+    ? { ...STEP_CHROME[step], section: timelineItems[timelineIndex]?.label ?? STEP_CHROME[step].section }
+    : STEP_CHROME[step];
+  const resolveStepNumber = (stepId: StepId): string | null => {
+    if (!copyAreas) return null;
+    const position = steps.findIndex((item) => item.id === stepId);
+    return position >= 0 ? `Шаг ${position + 1}` : null;
+  };
 
   return (
     <TrackUploadStatusContext.Provider value={trackUploadStatusValue}>
@@ -1561,7 +1670,7 @@ function WizardInner({
         </div>
 
         <div className="mx-auto w-full max-w-[860px] space-y-5">
-          <ReleaseWizardTimeline step={step} />
+          <ReleaseWizardTimeline items={timelineItems} activeIndex={timelineIndex} />
 
           {warningVisible ? (
             <div className="relative rounded-[26px] border border-[#4d2d26] bg-[linear-gradient(180deg,rgba(88,37,29,0.34),rgba(22,19,18,0.96))] px-5 py-4 text-[#efe6dc] shadow-[0_20px_46px_-32px_rgba(0,0,0,0.95)] sm:px-6">
@@ -1620,12 +1729,16 @@ function WizardInner({
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
               className="mx-auto w-full max-w-[860px]"
             >
+              <StepNumberContext.Provider value={resolveStepNumber}>
+              {step === "changes" ? <StepChanges /> : null}
               {step === "intro" ? <StepIntro /> : null}
+              {step === "cover" ? <StepInfo section="cover" /> : null}
               {step === "info" ? <StepInfo section="basics" /> : null}
               {step === "persons" ? <StepInfo section="persons" /> : null}
               {step === "codes" ? <StepInfo section="codes" /> : null}
               {step === "stores" ? <StepInfo section="stores" /> : null}
               {step === "tracks" ? <StepTracks /> : null}
+              {step === "lyrics" ? <StepLyrics /> : null}
               {step === "extras" ? <StepExtras /> : null}
               {step === "review" ? (
                 <StepReview
@@ -1638,8 +1751,12 @@ function WizardInner({
                   isSubmitting={submitting}
                   submitPhase={submitPhase}
                   freeRelease={
-                    submissionMode === "new" ? { enabled: useFreeRelease, onChange: setUseFreeRelease } : undefined
+                    submissionMode === "new" && !copyOfReleaseId && !copyOriginal
+                      ? { enabled: useFreeRelease, onChange: setUseFreeRelease }
+                      : undefined
                   }
+                  copyOriginal={copyOriginal}
+                  onBack={goPrev}
                 />
               ) : null}
               {step === "upload" ? (
@@ -1649,6 +1766,7 @@ function WizardInner({
                   submitPhase={submitPhase}
                 />
               ) : null}
+              </StepNumberContext.Provider>
             </motion.div>
           </AnimatePresence>
         </div>

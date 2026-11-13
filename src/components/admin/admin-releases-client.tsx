@@ -10,6 +10,7 @@ import type { AdminReleaseDetails } from "@/lib/admin-data";
 
 import { AdminReleaseCover } from "./admin-release-cover";
 import { ReleaseCoverUploadButton } from "@/components/admin/release-cover-upload-button";
+import { formatReleaseChangeAreas } from "@/lib/release-copy-changes";
 
 type AdminReleaseTab =
   | "moderation"
@@ -363,6 +364,14 @@ export function AdminReleasesClient({
                       {release.resubmission ? (
                         <span className="inline-flex items-center rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-200">
                           Повторная модерация
+                          {release.resubmission.changeAreas?.length
+                            ? ` · ${formatReleaseChangeAreas(release.resubmission.changeAreas)}`
+                            : ""}
+                        </span>
+                      ) : null}
+                      {release.resubmission?.unmarkedAreas?.length ? (
+                        <span className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-200">
+                          Не отмечено: {formatReleaseChangeAreas(release.resubmission.unmarkedAreas)}
                         </span>
                       ) : null}
                     </div>

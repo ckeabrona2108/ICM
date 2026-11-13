@@ -16,6 +16,7 @@ import {
 } from "@/lib/release-counts";
 import { canEditRelease } from "@/lib/release-policy";
 import { readReleaseTypeFromSubmissionData } from "@/lib/release-submit-tracks";
+import { withReleaseCopySource } from "@/lib/release-resubmission";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +98,19 @@ function readSubmissionDataCover(data: Record<string, unknown>): string | null {
   return readCoverUploadUrl(data) ?? normalizeReleaseCoverUrl(data.cover, null);
 }
 
+/** The approved release of this user that a new draft copies, or null when the link is not valid. */
+async function resolveCopySourceId(userId: string, copyOfReleaseId: unknown): Promise<string | null> {
+  const sourceId = typeof copyOfReleaseId === "string" ? copyOfReleaseId.trim() : "";
+  if (!sourceId) return null;
+  const source = await prisma.release.findFirst({
+    where: { id: sourceId, userId },
+    select: { id: true, status: true, roles: true }
+  });
+  if (!source) return null;
+  const lifecycle = getReleaseLifecycleStatus(source.status, source.roles) ?? "draft";
+  return canEditRelease({ status: lifecycle }).createsModerationCopy ? source.id : null;
+}
+
 async function draftsCount(userId: string) {
   const counts = await getReleaseSidebarCountsForUser({
     userId,
@@ -127,6 +141,10 @@ export async function POST(request: Request) {
   const preorderDate = parseDate(data.preorderDate, releaseDate);
 
   const newReleaseId = randomUUID();
+  // An edited copy of an approved release remembers its original: moderation shows it as a
+  // resubmission and approval merges it back instead of publishing a second release.
+  const copySourceId = await resolveCopySourceId(session.user.id, payload.copyOfReleaseId);
+  const initialRoles = withReleaseTimelineStamp({}, "createdAt", now) as Record<string, unknown>;
   const preview = await resolveReleasePreviewForPersistence({
     id: newReleaseId,
     preview: normalizeReleaseCoverUrl(data.cover, null),
@@ -167,7 +185,11 @@ export async function POST(request: Request) {
       confirmed: false,
       status: "moderating",
       roles: withReleaseLifecycleState(
-        withDraftPersistenceState(withReleaseTimelineStamp({}, "createdAt", now), payload.data as Record<string, unknown>, now),
+        withDraftPersistenceState(
+          copySourceId ? withReleaseCopySource(initialRoles, copySourceId) : initialRoles,
+          payload.data as Record<string, unknown>,
+          now
+        ),
         "draft"
       ) as Prisma.InputJsonValue
     },

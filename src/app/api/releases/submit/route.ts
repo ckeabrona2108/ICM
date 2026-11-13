@@ -41,7 +41,11 @@ import {
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
-import { findPaidPredecessorRelease, withReleaseResubmission } from "@/lib/release-resubmission";
+import {
+  findPaidPredecessorRelease,
+  readReleaseCopySourceId,
+  withReleaseResubmission
+} from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
 import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import {
@@ -51,6 +55,13 @@ import {
   readReleaseTypeFromSubmissionData
 } from "@/lib/release-submit-tracks";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
+import {
+  changedReleaseAreas,
+  diffReleaseSubmissions,
+  readReleaseChangeRequest,
+  unmarkedReleaseChangeAreas,
+  validateReleaseChangeRequest
+} from "@/lib/release-copy-changes";
 
 import { rememberReleaseArtistProfiles } from "@/lib/platform-link-discovery-service";
 import { executeIdempotentSubmission, validSubmissionKey } from "@/lib/release-submission-idempotency";
@@ -487,6 +498,38 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     return NextResponse.json(response, { status: 200 });
   }
 
+  // An edited copy of an approved release says what changes; the actual difference is kept for moderation.
+  const copySourceId = readReleaseCopySourceId(existing.roles);
+  if (copySourceId) {
+    const changeRequest = readReleaseChangeRequest(submissionData);
+    const changeRequestMessage = validateReleaseChangeRequest(changeRequest);
+    if (changeRequestMessage) {
+      const issue = { code: "change_request_required", field: "changeRequest", message: changeRequestMessage };
+      const response: ReleaseSubmitFailureResponse = {
+        ok: false,
+        errors: [issue],
+        errors_by_step: { release_info: [issue], tracks: [], stores: [], pricing: [] }
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+    const source = await db.release.findFirst({
+      where: { id: copySourceId, userId: session.user.id },
+      select: { roles: true }
+    });
+    const sourceSubmission = asRecord(source?.roles)?.submissionData;
+    if (sourceSubmission) {
+      const changes = diffReleaseSubmissions(sourceSubmission, submissionData);
+      existing.roles = {
+        ...(asRecord(existing.roles) ?? {}),
+        copyChanges: {
+          areas: changedReleaseAreas(changes),
+          unmarkedAreas: unmarkedReleaseChangeAreas(changes, changeRequest),
+          computedAt: new Date().toISOString()
+        }
+      } as Prisma.JsonValue;
+    }
+  }
+
   // An already paid release (returned for changes, rejected, re-sent) goes back to moderation
   // as paid: no new invoice, no subscription slot, no partner code or free release spent again.
   if (existing.confirmed) {
@@ -520,12 +563,14 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     return NextResponse.json(response, { status: 200 });
   }
 
+  // A copy made by editing an approved release, or a release re-sent with the UPC of a paid one.
   const paidPredecessor = existing.confirmed
     ? null
     : await findPaidPredecessorRelease(db, {
         userId: session.user.id,
         releaseId: existing.id,
-        upc: submissionData.upc
+        upc: submissionData.upc,
+        sourceReleaseId: readReleaseCopySourceId(existing.roles)
       });
   if (paidPredecessor) {
     await updateReleaseAndSyncTracks({
@@ -546,7 +591,9 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       ok: true,
       releaseId: existing.id,
       nextStatus: "moderation",
-      message: "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
+      message: copySourceId
+        ? "Изменения релиза отправлены на проверку. Повторная оплата не требуется."
+        : "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
     };
 
     return NextResponse.json(response, { status: 200 });

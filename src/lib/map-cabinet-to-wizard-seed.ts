@@ -4,6 +4,7 @@ import {
   releaseSubmissionDataSchema,
   type ReleaseSubmissionData
 } from "@/lib/release-policy";
+import { readReleaseChangeRequest } from "@/lib/release-copy-changes";
 
 function resolveUploadedAudioUrl(input: {
   url?: string | null;
@@ -135,8 +136,14 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
       earlyRussiaStart: Boolean(submission.earlyRussiaStart ?? r.earlyRussiaStart),
       realTimeDelivery: Boolean(submission.realTimeDelivery),
       yandexPreReleaseDate: submission.yandexPreReleaseDate ?? "",
+      vkStartDate: submission.vkStartDate ?? "",
+      vkStartTime: submission.vkStartTime || "00:00",
+      vkPreSave: Boolean(submission.vkPreSave),
+      vkPreSaveDate: submission.vkPreSaveDate ?? "",
       moderatorComment: submission.moderatorComment ?? "",
-      priorityRelease: Boolean(submission.priorityRelease)
+      priorityRelease: Boolean(submission.priorityRelease),
+      // A new copy starts with an empty request; a saved copy draft keeps what the artist marked.
+      changeRequest: createsCopy ? { areas: [], comment: "" } : readReleaseChangeRequest(submission)
     };
   }
 
@@ -219,7 +226,12 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
     earlyRussiaStart: Boolean(r.earlyRussiaStart),
     realTimeDelivery: false,
     yandexPreReleaseDate: "",
+    vkStartDate: "",
+    vkStartTime: "00:00",
+    vkPreSave: false,
+    vkPreSaveDate: "",
     moderatorComment: "",
-    priorityRelease: Boolean(r.priority)
+    priorityRelease: Boolean(r.priority),
+    changeRequest: createsCopy ? { areas: [], comment: "" } : null
   };
 }

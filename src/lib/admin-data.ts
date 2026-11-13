@@ -1,4 +1,5 @@
 import type { ModerationRemark } from "@/lib/api/contracts";
+import type { ReleaseChangeArea } from "@/lib/release-copy-changes";
 
 export type AdminReleaseStatus =
   | "draft"
@@ -65,7 +66,13 @@ export interface AdminReleaseDetails {
   deletionRequestedAt?: string;
   deletionComment?: string;
   hidden?: boolean;
-  resubmission?: { sourceReleaseId?: string; sourceReleaseTitle?: string } | null;
+  resubmission?: {
+    sourceReleaseId?: string;
+    sourceReleaseTitle?: string;
+    /** Edited copy: areas that differ from the original (or the ones the artist marked). */
+    changeAreas?: ReleaseChangeArea[];
+    unmarkedAreas?: ReleaseChangeArea[];
+  } | null;
   paid: boolean;
   paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
   paymentLabel?: string;

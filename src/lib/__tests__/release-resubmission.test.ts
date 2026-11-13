@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   findPaidPredecessorRelease,
   getReleaseResubmission,
+  readReleaseCopySourceId,
   readReleaseUpc,
+  withReleaseCopySource,
   withReleaseResubmission
 } from "@/lib/release-resubmission";
 
@@ -142,4 +144,106 @@ test("approving a copy of an approved release merges it into the original and hi
   const copy = releaseUpdates.find((update) => update.where.id === "rel_copy");
   const copyDeletion = (copy?.data.roles as Record<string, Record<string, unknown>>).deletionRequest;
   assert.equal(copyDeletion.status, "deleted");
+});
+
+test("a copy made from an approved release keeps a readable link to it", () => {
+  const roles = withReleaseCopySource({ lifecycleState: "draft" }, "rel_paid");
+  assert.equal(readReleaseCopySourceId(roles), "rel_paid");
+  assert.equal(roles.lifecycleState, "draft");
+  assert.equal(readReleaseCopySourceId({}), null);
+  assert.equal(readReleaseCopySourceId({ copyOfReleaseId: "  " }), null);
+});
+
+test("findPaidPredecessorRelease finds the original of a copy without a UPC", async () => {
+  const db = {
+    release: {
+      findMany: async () => [
+        { id: "rel_same_upc", title: "Другой", status: "approved", upc: "1111111111111", roles: {} },
+        { id: "rel_paid", title: "Ночью", status: "approved", upc: "5064133307028", roles: { lifecycleState: "approved" } },
+        {
+          id: "rel_unapproved",
+          title: "Ночью",
+          status: "rejected",
+          upc: null,
+          roles: { lifecycleState: "changes_required" }
+        }
+      ]
+    }
+  } as unknown as Parameters<typeof findPaidPredecessorRelease>[0];
+
+  assert.deepEqual(
+    await findPaidPredecessorRelease(db, { userId: "u1", releaseId: "rel_copy", upc: "", sourceReleaseId: "rel_paid" }),
+    { id: "rel_paid", title: "Ночью" }
+  );
+  // The copy link wins over a UPC match.
+  assert.deepEqual(
+    await findPaidPredecessorRelease(db, {
+      userId: "u1",
+      releaseId: "rel_copy",
+      upc: "1111111111111",
+      sourceReleaseId: "rel_paid"
+    }),
+    { id: "rel_paid", title: "Ночью" }
+  );
+  // A link to a release that is not approved is ignored.
+  assert.equal(
+    await findPaidPredecessorRelease(db, { userId: "u1", releaseId: "rel_copy", upc: null, sourceReleaseId: "rel_unapproved" }),
+    null
+  );
+});
+
+test("findPaidPredecessorRelease accepts several UPCs (stored one and the one the admin typed)", async () => {
+  const db = {
+    release: {
+      findMany: async () => [
+        { id: "rel_paid", title: "Ночью", status: "approved", upc: "5064133307028", roles: { lifecycleState: "approved" } }
+      ]
+    }
+  } as unknown as Parameters<typeof findPaidPredecessorRelease>[0];
+
+  assert.deepEqual(
+    await findPaidPredecessorRelease(db, { userId: "u1", releaseId: "rel_copy", upc: [null, "5064133307028"] }),
+    { id: "rel_paid", title: "Ночью" }
+  );
+  assert.equal(await findPaidPredecessorRelease(db, { userId: "u1", releaseId: "rel_copy", upc: [null, ""] }), null);
+});
+
+test("approving a linked copy without a UPC merges it into its original", async () => {
+  const { approveReleaseByAdmin } = await import("@/lib/admin-release-service");
+  const releaseUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }> = [];
+  const copyRoles = { lifecycleState: "moderation", copyOfReleaseId: "rel_paid", submissionData: { upc: "", title: "Ночью" } };
+  const tx = {
+    release: {
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        releaseUpdates.push(args);
+        return {};
+      }
+    },
+    track: { update: async () => ({}), create: async () => ({}), deleteMany: async () => ({ count: 0 }) }
+  };
+  const prisma = {
+    release: {
+      findUnique: async (args: { where: { id: string }; include?: unknown }) => {
+        if (args.where.id === "rel_copy" && !args.include) {
+          return { id: "rel_copy", title: "Ночью", status: "moderating", roles: copyRoles, upc: null, userId: "u1", user: { email: null, name: null } };
+        }
+        if (args.where.id === "rel_copy") {
+          return { id: "rel_copy", userId: "u1", title: "Ночью", roles: copyRoles, track: [] };
+        }
+        return { id: "rel_paid", userId: "u1", roles: { lifecycleState: "approved" }, track: [] };
+      },
+      findFirst: async () => null,
+      findMany: async () => [
+        { id: "rel_paid", title: "Ночью", status: "approved", upc: "5064133307028", roles: { lifecycleState: "approved" } }
+      ]
+    },
+    $transaction: async (fn: (client: typeof tx) => Promise<void>) => fn(tx),
+    userNotification: undefined
+  } as unknown as Parameters<typeof approveReleaseByAdmin>[0]["prisma"];
+
+  const result = await approveReleaseByAdmin({ prisma, adminId: "admin", releaseId: "rel_copy", upc: "5064133307028" });
+
+  assert.ok(result && !("error" in result));
+  assert.equal(result.releaseId, "rel_paid");
+  assert.ok(releaseUpdates.some((update) => update.where.id === "rel_paid" && update.data.status === "approved"));
 });

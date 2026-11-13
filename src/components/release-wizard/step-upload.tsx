@@ -24,15 +24,22 @@ export function StepUpload({
   const sentToModeration =
     submitResult?.nextStatus === "moderation" ||
     submitResult?.nextStatus === "pending_verification";
-  const title =
-    submitResult?.nextStatus === "pending_verification"
+  const isReleaseEdit = Boolean(data.changeRequest);
+  const title = isReleaseEdit && sentToModeration
+    ? "Изменения отправлены"
+    : submitResult?.nextStatus === "pending_verification"
       ? "Релиз ожидает подтверждения верификации"
       : sentToModeration
         ? submissionMode === "edit"
           ? "Релиз отправлен на модерацию"
           : "Релиз отправлен на модерацию"
         : "Изменения сохранены";
-  const description = submitResult?.message ? (
+  const description = isReleaseEdit && sentToModeration ? (
+    <>
+      Изменения релиза «{data.title || "Без названия"}» ушли на проверку. Опубликованная версия остаётся
+      на площадках, пока модератор не примет правки.
+    </>
+  ) : submitResult?.message ? (
     submitResult.message
   ) : sentToModeration && submissionMode === "edit" ? (
     <>
@@ -80,13 +87,15 @@ export function StepUpload({
                 ? "К ожидающим релизам"
                 : "К моим релизам"}
             </Link>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-[16px] bg-[var(--ux-accent)] px-5 py-3 text-[12.5px] font-medium text-white transition-colors hover:bg-[var(--ux-accent-strong)]"
-            >
-              Создать ещё
-            </button>
+            {isReleaseEdit ? null : (
+              <button
+                type="button"
+                onClick={reset}
+                className="rounded-[16px] bg-[var(--ux-accent)] px-5 py-3 text-[12.5px] font-medium text-white transition-colors hover:bg-[var(--ux-accent-strong)]"
+              >
+                Создать ещё
+              </button>
+            )}
           </div>
         </motion.div>
       ) : (

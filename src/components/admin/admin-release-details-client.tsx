@@ -21,6 +21,10 @@ import {
 import { ReleaseCoverUploadButton } from "@/components/admin/release-cover-upload-button";
 import { ReleaseAudioUploadButton } from "@/components/admin/release-audio-upload-button";
 import { StatusBadge } from "@/components/releases/status-badge";
+import {
+  AdminReleaseCopyChangesBlock,
+  type AdminReleaseCopyChanges
+} from "@/components/admin/admin-release-copy-changes";
 import { resolveRenderableStoredFileUrl } from "@/lib/s3";
 
 interface AdminReleaseDetailsResponse {
@@ -33,6 +37,8 @@ interface AdminReleaseDetailsResponse {
   priority: boolean;
   hidden?: boolean;
   resubmission?: { source_release_id?: string; source_release_title?: string } | null;
+  copy_changes?: AdminReleaseCopyChanges | null;
+  performer_mismatches?: string[];
   media_health?: {
     broken_cover: boolean;
     broken_audio_tracks: number;
@@ -81,6 +87,11 @@ interface AdminReleaseDetailsResponse {
       early_russia_start: boolean;
       real_time_delivery: boolean;
       yandex_pre_release_date: string;
+      /** Empty: the common start date. */
+      vk_start_date?: string;
+      vk_start_time?: string;
+      vk_pre_save?: boolean;
+      vk_pre_save_date?: string;
     };
   };
   tracks: Array<{
@@ -717,6 +728,17 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 .
               </p>
             ) : null}
+            {details.copy_changes ? <AdminReleaseCopyChangesBlock value={details.copy_changes} /> : null}
+            {details.performer_mismatches?.length ? (
+              <div className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.08] p-4 text-[12.5px] leading-5 text-amber-100">
+                <p className="font-semibold">Исполнитель трека отличается от исполнителя релиза</p>
+                <ul className="mt-1 space-y-0.5 text-amber-100/85">
+                  {details.performer_mismatches.map((message) => (
+                    <li key={message}>{message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="rounded-2xl border border-white/[0.08] bg-black/20 p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -947,6 +969,18 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                     "Яндекс Музыка: Скоро новый релиз",
                     details.release.settings.yandex_pre_release_date
                       ? details.release.settings.yandex_pre_release_date
+                      : "❌"
+                  ],
+                  [
+                    "VK Музыка, Одноклассники: старт",
+                    `${details.release.settings.vk_start_date || "как общая дата старта"}, ${
+                      details.release.settings.vk_start_time || "00:00"
+                    }`
+                  ],
+                  [
+                    "VK Музыка: pre-save",
+                    details.release.settings.vk_pre_save
+                      ? details.release.settings.vk_pre_save_date || "✅"
                       : "❌"
                   ]
                 ]}

@@ -95,6 +95,13 @@ export function buildReleaseSubmissionData(data: WizardData): ReleaseSubmissionD
     earlyRussiaStart: data.earlyRussiaStart,
     realTimeDelivery: data.realTimeDelivery,
     yandexPreReleaseDate: data.yandexPreReleaseDate,
-    priorityRelease: data.priorityRelease
+    vkStartDate: data.vkStartDate,
+    vkStartTime: data.vkStartTime,
+    vkPreSave: data.vkPreSave,
+    vkPreSaveDate: data.vkPreSave ? data.vkPreSaveDate : "",
+    priorityRelease: data.priorityRelease,
+    ...(data.changeRequest
+      ? { changeRequest: { areas: data.changeRequest.areas, comment: data.changeRequest.comment.trim() } }
+      : {})
   };
 }

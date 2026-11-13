@@ -21,6 +21,7 @@ import {
 } from "@/lib/release-platforms";
 
 import { ArtistPlatformPicker } from "./artist-platform-picker";
+import { useStepNumber } from "./step-number";
 import { useWizard, type PersonRole } from "./wizard-context";
 import {
   DateInput,
@@ -104,9 +105,13 @@ async function readAsDataUrl(file: File): Promise<string> {
 export function StepInfo({
   section = "basics"
 }: {
-  section?: "basics" | "persons" | "codes" | "stores";
+  section?: "cover" | "basics" | "persons" | "codes" | "stores";
 }) {
   const { data, set, patch } = useWizard();
+  const stepLabel = useStepNumber(
+    section === "basics" ? "info" : section,
+    { cover: "Шаг 2", basics: "Шаг 2", persons: "Шаг 3", codes: "Шаг 4", stores: "Шаг 5" }[section]
+  );
   const [coverError, setCoverError] = React.useState<string | null>(null);
   const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
   const [partnerCodeState, setPartnerCodeState] = React.useState<{
@@ -286,6 +291,75 @@ export function StepInfo({
     }
   }, [data.partnerCode, set]);
 
+  const coverField = (
+    <div data-wizard-anchor="info-cover" className="flex h-full flex-col rounded-[24px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.82),rgba(13,16,30,0.78))] p-5">
+      <FieldLabel required>Обложка</FieldLabel>
+      <label
+        htmlFor="cover-upload"
+        className="group relative mt-3 grid aspect-square w-full cursor-pointer place-items-center overflow-hidden rounded-[22px] border border-white/[0.08] bg-white/[0.02] transition-colors hover:border-[var(--ux-accent)]/55 hover:bg-white/[0.04]"
+      >
+        {safeCoverSrc ? (
+          <Image
+            src={safeCoverSrc}
+            alt="Обложка релиза"
+            fill
+            sizes="280px"
+            className="object-cover"
+            onError={() =>
+              setCoverCandidateIndex((prev) =>
+                prev + 1 < coverCandidates.length ? prev + 1 : coverCandidates.length
+              )
+            }
+          />
+        ) : showCoverLoadingState ? (
+          <span className="flex flex-col items-center gap-2 text-center text-white/48">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-[12px]">Подготавливаем превью…</span>
+          </span>
+        ) : (
+          <span className="flex flex-col items-center gap-2 text-center text-white/40">
+            <Upload className="h-5 w-5" />
+            <span className="text-[12px]">Загрузить файл</span>
+          </span>
+        )}
+        <input
+          id="cover-upload"
+          type="file"
+          accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
+          className="sr-only"
+          onChange={(event) => {
+            void onCoverPick(event);
+          }}
+        />
+      </label>
+      <p className="mt-2 text-[11px] leading-5 text-white/40">
+        JPG/PNG, до 20 МБ, 1400×1400 — 6000×6000, не менее 72 dpi.
+      </p>
+      {coverError ? <p className="mt-2 text-[12px] text-rose-300">{coverError}</p> : null}
+    </div>
+  );
+
+  if (section === "cover") {
+    return (
+      <div className="space-y-5">
+        <WizardCard className="overflow-hidden px-0 py-0">
+          <div className="px-7 py-7 sm:px-9 sm:py-8">
+            <section className="space-y-6">
+              <div className="space-y-2">
+                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">{stepLabel}</p>
+                <h3 className="text-[30px] font-black tracking-[-0.03em] text-white sm:text-[34px]">Новая обложка</h3>
+                <p className="text-[15px] text-[var(--ux-text-secondary)]">
+                  Загрузите обложку, которая заменит опубликованную. Остальные данные релиза не меняются.
+                </p>
+              </div>
+              <div className="max-w-[320px]">{coverField}</div>
+            </section>
+          </div>
+        </WizardCard>
+      </div>
+    );
+  }
+
   if (section === "basics") {
     return (
       <div className="space-y-5">
@@ -293,7 +367,7 @@ export function StepInfo({
           <div className="px-7 py-7 sm:px-9 sm:py-8">
             <section className="space-y-6">
               <div className="space-y-2">
-                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">Шаг 2</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">{stepLabel}</p>
                 <h3 className="text-[30px] font-black tracking-[-0.03em] text-white sm:text-[34px]">
                   Обложка и информация о релизе
                 </h3>
@@ -303,51 +377,7 @@ export function StepInfo({
               </div>
 
               <div className="grid items-stretch gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
-                <div data-wizard-anchor="info-cover" className="flex h-full flex-col rounded-[24px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.82),rgba(13,16,30,0.78))] p-5">
-                  <FieldLabel required>Обложка</FieldLabel>
-                  <label
-                    htmlFor="cover-upload"
-                    className="group relative mt-3 grid aspect-square w-full cursor-pointer place-items-center overflow-hidden rounded-[22px] border border-white/[0.08] bg-white/[0.02] transition-colors hover:border-[var(--ux-accent)]/55 hover:bg-white/[0.04]"
-                  >
-                    {safeCoverSrc ? (
-                      <Image
-                        src={safeCoverSrc}
-                        alt="Обложка релиза"
-                        fill
-                        sizes="280px"
-                        className="object-cover"
-                        onError={() =>
-                          setCoverCandidateIndex((prev) =>
-                            prev + 1 < coverCandidates.length ? prev + 1 : coverCandidates.length
-                          )
-                        }
-                      />
-                    ) : showCoverLoadingState ? (
-                      <span className="flex flex-col items-center gap-2 text-center text-white/48">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        <span className="text-[12px]">Подготавливаем превью…</span>
-                      </span>
-                    ) : (
-                      <span className="flex flex-col items-center gap-2 text-center text-white/40">
-                        <Upload className="h-5 w-5" />
-                        <span className="text-[12px]">Загрузить файл</span>
-                      </span>
-                    )}
-                    <input
-                      id="cover-upload"
-                      type="file"
-                      accept="image/jpeg,image/jpg,image/png,image/webp,image/gif"
-                      className="sr-only"
-                      onChange={(event) => {
-                        void onCoverPick(event);
-                      }}
-                    />
-                  </label>
-                  <p className="mt-2 text-[11px] leading-5 text-white/40">
-                    JPG/PNG, до 20 МБ, 1400×1400 — 6000×6000, не менее 72 dpi.
-                  </p>
-                  {coverError ? <p className="mt-2 text-[12px] text-rose-300">{coverError}</p> : null}
-                </div>
+                {coverField}
 
                 <div data-wizard-anchor="info-basics" className="flex h-full flex-col gap-5 rounded-[24px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.82),rgba(13,16,30,0.78))] p-5">
                   <div className="grid gap-4 sm:grid-cols-[minmax(0,0.96fr)_minmax(0,1.04fr)]">
@@ -456,7 +486,7 @@ export function StepInfo({
           <div className="px-7 py-7 sm:px-9 sm:py-8">
             <section className="space-y-6">
               <div className="space-y-2">
-                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">Шаг 3</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">{stepLabel}</p>
                 <h3 className="text-[30px] font-black tracking-[-0.03em] text-white">Персоны и роли</h3>
                 <p className="text-[15px] text-[var(--ux-text-secondary)]">
                   Для Исполнителей, feat. и Remixer укажите псевдоним артиста.
@@ -527,7 +557,7 @@ export function StepInfo({
           <div className="px-7 py-7 sm:px-9 sm:py-8">
             <section className="space-y-6">
               <div className="space-y-2">
-                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">Шаг 4</p>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">{stepLabel}</p>
                 <h3 className="text-[30px] font-black tracking-[-0.03em] text-white">Коды и даты релиза</h3>
                 <p className="text-[15px] text-[var(--ux-text-secondary)]">
                   Служебные поля собраны в отдельный шаг перед загрузкой аудио.
@@ -662,6 +692,7 @@ export function StepInfo({
 }
 
 function PlatformsSection() {
+  const stepLabel = useStepNumber("stores", "Шаг 5");
   const { data, patch, set } = useWizard();
   const [showAllPlatforms, setShowAllPlatforms] = React.useState(false);
 
@@ -687,7 +718,7 @@ function PlatformsSection() {
     <section className="space-y-6" data-wizard-anchor="info-platforms">
       <div className="space-y-2">
         <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">
-          Шаг 5
+          {stepLabel}
         </p>
         <h3 className="text-[30px] font-black tracking-[-0.03em] text-white">Площадки распространения</h3>
         <p className="text-[15px] text-[var(--ux-text-secondary)]">

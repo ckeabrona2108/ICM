@@ -3,6 +3,7 @@
 import * as React from "react";
 
 import { InfoTooltip, RadioPill, WizardCard } from "./wizard-ui";
+import { useStepNumber } from "./step-number";
 import { useWizard, type ReleaseKind, type ReleaseType } from "./wizard-context";
 
 const TYPE_OPTIONS: Array<{ value: ReleaseType; label: string; tooltip: string }> = [
@@ -26,6 +27,7 @@ const TYPE_OPTIONS: Array<{ value: ReleaseType; label: string; tooltip: string }
 
 export function StepIntro() {
   const { data, set } = useWizard();
+  const stepLabel = useStepNumber("intro", "Шаг 1");
 
   React.useEffect(() => {
     if (data.releaseKind === "single_maxi") {
@@ -40,7 +42,7 @@ export function StepIntro() {
           <section className="space-y-6">
             <div className="space-y-2">
               <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/45">
-                Шаг 1
+                {stepLabel}
               </p>
               <h2 className="text-[30px] font-black tracking-[-0.03em] text-white sm:text-[34px]">
                 Что загружаем?

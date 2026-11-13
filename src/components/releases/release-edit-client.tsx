@@ -9,14 +9,22 @@ import type {
   CancelModerationSuccessResponse
 } from "@/lib/api/contracts";
 import { ReleaseWizard } from "@/components/release-wizard/release-wizard";
+import { buildReleaseSubmissionData } from "@/components/release-wizard/release-submission";
+import { normalizeWizardSeed } from "@/components/release-wizard/wizard-context";
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import { mapCabinetReleaseToWizardSeed } from "@/lib/map-cabinet-to-wizard-seed";
 import { canEditRelease } from "@/lib/release-policy";
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
 import { ReleaseChangesNotice } from "@/components/dashboard/release-changes-notice";
 
-export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
-  const seed = React.useMemo(() => mapCabinetReleaseToWizardSeed(release), [release]);
+export function ReleaseEditClient({
+  release,
+  copySource = null
+}: {
+  release: CabinetRelease;
+  /** Approved release this saved draft is an edited copy of. */
+  copySource?: CabinetRelease | null;
+}) {
   const [cancelledModeration, setCancelledModeration] = React.useState(false);
   const [cancellingModeration, setCancellingModeration] = React.useState(false);
   const [cancelError, setCancelError] = React.useState<string | null>(null);
@@ -42,6 +50,16 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
   );
   const createsModerationCopy = Boolean(editPermission.createsModerationCopy);
   const submissionMode = createsModerationCopy ? "new" : "edit";
+  const seed = React.useMemo(() => {
+    const mapped = mapCabinetReleaseToWizardSeed(release);
+    // Every edit of an approved release starts by asking what the artist wants to change.
+    return createsModerationCopy ? { ...mapped, changeRequest: { areas: [], comment: "" } } : mapped;
+  }, [createsModerationCopy, release]);
+  // The published version the copy is compared with on the review step.
+  const copyOriginal = React.useMemo(() => {
+    const original = createsModerationCopy ? release : copySource;
+    return original ? buildReleaseSubmissionData(normalizeWizardSeed(mapCabinetReleaseToWizardSeed(original))) : null;
+  }, [copySource, createsModerationCopy, release]);
 
   const cancelModeration = React.useCallback(async () => {
     setCancellingModeration(true);
@@ -169,8 +187,8 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
       ) : createsModerationCopy ? (
         <div className="mb-5 rounded-xl border border-sky-500/20 bg-sky-500/[0.06] px-4 py-3 text-[12.5px] leading-relaxed text-sky-100/90">
           <p>
-            Вы редактируете копию принятого релиза. Изменения будут сохранены как новый черновик и
-            после отправки снова попадут на модерацию. Для копии нужен новый UPC; UPC исходного релиза не переносится.
+            Вы редактируете принятый релиз. Опубликованная версия останется на площадках, пока
+            модератор не примет изменения. Повторная оплата не нужна.
           </p>
         </div>
       ) : null}
@@ -181,6 +199,8 @@ export function ReleaseEditClient({ release }: { release: CabinetRelease }) {
         submissionMode={submissionMode}
         pageTitle={isDraftRelease || createsModerationCopy ? "Новый релиз" : "Редактирование релиза"}
         sourceReleaseId={submissionMode === "edit" ? release.id : undefined}
+        copyOfReleaseId={createsModerationCopy ? release.id : undefined}
+        copyOriginal={copyOriginal}
         currentStatus={submissionMode === "edit" ? effectiveStatus : undefined}
         moderationStarted={cancelledModeration ? false : release.moderationStarted}
       />

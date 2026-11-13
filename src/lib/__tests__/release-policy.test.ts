@@ -435,3 +435,35 @@ test("getFocusTrackLimit follows documented rules", () => {
   assert.equal(getFocusTrackLimit({ releaseType: "album", releaseKind: "standard", trackCount: 10 }), 2);
   assert.equal(getFocusTrackLimit({ releaseType: "album", releaseKind: "standard", trackCount: 11 }), 3);
 });
+
+test("VK start date and hour are optional but must be valid when set", () => {
+  const fields = (payload: ReleaseSubmissionData) =>
+    validateReleaseSubmission(payload)
+      .map((issue) => issue.field)
+      .filter((field) => field.startsWith("vk"));
+
+  assert.deepEqual(fields(validSubmission()), []);
+  assert.deepEqual(fields({ ...validSubmission(), vkStartDate: "2026-04-30", vkStartTime: "18:00", vkPreSave: true, vkPreSaveDate: "2026-04-23" }), []);
+  assert.deepEqual(fields({ ...validSubmission(), vkStartDate: "не дата", vkStartTime: "18:30" }), ["vkStartDate", "vkStartTime"]);
+});
+
+test("Yandex and VK pre-save must be at least 2 days before their start", () => {
+  const fields = (payload: ReleaseSubmissionData) =>
+    validateReleaseSubmission(payload)
+      .map((issue) => issue.field)
+      .filter((field) => field === "yandexPreReleaseDate" || field === "vkPreSaveDate");
+  const base = validSubmission();
+  const shift = (days: number) =>
+    new Date(new Date(`${base.startDate}T00:00:00.000Z`).getTime() + days * 86_400_000).toISOString().slice(0, 10);
+
+  assert.deepEqual(fields({ ...base, yandexPreReleaseDate: shift(-7) }), []);
+  assert.deepEqual(fields({ ...base, yandexPreReleaseDate: shift(-3) }), []);
+  assert.deepEqual(fields({ ...base, yandexPreReleaseDate: shift(-1) }), ["yandexPreReleaseDate"]);
+  assert.deepEqual(fields({ ...base, yandexPreReleaseDate: "", vkPreSave: true, vkPreSaveDate: shift(-2) }), []);
+  assert.deepEqual(fields({ ...base, yandexPreReleaseDate: "", vkPreSave: true, vkPreSaveDate: "" }), ["vkPreSaveDate"]);
+  // VK pre-save is checked against the VK start date when it has its own.
+  assert.deepEqual(
+    fields({ ...base, yandexPreReleaseDate: "", vkPreSave: true, vkStartDate: shift(10), vkPreSaveDate: shift(5) }),
+    []
+  );
+});

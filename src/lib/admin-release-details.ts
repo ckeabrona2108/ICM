@@ -17,7 +17,20 @@ import {
 import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
 import {
+  describeTrackPerformerMismatch,
+  findTrackPerformerMismatches
+} from "@/lib/release-performer-check";
+import {
+  diffReleaseSubmissions,
+  readReleaseChangeRequest,
+  unmarkedReleaseChangeAreas,
+  type ReleaseChangeArea,
+  type ReleaseChangeRequest,
+  type ReleaseFieldChange
+} from "@/lib/release-copy-changes";
+import {
   findPaidPredecessorRelease,
+  readReleaseCopySourceId,
   getReleaseResubmission,
   readReleaseUpc
 } from "@/lib/release-resubmission";
@@ -32,6 +45,15 @@ interface AdminReleaseDetailsResponse {
   priority: boolean;
   hidden?: boolean;
   resubmission?: { source_release_id?: string; source_release_title?: string } | null;
+  /** Tracks whose performer is not a performer of the release. */
+  performer_mismatches?: string[];
+  /** Edited copy of an approved release: what the artist marked and what actually differs. */
+  copy_changes?: {
+    request: ReleaseChangeRequest | null;
+    changes: ReleaseFieldChange[];
+    unmarked_areas: ReleaseChangeArea[];
+    source_available: boolean;
+  } | null;
   media_health?: {
     broken_cover: boolean;
     broken_audio_tracks: number;
@@ -80,6 +102,11 @@ interface AdminReleaseDetailsResponse {
       early_russia_start: boolean;
       real_time_delivery: boolean;
       yandex_pre_release_date: string;
+      /** Empty: the common start date. */
+      vk_start_date?: string;
+      vk_start_time?: string;
+      vk_pre_save?: boolean;
+      vk_pre_save_date?: string;
     };
   };
   tracks: Array<{
@@ -1157,7 +1184,14 @@ export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetai
       settings: {
         early_russia_start: Boolean(submissionData?.earlyRussiaStart ?? release.earlyStartInRussia),
         real_time_delivery: Boolean(submissionData?.realTimeDelivery ?? release.realTimeDelivery),
-        yandex_pre_release_date: toDate(submissionData?.yandexPreReleaseDate as string | undefined ?? (release.yandexSoonNewRelease as Date | undefined))
+        yandex_pre_release_date: toDate(submissionData?.yandexPreReleaseDate as string | undefined ?? (release.yandexSoonNewRelease as Date | undefined)),
+        vk_start_date: asString(submissionData?.vkStartDate) ? toDate(asString(submissionData?.vkStartDate)) : "",
+        vk_start_time: asString(submissionData?.vkStartTime) ?? "00:00",
+        vk_pre_save: submissionData?.vkPreSave === true,
+        vk_pre_save_date:
+          submissionData?.vkPreSave === true && asString(submissionData?.vkPreSaveDate)
+            ? toDate(asString(submissionData?.vkPreSaveDate))
+            : ""
       }
     },
     tracks,
@@ -1299,12 +1333,16 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
   if (!release) return null;
   const details = mapAdminReleaseDetails(release);
   details.hidden = getReleaseDeletionState(release.roles)?.status === "deleted";
+  details.performer_mismatches = findTrackPerformerMismatches(parseSubmissionData(release)).map(
+    describeTrackPerformerMismatch
+  );
   if (details.status === "moderation") {
     const marker = getReleaseResubmission(release.roles);
     const predecessor = await findPaidPredecessorRelease(prisma, {
       userId: release.userId,
       releaseId: release.id,
-      upc: readReleaseUpc(release)
+      upc: readReleaseUpc(release),
+      sourceReleaseId: marker?.sourceReleaseId ?? readReleaseCopySourceId(release.roles)
     });
     if (marker || predecessor) {
       details.resubmission = {
@@ -1314,6 +1352,23 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
       if (!release.confirmed && details.resubmission.source_release_id) {
         details.payment_status = "paid";
         details.payment_label = "Оплачен ранее";
+      }
+      const sourceId = details.resubmission.source_release_id;
+      const copySubmission = parseSubmissionData(release);
+      const request = readReleaseChangeRequest(copySubmission);
+      if (sourceId && (request || readReleaseCopySourceId(release.roles))) {
+        const source = await prisma.release.findFirst({
+          where: { id: sourceId, userId: release.userId },
+          select: { roles: true }
+        });
+        const sourceSubmission = asRecord(asRecord(source?.roles)?.submissionData);
+        const changes = sourceSubmission ? diffReleaseSubmissions(sourceSubmission, copySubmission) : [];
+        details.copy_changes = {
+          request,
+          changes,
+          unmarked_areas: unmarkedReleaseChangeAreas(changes, request),
+          source_available: Boolean(sourceSubmission)
+        };
       }
     }
   }

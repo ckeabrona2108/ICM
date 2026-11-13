@@ -57,22 +57,50 @@ export function readReleaseUpc(source: { upc?: string | null; roles: unknown }):
   return asString(submission?.upc);
 }
 
-/** Finds an approved paid release of the same artist with the same UPC: the artist re-sent it as a new copy. */
+/** Key in `release.roles` linking a moderation copy to the approved release it was made from. */
+export const RELEASE_COPY_SOURCE_KEY = "copyOfReleaseId";
+
+/** Id of the approved release this release was copied from in the edit wizard, if any. */
+export function readReleaseCopySourceId(roles: unknown): string | null {
+  return asString(asRecord(roles)?.[RELEASE_COPY_SOURCE_KEY]);
+}
+
+export function withReleaseCopySource(roles: Record<string, unknown>, sourceReleaseId: string): Record<string, unknown> {
+  return { ...roles, [RELEASE_COPY_SOURCE_KEY]: sourceReleaseId };
+}
+
+/** Finds an approved paid release of the same artist that this release re-sends: either the release
+ * it was copied from (`sourceReleaseId`) or one with the same UPC. */
 export async function findPaidPredecessorRelease(
   db: { release: Pick<PrismaClient["release"], "findMany"> },
-  params: { userId: string; releaseId: string; upc: string | null | undefined }
+  params: {
+    userId: string;
+    releaseId: string;
+    upc: string | null | undefined | ReadonlyArray<string | null | undefined>;
+    sourceReleaseId?: string | null;
+  }
 ): Promise<{ id: string; title: string } | null> {
-  const upc = params.upc?.trim();
-  if (!upc) return null;
+  const upcs = new Set(
+    (Array.isArray(params.upc) ? params.upc : [params.upc])
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean)
+  );
+  const sourceReleaseId = params.sourceReleaseId?.trim() || null;
+  if (upcs.size === 0 && !sourceReleaseId) return null;
 
   const candidates = await db.release.findMany({
     where: { userId: params.userId, confirmed: true, id: { not: params.releaseId } },
     select: { id: true, title: true, status: true, upc: true, roles: true }
   });
-  const match = candidates.find(
-    (candidate) =>
-      readReleaseUpc(candidate) === upc &&
-      shouldTreatReleaseAsApproved({ ...candidate, confirmed: true, upc: readReleaseUpc(candidate) })
-  );
+  const isApproved = (candidate: (typeof candidates)[number]) =>
+    shouldTreatReleaseAsApproved({ ...candidate, confirmed: true, upc: readReleaseUpc(candidate) });
+  const match =
+    (sourceReleaseId
+      ? candidates.find((candidate) => candidate.id === sourceReleaseId && isApproved(candidate))
+      : undefined) ??
+    candidates.find((candidate) => {
+      const upc = readReleaseUpc(candidate);
+      return Boolean(upc && upcs.has(upc)) && isApproved(candidate);
+    });
   return match ? { id: match.id, title: match.title } : null;
 }

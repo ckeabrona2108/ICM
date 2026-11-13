@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  resolveCopyWizardSteps,
   resolveDraftReleaseId,
   resolveReleaseSubmitMode,
   shouldResubmitEditedRelease
@@ -35,4 +36,24 @@ test("shouldResubmitEditedRelease sends approved edits through moderation again"
   assert.equal(shouldResubmitEditedRelease("distributed"), true);
   assert.equal(shouldResubmitEditedRelease("moderation"), false);
   assert.equal(shouldResubmitEditedRelease("draft"), false);
+});
+
+test("an edited copy opens only the screens for the marked changes", () => {
+  assert.deepEqual(resolveCopyWizardSteps(["cover"]), ["changes", "cover", "review", "upload"]);
+  assert.deepEqual(resolveCopyWizardSteps(["lyrics"]), ["changes", "lyrics", "review", "upload"]);
+  assert.deepEqual(resolveCopyWizardSteps(["dates", "distribution"]), ["changes", "codes", "stores", "review", "upload"]);
+  // The release info screen already has the cover, track forms already have lyrics.
+  assert.deepEqual(resolveCopyWizardSteps(["cover", "metadata"]), ["changes", "info", "persons", "review", "upload"]);
+  assert.deepEqual(resolveCopyWizardSteps(["tracks", "lyrics"]), ["changes", "tracks", "review", "upload"]);
+  assert.deepEqual(resolveCopyWizardSteps([]), ["changes", "review", "upload"]);
+});
+
+test("\"other\" opens the full release form", () => {
+  assert.deepEqual(resolveCopyWizardSteps(["other", "cover"]), [
+    "changes", "intro", "info", "persons", "codes", "stores", "tracks", "extras", "review", "upload"
+  ]);
+});
+
+test("a step the artist was sent to from review stays in the route", () => {
+  assert.deepEqual(resolveCopyWizardSteps(["cover"], "tracks"), ["changes", "cover", "tracks", "review", "upload"]);
 });

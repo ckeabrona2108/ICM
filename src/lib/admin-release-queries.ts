@@ -15,6 +15,28 @@ import {
   readReleaseTimeline
 } from "@/lib/release-timeline";
 import { getReleaseResubmission, readReleaseUpc } from "@/lib/release-resubmission";
+import {
+  RELEASE_CHANGE_AREAS,
+  readReleaseChangeRequest,
+  type ReleaseChangeArea
+} from "@/lib/release-copy-changes";
+
+function readAreaList(value: unknown): ReleaseChangeArea[] {
+  if (!Array.isArray(value)) return [];
+  return RELEASE_CHANGE_AREAS.filter((area) => value.includes(area));
+}
+
+/** Short "what changed" for the moderation list: stored at submit, or the artist's marks. */
+function readCopyChangeSummary(roles: unknown): { changeAreas?: ReleaseChangeArea[]; unmarkedAreas?: ReleaseChangeArea[] } {
+  const root = roles && typeof roles === "object" && !Array.isArray(roles) ? (roles as Record<string, unknown>) : {};
+  const stored = root.copyChanges && typeof root.copyChanges === "object" ? (root.copyChanges as Record<string, unknown>) : null;
+  const changeAreas = stored ? readAreaList(stored.areas) : readReleaseChangeRequest(root.submissionData)?.areas ?? [];
+  const unmarkedAreas = stored ? readAreaList(stored.unmarkedAreas) : [];
+  return {
+    ...(changeAreas.length > 0 ? { changeAreas } : {}),
+    ...(unmarkedAreas.length > 0 ? { unmarkedAreas } : {})
+  };
+}
 
 export type AdminReleaseStatusFilter =
   | "moderation"
@@ -306,7 +328,8 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
       const resubmission = onModeration && (resubmissionMarker || sourceRelease)
         ? {
             sourceReleaseId: resubmissionMarker?.sourceReleaseId ?? sourceRelease?.id,
-            sourceReleaseTitle: sourceRelease?.title
+            sourceReleaseTitle: sourceRelease?.title,
+            ...readCopyChangeSummary(source.roles)
           }
         : null;
       const paidEarlier = !source.confirmed && Boolean(resubmission?.sourceReleaseId);

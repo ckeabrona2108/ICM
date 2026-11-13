@@ -16,6 +16,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
+import { inheritReleasePersonsForTrack } from "@/lib/release-performer-check";
 import { uploadBrowserBlobToStorage } from "@/lib/browser-storage-upload";
 
 import {
@@ -459,6 +460,18 @@ export function StepTracks() {
     [data.tracks, set]
   );
 
+  // A new track starts with the release performers; the artist can change them per track.
+  const newTrackMeta = React.useCallback(
+    () => ({
+      ...emptyTrackMeta(),
+      trackPersons: inheritReleasePersonsForTrack(data.persons).map((person) => ({
+        id: crypto.randomUUID(),
+        ...person
+      }))
+    }),
+    [data.persons]
+  );
+
   const acceptFiles = React.useCallback(
     async (files: FileList | File[]) => {
       setError(null);
@@ -490,7 +503,7 @@ export function StepTracks() {
           durationSec,
           durationLabel: durationSec ? formatDuration(durationSec) : undefined,
           audioUrl: URL.createObjectURL(file),
-          meta: emptyTrackMeta()
+          meta: newTrackMeta()
         });
       }
 
@@ -504,7 +517,7 @@ export function StepTracks() {
 
       setLoadingDuration(false);
     },
-    [data.tracks, set]
+    [data.tracks, newTrackMeta, set]
   );
 
   const onDrop = (e: React.DragEvent) => {
@@ -524,7 +537,7 @@ export function StepTracks() {
       hasAudio: false,
       localAudioFile: null,
       audioUpload: null,
-      meta: emptyTrackMeta()
+      meta: newTrackMeta()
     };
 
     set("tracks", [...data.tracks, metadataTrack]);

@@ -19,6 +19,14 @@ import { getReleasePlatformLabel } from "@/lib/release-platforms";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
 import { cn } from "@/lib/utils";
 
+import type { ReleaseSubmissionData } from "@/lib/release-policy";
+
+import {
+  describeTrackPerformerMismatch,
+  findTrackPerformerMismatches
+} from "@/lib/release-performer-check";
+
+import { CopyChangesReview } from "./change-request";
 import { FreeReleaseOption } from "./free-release-option";
 import { useWizard, type PersonRole, type TrackFile } from "./wizard-context";
 
@@ -172,7 +180,9 @@ export function StepReview({
   stepIssues,
   isSubmitting,
   submitPhase = "idle",
-  freeRelease
+  freeRelease,
+  copyOriginal,
+  onBack
 }: {
   onSubmit: () => void | Promise<void>;
   errors: string[];
@@ -184,8 +194,23 @@ export function StepReview({
   submitPhase?: SubmitPhase;
   // Offered only for new releases; edits keep the way the release was paid.
   freeRelease?: { enabled: boolean; onChange: (value: boolean) => void };
+  /** Published version of the release this copy edits. */
+  copyOriginal?: ReleaseSubmissionData | null;
+  /** Previous step of the current route (an edited copy skips most steps). */
+  onBack?: () => void;
 }) {
   const { data, set, setStep } = useWizard();
+  // An edited approved release is sent as a release edit, not as a new release.
+  const isReleaseEdit = Boolean(data.changeRequest);
+  // Release and track performers are separate lists; a different track artist is only flagged.
+  const performerMismatches = React.useMemo(
+    () =>
+      findTrackPerformerMismatches({
+        persons: data.persons,
+        tracks: data.tracks.map((track) => ({ title: track.meta.title, trackPersons: track.meta.trackPersons }))
+      }),
+    [data.persons, data.tracks]
+  );
   const [coverCandidateIndex, setCoverCandidateIndex] = React.useState(0);
   const [openTrackId, setOpenTrackId] = React.useState<string | null>(data.tracks[0]?.id ?? null);
   const [showPlatforms, setShowPlatforms] = React.useState(false);
@@ -356,6 +381,20 @@ export function StepReview({
                 Исправить
               </button>
             </div>
+
+            {performerMismatches.length > 0 ? (
+              <div className="mt-4 rounded-[18px] border border-amber-400/30 bg-amber-500/[0.08] px-4 py-3 text-[12.5px] leading-5 text-amber-100">
+                <p className="font-semibold">Исполнитель трека отличается от исполнителя релиза</p>
+                <ul className="mt-1 space-y-0.5 text-amber-100/85">
+                  {performerMismatches.map((mismatch) => (
+                    <li key={mismatch.trackIndex}>{describeTrackPerformerMismatch(mismatch)}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-amber-100/70">
+                  На площадках трек выйдет под исполнителем трека. Если это не сборник или фит, исправьте персоны трека.
+                </p>
+              </div>
+            ) : null}
 
             {data.tracks.length === 0 ? (
               <MissingInline onFix={() => setStep("tracks")}>Треки не добавлены</MissingInline>
@@ -549,8 +588,20 @@ export function StepReview({
               <ReviewValue label="Доставка в реальном времени" value={data.realTimeDelivery ? "Включено" : "Выключено"} optional />
               <ReviewValue label="Приоритетный релиз" value={data.priorityRelease ? "Включено" : "Выключено"} optional />
               <ReviewValue label="Яндекс pre-save" value={formatDate(data.yandexPreReleaseDate)} optional />
+              <ReviewValue
+                label="VK Музыка: старт"
+                value={`${data.vkStartDate ? formatDate(data.vkStartDate) : "Как общая дата"}, ${data.vkStartTime || "00:00"}`}
+                optional
+              />
+              <ReviewValue
+                label="VK Музыка: pre-save"
+                value={data.vkPreSave ? formatDate(data.vkPreSaveDate) : "Выключено"}
+                optional
+              />
             </div>
           </section>
+
+          {copyOriginal && data.changeRequest ? <CopyChangesReview original={copyOriginal} /> : null}
 
           <section ref={moderatorRef} className="rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,21,34,0.96),rgba(11,14,25,0.98))] p-5 sm:p-6">
             <SectionTitle title="Сообщение для модератора" />
@@ -570,7 +621,9 @@ export function StepReview({
           <section className="rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,21,34,0.96),rgba(11,14,25,0.98))] p-5 sm:p-6">
             <SectionTitle title="Финальная отправка" />
             <p className="mt-2 text-[13px] leading-6 text-white/52">
-              Проверьте все разделы выше. После отправки релиз уйдёт на модерацию с текущими данными формы.
+              {isReleaseEdit
+                ? "Проверьте изменения выше. Опубликованная версия останется на площадках, пока модератор не примет правки."
+                : "Проверьте все разделы выше. После отправки релиз уйдёт на модерацию с текущими данными формы."}
             </p>
 
             {hasBlockingErrors ? (
@@ -582,7 +635,7 @@ export function StepReview({
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
-                onClick={() => setStep("extras")}
+                onClick={() => (onBack ? onBack() : setStep("extras"))}
                 className="inline-flex items-center gap-2 rounded-[18px] border border-white/[0.08] bg-white/[0.03] px-5 py-3 text-[13px] font-medium text-white/82 transition-colors hover:border-white/[0.16] hover:bg-white/[0.05] hover:text-white"
               >
                 Назад
@@ -602,8 +655,12 @@ export function StepReview({
                   : submitPhase === "uploading"
                     ? "Загружаем файлы..."
                     : submitPhase === "submitting" || isSubmitting
-                      ? "Отправляем на модерацию..."
-                      : "Отправить релиз на модерацию"}
+                      ? isReleaseEdit
+                        ? "Отправляем изменения..."
+                        : "Отправляем на модерацию..."
+                      : isReleaseEdit
+                        ? "Отправить на редактирование релиза"
+                        : "Отправить релиз на модерацию"}
               </button>
             </div>
           </section>

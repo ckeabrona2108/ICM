@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { ReleaseChangeRequest } from "@/lib/release-copy-changes";
 
 export type ReleaseType = "single" | "ep" | "album";
 export type ReleaseKind = "standard" | "single_maxi" | "mixtape" | "audiobook";
@@ -178,8 +179,15 @@ export interface WizardData {
   earlyRussiaStart: boolean;
   realTimeDelivery: boolean;
   yandexPreReleaseDate: string;
+  /** VK Музыка / Одноклассники; an empty date means the common start date. */
+  vkStartDate: string;
+  vkStartTime: string;
+  vkPreSave: boolean;
+  vkPreSaveDate: string;
   moderatorComment: string;
   priorityRelease: boolean;
+  /** Only for an edited copy of an approved release: what the artist changes and why. */
+  changeRequest: ReleaseChangeRequest | null;
 }
 
 const initial: WizardData = {
@@ -210,17 +218,25 @@ const initial: WizardData = {
   earlyRussiaStart: false,
   realTimeDelivery: false,
   yandexPreReleaseDate: "",
+  vkStartDate: "",
+  vkStartTime: "00:00",
+  vkPreSave: false,
+  vkPreSaveDate: "",
   moderatorComment: "",
-  priorityRelease: false
+  priorityRelease: false,
+  changeRequest: null
 };
 
 export type StepId =
+  | "changes"
   | "intro"
+  | "cover"
   | "info"
   | "persons"
   | "codes"
   | "stores"
   | "tracks"
+  | "lyrics"
   | "extras"
   | "review"
   | "upload";
@@ -245,7 +261,8 @@ function revokeBlobUrl(url: string | undefined) {
   if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
-function normalizeWizardSeed(seed?: Partial<WizardData>): WizardData {
+/** Full wizard data from a partial seed, the same way the wizard starts from it. */
+export function normalizeWizardSeed(seed?: Partial<WizardData>): WizardData {
   const merged = { ...initial, ...seed };
   return {
     ...merged,
@@ -271,7 +288,9 @@ export function WizardProvider({
 }) {
   const seedSignature = React.useMemo(() => JSON.stringify(seed ?? {}), [seed]);
   const [data, setData] = React.useState<WizardData>(() => normalizeWizardSeed(seed));
-  const [step, setStep] = React.useState<StepId>("intro");
+  // An edited copy of an approved release starts by asking what changes.
+  const firstStep: StepId = seed?.changeRequest ? "changes" : "intro";
+  const [step, setStep] = React.useState<StepId>(firstStep);
 
   const set = React.useCallback(
     <K extends keyof WizardData>(key: K, value: WizardData[K]) => {
@@ -296,15 +315,15 @@ export function WizardProvider({
       for (const t of prev.tracks) revokeBlobUrl(t.audioUrl);
       return normalizeWizardSeed(seed);
     });
-    setStep("intro");
-  }, [seed]);
+    setStep(firstStep);
+  }, [firstStep, seed]);
 
   React.useEffect(() => {
     setData((prev) => {
       for (const t of prev.tracks) revokeBlobUrl(t.audioUrl);
       return normalizeWizardSeed(seed);
     });
-    setStep("intro");
+    setStep(firstStep);
   }, [seedSignature, submissionMode]);
 
   return (

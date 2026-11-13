@@ -8,6 +8,8 @@ import {
   isAllowedReleasePersonRole,
   isAllowedTrackPersonRole
 } from "@/lib/person-roles";
+import { RELEASE_CHANGE_AREAS } from "@/lib/release-copy-changes";
+import { resolveVkStartDate, validatePreSaveDate } from "@/lib/release-presave";
 
 export const releaseLifecycleStatuses = [
   "draft",
@@ -161,7 +163,19 @@ export const releaseSubmissionDataSchema = z.object({
   earlyRussiaStart: z.boolean().optional(),
   realTimeDelivery: z.boolean().optional(),
   yandexPreReleaseDate: z.string().trim().optional(),
-  priorityRelease: z.boolean().optional()
+  /** VK Музыка / Одноклассники: own start date (empty = common start date), start hour, pre-save. */
+  vkStartDate: z.string().trim().optional(),
+  vkStartTime: z.string().trim().optional(),
+  vkPreSave: z.boolean().optional(),
+  vkPreSaveDate: z.string().trim().optional(),
+  priorityRelease: z.boolean().optional(),
+  /** Edited copy of an approved release: what the artist says they change and why. */
+  changeRequest: z
+    .object({
+      areas: z.array(z.enum(RELEASE_CHANGE_AREAS)),
+      comment: z.string().trim()
+    })
+    .optional()
 });
 
 export const releaseSubmitRequestSchema = z.object({
@@ -362,11 +376,6 @@ function isValidLegalName(value: string): boolean {
 
 function normalizeIsrc(value: string): string {
   return value.replace(/[-\s]/gu, "").toUpperCase();
-}
-
-function daysBetween(start: Date, end: Date): number {
-  const msInDay = 24 * 60 * 60 * 1000;
-  return Math.round((end.getTime() - start.getTime()) / msInDay);
 }
 
 function hasStreamingPlatforms(platforms: string[]): boolean {
@@ -627,26 +636,31 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
     );
   }
 
+  // Pre-save: by default 7 days before the start, at the latest 2 days before it.
   if (data.yandexPreReleaseDate?.trim()) {
-    const yandexDate = parseDateInput(data.yandexPreReleaseDate);
-    if (!yandexDate) {
-      pushIssue(
-        issues,
-        "invalid",
-        "yandexPreReleaseDate",
-        "Укажите корректную дату «Скоро новый релиз» для Яндекс Музыки."
-      );
-    } else if (startDate) {
-      const delta = daysBetween(yandexDate, startDate);
-      if (delta !== 7) {
-        pushIssue(
-          issues,
-          "invalid",
-          "yandexPreReleaseDate",
-          "Дата «Скоро новый релиз» должна быть ровно за 7 дней до даты старта."
-        );
-      }
-    }
+    const message = validatePreSaveDate({
+      preSaveDate: data.yandexPreReleaseDate,
+      startDate: data.startDate,
+      platform: "Яндекс Музыки"
+    });
+    if (message) pushIssue(issues, "invalid", "yandexPreReleaseDate", message);
+  }
+
+  if (data.vkPreSave) {
+    const message = validatePreSaveDate({
+      preSaveDate: data.vkPreSaveDate,
+      startDate: resolveVkStartDate(data),
+      platform: "VK Музыки"
+    });
+    if (message) pushIssue(issues, "invalid", "vkPreSaveDate", message);
+  }
+
+  if (data.vkStartDate?.trim() && !parseDateInput(data.vkStartDate)) {
+    pushIssue(issues, "invalid", "vkStartDate", "Укажите корректную дату старта для VK Музыки.");
+  }
+
+  if (data.vkStartTime?.trim() && !/^([01]\d|2[0-3]):00$/u.test(data.vkStartTime.trim())) {
+    pushIssue(issues, "invalid", "vkStartTime", "Выберите час старта для VK Музыки из списка.");
   }
 
   if (

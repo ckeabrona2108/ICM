@@ -10,6 +10,7 @@ import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { markFreeReleaseConsumed } from "@/lib/free-release";
 import {
   findPaidPredecessorRelease,
+  readReleaseCopySourceId,
   getReleaseResubmission,
   readReleaseUpc
 } from "@/lib/release-resubmission";
@@ -174,7 +175,12 @@ async function mergeResubmittedCopyIntoSource(params: {
 
   const copySubmission = asRecord(asRecord(copy.roles)?.submissionData);
   const sourceRoles: Record<string, unknown> = { ...(asRecord(source.roles) ?? {}) };
-  if (copySubmission) sourceRoles.submissionData = { ...copySubmission, upc: params.upc };
+  if (copySubmission) {
+    // The change request describes one moderation round, not the release itself.
+    const submission: Record<string, unknown> = { ...copySubmission, upc: params.upc };
+    delete submission.changeRequest;
+    sourceRoles.submissionData = submission;
+  }
   delete sourceRoles.resubmission;
   const mergedRoles = resetNeedsChangesFlags(sourceRoles);
 
@@ -308,12 +314,14 @@ export async function approveReleaseByAdmin(params: {
   }
 
   // A copy of an approved release is merged into the original instead of becoming a duplicate.
+  // The admin may enter the original's UPC for a copy that was sent without one.
   const sourceReleaseId =
     getReleaseResubmission(release.roles)?.sourceReleaseId ??
     (await findPaidPredecessorRelease(params.prisma, {
       userId: release.userId,
       releaseId: release.id,
-      upc: readReleaseUpc(release)
+      upc: [readReleaseUpc(release), normalizedUpc],
+      sourceReleaseId: readReleaseCopySourceId(release.roles)
     }))?.id;
   if (sourceReleaseId) {
     const merged = await mergeResubmittedCopyIntoSource({

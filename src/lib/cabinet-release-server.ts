@@ -1,3 +1,4 @@
+import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import type { verification_status } from "@prisma/client";
 
 import type {
@@ -389,7 +390,9 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
     status: cabinetStatus,
     paid: Boolean(release.confirmed),
     paymentKind: release.confirmed ? paymentDisplay?.kind ?? "paid" : "unpaid",
-    paymentLabel: release.confirmed ? paymentDisplay?.label ?? "Оплачен" : "Не оплачен",
+    paymentLabel: release.confirmed
+      ? paymentDisplay?.label ?? "Оплачен"
+      : describePendingExtrasSupplement(release.roles, false) ?? "Не оплачен",
     paymentPlan: paymentDisplay?.usage?.plan ?? null,
     tracks: mappedTracks,
     moderationStarted:

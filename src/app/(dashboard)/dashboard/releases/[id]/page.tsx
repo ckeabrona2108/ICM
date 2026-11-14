@@ -11,7 +11,8 @@ import { ReleaseModerationStepper } from "@/components/dashboard/release-moderat
 import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
 import { prisma } from "@/lib/prisma";
-import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
+import { resolveReleaseAmountDue } from "@/lib/release-extras-supplement";
+import { RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { getReleaseTimelineState } from "@/lib/release-timeline-state";
 import Link from "next/link";
 import { ReleasePaymentPanel } from "@/components/releases/release-payment-panel";
@@ -64,14 +65,16 @@ export default async function ReleaseDetailsPage({
   }
   const timeline = getReleaseTimelineState(release.status, release.paid);
   const awaitingPayment = !release.paid && release.status === "moderation";
-  const releasePrice = awaitingPayment
-    ? calculateReleasePrice(
-        await prisma.track.findMany({
-          where: { releaseId: release.id, release: { userId: session.user.id } },
-          select: RELEASE_PRICING_TRACK_SELECT
+  // A re-sent paid release only owes the extras added since its payment.
+  const amountDue = awaitingPayment
+    ? await prisma.release
+        .findFirst({
+          where: { id: release.id, userId: session.user.id },
+          select: { roles: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
         })
-      )
+        .then((stored) => (stored ? resolveReleaseAmountDue(stored.roles, stored.track) : null))
     : null;
+  const releasePrice = amountDue?.price ?? null;
   const paymentReturnState =
     paymentResult?.status === "canceled"
       ? { kind: "failed" as const, message: describeYooKassaCancellation(paymentResult.cancellationReason) }
@@ -112,6 +115,7 @@ export default async function ReleaseDetailsPage({
               <ReleasePaymentPanel
                 releaseId={release.id}
                 price={releasePrice}
+                supplement={Boolean(amountDue?.supplement)}
                 autoStart={searchParams?.pay === "1" && !payOrderId}
                 returnState={paymentReturnState}
               />

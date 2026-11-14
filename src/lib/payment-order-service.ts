@@ -23,6 +23,7 @@ import {
   buildStandalonePaymentUsage,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
+import { readPendingExtrasSupplement, withExtrasSupplementPaid } from "@/lib/release-extras-supplement";
 import { normalizeSubscriptionBillingPeriod } from "@/lib/subscription-billing";
 import { grantSubscriptionFromConfirmedPayment } from "@/lib/subscription-payment-service";
 import { sendAiTokensCreditedEmail, sendAiTokensPendingEmail } from "@/lib/user-event-email";
@@ -338,10 +339,17 @@ async function applyConfirmedOrder(params: {
         where: { id: releaseId, userId: params.order.userId },
         select: { id: true, roles: true, confirmed: true }
       });
-      const paymentRoles = mergeReleaseRolesPaymentUsage(
-        release?.roles ?? null,
-        buildStandalonePaymentUsage({ orderId: params.order.id })
-      );
+      // A supplement for added extras keeps the release's original payment record.
+      const supplementRoles =
+        release && readPendingExtrasSupplement(release.roles)
+          ? withExtrasSupplementPaid(release.roles as Record<string, unknown>, { orderId: params.order.id })
+          : null;
+      const paymentRoles = supplementRoles
+        ? (supplementRoles as Prisma.InputJsonValue)
+        : mergeReleaseRolesPaymentUsage(
+            release?.roles ?? null,
+            buildStandalonePaymentUsage({ orderId: params.order.id })
+          );
       if (release && !release.confirmed) {
         await params.prisma.release.updateMany({
           where: { id: releaseId, userId: params.order.userId },

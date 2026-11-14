@@ -6,7 +6,8 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
-import { calculateReleasePrice, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
+import { resolveReleaseAmountDue } from "@/lib/release-extras-supplement";
+import { RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export async function POST(request: Request, context: { params: { id: string } }
       id: releaseId,
       userId: session.user.id
     },
-    select: { id: true, title: true, confirmed: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
+    select: { id: true, title: true, confirmed: true, roles: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
   });
 
   if (!release) {
@@ -63,14 +64,19 @@ export async function POST(request: Request, context: { params: { id: string } }
     );
   }
 
-  const amountRub = calculateReleasePrice(release.track).totalRub;
+  // A re-sent paid release only owes the extras added since its payment.
+  const due = resolveReleaseAmountDue(release.roles, release.track);
+  const amountRub = due.price.totalRub;
+  if (amountRub <= 0) {
+    return NextResponse.json({ error: "Сумма к оплате не найдена. Обновите страницу." }, { status: 409 });
+  }
   const orderId = randomUUID();
   const returnUrl = `${getAppBaseUrl(request)}/dashboard/releases/${releaseId}?pay_order=${orderId}`;
   let payment;
   try {
     payment = await createYooKassaPayment({
       amountRub,
-      description: `Оплата релиза: ${release.title}`,
+      description: due.supplement ? `Доплата за дополнения: ${release.title}` : `Оплата релиза: ${release.title}`,
       returnUrl,
       customerEmail: session.user.email,
       idempotenceKey: orderId,
@@ -78,6 +84,7 @@ export async function POST(request: Request, context: { params: { id: string } }
         orderId,
         kind: "release",
         releaseId,
+        ...(due.supplement ? { extrasSupplement: "1" } : {}),
         userId: session.user.id
       }
     });
@@ -107,6 +114,7 @@ export async function POST(request: Request, context: { params: { id: string } }
       metadata: {
         releaseId,
         amountRub,
+        ...(due.supplement ? { extrasSupplement: true } : {}),
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

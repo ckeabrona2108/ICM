@@ -1,3 +1,4 @@
+import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import { prisma } from "@/lib/prisma";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
@@ -332,7 +333,9 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
             ...readCopyChangeSummary(source.roles)
           }
         : null;
-      const paidEarlier = !source.confirmed && Boolean(resubmission?.sourceReleaseId);
+      // An edited copy with added extras is not "paid earlier" until the supplement is paid.
+      const supplementLabel = describePendingExtrasSupplement(source.roles, Boolean(source.confirmed));
+      const paidEarlier = !source.confirmed && Boolean(resubmission?.sourceReleaseId) && !supplementLabel;
       const paid = Boolean(source.confirmed) || paidEarlier;
       const paymentDisplay = source.confirmed
         ? getReleasePaymentDisplayFromRoles(source.roles)
@@ -380,7 +383,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
           ? "Оплачен ранее"
           : source.confirmed
           ? paymentDisplay?.label ?? "Оплачен/Подтверждён"
-          : "Не оплачен/Не подтверждён",
+          : supplementLabel ?? "Не оплачен/Не подтверждён",
         paymentUsage: null,
         paymentPlan: paymentDisplay?.usage?.plan ?? null,
         metadataLanguage: source.language,

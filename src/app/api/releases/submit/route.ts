@@ -47,6 +47,13 @@ import {
   withReleaseResubmission
 } from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
+import {
+  planExtrasSupplement,
+  readPendingExtrasSupplement,
+  withExtrasSupplement,
+  withoutExtrasSupplement
+} from "@/lib/release-extras-supplement";
+import { RELEASE_PRICING_TRACK_SELECT, type ReleasePrice } from "@/lib/release-pricing";
 import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import {
   buildSubmitTrackDiagnostics,
@@ -290,6 +297,14 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
   if (!editPermission.allowed) {
     return NextResponse.json({ error: editPermission.message }, { status: 409 });
   }
+  // An approved release is never changed in place: "Редактировать" makes a copy that goes
+  // through moderation (and the extras check below) and is merged back on approval.
+  if (editPermission.createsModerationCopy) {
+    return NextResponse.json(
+      { error: "Принятый релиз меняется через «Редактировать»: изменения уходят на проверку отдельной заявкой." },
+      { status: 409 }
+    );
+  }
 
   const contract = await getUserContractStatus({ prisma: db as PrismaClient, userId: session.user.id });
   if (contract.status === "unavailable") return NextResponse.json({ error: contract.reason }, { status: 503 });
@@ -349,6 +364,44 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     startDate,
     tracks: submissionData.tracks
   });
+
+  // A paid release re-sent with more lyrics / karaoke / video than was paid for waits for a
+  // supplement payment before moderation. Active subscribers have extras included.
+  // Once confirmed (paid, or marked paid / approved by an admin), the release's tracks are the baseline.
+  const pendingSupplement = existing.confirmed ? null : readPendingExtrasSupplement(existing.roles);
+  const resolvePaidResend = async (params: {
+    roles: Record<string, unknown>;
+    paidReleaseId: string;
+    sourceReleaseId?: string | null;
+  }): Promise<{ confirmed: boolean; roles: Record<string, unknown>; supplement: ReleasePrice | null }> => {
+    const paidTracks = await db.track.findMany({
+      where: { releaseId: params.paidReleaseId },
+      select: RELEASE_PRICING_TRACK_SELECT
+    });
+    const plan = planExtrasSupplement({
+      paidTracks,
+      nextTracks: trackRows,
+      pending: pendingSupplement,
+      extrasIncluded: quota.isActive
+    });
+    const roles = withoutExtrasSupplement(params.roles);
+    if (!plan) return { confirmed: true, roles, supplement: null };
+    return {
+      confirmed: false,
+      roles: withReleasePaymentWaitingSince(
+        withExtrasSupplement(roles, {
+          paid: plan.paid,
+          amountRub: plan.price.totalRub,
+          sourceReleaseId: params.sourceReleaseId
+        })
+      ),
+      supplement: plan.price
+    };
+  };
+  const supplementMessage = (price: ReleasePrice) =>
+    `Изменения отправлены. Добавленные дополнения (${price.lines
+      .map((line) => (line.count > 1 ? `${line.label.toLowerCase()} × ${line.count}` : line.label.toLowerCase()))
+      .join(", ")}) нужно доплатить: ${price.totalRub} ₽. Проверка начнётся после оплаты.`;
 
   const updateReleaseAndSyncTracks = async (params: {
     confirmed: boolean;
@@ -450,21 +503,27 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     }
     const currentLifecycle =
       getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus;
-    const shouldResubmit = shouldResubmitEditedRelease(currentLifecycle);
+    // Resubmission keeps the existing payment: the base fee is not charged again, only
+    // lyrics / karaoke / video added beyond what was paid (see resolvePaidResend).
+    const paidResend =
+      existing.confirmed || pendingSupplement
+        ? await resolvePaidResend({
+            roles: mergeSubmissionData(existing.roles, submissionData),
+            paidReleaseId: existing.id
+          })
+        : null;
+    // Added extras always wait for payment and moderation, whatever the release status was.
+    const shouldResubmit = shouldResubmitEditedRelease(currentLifecycle) || Boolean(paidResend?.supplement);
     const editedRoles = withReleaseLifecycleState(
-      mergeSubmissionData(existing.roles, submissionData),
+      paidResend?.roles ?? mergeSubmissionData(existing.roles, submissionData),
       shouldResubmit
         ? "moderation"
         : (getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus ?? "draft")
     );
     await updateReleaseAndSyncTracks({
-      // Resubmission keeps the existing payment: no new charge for an already paid release.
-      confirmed: existing.confirmed,
+      confirmed: paidResend ? paidResend.confirmed : existing.confirmed,
       status: shouldResubmit ? "moderating" : existing.status,
-      // Only an already approved release goes to "repeat moderation"; a fixed rejected one is a normal submission.
-      roles: (shouldResubmit && (currentLifecycle === "approved" || currentLifecycle === "distributed")
-        ? withReleaseResubmission(editedRoles, { previousStatus: currentLifecycle })
-        : editedRoles) as Prisma.InputJsonValue,
+      roles: editedRoles as Prisma.InputJsonValue,
       afterSync: shouldResubmit
         ? async (tx) => {
             await tx.release.update({
@@ -486,13 +545,16 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       });
     }
 
-    const response: ReleaseSubmitSuccessResponse = {
+    const response: ReleaseSubmitSuccessResponse & { payment_required?: true; paid?: false } = {
       ok: true,
       releaseId: existing.id,
       nextStatus: shouldResubmit ? "moderation" : (currentLifecycle ?? "draft"),
-      message: shouldResubmit
-        ? "Релиз повторно отправлен на модерацию."
-        : "Изменения релиза сохранены."
+      ...(paidResend?.supplement ? { payment_required: true as const, paid: false as const } : {}),
+      message: paidResend?.supplement
+        ? supplementMessage(paidResend.supplement)
+        : shouldResubmit
+          ? "Релиз повторно отправлен на модерацию."
+          : "Изменения релиза сохранены."
     };
 
     return NextResponse.json(response, { status: 200 });
@@ -532,12 +594,17 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
 
   // An already paid release (returned for changes, rejected, re-sent) goes back to moderation
   // as paid: no new invoice, no subscription slot, no partner code or free release spent again.
-  if (existing.confirmed) {
+  // Only extras added beyond the paid ones are charged (a pending supplement keeps its baseline).
+  if (existing.confirmed || (pendingSupplement && !pendingSupplement.sourceReleaseId)) {
+    const paidResend = await resolvePaidResend({
+      roles: mergeSubmissionData(existing.roles, submissionData),
+      paidReleaseId: existing.id
+    });
     await updateReleaseAndSyncTracks({
-      confirmed: true,
+      confirmed: paidResend.confirmed,
       status: "moderating",
       roles: withReleaseResubmission(
-        withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation"),
+        withReleaseLifecycleState(paidResend.roles, "moderation"),
         { previousStatus: lifecycle }
       ) as Prisma.InputJsonValue,
       afterSync: async (tx) => {
@@ -553,11 +620,14 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
     });
 
-    const response: ReleaseSubmitSuccessResponse = {
+    const response: ReleaseSubmitSuccessResponse & { payment_required?: true; paid?: false } = {
       ok: true,
       releaseId: existing.id,
       nextStatus: "moderation",
-      message: "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
+      ...(paidResend.supplement ? { payment_required: true as const, paid: false as const } : {}),
+      message: paidResend.supplement
+        ? supplementMessage(paidResend.supplement)
+        : "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
     };
 
     return NextResponse.json(response, { status: 200 });
@@ -573,11 +643,17 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
         sourceReleaseId: readReleaseCopySourceId(existing.roles)
       });
   if (paidPredecessor) {
+    // The approved original's tracks are what was paid for; extras added in the copy are charged.
+    const paidResend = await resolvePaidResend({
+      roles: mergeSubmissionData(existing.roles, submissionData),
+      paidReleaseId: paidPredecessor.id,
+      sourceReleaseId: paidPredecessor.id
+    });
     await updateReleaseAndSyncTracks({
-      confirmed: true,
+      confirmed: paidResend.confirmed,
       status: "moderating",
       roles: withReleaseResubmission(
-        withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation"),
+        withReleaseLifecycleState(paidResend.roles, "moderation"),
         { sourceReleaseId: paidPredecessor.id }
       ) as Prisma.InputJsonValue
     });
@@ -587,17 +663,23 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
     });
 
-    const response: ReleaseSubmitSuccessResponse = {
+    const response: ReleaseSubmitSuccessResponse & { payment_required?: true; paid?: false } = {
       ok: true,
       releaseId: existing.id,
       nextStatus: "moderation",
-      message: copySourceId
-        ? "Изменения релиза отправлены на проверку. Повторная оплата не требуется."
-        : "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
+      ...(paidResend.supplement ? { payment_required: true as const, paid: false as const } : {}),
+      message: paidResend.supplement
+        ? supplementMessage(paidResend.supplement)
+        : copySourceId
+          ? "Изменения релиза отправлены на проверку. Повторная оплата не требуется."
+          : "Релиз повторно отправлен на модерацию. Повторная оплата не требуется."
     };
 
     return NextResponse.json(response, { status: 200 });
   }
+
+  // Not a re-sent paid release any more: an old supplement no longer prices it.
+  existing.roles = withoutExtrasSupplement(asRecord(existing.roles) ?? {}) as Prisma.JsonValue;
 
   // If the free release does not apply for any reason, the release still goes out the usual
   // way (subscription or payment); the artist is told why and the reason is kept for admins.

@@ -1,3 +1,4 @@
+import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import type { Prisma, PrismaClient, verification_status } from "@prisma/client";
 import { z } from "zod";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
@@ -286,6 +287,7 @@ export async function approveReleaseByAdmin(params: {
       id: true,
       title: true,
       status: true,
+      confirmed: true,
       roles: true,
       upc: true,
       userId: true,
@@ -301,6 +303,14 @@ export async function approveReleaseByAdmin(params: {
   if (!release) return null;
   if (!canApproveReleaseStatus(release.status)) {
     return { releaseId: params.releaseId, error: "STATUS_TRANSITION_NOT_ALLOWED" } as const;
+  }
+  // Extras added in an edit of a paid release must be paid (or marked paid by an admin) first.
+  const supplementLabel = describePendingExtrasSupplement(release.roles, Boolean(release.confirmed));
+  if (supplementLabel) {
+    return {
+      releaseId: params.releaseId,
+      error: `${supplementLabel}. Примите релиз после оплаты или отметьте его оплаченным вручную.`
+    } as const;
   }
 
   const normalizedUpc = upcParsed.data;

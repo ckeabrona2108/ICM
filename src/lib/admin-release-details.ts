@@ -1,3 +1,4 @@
+import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import {
@@ -1136,7 +1137,9 @@ export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetai
       upc: asString(submissionData?.upc) ?? asString(release.upc)
     }),
     payment_status: Boolean(release.confirmed) ? "paid" : "unpaid",
-    payment_label: Boolean(release.confirmed) ? "Оплачен" : "Не оплачен",
+    payment_label: Boolean(release.confirmed)
+      ? "Оплачен"
+      : describePendingExtrasSupplement(release.roles, false) ?? "Не оплачен",
     payment_usage: null,
     payment_plan: null,
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),

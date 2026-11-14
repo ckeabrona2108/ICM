@@ -4,7 +4,8 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { calculateReleasePrice, RELEASE_BASE_PRICE_RUB, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
+import { resolveReleaseAmountDue } from "@/lib/release-extras-supplement";
+import { RELEASE_BASE_PRICE_RUB, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
 import {
   getSubscriptionTariffConfig,
   normalizeSubscriptionBillingPeriod
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
 
   let amountRub = RELEASE_BASE_PRICE_RUB;
   let description = "Оплата релиза ICECREAMMUSIC";
+  let extrasSupplement = false;
   const billingPeriod = normalizeSubscriptionBillingPeriod(payload.billingPeriod);
   const subscriptionTariff =
     kind === "subscription"
@@ -76,6 +78,7 @@ export async function POST(request: Request) {
       select: {
         title: true,
         confirmed: true,
+        roles: true,
         track: { select: RELEASE_PRICING_TRACK_SELECT }
       }
     });
@@ -105,8 +108,14 @@ export async function POST(request: Request) {
       );
     }
 
-    amountRub = calculateReleasePrice(release.track).totalRub;
-    description = `Оплата релиза: ${release.title}`;
+    // A re-sent paid release only owes the extras added since its payment.
+    const due = resolveReleaseAmountDue(release.roles, release.track);
+    if (due.price.totalRub <= 0) {
+      return NextResponse.json({ error: "Сумма к оплате не найдена. Обновите страницу." }, { status: 409 });
+    }
+    amountRub = due.price.totalRub;
+    extrasSupplement = due.supplement;
+    description = due.supplement ? `Доплата за дополнения: ${release.title}` : `Оплата релиза: ${release.title}`;
   }
 
   let payment;
@@ -155,6 +164,7 @@ export async function POST(request: Request) {
         billingPeriod: kind === "subscription" ? billingPeriod : null,
         tariffTitle: subscriptionTariff?.title ?? null,
         amountRub,
+        ...(extrasSupplement ? { extrasSupplement: true } : {}),
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

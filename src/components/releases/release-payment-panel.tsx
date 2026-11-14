@@ -24,10 +24,13 @@ export function ReleasePaymentPanel({
   releaseId,
   price,
   autoStart = false,
-  returnState
+  returnState,
+  supplement = false
 }: {
   releaseId: string;
   price: ReleasePrice | null;
+  /** The release was paid earlier; only extras added in an edit are due. */
+  supplement?: boolean;
   autoStart?: boolean;
   returnState: PaymentReturnState;
 }) {
@@ -37,7 +40,7 @@ export function ReleasePaymentPanel({
   const autoStartedRef = React.useRef(false);
   const [breakdownOpen, setBreakdownOpen] = React.useState(false);
   // Extras change the sum, so it is shown before leaving for the checkout; a bare release goes straight there.
-  const hasExtras = Boolean(price && price.lines.length > 1);
+  const hasExtras = Boolean(price && (supplement ? price.lines.length > 0 : price.lines.length > 1));
 
   const startPayment = React.useCallback(async () => {
     setError(null);
@@ -109,7 +112,9 @@ export function ReleasePaymentPanel({
         ? recheckCount < 12
           ? "Платёж обрабатывается банком — статус обновится сам через несколько секунд. Не оплачивайте повторно."
           : "Платёж ещё обрабатывается. Если деньги уже списались, повторно оплачивать не нужно — статус обновится автоматически."
-        : "Релиз отправлен, но не оплачен. Модерация начнётся сразу после оплаты.";
+        : supplement
+          ? `В изменениях добавлены платные дополнения — нужна доплата${price ? ` ${price.totalRub} ₽` : ""}. Сам релиз уже оплачен, проверка изменений начнётся сразу после доплаты.`
+          : "Релиз отправлен, но не оплачен. Модерация начнётся сразу после оплаты.";
 
   return (
     <div
@@ -129,7 +134,7 @@ export function ReleasePaymentPanel({
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#7b3df5] px-3 text-[13px] font-semibold text-white transition hover:bg-[#8f5bf7] disabled:opacity-60"
         >
           {paying && !breakdownOpen ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-          {returnState.kind === "failed" ? "Попробовать снова" : "Оплатить релиз"}
+          {returnState.kind === "failed" ? "Попробовать снова" : supplement ? "Доплатить" : "Оплатить релиз"}
         </button>
         {returnState.kind === "pending" ? (
           <button
@@ -147,6 +152,7 @@ export function ReleasePaymentPanel({
         ? createPortal(
             <PriceBreakdownDialog
               price={price}
+              supplement={supplement}
               paying={paying}
               error={error}
               onPay={() => void startPayment()}
@@ -161,12 +167,14 @@ export function ReleasePaymentPanel({
 
 function PriceBreakdownDialog({
   price,
+  supplement,
   paying,
   error,
   onPay,
   onClose
 }: {
   price: ReleasePrice;
+  supplement: boolean;
   paying: boolean;
   error: string | null;
   onPay: () => void;
@@ -183,8 +191,12 @@ function PriceBreakdownDialog({
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 id="release-price-title" className="text-[17px] font-semibold">Оплата релиза</h2>
-            <p className="mt-1 text-[12.5px] text-white/50">Из чего складывается сумма</p>
+            <h2 id="release-price-title" className="text-[17px] font-semibold">
+              {supplement ? "Доплата за дополнения" : "Оплата релиза"}
+            </h2>
+            <p className="mt-1 text-[12.5px] text-white/50">
+              {supplement ? "Релиз уже оплачен — только то, что добавлено в изменениях" : "Из чего складывается сумма"}
+            </p>
           </div>
           <button
             type="button"

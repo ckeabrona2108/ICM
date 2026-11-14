@@ -247,6 +247,13 @@ export async function PATCH(request: Request) {
   if (!editPermission.allowed) {
     return NextResponse.json({ error: editPermission.message }, { status: 409 });
   }
+  // An approved release is changed only through its edited copy and moderation, never in place.
+  if (editPermission.createsModerationCopy) {
+    return NextResponse.json(
+      { error: "Принятый релиз меняется через «Редактировать»: изменения уходят на проверку отдельной заявкой." },
+      { status: 409 }
+    );
+  }
 
   const data = payload.data as Record<string, unknown>;
   const now = new Date();

@@ -17,7 +17,7 @@ const CARDS = [
     size: "h-36 w-36 sm:h-40 sm:w-40 md:h-44 md:w-44 lg:h-48 lg:w-48",
     rotate: 4,
     z: "z-0",
-    image: "/hero/drop.png",
+    image: "/hero/drop.webp",
     alt: "Архис — Drop Season",
     delay: 0.05,
     floatDelay: "0.5s",
@@ -29,7 +29,7 @@ const CARDS = [
     size: "h-52 w-52 sm:h-60 sm:w-60 md:h-64 md:w-64 lg:h-72 lg:w-72",
     rotate: -10,
     z: "z-10",
-    image: "/hero/vibes.png",
+    image: "/hero/vibes.webp",
     alt: "JMSBRWN — Thirteenkilla",
     delay: 0.1,
     floatDelay: "0s",
@@ -41,7 +41,7 @@ const CARDS = [
     size: "h-44 w-44 sm:h-48 sm:w-48 md:h-56 md:w-56 lg:h-60 lg:w-60",
     rotate: -6,
     z: "z-10",
-    image: "/hero/flesh-2022.jpg",
+    image: "/hero/flesh-2022.webp",
     alt: "TigerGid x Flesh — 2022",
     delay: 0.31,
     floatDelay: "2.5s",
@@ -53,7 +53,7 @@ const CARDS = [
     size: "h-40 w-40 sm:h-48 sm:w-48 md:h-52 md:w-52 lg:h-56 lg:w-56",
     rotate: 12,
     z: "z-10",
-    image: "/hero/love.png",
+    image: "/hero/love.webp",
     alt: "Tigergid x Icetrae — Big Stepper",
     delay: 0.18,
     floatDelay: "2s",
@@ -65,7 +65,7 @@ const CARDS = [
     size: "h-40 w-40 sm:h-44 sm:w-44 md:h-48 md:w-48 lg:h-52 lg:w-52",
     rotate: -16,
     z: "z-20",
-    image: "/hero/live.png",
+    image: "/hero/live.webp",
     alt: "Live show",
     delay: 0.22,
     floatDelay: "1s",
@@ -77,7 +77,7 @@ const CARDS = [
     size: "h-40 w-40 sm:h-44 sm:w-44 md:h-48 md:w-48 lg:h-52 lg:w-52",
     rotate: 18,
     z: "z-20",
-    image: "/hero/barceton.png",
+    image: "/hero/barceton.webp",
     alt: "Barceton — Громко о себе",
     delay: 0.28,
     floatDelay: "1.5s",
@@ -89,7 +89,7 @@ const CARDS = [
     size: "h-52 w-52 sm:h-60 sm:w-60 md:h-64 md:w-64 lg:h-72 lg:w-72",
     rotate: 6,
     z: "z-30",
-    image: "/hero/studio.png",
+    image: "/hero/studio.webp",
     alt: "19",
     delay: 0.34,
     floatDelay: "3s",
@@ -169,9 +169,6 @@ function ParallaxCard({ card, springX, springY, reduce }: ParallaxCardProps) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.85, y: 40 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ duration: 0.9, delay: card.delay, ease: [0.22, 1, 0.36, 1] }}
       style={
         reduce
           ? undefined
@@ -186,6 +183,8 @@ function ParallaxCard({ card, springX, springY, reduce }: ParallaxCardProps) {
       }
       className={`absolute ${card.pos} ${card.size} ${card.z}`}
     >
+      {/* Entrance runs in CSS from the server HTML, so covers don't wait for hydration. */}
+      <div className="hero-card-in h-full w-full" style={{ animationDelay: `${card.delay}s` }}>
       <div
         className="group relative h-full w-full overflow-hidden rounded-[28px] shadow-[0_30px_70px_-20px_rgba(0,0,0,0.75)]"
         style={
@@ -199,11 +198,15 @@ function ParallaxCard({ card, springX, springY, reduce }: ParallaxCardProps) {
           src={card.image}
           alt={card.alt}
           fill
-          sizes="(max-width: 768px) 50vw, 280px"
+          sizes="(max-width: 768px) 50vw, 288px"
           className="pointer-events-none select-none object-contain"
           draggable={false}
-          priority={card.id === "vibes"}
+          // All seven covers sit in the first screen on desktop: load them right away;
+          // the two biggest also get a preload with high fetch priority.
+          priority={card.id === "vibes" || card.id === "studio"}
+          loading={card.id === "vibes" || card.id === "studio" ? undefined : "eager"}
         />
+      </div>
       </div>
     </motion.div>
   );

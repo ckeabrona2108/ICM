@@ -46,6 +46,13 @@ const nextConfig = {
         ]
       },
       {
+        // Landing hero covers: let browsers keep them instead of re-checking on every visit.
+        source: "/hero/:file*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=2592000, stale-while-revalidate=86400" }
+        ]
+      },
+      {
         source: "/",
         headers: [
           {

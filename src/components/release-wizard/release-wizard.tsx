@@ -238,8 +238,17 @@ function formatValidationList(items: string[]) {
   return `${items.slice(0, -1).join(", ")} и ${items[items.length - 1]}`;
 }
 
+// Short "fill in X" labels only fit issues where the field is empty. For any other
+// problem (e.g. release date later than start date, UPC with wrong length) the
+// policy message explains what is actually wrong, so show it as is.
+function isMissingFieldIssue(issue: ReleaseValidationIssue) {
+  return issue.code === "required";
+}
+
 function resolveValidationMessage(issue: ReleaseValidationIssue) {
   const field = issue.field;
+
+  if (!isMissingFieldIssue(issue) && issue.message) return issue.message;
 
   if (field === "cover") return "загрузите обложку релиза";
   if (field === "title") return "укажите название релиза";
@@ -743,15 +752,33 @@ function WizardInner({
 
     if (issues.length === 0 && fallbackMessages.length === 0) return null;
 
-    const messages =
-      issues.length > 0
-        ? Array.from(new Set(issues.map(resolveValidationMessage)))
-        : fallbackMessages;
+    let message: string;
+    if (issues.length > 0) {
+      const missing = Array.from(
+        new Set(issues.filter(isMissingFieldIssue).map(resolveValidationMessage))
+      );
+      const invalid = Array.from(
+        new Set(
+          issues
+            .filter((issue) => !isMissingFieldIssue(issue))
+            .map(resolveValidationMessage)
+            .map((text) => text.trim().replace(/[.!]$/u, ""))
+        )
+      );
+      const parts: string[] = [];
+      if (missing.length > 0) {
+        parts.push(`Заполните обязательные поля: ${formatValidationList(missing)}.`);
+      }
+      for (const text of invalid) parts.push(`${text}.`);
+      message = parts.join(" ");
+    } else {
+      message = `Заполните обязательные поля: ${formatValidationList(fallbackMessages)}.`;
+    }
 
     return {
       step: currentStep,
       issues,
-      message: `Заполните обязательные поля: ${formatValidationList(messages)}.`,
+      message,
       anchorId: issues[0] ? resolveValidationAnchor(issues[0]) : null
     };
   }, [data.changeRequest, data.type, issuesByStep, step, stepIssues]);

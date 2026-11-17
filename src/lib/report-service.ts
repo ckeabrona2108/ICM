@@ -6,6 +6,7 @@ import { createAdminLog } from "@/lib/admin-log-service";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import { formatRubCurrency } from "@/lib/currency-format";
+import { describeReportPayoutConflicts, findReportPayoutConflicts } from "@/lib/payout-request";
 
 export const REPORT_PAYLOAD_DESCRIPTION = "Finance report payload";
 export const REPORT_PAYLOAD_KIND = "finance_report_payload";
@@ -1177,6 +1178,20 @@ export async function createUserReportByAdmin(params: {
   }
 }
 
+/** A message when payouts (open or paid) rely on this report's money, so it must not lose any. */
+async function describeReportPayoutBlock(
+  prisma: PrismaClient,
+  params: { userId: string; reportId: string; quarter?: number | null; year?: number | null }
+): Promise<string | null> {
+  const conflicts = await findReportPayoutConflicts(prisma, {
+    userIds: [params.userId],
+    reportIds: [params.reportId],
+    quarter: params.quarter ?? null,
+    year: params.year ?? null
+  });
+  return conflicts.length ? describeReportPayoutConflicts(conflicts) : null;
+}
+
 export async function updateUserReportByAdmin(params: {
   prisma: PrismaClient;
   adminId: string;
@@ -1219,6 +1234,15 @@ export async function updateUserReportByAdmin(params: {
   const balanceDelta = roundAmount(nextCreditedAmount - previousCreditedAmount);
   const workflowState: UserReportLifecycleState =
     params.status === FinanceReportStatus.AGREED ? "agreed" : "ready_to_confirm";
+  if (balanceDelta < 0) {
+    const block = await describeReportPayoutBlock(params.prisma, {
+      userId: params.userId,
+      reportId: params.reportId,
+      quarter: existing.payloadRecord?.payload.quarter,
+      year: existing.payloadRecord?.payload.year
+    });
+    if (block) return { ok: false as const, error: `Нельзя уменьшить согласованный отчёт. ${block}` };
+  }
 
   try {
     await params.prisma.$transaction(async (tx) => {
@@ -1372,6 +1396,13 @@ export async function deleteUserReportByAdmin(params: {
     ? resolveLifecycleState(existing.report.status, existing.payloadRecord?.payload ?? null)
     : existing.payloadRecord?.payload.workflowState ?? "ready_to_confirm";
   const balanceDelta = lifecycleState === "agreed" ? -amount : 0;
+  const block = await describeReportPayoutBlock(params.prisma, {
+    userId: params.userId,
+    reportId: params.reportId,
+    quarter: existing.payloadRecord?.payload.quarter,
+    year: existing.payloadRecord?.payload.year
+  });
+  if (block) return { ok: false as const, error: `Нельзя удалить отчёт. ${block}` };
 
   try {
     await params.prisma.$transaction(async (tx) => {
@@ -1532,6 +1563,8 @@ export async function markUserReportAsRejected(params: {
   return { ok: true as const };
 }
 
+class ReportAlreadyAgreedError extends Error {}
+
 export async function markUserReportAsAgreed(params: {
   prisma: PrismaClient;
   reportId: string;
@@ -1556,15 +1589,17 @@ export async function markUserReportAsAgreed(params: {
 
   try {
     await params.prisma.$transaction(async (tx) => {
-      await tx.financeReport.update({
-        where: { id: params.reportId },
+      // Only the request that actually moves the report to AGREED credits it: a double click
+      // must not add the amount twice.
+      const moved = await tx.financeReport.updateMany({
+        where: { id: params.reportId, status: { not: FinanceReportStatus.AGREED } },
         data: {
           status: FinanceReportStatus.AGREED,
           agreedAt: now,
           updatedAt: now
-        },
-        select: { id: true }
+        }
       });
+      if (moved.count === 0) throw new ReportAlreadyAgreedError();
 
       const payload = buildStoredUserReportPayload({
         reportId: params.reportId,
@@ -1591,6 +1626,9 @@ export async function markUserReportAsAgreed(params: {
       await applyUserBalanceDelta(tx, params.userId, amount);
     });
   } catch (error) {
+    if (error instanceof ReportAlreadyAgreedError) {
+      return { ok: false as const, error: "Отчет уже согласован." };
+    }
     if (!isPrismaTableMissingError(error, "financeReport")) {
       throw error;
     }

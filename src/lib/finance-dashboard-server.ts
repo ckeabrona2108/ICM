@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { prisma } from "@/lib/prisma";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
+import { withNetReportRights } from "@/lib/finance-client";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { listUserReports } from "@/lib/report-service";
 import { getCurrentPayoutWindowState, type PayoutWindowState } from "@/lib/payout-schedule";
@@ -199,7 +200,7 @@ export async function getFinanceDashboardViewData(
     quarterLabel: report.quarterLabel,
     adminComment: report.adminComment,
     userComment: report.userComment,
-    items: report.items,
+    items: report.items.map(withNetReportRights),
     platformTotals: report.platformTotals
   }));
 

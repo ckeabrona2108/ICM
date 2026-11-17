@@ -1,20 +1,15 @@
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
 
 import type { AdminReleaseDecisionResponse } from "@/lib/api/contracts";
 import { authOptions } from "@/lib/auth";
 import {
+  approveReleaseByAdmin,
   canManageReleasesSession,
-  canRejectRelease,
-  withAdminReleaseChangesRequiredState
+  rejectReleaseByAdmin
 } from "@/lib/admin-release-service";
-import { markFreeReleaseConsumed } from "@/lib/free-release";
 import { prisma } from "@/lib/prisma";
-import { withReleaseTimelineStamp } from "@/lib/release-timeline";
-import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
-import { buildReleaseApprovedVkMessage, RELEASE_APPROVED_VK_HREF } from "@/lib/vk-messages";
 
 export const dynamic = "force-dynamic";
 
@@ -33,44 +28,6 @@ const decisionSchema = z.object({
     )
     .optional()
 });
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-function resetNeedsChangesFlags(roles: unknown): Record<string, unknown> | null {
-  const root = asRecord(roles);
-  if (!root) return null;
-  const next: Record<string, unknown> = { ...root };
-  next.needsChanges = false;
-  next.moderationStatus = "approved";
-  next.rejectReason = null;
-  next.rejectionReason = null;
-  next.moderationComment = null;
-  next.moderatorComment = null;
-  next.moderationRemarks = null;
-  next.moderationReturnedAt = null;
-  next.lifecycleState = "approved";
-  delete next.submittedToModeration;
-  const submission = asRecord(next.submissionData);
-  if (submission) {
-    next.submissionData = {
-      ...submission,
-      needsChanges: false,
-      moderationStatus: "approved",
-      rejectReason: null,
-      rejectionReason: null,
-      moderationComment: null,
-      moderatorComment: null,
-      moderationRemarks: null,
-      moderationReturnedAt: null,
-      lifecycleState: "approved"
-    };
-    delete (next.submissionData as Record<string, unknown>).submittedToModeration;
-  }
-  return next;
-}
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
@@ -91,124 +48,55 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid payload" }, { status: 400 });
   }
 
-  const release = await prisma.release.findUnique({
-    where: { id: parsed.data.releaseId },
-    select: { id: true, userId: true, title: true, status: true, roles: true, upc: true }
-  });
-  if (!release) {
-    return NextResponse.json({ error: "Release not found" }, { status: 404 });
-  }
-
+  // The same checks as the moderation buttons (status, payment, UPC, merging a copy into its
+  // original): this endpoint must not be a shortcut around them.
   if (parsed.data.action === "approve") {
-    const upc = parsed.data.upc?.trim() || null;
-    if (upc && !/^\d{12,14}$/u.test(upc)) {
-      return NextResponse.json({ error: "UPC должен содержать 12-14 цифр." }, { status: 400 });
-    }
-    if (upc) {
-      const duplicate = await prisma.release.findFirst({
-        where: {
-          upc,
-          id: { not: release.id },
-          userId: { not: release.userId }
-        },
-        select: { id: true }
-      });
-      if (duplicate) {
+    const approved = await approveReleaseByAdmin({
+      prisma,
+      adminId: session.user.id,
+      releaseId: parsed.data.releaseId,
+      upc: parsed.data.upc ?? ""
+    });
+    if (!approved) return NextResponse.json({ error: "Release not found" }, { status: 404 });
+    if ("error" in approved) {
+      if (approved.error === "UPC_ALREADY_EXISTS") {
         return NextResponse.json({ error: "UPC уже используется в другом релизе." }, { status: 409 });
       }
-    }
-
-    await prisma.release.update({
-      where: { id: release.id },
-      data: {
-        status: "approved",
-        confirmed: true,
-        upc: upc ?? release.upc,
-        rejectReason: null,
-        moderatorComment: null,
-        roles: withReleaseTimelineStamp(resetNeedsChangesFlags(release.roles) ?? release.roles, "approvedAt") as Prisma.InputJsonValue
+      if (approved.error === "STATUS_TRANSITION_NOT_ALLOWED") {
+        return NextResponse.json({ error: "Релиз нельзя принять в текущем статусе." }, { status: 409 });
       }
-    });
-    await markFreeReleaseConsumed(prisma, release.id);
-
-    await deliverUserNotificationSafely(prisma, {
-      id: `release-approved-${release.id}`,
-      userId: release.userId,
-      kind: "release_approved",
-      title: "Релиз принят",
-      message: `Релиз «${release.title ?? "Без названия"}» принят. Загрузите 30-секундный фрагмент, чтобы попасть на витрину.`,
-      href: `/dashboard/showcase?releaseId=${encodeURIComponent(release.id)}`,
-      vkMessage: buildReleaseApprovedVkMessage(release.title),
-      vkHref: RELEASE_APPROVED_VK_HREF,
-      resetReadState: true
-    });
-
+      return NextResponse.json({ error: approved.error }, { status: 400 });
+    }
     const response: AdminReleaseDecisionResponse = {
       ok: true,
-      releaseId: release.id,
+      releaseId: approved.releaseId,
       status: "approved",
-      message: "Релиз принят."
+      message: "mergedFromReleaseId" in approved
+        ? "Повторная модерация принята: изменения перенесены в исходный релиз."
+        : "Релиз принят."
     };
     return NextResponse.json(response, { status: 200 });
   }
 
-  const comment = parsed.data.comment?.trim() || null;
-  const remarks = parsed.data.remarks?.length ? parsed.data.remarks : undefined;
-  if (!canRejectRelease(release.status, release.roles)) {
-    return NextResponse.json(
-      { error: "Отклонение доступно только для релизов на модерации." },
-      { status: 409 }
-    );
-  }
-  if (!comment) {
-    return NextResponse.json({ error: "Причина отклонения обязательна." }, { status: 400 });
-  }
-  const moderationReturnedAt = new Date();
-  const moderationReturnedAtIso = moderationReturnedAt.toISOString();
-
-  await prisma.release.update({
-    where: { id: release.id },
-    data: {
-      status: "rejected",
-      rejectReason: comment,
-      moderatorComment: comment,
-      roles: withAdminReleaseChangesRequiredState(
-        withReleaseTimelineStamp(
-          release.roles,
-          parsed.data.action === "reject" ? "rejectedAt" : "changesRequestedAt",
-          moderationReturnedAt
-        ),
-        comment,
-        {
-          remarks,
-          action: parsed.data.action,
-          returnedAt: moderationReturnedAtIso
-        }
-      ) as Prisma.InputJsonValue
-    }
+  const rejected = await rejectReleaseByAdmin({
+    prisma,
+    adminId: session.user.id,
+    releaseId: parsed.data.releaseId,
+    reason: parsed.data.comment ?? "",
+    remarks: parsed.data.remarks,
+    action: parsed.data.action
   });
-
-  await deliverUserNotificationSafely(prisma, {
-    id: parsed.data.action === "reject"
-      ? `release-rejected-${release.id}`
-      : `release-changes-${release.id}`,
-    userId: release.userId,
-    kind: parsed.data.action === "reject" ? "release_rejected" : "release_changes_required",
-    title: parsed.data.action === "reject" ? "Релиз отклонён" : "Релиз отправлен на доработку",
-    message: comment,
-    href: "/dashboard/changes-required",
-    resetReadState: true
-  });
+  if (!rejected.ok) {
+    const status = rejected.error === "Release not found" ? 404 : rejected.error.startsWith("Отклонение доступно") ? 409 : 400;
+    return NextResponse.json({ error: rejected.error }, { status });
+  }
 
   const response: AdminReleaseDecisionResponse = {
     ok: true,
-    releaseId: release.id,
+    releaseId: parsed.data.releaseId,
     status: parsed.data.action === "reject" ? "rejected" : "changes_required",
-    message:
-      parsed.data.action === "reject"
-        ? "Релиз отклонён."
-        : "Релиз отправлен на доработку.",
-    remarks
+    message: parsed.data.action === "reject" ? "Релиз отклонён." : "Релиз отправлен на доработку.",
+    remarks: rejected.remarks
   };
   return NextResponse.json(response, { status: 200 });
 }

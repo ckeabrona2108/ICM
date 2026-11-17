@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { NextResponse } from "next/server";
 import type { AdminPayoutStatus } from "@/lib/admin-payouts-service";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import { formatRubCurrency } from "@/lib/currency-format";
+import { getUserBalanceTotals } from "@/lib/finance-service";
+
+type BalanceTotalsReader = (tx: Prisma.TransactionClient, userId: string) => Promise<{ agreedBalance: number; pendingPayout: number }>;
+
+class PayoutExceedsBalanceError extends Error {}
 
 type TargetStatus = Exclude<AdminPayoutStatus, "REQUESTED">;
 
@@ -40,6 +45,7 @@ export async function handlePayoutTransition(params: {
   status: TargetStatus;
   rejectionReason?: string;
   notify?: typeof deliverUserNotificationSafely;
+  balanceTotals?: BalanceTotalsReader;
 }) {
   if (!params.session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (params.session.user.role !== "ADMIN") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -48,13 +54,27 @@ export async function handlePayoutTransition(params: {
     return NextResponse.json({ error: "Укажите причину отклонения (минимум 3 символа)." }, { status: 400 });
   }
 
-  const result = await params.prisma.$transaction(async (tx) => {
+  let result: { payout: any; changed: boolean };
+  try {
+  result = await params.prisma.$transaction(async (tx) => {
     const now = new Date();
     const current = await tx.payouts.findUnique({
       where: { id: params.id },
       select: { id: true, userId: true, amount: true, status: true, requisites: true }
     });
     if (!current) return { payout: null, changed: false };
+    // The balance may have shrunk since the request (a report rolled back or reduced): a payout
+    // is sent only while the agreed balance still covers it and every other open request.
+    if (params.status === "PAID" && (current.status === "REQUESTED" || current.status === "PROCESSING")) {
+      const totals = params.balanceTotals
+        ? await params.balanceTotals(tx, current.userId)
+        : await getUserBalanceTotals(tx as unknown as PrismaClient, current.userId);
+      if (totals.agreedBalance + 0.005 < totals.pendingPayout) {
+        throw new PayoutExceedsBalanceError(
+          `Согласованный баланс артиста (${formatRubCurrency(totals.agreedBalance)}) меньше суммы открытых заявок (${formatRubCurrency(totals.pendingPayout)}). Проверьте отчёты артиста перед выплатой.`
+        );
+      }
+    }
     // The conditional write takes the row lock. All terminal transitions use
     // the same predicate, so a competing action cannot overwrite the winner.
     const changed = await tx.payouts.updateMany({
@@ -88,6 +108,12 @@ export async function handlePayoutTransition(params: {
       changed: changed.count > 0
     };
   }, { isolationLevel: "ReadCommitted" });
+  } catch (error) {
+    if (error instanceof PayoutExceedsBalanceError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    throw error;
+  }
 
   if (!result.payout) return NextResponse.json({ error: "Заявка на выплату не найдена." }, { status: 404 });
   if (result.payout.status !== params.status) {

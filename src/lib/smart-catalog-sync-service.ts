@@ -27,7 +27,12 @@ import {
   supplementReportComment,
   type CandidateRow
 } from "@/lib/finance-unallocated";
-import { getPayoutPeriod, isActivePayoutStatus } from "@/lib/payout-request";
+import {
+  describeReportPayoutConflicts,
+  findReportPayoutConflicts,
+  getPayoutPeriod,
+  isActivePayoutStatus
+} from "@/lib/payout-request";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import {
   REPORT_PAYLOAD_DESCRIPTION,
@@ -2930,7 +2935,32 @@ export async function applyFinancialImport(params: {
   };
   const applyContext = createFinancialApplyContext();
 
+  let alreadyApplied = false;
   await prisma.$transaction(async (tx) => {
+    // Applies are serialized and the import is re-checked under the lock: a double click, a retry
+    // after a timeout or two admins at once must not create a second set of accruals.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('financial-import-apply', 0))`;
+    const locked = await tx.$queryRaw<Array<{ status: string }>>`
+      SELECT status::text AS status FROM "icecream"."financial_imports"
+      WHERE id::text = ${importJob.id} FOR UPDATE`;
+    if (locked[0]?.status === "CONFIRMED") {
+      alreadyApplied = true;
+      return;
+    }
+    if (matchedUserIds.length) {
+      const duplicate = await tx.financeReport.findFirst({
+        where: {
+          userId: { in: matchedUserIds },
+          periodStart: selectedReportPeriod.periodStart,
+          periodEnd: selectedReportPeriod.periodEnd
+        },
+        select: { id: true }
+      });
+      if (duplicate) {
+        throw new Error("Отчёт за этот квартал только что создан другим импортом. Обновите страницу и проверьте импорты.");
+      }
+    }
+
     const releaseRepo = requireClientRepo<{
       findUnique: typeof tx.release.findUnique;
     }>(tx, "release", "financial import apply release lookup");
@@ -3316,6 +3346,13 @@ export async function applyFinancialImport(params: {
     timeout: 60_000
   });
 
+  if (alreadyApplied) {
+    return financialImportsRepo.findUniqueOrThrow({
+      where: { id: params.importId },
+      include: FINANCIAL_IMPORT_INCLUDE
+    });
+  }
+
   await createAdminLog(prisma, {
     adminId: params.adminId,
     action: "smart_financial_apply",
@@ -3409,7 +3446,29 @@ export async function rollbackFinancialImport(params: {
   const rollbackReportQuarter = reportQuarter ?? normalizeReportQuarter(metadata.reportQuarter);
   const rollbackReportYear = reportYear ?? normalizeReportYear(metadata.reportYear);
 
+  // Agreed reports were credited to the legacy balance cache; it is reduced with them.
+  const agreedReportDeltas = new Map<string, number>();
   await prisma.$transaction(async (tx) => {
+    if (importJob.status === "CONFIRMED" && metadata.financeReportIds?.length) {
+      const reports = await tx.financeReport.findMany({
+        where: { id: { in: metadata.financeReportIds } },
+        select: { id: true, userId: true, amount: true, status: true }
+      });
+      const conflicts = await findReportPayoutConflicts(tx, {
+        userIds: reports.map((report) => report.userId),
+        reportIds: reports.map((report) => report.id),
+        quarter: rollbackReportQuarter ?? null,
+        year: rollbackReportYear ?? null
+      });
+      if (conflicts.length) {
+        throw new Error(`Откат невозможен. ${describeReportPayoutConflicts(conflicts)}`);
+      }
+      for (const report of reports) {
+        if (report.status !== "AGREED") continue;
+        agreedReportDeltas.set(report.userId, (agreedReportDeltas.get(report.userId) ?? 0) - Number(report.amount ?? 0));
+      }
+    }
+
     const balanceTransactionsRepo = requireClientRepo<{
       deleteMany: typeof tx.balance_transactions.deleteMany;
     }>(tx, "balance_transactions", "financial import rollback balance transactions");
@@ -3476,6 +3535,13 @@ export async function rollbackFinancialImport(params: {
       await userRepo.update({
         where: { id: userId },
         data: { balance }
+      });
+    }
+    for (const [userId, delta] of agreedReportDeltas) {
+      if (Math.abs(delta) < 0.005) continue;
+      await userRepo.update({
+        where: { id: userId },
+        data: { balance: { increment: Number(delta.toFixed(2)) } }
       });
     }
 

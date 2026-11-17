@@ -10,6 +10,7 @@ function harness(initial: Status | null = "REQUESTED", failDebit = false) {
   let debitAttempts = 0;
   let lastDebitData: any = null;
   let lastNotice: any = null;
+  let balance = { agreedBalance: 1_000_000, pendingPayout: 3000 };
   let queue = Promise.resolve();
   const prisma = { $transaction: async (callback: (tx: unknown) => Promise<unknown>) => {
     const run = queue.then(async () => {
@@ -37,8 +38,10 @@ function harness(initial: Status | null = "REQUESTED", failDebit = false) {
   } };
   return {
     run: (status: Exclude<Status, "REQUESTED">, session: any = { user: { role: "ADMIN" } }, rejectionReason?: string) => handlePayoutTransition({
-      prisma: prisma as never, id: "p1", status, session, rejectionReason, notify: (async (_prisma: unknown, event: unknown) => { notices++; lastNotice = event; }) as never
+      prisma: prisma as never, id: "p1", status, session, rejectionReason, notify: (async (_prisma: unknown, event: unknown) => { notices++; lastNotice = event; }) as never,
+      balanceTotals: async () => balance
     }),
+    setBalance: (next: { agreedBalance: number; pendingPayout: number }) => { balance = next; },
     state: () => ({ status: row?.status, requisites: row?.requisites, debits, notices, debitAttempts, lastDebitData, lastNotice })
   };
 }
@@ -107,4 +110,16 @@ test("processing and paid transitions notify the user about the current status",
   assert.match(h.state().lastNotice.title, /обработку/);
   assert.equal((await h.run("PAID")).status, 200);
   assert.match(h.state().lastNotice.message, /до 48 часов/);
+});
+
+test("PAID is refused when the agreed balance no longer covers open requests", async () => {
+  const h = harness();
+  h.setBalance({ agreedBalance: 1000, pendingPayout: 3000 });
+  const response = await h.run("PAID");
+  assert.equal(response.status, 409);
+  assert.equal(h.state().status, "REQUESTED");
+  assert.equal(h.state().debits, 0);
+  assert.equal(h.state().notices, 0);
+  // Rejecting such a request is still possible.
+  assert.equal((await h.run("REJECTED", undefined, "Отчёт пересчитан")).status, 200);
 });

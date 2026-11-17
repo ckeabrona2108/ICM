@@ -22,7 +22,8 @@ function createReportPrismaStub() {
     report: null as any,
     payloadTx: null as any,
     adminLogs: [] as any[],
-    notifications: [] as any[]
+    notifications: [] as any[],
+    payouts: [] as any[]
   };
 
   const financeReport = {
@@ -48,6 +49,12 @@ function createReportPrismaStub() {
         amount: data.amount !== undefined ? Number(data.amount) : state.report.amount
       };
       return state.report;
+    },
+    updateMany: async ({ where, data }: any) => {
+      if (!state.report || state.report.id !== where.id) return { count: 0 };
+      if (where.status?.not && state.report.status === where.status.not) return { count: 0 };
+      state.report = { ...state.report, ...data };
+      return { count: 1 };
     },
     delete: async ({ where }: any) => {
       if (state.report?.id !== where.id) {
@@ -153,6 +160,9 @@ function createReportPrismaStub() {
     },
     push_subscriptions: {
       findMany: async () => []
+    },
+    payouts: {
+      findMany: async ({ where }: any) => state.payouts.filter((item: any) => where.userId.in.includes(item.userId))
     },
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
@@ -537,6 +547,9 @@ test("payload-only fallback still lists and agrees reports when financeReport ta
       },
       update: async () => {
         throw new Error('The table `icecream.financeReport` does not exist in the current database.');
+      },
+      updateMany: async () => {
+        throw new Error('The table `icecream.financeReport` does not exist in the current database.');
       }
     },
     transaction: {
@@ -685,4 +698,47 @@ test("admin delete hides agreed report from user and reverses credited balance",
   assert.equal(reports.length, 0);
   assert.equal(state.payloadTx.description, "Finance report payload deleted");
   assert.equal(state.payloadTx.metadata.kind, "finance_report_payload_deleted");
+});
+
+test("agreeing a report twice credits the balance once", async () => {
+  const { prisma, state } = createReportPrismaStub();
+  await createUserReportByAdmin({
+    prisma, adminId: "admin_1", userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"), periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 500, status: FinanceReportStatus.READY_TO_CONFIRM, quarter: 2, year: 2026
+  });
+  const reportId = state.report.id;
+  // Both requests read the report before either commits.
+  state.report.status = FinanceReportStatus.AGREED;
+  const second = await markUserReportAsAgreed({ prisma, reportId, userId: "user_1" });
+  assert.equal(second.ok, false);
+  assert.equal(state.userBalance, 0);
+});
+
+test("admin cannot delete or reduce a report that a payout relies on", async () => {
+  const { prisma, state } = createReportPrismaStub();
+  await createUserReportByAdmin({
+    prisma, adminId: "admin_1", userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"), periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 500, status: FinanceReportStatus.READY_TO_CONFIRM, quarter: 2, year: 2026
+  });
+  const reportId = state.report.id;
+  assert.equal((await markUserReportAsAgreed({ prisma, reportId, userId: "user_1" })).ok, true);
+  state.payouts.push({ id: "p1", userId: "user_1", status: "PAID", confirmed: true, amount: 500, requisites: { quarter: 2, year: 2026, reportId } });
+
+  const deleted = await deleteUserReportByAdmin({ prisma, adminId: "admin_1", reportId, userId: "user_1" });
+  assert.equal(deleted.ok, false);
+  assert.match(deleted.error, /проведённых выплат: 1/u);
+
+  const reduced = await updateUserReportByAdmin({
+    prisma, adminId: "admin_1", reportId, userId: "user_1",
+    periodStart: new Date("2026-04-01T00:00:00.000Z"), periodEnd: new Date("2026-06-30T23:59:59.999Z"),
+    amount: 100, status: FinanceReportStatus.AGREED, quarter: 2, year: 2026
+  });
+  assert.equal(reduced.ok, false);
+  assert.equal(state.userBalance, 500);
+
+  state.payouts[0].status = "REJECTED";
+  state.payouts[0].confirmed = null;
+  assert.equal((await deleteUserReportByAdmin({ prisma, adminId: "admin_1", reportId, userId: "user_1" })).ok, true);
 });

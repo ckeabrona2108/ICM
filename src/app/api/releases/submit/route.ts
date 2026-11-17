@@ -639,7 +639,9 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     : await findPaidPredecessorRelease(db, {
         userId: session.user.id,
         releaseId: existing.id,
-        upc: submissionData.upc,
+        // Only an explicit copy of an approved release is "already paid". A UPC typed by the artist
+        // is not proof: reusing an old UPC must not make a new release free or overwrite the old one.
+        upc: null,
         sourceReleaseId: readReleaseCopySourceId(existing.roles)
       });
   if (paidPredecessor) {

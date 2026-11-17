@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { listUserReports } from "@/lib/report-service";
 import { prisma } from "@/lib/prisma";
 import { formatRubCurrency } from "@/lib/currency-format";
+import { withNetReportRights } from "@/lib/finance-client";
 
 function escapeHtml(value: string): string {
   return value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;");
@@ -16,6 +17,8 @@ export async function GET(_request: Request, { params }: { params: { reportId: s
   const report = (await listUserReports(prisma, session.user.id, { strict: true }))
     .find((item) => item.id === params.reportId);
   if (!report) return NextResponse.json({ error: "Отчет не найден." }, { status: 404 });
+  // Source rights amounts are gross; the artist sees only their net share (no commission).
+  report.items = report.items.map(withNetReportRights);
 
   const columns = [
     ["Период использования", (item: typeof report.items[number]) => item.usagePeriod],

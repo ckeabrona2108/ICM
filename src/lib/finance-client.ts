@@ -81,6 +81,16 @@ export function resolveNetReportRightsAmounts(item: ReportRightsLine): {
     : { authorAmount: null, relatedAmount: netAmount };
 }
 
+/**
+ * A report line as an artist may see it: the gross source rights amounts are replaced by their
+ * net share, so the platform commission cannot be derived from the statement. Server-side only
+ * callers that build artist-facing data must use this; admin views keep the source values.
+ */
+export function withNetReportRights<T extends ReportRightsLine>(item: T): T {
+  const net = resolveNetReportRightsAmounts(item);
+  return { ...item, authorAmount: net.authorAmount, relatedAmount: net.relatedAmount };
+}
+
 export function mapReportStatusToLabel(
   status: FinanceReportStatus
 ): "Согласовать" | "Согласован" | "Требуются изменения" {

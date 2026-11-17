@@ -12,8 +12,7 @@ import { markFreeReleaseConsumed } from "@/lib/free-release";
 import {
   findPaidPredecessorRelease,
   readReleaseCopySourceId,
-  getReleaseResubmission,
-  readReleaseUpc
+  getReleaseResubmission
 } from "@/lib/release-resubmission";
 
 export const upcSchema = z
@@ -153,6 +152,46 @@ export function withAdminReleaseChangesRequiredState(
   return next;
 }
 
+/**
+ * For each track of an approved copy, the id of the original's track it replaces (or null for a
+ * new track). Royalties and analytics point to track ids, so tracks are paired by ISRC, then by
+ * title, and only then by position — never purely by position, which would hand an old track's
+ * id (and its royalty history) to a different song when tracks are reordered or removed.
+ */
+export function pairCopyTracksWithSource(
+  copyTracks: ReadonlyArray<{ isrc?: string | null; title?: string | null }>,
+  sourceTracks: ReadonlyArray<{ id: string; isrc?: string | null; title?: string | null }>
+): Array<string | null> {
+  const isrcKey = (value: string | null | undefined) => (value ?? "").replace(/[\s-]/gu, "").toUpperCase();
+  const titleKey = (value: string | null | undefined) => (value ?? "").trim().toLowerCase().replace(/\s+/gu, " ");
+  const used = new Set<string>();
+  const result: Array<string | null> = copyTracks.map(() => null);
+  const take = (index: number, match: (source: (typeof sourceTracks)[number]) => boolean) => {
+    if (result[index]) return;
+    const source = sourceTracks.find((candidate) => !used.has(candidate.id) && match(candidate));
+    if (!source) return;
+    used.add(source.id);
+    result[index] = source.id;
+  };
+  copyTracks.forEach((track, index) => {
+    const key = isrcKey(track.isrc);
+    if (key) take(index, (source) => isrcKey(source.isrc) === key);
+  });
+  copyTracks.forEach((track, index) => {
+    const key = titleKey(track.title);
+    // A title match with a different ISRC is another recording, not the same track.
+    if (key) take(index, (source) => titleKey(source.title) === key &&
+      (!isrcKey(track.isrc) || !isrcKey(source.isrc) || isrcKey(track.isrc) === isrcKey(source.isrc)));
+  });
+  copyTracks.forEach((track, index) => {
+    const source = sourceTracks[index];
+    if (!source || used.has(source.id)) return;
+    if (isrcKey(track.isrc) && isrcKey(source.isrc)) return;
+    take(index, (candidate) => candidate.id === source.id);
+  });
+  return result;
+}
+
 /** Applies an approved copy of a release to its original, so the artist keeps one release.
  * The original keeps its id, tracks ids and payment; the copy is hidden, not deleted. */
 async function mergeResubmittedCopyIntoSource(params: {
@@ -169,7 +208,12 @@ async function mergeResubmittedCopyIntoSource(params: {
     }),
     params.prisma.release.findUnique({
       where: { id: params.sourceId },
-      select: { id: true, userId: true, roles: true, track: { select: { id: true }, orderBy: { index: "asc" } } }
+      select: {
+        id: true,
+        userId: true,
+        roles: true,
+        track: { select: { id: true, isrc: true, title: true }, orderBy: { index: "asc" } }
+      }
     })
   ]);
   if (!copy || !source || copy.userId !== source.userId) return false;
@@ -224,6 +268,7 @@ async function mergeResubmittedCopyIntoSource(params: {
     });
 
     // Tracks are updated in place to keep ids that reports and royalties point to.
+    const pairedSourceIds = pairCopyTracksWithSource(copy.track, source.track);
     for (const [index, track] of copy.track.entries()) {
       const data = {
         title: track.title,
@@ -249,14 +294,15 @@ async function mergeResubmittedCopyIntoSource(params: {
         video_shot: track.video_shot,
         index: track.index
       };
-      const existingTrackId = source.track[index]?.id;
+      const existingTrackId = pairedSourceIds[index];
       if (existingTrackId) {
         await tx.track.update({ where: { id: existingTrackId }, data });
       } else {
         await tx.track.create({ data: { ...data, releaseId: source.id } });
       }
     }
-    const extraTrackIds = source.track.slice(copy.track.length).map((track) => track.id);
+    const keptTrackIds = new Set(pairedSourceIds.filter((id): id is string => Boolean(id)));
+    const extraTrackIds = source.track.filter((track) => !keptTrackIds.has(track.id)).map((track) => track.id);
     if (extraTrackIds.length > 0) {
       await tx.track.deleteMany({ where: { id: { in: extraTrackIds } } });
     }
@@ -301,7 +347,11 @@ export async function approveReleaseByAdmin(params: {
   });
 
   if (!release) return null;
-  if (!canApproveReleaseStatus(release.status)) {
+  // The column alone is not enough: drafts and releases whose moderation the artist cancelled
+  // keep `status = moderating`. Only a release actually waiting for review (or a re-approval of an
+  // approved one) can be approved, so a stale admin page cannot approve a release being edited.
+  const lifecycle = getReleaseLifecycleStatus(release.status, release.roles);
+  if (!canApproveReleaseStatus(release.status) || (lifecycle !== "moderation" && lifecycle !== "approved")) {
     return { releaseId: params.releaseId, error: "STATUS_TRANSITION_NOT_ALLOWED" } as const;
   }
   // Extras added in an edit of a paid release must be paid (or marked paid by an admin) first.
@@ -310,6 +360,15 @@ export async function approveReleaseByAdmin(params: {
     return {
       releaseId: params.releaseId,
       error: `${supplementLabel}. Примите релиз после оплаты или отметьте его оплаченным вручную.`
+    } as const;
+  }
+
+  // Approval does not stand in for payment: an unpaid release is paid by the artist or marked
+  // paid by an admin first. A copy of a paid release (`resubmission.sourceReleaseId`) is paid.
+  if (!release.confirmed && !getReleaseResubmission(release.roles)?.sourceReleaseId) {
+    return {
+      releaseId: params.releaseId,
+      error: "Релиз не оплачен. Примите его после оплаты или сначала отметьте оплаченным вручную."
     } as const;
   }
 
@@ -330,7 +389,9 @@ export async function approveReleaseByAdmin(params: {
     (await findPaidPredecessorRelease(params.prisma, {
       userId: release.userId,
       releaseId: release.id,
-      upc: [readReleaseUpc(release), normalizedUpc],
+      // Merged only into the release it was explicitly copied from: a matching UPC alone must not
+      // overwrite another approved release of the artist.
+      upc: null,
       sourceReleaseId: readReleaseCopySourceId(release.roles)
     }))?.id;
   if (sourceReleaseId) {

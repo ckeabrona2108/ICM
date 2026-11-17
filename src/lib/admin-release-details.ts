@@ -32,8 +32,7 @@ import {
 import {
   findPaidPredecessorRelease,
   readReleaseCopySourceId,
-  getReleaseResubmission,
-  readReleaseUpc
+  getReleaseResubmission
 } from "@/lib/release-resubmission";
 
 interface AdminReleaseDetailsResponse {
@@ -1344,7 +1343,8 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
     const predecessor = await findPaidPredecessorRelease(prisma, {
       userId: release.userId,
       releaseId: release.id,
-      upc: readReleaseUpc(release),
+      // Linked only through an explicit copy, never through a matching UPC (see release submit).
+      upc: null,
       sourceReleaseId: marker?.sourceReleaseId ?? readReleaseCopySourceId(release.roles)
     });
     if (marker || predecessor) {

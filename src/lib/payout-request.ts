@@ -117,3 +117,42 @@ export async function listUserPayoutRequests(prisma: PrismaClient, userId: strin
     return legacyRows.map(mapPayoutSummary);
   }
 }
+
+const PAYOUT_STATUSES_HOLDING_REPORT_MONEY = new Set(["REQUESTED", "PROCESSING", "PAID"]);
+
+export type ReportPayoutConflict = { id: string; userId: string; status: string; amount: number };
+
+/**
+ * Payout requests (open or paid) that rely on the money of the given reports: they name one of
+ * the reports or ask for the same quarter. Such reports must not be rolled back, deleted or
+ * reduced, or the artist ends up paid more than their balance with nothing showing it.
+ */
+export async function findReportPayoutConflicts(
+  db: { payouts: Pick<PrismaClient["payouts"], "findMany"> },
+  params: { userIds: string[]; reportIds: string[]; quarter: number | null; year: number | null }
+): Promise<ReportPayoutConflict[]> {
+  const userIds = Array.from(new Set(params.userIds.filter(Boolean)));
+  if (!userIds.length) return [];
+  const reportIds = new Set(params.reportIds.filter(Boolean));
+  const rows = await db.payouts.findMany({
+    where: { userId: { in: userIds } },
+    select: { id: true, userId: true, status: true, confirmed: true, amount: true, requisites: true }
+  });
+  return rows
+    .filter((row) => {
+      if (!PAYOUT_STATUSES_HOLDING_REPORT_MONEY.has(String(row.status)) && row.confirmed !== true) return false;
+      const reportId = String(asRecord(row.requisites).reportId ?? "").trim();
+      if (reportId && reportIds.has(reportId)) return true;
+      const period = getPayoutPeriod(row.requisites);
+      return params.quarter !== null && params.year !== null &&
+        period.quarter === params.quarter && period.year === params.year;
+    })
+    .map((row) => ({ id: row.id, userId: row.userId, status: String(row.status), amount: Number(row.amount ?? 0) }));
+}
+
+export function describeReportPayoutConflicts(conflicts: ReportPayoutConflict[]): string {
+  const paid = conflicts.filter((item) => item.status === "PAID").length;
+  const open = conflicts.length - paid;
+  const parts = [paid ? `проведённых выплат: ${paid}` : "", open ? `открытых заявок на выплату: ${open}` : ""].filter(Boolean);
+  return `По этим отчётам есть ${parts.join(", ")}. Сначала отклоните открытые заявки; если выплата уже проведена, исправьте сумму корректировкой баланса, а не откатом.`;
+}

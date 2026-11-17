@@ -91,7 +91,7 @@ test("approving a copy of an approved release merges it into the original and hi
     video_shot: null,
     index: 0
   };
-  const copyRoles = { lifecycleState: "moderation", submissionData: { upc: "5064133307028", title: "Игристое" } };
+  const copyRoles = { lifecycleState: "moderation", copyOfReleaseId: "rel_paid", submissionData: { upc: "5064133307028", title: "Игристое" } };
   const tx = {
     release: {
       update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
@@ -115,7 +115,7 @@ test("approving a copy of an approved release merges it into the original and hi
     release: {
       findUnique: async (args: { where: { id: string }; include?: unknown }) => {
         if (args.where.id === "rel_copy" && !args.include) {
-          return { id: "rel_copy", title: "Игристое", status: "moderating", roles: copyRoles, upc: null, userId: "u1", user: { email: null, name: null } };
+          return { id: "rel_copy", title: "Игристое", status: "moderating", confirmed: true, roles: copyRoles, upc: null, userId: "u1", user: { email: null, name: null } };
         }
         if (args.where.id === "rel_copy") {
           return { id: "rel_copy", userId: "u1", title: "Игристое", roles: copyRoles, track: [copyTrack] };
@@ -225,7 +225,7 @@ test("approving a linked copy without a UPC merges it into its original", async 
     release: {
       findUnique: async (args: { where: { id: string }; include?: unknown }) => {
         if (args.where.id === "rel_copy" && !args.include) {
-          return { id: "rel_copy", title: "Ночью", status: "moderating", roles: copyRoles, upc: null, userId: "u1", user: { email: null, name: null } };
+          return { id: "rel_copy", title: "Ночью", status: "moderating", confirmed: true, roles: copyRoles, upc: null, userId: "u1", user: { email: null, name: null } };
         }
         if (args.where.id === "rel_copy") {
           return { id: "rel_copy", userId: "u1", title: "Ночью", roles: copyRoles, track: [] };
@@ -246,4 +246,85 @@ test("approving a linked copy without a UPC merges it into its original", async 
   assert.ok(result && !("error" in result));
   assert.equal(result.releaseId, "rel_paid");
   assert.ok(releaseUpdates.some((update) => update.where.id === "rel_paid" && update.data.status === "approved"));
+});
+
+test("approving a new release that only reuses an old UPC does not overwrite the old release", async () => {
+  const { approveReleaseByAdmin } = await import("@/lib/admin-release-service");
+  const releaseUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }> = [];
+  const roles = { lifecycleState: "moderation", submissionData: { upc: "5064133307028", title: "Новый альбом" } };
+  const prisma = {
+    release: {
+      findUnique: async () => ({ id: "rel_new", title: "Новый альбом", status: "moderating", confirmed: true, roles, upc: null, userId: "u1", user: { email: null, name: null } }),
+      findFirst: async () => null,
+      findMany: async () => [
+        { id: "rel_paid", title: "Старый сингл", status: "approved", upc: "5064133307028", roles: { lifecycleState: "approved" } }
+      ],
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        releaseUpdates.push(args);
+        return {};
+      }
+    },
+    free_release_claims: undefined,
+    userNotification: undefined
+  } as unknown as Parameters<typeof approveReleaseByAdmin>[0]["prisma"];
+
+  const result = await approveReleaseByAdmin({ prisma, adminId: "admin", releaseId: "rel_new", upc: "5064133307028" }).catch(() => null);
+
+  assert.ok(!releaseUpdates.some((update) => update.where.id === "rel_paid"));
+  if (result && !("error" in result)) assert.equal(result.releaseId, "rel_new");
+});
+
+test("approval is refused for an unpaid release and for one the artist pulled back from moderation", async () => {
+  const { approveReleaseByAdmin } = await import("@/lib/admin-release-service");
+  const make = (release: Record<string, unknown>) => ({
+    release: {
+      findUnique: async () => ({ id: "rel", title: "X", upc: null, userId: "u1", user: { email: null, name: null }, ...release }),
+      findFirst: async () => null,
+      findMany: async () => [],
+      update: async () => { throw new Error("must not update"); }
+    }
+  }) as unknown as Parameters<typeof approveReleaseByAdmin>[0]["prisma"];
+
+  const unpaid = await approveReleaseByAdmin({
+    prisma: make({ status: "moderating", confirmed: false, roles: { lifecycleState: "moderation" } }),
+    adminId: "admin", releaseId: "rel", upc: "5064133307028"
+  });
+  assert.ok(unpaid && "error" in unpaid && /не оплачен/u.test(String(unpaid.error)));
+
+  const cancelled = await approveReleaseByAdmin({
+    prisma: make({ status: "moderating", confirmed: false, roles: { lifecycleState: "changes_required" } }),
+    adminId: "admin", releaseId: "rel", upc: "5064133307028"
+  });
+  assert.deepEqual(cancelled, { releaseId: "rel", error: "STATUS_TRANSITION_NOT_ALLOWED" });
+});
+
+test("copy tracks keep the original track ids by ISRC and title, not by position", async () => {
+  const { pairCopyTracksWithSource } = await import("@/lib/admin-release-service");
+  const source = [
+    { id: "t1", isrc: "RU-A01-24-00001", title: "Первая" },
+    { id: "t2", isrc: "RUA012400002", title: "Вторая" },
+    { id: "t3", isrc: null, title: "Третья" }
+  ];
+  // Reordered, the second track removed, a new one added, the third renamed only in case.
+  assert.deepEqual(
+    pairCopyTracksWithSource(
+      [
+        { isrc: null, title: "третья" },
+        { isrc: "RUA012400001", title: "Первая (remaster)" },
+        { isrc: "RUA012400099", title: "Новая" }
+      ],
+      source
+    ),
+    ["t3", "t1", null]
+  );
+  // Same order, ISRCs not filled in the copy: position is still used.
+  assert.deepEqual(
+    pairCopyTracksWithSource([{ title: "A" }, { title: "B" }], [{ id: "x1", title: "Old A" }, { id: "x2", title: "Old B" }]),
+    ["x1", "x2"]
+  );
+  // A different ISRC at the same position is another recording.
+  assert.deepEqual(
+    pairCopyTracksWithSource([{ isrc: "RUB000000001", title: "Другая" }], [{ id: "y1", isrc: "RUA000000001", title: "Старая" }]),
+    [null]
+  );
 });

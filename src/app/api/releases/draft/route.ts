@@ -278,33 +278,51 @@ export async function PATCH(request: Request) {
     submissionDataCover
   });
 
-  await prisma.release.update({
-    where: { id: payload.releaseId },
-    data: {
-      preview,
-      title: readTitle(data),
-      date: releaseDate,
-      language: readLanguage(data),
-      subtitle: typeof data.subtitle === "string" ? data.subtitle : null,
-      performer: readPerformer(data),
-      feat: typeof data.feat === "string" ? data.feat : null,
-      remixer: typeof data.remixer === "string" ? data.remixer : null,
-      genre: readGenre(data),
-      labelName: readLabel(data),
-      startDate,
-      preorderDate,
-      type: readReleaseTypeFromSubmissionData(data),
-      earlyStartInRussia: data.earlyRussiaStart === true,
-      realTimeDelivery: data.realTimeDelivery === true,
-      yandexSoonNewRelease: parseDate(data.yandexPreReleaseDate, releaseDate),
-      confirmed: existing.confirmed,
-      status: existing.status,
-      roles: withReleaseLifecycleState(
-        withDraftPersistenceState(existing.roles, payload.data as Record<string, unknown>, now),
-        getReleaseLifecycleStatus(existing.status, existing.roles) ?? "draft"
-      ) as Prisma.InputJsonValue
+  // An autosave that read the release before it was sent to moderation must not write the
+  // draft state back over it: the row is locked (the submit route locks it too) and re-checked.
+  const conflict = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "icecream"."release" WHERE id::text = ${payload.releaseId} AND "userId"::text = ${session.user.id} FOR UPDATE`;
+    const current = await tx.release.findFirst({
+      where: { id: payload.releaseId, userId: session.user.id },
+      select: { confirmed: true, status: true, roles: true }
+    });
+    if (!current) return { status: 404, error: "Черновик не найден" };
+    const currentLifecycle = getReleaseLifecycleStatus(current.status, current.roles) ?? "draft";
+    if (current.status !== existing.status || currentLifecycle !== lifecycle) {
+      return { status: 409, error: "Релиз уже изменился (например, отправлен на модерацию). Обновите страницу." };
     }
+    await tx.release.update({
+      where: { id: payload.releaseId },
+      data: {
+        preview,
+        title: readTitle(data),
+        date: releaseDate,
+        language: readLanguage(data),
+        subtitle: typeof data.subtitle === "string" ? data.subtitle : null,
+        performer: readPerformer(data),
+        feat: typeof data.feat === "string" ? data.feat : null,
+        remixer: typeof data.remixer === "string" ? data.remixer : null,
+        genre: readGenre(data),
+        labelName: readLabel(data),
+        startDate,
+        preorderDate,
+        type: readReleaseTypeFromSubmissionData(data),
+        earlyStartInRussia: data.earlyRussiaStart === true,
+        realTimeDelivery: data.realTimeDelivery === true,
+        yandexSoonNewRelease: parseDate(data.yandexPreReleaseDate, releaseDate),
+        confirmed: current.confirmed,
+        status: current.status,
+        roles: withReleaseLifecycleState(
+          withDraftPersistenceState(current.roles, payload.data as Record<string, unknown>, now),
+          currentLifecycle
+        ) as Prisma.InputJsonValue
+      }
+    });
+    return null;
   });
+  if (conflict) {
+    return NextResponse.json({ error: conflict.error }, { status: conflict.status });
+  }
 
   const response: ReleaseDraftSaveResponse = {
     ok: true,

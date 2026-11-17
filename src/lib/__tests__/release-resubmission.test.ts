@@ -328,3 +328,35 @@ test("copy tracks keep the original track ids by ISRC and title, not by position
     [null]
   );
 });
+
+test("an edited copy waits while another copy of the same release is in moderation", async () => {
+  const { describeReleaseCopySubmitBlock } = await import("@/lib/release-resubmission");
+  const copyRoles = { copyOfReleaseId: "src", timeline: { createdAt: "2026-11-10T10:00:00.000Z" } };
+  const sourceRoles = { timeline: { approvedAt: "2026-11-01T10:00:00.000Z" } };
+  assert.match(
+    String(describeReleaseCopySubmitBlock({ copyRoles, sourceRoles, otherCopies: [{ lifecycle: "moderation", roles: {} }] })),
+    /уже на проверке/u
+  );
+  // Drafts, merged and deleted copies do not block.
+  assert.equal(describeReleaseCopySubmitBlock({
+    copyRoles,
+    sourceRoles,
+    otherCopies: [
+      { lifecycle: "draft", roles: {} },
+      { lifecycle: "moderation", roles: { mergedIntoReleaseId: "src" } },
+      { lifecycle: "moderation", roles: { deletionRequest: { status: "deleted" } } }
+    ]
+  }), null);
+});
+
+test("a copy started before newer changes of the original were approved is not sent", async () => {
+  const { describeReleaseCopySubmitBlock } = await import("@/lib/release-resubmission");
+  assert.match(
+    String(describeReleaseCopySubmitBlock({
+      copyRoles: { timeline: { createdAt: "2026-11-10T10:00:00.000Z" } },
+      sourceRoles: { timeline: { approvedAt: "2026-11-12T10:00:00.000Z" } },
+      otherCopies: []
+    })),
+    /изменился после того/u
+  );
+});

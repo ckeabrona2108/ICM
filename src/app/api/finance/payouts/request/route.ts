@@ -28,6 +28,7 @@ import {
 import { getCurrentPayoutWindowState } from "@/lib/payout-schedule";
 import { getPayoutPeriod, isActivePayoutStatus } from "@/lib/payout-request";
 import { getUserContractStatus } from "@/lib/contract-verification";
+import { notifyAdminPayoutRequested } from "@/lib/telegram-notifier";
 
 export const dynamic = "force-dynamic";
 
@@ -261,6 +262,18 @@ export async function POST(request: Request) {
     title: "Заявка на вывод отправлена",
     message: `Сумма: ${formatRubCurrency(parsed.data.amount)}. Договор № ${contractNumber}.`,
     href: "/dashboard/finance"
+  });
+
+  // The admin learns about the request right away; Telegram retries must not delay the artist.
+  void notifyAdminPayoutRequested({
+    artistName: session.user.name?.trim() || session.user.email || session.user.id,
+    userEmail: session.user.email ?? "—",
+    amountLabel: formatRubCurrency(parsed.data.amount),
+    quarter: parsed.data.quarter,
+    year: parsed.data.year,
+    contractNumber
+  }).catch((error) => {
+    console.error("[telegram] payout request notification failed", { payoutId: result.payoutId, error });
   });
 
   return NextResponse.json(response, { status: 201 });

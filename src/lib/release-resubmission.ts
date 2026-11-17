@@ -104,3 +104,37 @@ export async function findPaidPredecessorRelease(
     });
   return match ? { id: match.id, title: match.title } : null;
 }
+
+function readTimelineDate(roles: unknown, key: string): Date | null {
+  const value = asRecord(asRecord(roles)?.timeline)?.[key];
+  if (typeof value !== "string" || !value.trim()) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/**
+ * Why an edited copy of an approved release cannot be sent now, or null. One round of changes is
+ * reviewed at a time, and a copy started before the original last changed would, on approval,
+ * silently undo the changes approved since: the artist starts the edit again from the current one.
+ */
+export function describeReleaseCopySubmitBlock(params: {
+  copyRoles: unknown;
+  sourceRoles: unknown;
+  otherCopies: ReadonlyArray<{ lifecycle: string | null; roles: unknown }>;
+}): string | null {
+  const pending = params.otherCopies.some((copy) => {
+    const roles = asRecord(copy.roles);
+    if (asString(roles?.mergedIntoReleaseId)) return false;
+    if (asString(asRecord(roles?.deletionRequest)?.status) === "deleted") return false;
+    return copy.lifecycle === "moderation";
+  });
+  if (pending) {
+    return "Изменения этого релиза уже на проверке. Дождитесь решения модератора, затем отправьте новые правки.";
+  }
+  const copyCreatedAt = readTimelineDate(params.copyRoles, "createdAt");
+  const sourceApprovedAt = readTimelineDate(params.sourceRoles, "approvedAt");
+  if (copyCreatedAt && sourceApprovedAt && sourceApprovedAt > copyCreatedAt) {
+    return "Релиз изменился после того, как вы начали правку: приняты другие изменения. Удалите этот черновик и нажмите «Редактировать» у релиза заново.";
+  }
+  return null;
+}

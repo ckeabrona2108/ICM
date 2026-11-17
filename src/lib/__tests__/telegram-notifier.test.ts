@@ -157,3 +157,21 @@ test("trimTelegramText keeps messages under the Telegram limit", () => {
   assert.equal(trimmed.length, 4000);
   assert.ok(trimmed.endsWith("…"));
 });
+
+test("buildPayoutRequestedTelegramText names the artist, amount, period and admin link", async () => {
+  const { buildPayoutRequestedTelegramText } = await import("@/lib/telegram-notifier");
+  const text = buildPayoutRequestedTelegramText({
+    artistName: "Олег",
+    userEmail: "oleg@example.com",
+    amountLabel: "12 500 ₽",
+    quarter: 3,
+    year: 2026,
+    contractNumber: 42
+  });
+  assert.match(text, /Новая заявка на выплату/u);
+  assert.match(text, /Олег/u);
+  assert.match(text, /12 500 ₽/u);
+  assert.match(text, /3 квартал 2026/u);
+  assert.match(text, /Договор № 42/u);
+  assert.match(text, /\/admin\/payments$/u);
+});

@@ -227,3 +227,34 @@ export async function notifyAdminReleaseSubmitted(
 ): Promise<boolean> {
   return sendTelegramMessage(buildReleaseModerationTelegramText(payload));
 }
+
+export interface TelegramPayoutRequestNotificationPayload {
+  artistName: string;
+  userEmail: string;
+  amountLabel: string;
+  quarter: number;
+  year: number;
+  contractNumber: number;
+}
+
+export function buildPayoutRequestedTelegramText(payload: TelegramPayoutRequestNotificationPayload): string {
+  const adminUrl = `${resolveAppUrl().replace(/\/$/, "")}/admin/payments`;
+  return [
+    "Новая заявка на выплату",
+    "",
+    `Артист: ${payload.artistName}`,
+    `Email: ${payload.userEmail}`,
+    `Сумма: ${payload.amountLabel}`,
+    `Период: ${payload.quarter} квартал ${payload.year}`,
+    `Договор № ${payload.contractNumber}`,
+    "",
+    "Открыть заявки:",
+    adminUrl
+  ].join("\n");
+}
+
+export async function notifyAdminPayoutRequested(
+  payload: TelegramPayoutRequestNotificationPayload
+): Promise<boolean> {
+  return sendTelegramMessage(buildPayoutRequestedTelegramText(payload));
+}

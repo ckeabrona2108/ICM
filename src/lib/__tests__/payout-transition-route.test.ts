@@ -123,3 +123,11 @@ test("PAID is refused when the agreed balance no longer covers open requests", a
   // Rejecting such a request is still possible.
   assert.equal((await h.run("REJECTED", undefined, "Отчёт пересчитан")).status, 200);
 });
+
+test("a repeated «processing» click succeeds without a second notification", async () => {
+  const h = harness();
+  assert.equal((await h.run("PROCESSING")).status, 200);
+  assert.equal((await h.run("PROCESSING")).status, 200);
+  assert.equal(h.state().status, "PROCESSING");
+  assert.equal(h.state().notices, 1);
+});

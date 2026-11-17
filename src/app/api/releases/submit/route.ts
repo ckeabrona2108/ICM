@@ -42,8 +42,10 @@ import {
 } from "@/lib/release-quota";
 import { shouldResubmitEditedRelease } from "@/lib/release-wizard-mode";
 import {
+  describeReleaseCopySubmitBlock,
   findPaidPredecessorRelease,
   readReleaseCopySourceId,
+  RELEASE_COPY_SOURCE_KEY,
   withReleaseResubmission
 } from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
@@ -496,10 +498,49 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     trackCount: submissionData.tracks.length
   });
 
+  // One round of changes to an approved release is reviewed at a time, and a copy started before
+  // the original last changed must not undo the changes approved since. Submissions of one artist
+  // are serialized by the user lock, so two copies cannot both pass this check.
+  const copySubmitBlock = async (sourceId: string, sourceRoles: unknown) => {
+    const otherCopies = await db.release.findMany({
+      where: {
+        userId: session.user.id,
+        id: { not: existing.id },
+        roles: { path: [RELEASE_COPY_SOURCE_KEY], equals: sourceId }
+      },
+      select: { status: true, roles: true }
+    });
+    const message = describeReleaseCopySubmitBlock({
+      copyRoles: existing.roles,
+      sourceRoles,
+      otherCopies: otherCopies.map((copy) => ({
+        lifecycle: getReleaseLifecycleStatus(copy.status, copy.roles),
+        roles: copy.roles
+      }))
+    });
+    if (!message) return null;
+    const issue = { code: "change_request_blocked", field: "changeRequest", message };
+    const response: ReleaseSubmitFailureResponse = {
+      ok: false,
+      errors: [issue],
+      errors_by_step: { release_info: [issue], tracks: [], stores: [], pricing: [] }
+    };
+    return NextResponse.json(response, { status: 409 });
+  };
+
   if (payload.mode === "edit") {
     // A free single stays a one-track single after edits too.
     if (!freeReleaseShape.ok && (await isFreeReleaseClaimedBy(db, existing.id))) {
       return pricingFailure("free_release_shape", freeReleaseShape.message);
+    }
+    const editedCopySourceId = readReleaseCopySourceId(existing.roles);
+    if (editedCopySourceId) {
+      const source = await db.release.findFirst({
+        where: { id: editedCopySourceId, userId: session.user.id },
+        select: { roles: true }
+      });
+      const copyBlock = await copySubmitBlock(editedCopySourceId, source?.roles);
+      if (copyBlock) return copyBlock;
     }
     const currentLifecycle =
       getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus;
@@ -578,6 +619,8 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       where: { id: copySourceId, userId: session.user.id },
       select: { roles: true }
     });
+    const copyBlock = await copySubmitBlock(copySourceId, source?.roles);
+    if (copyBlock) return copyBlock;
     const sourceSubmission = asRecord(source?.roles)?.submissionData;
     if (sourceSubmission) {
       const changes = diffReleaseSubmissions(sourceSubmission, submissionData);

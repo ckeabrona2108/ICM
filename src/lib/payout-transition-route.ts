@@ -78,7 +78,11 @@ export async function handlePayoutTransition(params: {
     // The conditional write takes the row lock. All terminal transitions use
     // the same predicate, so a competing action cannot overwrite the winner.
     const changed = await tx.payouts.updateMany({
-      where: { id: params.id, status: { in: ["REQUESTED", "PROCESSING"] } },
+      // "Processing" is entered once: a repeated click changes nothing and notifies nobody.
+      where: {
+        id: params.id,
+        status: { in: params.status === "PROCESSING" ? ["REQUESTED"] : ["REQUESTED", "PROCESSING"] }
+      },
       data: {
         status: params.status,
         updatedAt: now,

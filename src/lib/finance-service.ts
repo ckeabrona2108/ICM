@@ -503,6 +503,10 @@ export async function topUpUserBalanceByAdmin(params: {
   const financeNewValue = financeOldValue + params.amount;
 
   await params.prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: params.userId },
+      data: { balance: { increment: params.amount } }
+    });
     await tx.financeReport.create({
       data: {
         id: randomUUID(),
@@ -572,11 +576,10 @@ export async function adjustUserBalanceByAdmin(params: {
   const delta = params.type === "credit" ? params.amount : -params.amount;
   const newValue = oldValue + delta;
 
-  if (params.type === "debit" && newValue < 0) {
-    return { ok: false as const, error: "Недостаточно средств для списания" };
-  }
-
   if (!transactionRepo || (params.type === "credit" && !financeReportRepo)) {
+    if (params.type === "debit" && newValue < 0) {
+      return { ok: false as const, error: "Недостаточно средств для списания" };
+    }
     await params.prisma.$transaction(async (tx) => {
       await tx.user.updateMany({
         where: { id: params.userId },
@@ -613,7 +616,22 @@ export async function adjustUserBalanceByAdmin(params: {
   const now = new Date();
   const { start, end } = monthRange(now);
 
+  let insufficient: number | null = null;
   await params.prisma.$transaction(async (tx) => {
+    // The real balance (agreed reports, payouts, earlier adjustments) decides, not the legacy
+    // `user.balance` cache; open payout requests keep their money. One adjustment per user at a time.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`balance-adjust:${params.userId}`}, 0))`;
+    if (params.type === "debit") {
+      const totals = await getUserBalanceTotals(tx as unknown as PrismaClient, params.userId);
+      if (params.amount > totals.availableToWithdraw + 0.005) {
+        insufficient = totals.availableToWithdraw;
+        return;
+      }
+    }
+    await tx.user.update({
+      where: { id: params.userId },
+      data: { balance: { increment: delta } }
+    });
     if (params.type === "credit") {
       await tx.financeReport.create({
         data: {
@@ -689,6 +707,13 @@ export async function adjustUserBalanceByAdmin(params: {
       comment: normalizedComment
     });
   });
+
+  if (insufficient !== null) {
+    return {
+      ok: false as const,
+      error: `Недостаточно средств для списания: доступно ${Number(insufficient).toFixed(2)} ₽ с учётом открытых заявок на выплату.`
+    };
+  }
 
   return { ok: true as const };
 }

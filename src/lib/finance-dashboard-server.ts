@@ -285,7 +285,35 @@ export async function getFinanceDashboardViewData(
       platformName: null,
       sourceReference: null
     }));
-  const transactions = [...ledgerTransactions, ...reportAccruals].sort((left, right) =>
+  // Settled money movements kept in the `transaction` ledger: payouts sent, admin debits and
+  // refunds. They change the balance, so the artist sees them in the history too.
+  const settlementRows = await prisma.transaction.findMany({
+    where: { userId, status: "COMPLETED", type: { in: ["PAYOUT", "FEE", "REFUND"] } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: { id: true, type: true, amount: true, description: true, createdAt: true, processedAt: true }
+  });
+  const settlementTransactions: FinanceTransactionView[] = settlementRows.map((row) => {
+    const type = row.type === "PAYOUT" ? "Payout" : row.type === "FEE" ? "Fee" : "Royalty";
+    const comment = String(row.description ?? "").trim();
+    return {
+      id: `tx-${row.id}`,
+      date: toDate(row.processedAt ?? row.createdAt),
+      type,
+      amount: type === "Royalty" ? Math.abs(decimalToNumber(row.amount)) : -Math.abs(decimalToNumber(row.amount)),
+      status: "Completed" as const,
+      description: type === "Payout"
+        ? "Выплата по заявке"
+        : type === "Fee"
+          ? (comment ? `Списание: ${comment}` : "Списание с баланса")
+          : (comment ? `Возврат: ${comment}` : "Возврат на баланс"),
+      releaseTitle: null,
+      trackTitle: null,
+      platformName: null,
+      sourceReference: null
+    };
+  });
+  const transactions = [...ledgerTransactions, ...reportAccruals, ...settlementTransactions].sort((left, right) =>
     String(right.date).localeCompare(String(left.date))
   );
 

@@ -26,7 +26,8 @@ import {
   retryPrismaSerializationConflict
 } from "@/lib/prisma-errors";
 import { getCurrentPayoutWindowState } from "@/lib/payout-schedule";
-import { getPayoutPeriod, isActivePayoutStatus } from "@/lib/payout-request";
+import { getPayoutPeriod } from "@/lib/payout-request";
+import { computeQuarterPayoutStates } from "@/lib/payout-quarter";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { notifyAdminPayoutRequested } from "@/lib/telegram-notifier";
 
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
       const payoutWindow = await getCurrentPayoutWindowState(tx as typeof prisma);
       const existingPayouts = await tx.payouts.findMany({
         where: { userId: session.user.id },
-        select: { status: true, confirmed: true, requisites: true }
+        select: { status: true, confirmed: true, amount: true, requisites: true }
       });
       const reportStatuses = reports.map((report) =>
         report.lifecycleState === "agreed"
@@ -136,16 +137,24 @@ export async function POST(request: Request) {
           report.quarter === parsed.data.quarter &&
           report.year === parsed.data.year
       );
-      const selectedQuarterBalance = selectedReports.reduce((sum, report) => sum + report.amount, 0);
-      const duplicateQuarterRequest = existingPayouts.some((payout) => {
-        const period = getPayoutPeriod(payout.requisites);
-        const matchesSelectedPeriod = period.quarter === parsed.data.quarter && period.year === parsed.data.year;
-        return matchesSelectedPeriod && (
-          isActivePayoutStatus(payout.status) ||
-          payout.status === "PAID" ||
-          payout.confirmed === true
-        );
-      });
+      // What is left of the quarter after earlier requests: a quarter can be withdrawn in parts,
+      // and money added to it later (a supplement, an admin credit) can still be withdrawn.
+      const quarterState = computeQuarterPayoutStates(
+        reports.map((report) => ({
+          quarter: report.quarter,
+          year: report.year,
+          amount: report.amount,
+          agreed: report.lifecycleState === "agreed"
+        })),
+        existingPayouts.map((payout) => ({
+          ...getPayoutPeriod(payout.requisites),
+          amount: Number(payout.amount ?? 0),
+          status: String(payout.status),
+          confirmed: payout.confirmed
+        }))
+      ).get(`${parsed.data.year}-${parsed.data.quarter}`);
+      const selectedQuarterBalance = quarterState?.remaining ?? 0;
+      const duplicateQuarterRequest = Boolean(quarterState?.hasOpenRequest);
       const documentKeyPrefix = `private/payout-documents/${session.user.id}/`;
       const documentBelongsToUser = parsed.data.documents.supportingDocument.key.startsWith(documentKeyPrefix);
       const issues = validatePayoutRequest(parsed.data, {

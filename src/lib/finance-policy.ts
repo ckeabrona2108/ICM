@@ -110,7 +110,7 @@ export function validatePayoutRequest(
       issues,
       "invalid",
       "quarter",
-      "За выбранный квартал нет согласованного отчета с доступными средствами."
+      "За выбранный квартал нет доступных средств: всё уже выплачено или отчёт не согласован."
     );
   } else if (input.amount > (context.selectedQuarterBalance ?? 0)) {
     pushIssue(
@@ -126,7 +126,7 @@ export function validatePayoutRequest(
       issues,
       "forbidden",
       "quarter",
-      "По выбранному кварталу уже создана заявка на выплату."
+      "По выбранному кварталу уже есть заявка в обработке. Новую можно создать после её выплаты или отклонения."
     );
   }
 

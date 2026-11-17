@@ -414,6 +414,7 @@ test("top-up transaction rollback propagates error", async () => {
     },
     $transaction: async (handler: (tx: any) => Promise<unknown>) =>
       handler({
+        user: { update: async () => ({}) },
         financeReport: prisma.financeReport,
         transaction: prisma.transaction,
         adminLog: prisma.adminLog

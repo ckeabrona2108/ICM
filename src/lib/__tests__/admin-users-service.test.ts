@@ -511,12 +511,18 @@ test("debit more than balance is rejected", async () => {
         return { _sum: { amount: 0 } };
       }
     },
-    payoutRequest: {
-      aggregate: async () => ({ _sum: { amount: 0 } })
+    payouts: {
+      // An open payout request keeps 100 of the agreed 300.
+      aggregate: async () => ({ _sum: { amount: 100 } })
     },
     transaction: {
-      findMany: async () => []
-    }
+      findMany: async () => [],
+      create: async () => {
+        throw new Error("must not debit");
+      }
+    },
+    $executeRaw: async () => 0,
+    $transaction: async (handler: (tx: any) => Promise<unknown>) => handler(prisma)
   } as any;
 
   const result = await adjustUserBalanceByAdmin({
@@ -524,12 +530,13 @@ test("debit more than balance is rejected", async () => {
     adminId: "admin_1",
     userId: "u1",
     type: "debit",
-    amount: 500,
+    amount: 250,
     comment: "Лишнее списание"
   });
 
+  // The real balance decides (300 agreed − 100 requested = 200), not the stale `user.balance` cache.
   assert.equal(result.ok, false);
-  assert.equal(result.error, "Недостаточно средств для списания");
+  assert.match(String(result.error), /Недостаточно средств для списания: доступно 200\.00/u);
 });
 
 test("invalid admin balance adjustment rejected", () => {

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import type { PayoutRequestBody, PayoutRequestFailureResponse, PayoutRequestSuccessResponse } from "@/lib/api/contracts";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { PayoutRequestSummary } from "@/lib/payout-request";
+import { computeQuarterPayoutStates, quarterKey } from "@/lib/payout-quarter";
 import type { PayoutWindowState } from "@/lib/payout-schedule";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ type StringSetter = (value: string) => void;
 
 type StepPaymentProps = {
   reports: FinanceReportClientItem[];
+  quarterRemaining: (report: FinanceReportClientItem) => number;
   selectedReportId: string;
   setSelectedReportId: StringSetter;
   amount: string;
@@ -151,15 +153,22 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
   contractNumber: number | null;
 }) {
   const [payoutRequests, setPayoutRequests] = React.useState(initialPayoutRequests);
-  const lockedPeriods = new Set(
-    payoutRequests
-      .filter((request) => request.status !== "REJECTED" && request.quarter && request.year)
-      .map((request) => `${request.year}-${request.quarter}`)
+  // A quarter stays available while money is left in it and no request for it is open.
+  const quarterStates = computeQuarterPayoutStates(
+    reports.map((report) => ({ quarter: report.quarter, year: report.year, amount: report.amount, agreed: report.status === "agreed" })),
+    payoutRequests.map((request) => ({ quarter: request.quarter, year: request.year, amount: request.amount, status: request.status }))
   );
-  const agreedReports = reports.filter(
-    (report) => report.status === "agreed" && report.quarter && report.year &&
-      !lockedPeriods.has(`${report.year}-${report.quarter}`)
-  );
+  const quarterRemaining = (report: FinanceReportClientItem) =>
+    quarterStates.get(quarterKey(report.quarter, report.year) ?? "")?.remaining ?? 0;
+  const seenQuarters = new Set<string>();
+  const agreedReports = reports.filter((report) => {
+    const key = quarterKey(report.quarter, report.year);
+    if (report.status !== "agreed" || !key || seenQuarters.has(key)) return false;
+    const state = quarterStates.get(key);
+    if (!state || state.hasOpenRequest || state.remaining <= 0) return false;
+    seenQuarters.add(key);
+    return true;
+  });
   const [step, setStep] = React.useState<Step>(1);
   const [amount, setAmount] = React.useState("");
   const [selectedReportId, setSelectedReportId] = React.useState(agreedReports[0]?.id ?? "");
@@ -186,7 +195,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
   const selectedReport = agreedReports.find((report) => report.id === selectedReportId) ?? null;
   const parsedAmount = Number(amount.replace(",", "."));
   const bankName = bankChoice === "Другой банк" ? customBankName : bankChoice;
-  const quarterAmount = selectedReport?.amount ?? 0;
+  const quarterAmount = selectedReport ? quarterRemaining(selectedReport) : 0;
   const canStart = Boolean(contractNumber && selectedReport) && Number.isFinite(parsedAmount) && parsedAmount >= minimumPayoutAmount && parsedAmount <= Math.min(availableToWithdraw, quarterAmount) && payoutWindow.isOpen;
 
   const updateReceipt = (field: keyof typeof receiptDetails, value: string) => setReceiptDetails((current) => ({ ...current, [field]: value }));
@@ -304,7 +313,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
         {index < steps.length - 1 ? <span className={cn("mx-3 h-0.5 flex-1 rounded-full", item.id < step ? "bg-[#7b61ff]" : "bg-white/[0.08]")} /> : null}
       </li>)}
     </ol>
-    {step === 1 ? <StepPayment reports={agreedReports} selectedReportId={selectedReportId} setSelectedReportId={setSelectedReportId} amount={amount} setAmount={setAmount} maxAmount={Math.min(availableToWithdraw, quarterAmount)} taxStatus={taxStatus} setTaxStatus={setTaxStatus} available={availableToWithdraw} minimum={minimumPayoutAmount} window={payoutWindow} contractNumber={contractNumber} /> : null}
+    {step === 1 ? <StepPayment reports={agreedReports} quarterRemaining={quarterRemaining} selectedReportId={selectedReportId} setSelectedReportId={setSelectedReportId} amount={amount} setAmount={setAmount} maxAmount={Math.min(availableToWithdraw, quarterAmount)} taxStatus={taxStatus} setTaxStatus={setTaxStatus} available={availableToWithdraw} minimum={minimumPayoutAmount} window={payoutWindow} contractNumber={contractNumber} /> : null}
     {step === 2 ? <StepRequisites recipientName={recipientName} setRecipientName={setRecipientName} bankChoice={bankChoice} setBankChoice={setBankChoice} customBankName={customBankName} setCustomBankName={setCustomBankName} accountNumber={accountNumber} setAccountNumber={setAccountNumber} bankBik={bankBik} setBankBik={setBankBik} taxId={taxId} setTaxId={setTaxId} /> : null}
     {step === 3 ? <StepDocuments taxStatus={taxStatus} selectedReport={selectedReport} recipientName={recipientName} receiptDetails={receiptDetails} updateReceipt={updateReceipt} receiptAcknowledged={receiptAcknowledged} setReceiptAcknowledged={setReceiptAcknowledged} supportingDocument={supportingDocument} uploading={uploading} uploadDocument={uploadDocument} downloadReceipt={downloadReceipt} previewReceipt={previewReceipt} /> : null}
     {step === 4 && selectedReport && contractNumber ? <StepReview report={selectedReport} amount={parsedAmount} taxStatus={taxStatus} recipientName={recipientName} bankName={bankName} accountNumber={accountNumber} bankBik={bankBik} taxId={taxId} document={supportingDocument} contractNumber={contractNumber} onEdit={setStep} /> : null}
@@ -317,7 +326,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
   </div>;
 }
 
-function StepPayment({ reports, selectedReportId, setSelectedReportId, amount, setAmount, maxAmount, taxStatus, setTaxStatus, available, minimum, window, contractNumber }: StepPaymentProps) {
+function StepPayment({ reports, quarterRemaining, selectedReportId, setSelectedReportId, amount, setAmount, maxAmount, taxStatus, setTaxStatus, available, minimum, window, contractNumber }: StepPaymentProps) {
   const selected = reports.find((report: FinanceReportClientItem) => report.id === selectedReportId);
   const taxOptions: Array<{ id: TaxStatus; title: string; description: string; icon: React.ReactNode }> = [
     { id: "individual", title: "Физическое лицо", description: "Понадобится расписка — сформируем её на шаге «Документы».", icon: <UserRound className="h-5 w-5" /> },
@@ -329,10 +338,10 @@ function StepPayment({ reports, selectedReportId, setSelectedReportId, amount, s
       {contractNumber ? <span className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.05] px-3 py-1.5 text-[12.5px] font-medium text-white/60"><FileText className="h-3.5 w-3.5" />Договор № {contractNumber}</span> : null}
     </div>
     <div className="mt-6 grid gap-4 sm:grid-cols-2">
-      <label className="text-[13px] font-semibold text-white/70">Отчётный период<select value={selectedReportId} onChange={(event) => setSelectedReportId(event.target.value)} className={fieldClass}><option value="">Выберите квартал</option>{reports.map((report: FinanceReportClientItem) => <option value={report.id} key={report.id}>{report.quarterLabel} · {formatRubCurrency(report.amount)}</option>)}</select></label>
+      <label className="text-[13px] font-semibold text-white/70">Отчётный период<select value={selectedReportId} onChange={(event) => setSelectedReportId(event.target.value)} className={fieldClass}><option value="">Выберите квартал</option>{reports.map((report: FinanceReportClientItem) => <option value={report.id} key={report.id}>{report.quarterLabel} · {formatRubCurrency(quarterRemaining(report))}</option>)}</select></label>
       <label className="text-[13px] font-semibold text-white/70">Сумма выплаты<div className="relative"><input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={cn(fieldClass, "pr-28")} /><button type="button" disabled={!selected || maxAmount <= 0} onClick={() => setAmount(String(maxAmount))} className="absolute right-2 top-1/2 mt-1 -translate-y-1/2 rounded-lg bg-[#7b61ff]/20 px-2.5 py-1.5 text-[12px] font-semibold text-[#c4b5fd] transition hover:bg-[#7b61ff]/30 disabled:opacity-40">Вся сумма</button></div></label>
     </div>
-    {selected ? <p className="mt-3 text-[13px] text-white/50">По кварталу «{selected.quarterLabel}» доступно {formatRubCurrency(selected.amount)}. Одна заявка — один квартал.</p> : <p className="mt-3 text-[13px] text-amber-200">Нет согласованных отчётов, доступных для выплаты.</p>}
+    {selected ? <p className="mt-3 text-[13px] text-white/50">По кварталу «{selected.quarterLabel}» доступно {formatRubCurrency(quarterRemaining(selected))}. Квартал можно выводить частями, по одной заявке за раз.</p> : <p className="mt-3 text-[13px] text-amber-200">Нет согласованных отчётов, доступных для выплаты.</p>}
     <fieldset className="mt-6"><legend className="text-[13px] font-semibold text-white/70">Налоговый статус</legend><div className="mt-2 grid gap-3 sm:grid-cols-2">{taxOptions.map((option) => <label key={option.id} className={cn("flex cursor-pointer items-start gap-3 rounded-2xl border p-4 transition-colors", taxStatus === option.id ? "border-[#7b61ff]/60 bg-[#7b61ff]/12" : "border-white/[0.09] bg-white/[0.02] hover:border-white/[0.16]")}><input className="sr-only" type="radio" checked={taxStatus === option.id} onChange={() => setTaxStatus(option.id)} /><span className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", taxStatus === option.id ? "bg-[#7b61ff] text-white" : "bg-white/[0.06] text-white/60")}>{option.icon}</span><span><span className="block font-semibold text-white">{option.title}</span><span className="mt-1 block text-[13px] leading-relaxed text-white/55">{option.description}</span></span></label>)}</div></fieldset>
     {!window.isOpen ? <p className="mt-5 flex items-center gap-2 rounded-xl border border-[#7b61ff]/25 bg-[#7b61ff]/10 px-3.5 py-3 text-[13px] text-[#ddd3ff]"><CalendarDays className="h-4 w-4 shrink-0" />{window.message} Создать заявку можно, когда окно выплат откроется.</p> : null}
   </div>;

@@ -4,6 +4,7 @@ import { requireAdminPage } from "@/lib/admin-page-guard";
 
 const ADMIN_RELEASE_TABS = new Set<AdminReleaseStatusFilter>([
   "moderation",
+  "awaiting_payment",
   "pending_verification",
   "deletion_requests",
   "all",

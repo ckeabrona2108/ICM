@@ -14,6 +14,7 @@ import { formatReleaseChangeAreas } from "@/lib/release-copy-changes";
 
 type AdminReleaseTab =
   | "moderation"
+  | "awaiting_payment"
   | "pending_verification"
   | "deletion_requests"
   | "all"
@@ -22,6 +23,7 @@ type AdminReleaseTab =
 
 const TAB_LABELS: Record<AdminReleaseTab, string> = {
   moderation: "На модерации",
+  awaiting_payment: "Ожидают оплаты",
   pending_verification: "Ожидает верификацию",
   deletion_requests: "Запросы на удаление",
   all: "Все",
@@ -308,7 +310,9 @@ export function AdminReleasesClient({
               release.deletionStatus === "requested" || release.deletionStatus === "deleted";
             const canApprove =
               !hasDeletionWorkflow &&
-              ["moderation", "rejected", "approved", "changes_required"].includes(release.status);
+              ["moderation", "rejected", "approved", "changes_required"].includes(release.status) &&
+              // An unpaid release is approved after payment (or after it is marked paid).
+              release.paid !== false;
             const canReject = !hasDeletionWorkflow && release.status === "moderation";
             const isBusy = busyId === release.id;
             return (

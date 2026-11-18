@@ -42,6 +42,7 @@ import {
   saveDiscoveredPlatformLinks
 } from "@/lib/smart-link-service";
 import { normalizeSmartLinkHref } from "@/lib/smart-link-urls";
+import { toAbsoluteAppUrl } from "@/lib/vk-messages";
 
 /** Columns of the "Найти мои релизы" table, in order. */
 export const RELEASE_LINK_PLATFORMS = [
@@ -1017,8 +1018,13 @@ async function notifyLinksFound(userId: string, result: DiscoveryResult): Promis
     userId,
     kind: "release_links_found",
     title: "Релиз появился на площадках",
-    message: `«${result.title}» теперь есть в: ${labels}. Ссылки добавлены в смарт-ссылку.`,
+    // The public smart link itself, ready to share, in every channel (not only a cabinet link).
+    message: promo
+      ? `«${result.title}» теперь есть в: ${labels}. Смарт-ссылка со всеми площадками — делитесь ей: ${toAbsoluteAppUrl(`/l/${promo.shortName}`)}`
+      : `«${result.title}» теперь есть в: ${labels}. Ссылки добавлены в смарт-ссылку.`,
     href: `/dashboard/releases/${result.releaseId}/smart-link`,
+    // VK and Telegram put the link under the text themselves, so their text does not repeat it.
+    vkMessage: promo ? `«${result.title}» теперь есть в: ${labels}. Смарт-ссылка со всеми площадками — делитесь ей:` : undefined,
     vkHref: promo ? `/l/${promo.shortName}` : undefined,
     sendEmail: false
   });

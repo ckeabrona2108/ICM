@@ -30,6 +30,7 @@ import {
 import { escapeContractHtml, renderContractTextPagesHtml } from "@/lib/contract-document";
 import { sendVerificationDecisionEmail } from "@/lib/user-event-email";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
+import { isReleaseAwaitingPayment } from "@/lib/release-awaiting-payment";
 
 const RELEASE_STATUS_MODERATION = "moderating";
 const RELEASE_LIFECYCLE_PENDING_VERIFICATION = "pending_verification";
@@ -2764,7 +2765,9 @@ export async function getAdminVerificationCounts(params: {
       if (
         lifecycle === "moderation" &&
         release.status === RELEASE_STATUS_MODERATION &&
-        (release.confirmed || (isRecordLike(release.roles) && release.roles.submittedToModeration === true))
+        (release.confirmed || (isRecordLike(release.roles) && release.roles.submittedToModeration === true)) &&
+        // Releases waiting for payment are not counted as work for moderators.
+        !isReleaseAwaitingPayment(release)
       ) {
         releasesModeration += 1;
       }

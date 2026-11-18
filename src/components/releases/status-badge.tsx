@@ -2,8 +2,8 @@ import { Badge } from "@/components/ui/badge";
 import { getStatusTone } from "@/lib/format";
 import { getReleaseStatusDescriptor } from "@/lib/release-status-ui";
 
-export function StatusBadge({ status }: { status: string }) {
-  const releaseStatus = getReleaseStatusDescriptor(status);
+export function StatusBadge({ status, paid }: { status: string; paid?: boolean }) {
+  const releaseStatus = getReleaseStatusDescriptor(status, paid);
   if (releaseStatus) {
     return <Badge variant={releaseStatus.variant}>{releaseStatus.label}</Badge>;
   }

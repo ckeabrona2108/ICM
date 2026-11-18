@@ -1001,8 +1001,8 @@ function StatusFieldValue({ release }: { release: CabinetRelease }) {
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-      <StatusBadge status={release.status} />
-      {showPaymentBadge ? (
+      <StatusBadge status={release.status} paid={release.paid} />
+      {showPaymentBadge && !(release.status === "moderation" && !release.paid) ? (
         <PaymentStatusBadge
           paid={release.paid}
           label={statusPaymentLabel}

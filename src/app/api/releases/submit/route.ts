@@ -403,7 +403,7 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
   const supplementMessage = (price: ReleasePrice) =>
     `Изменения отправлены. Добавленные дополнения (${price.lines
       .map((line) => (line.count > 1 ? `${line.label.toLowerCase()} × ${line.count}` : line.label.toLowerCase()))
-      .join(", ")}) нужно доплатить: ${price.totalRub} ₽. Проверка начнётся после оплаты.`;
+      .join(", ")}) нужно доплатить: ${price.totalRub} ₽. Изменения ждут оплаты, проверка начнётся сразу после неё.`;
 
   const updateReleaseAndSyncTracks = async (params: {
     confirmed: boolean;
@@ -578,7 +578,9 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
         : undefined
     });
 
-    if (shouldResubmit) {
+    // A release waiting for a supplement payment is not in the queue yet: the admin hears
+    // about it once it is paid (see payment-order-service).
+    if (shouldResubmit && !paidResend?.supplement) {
       notifications.push({
         releaseId: existing.id,
         releaseTitle: baseReleaseData.title,
@@ -657,11 +659,13 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
         });
       }
     });
-    notifications.push({
-      releaseId: existing.id,
-      releaseTitle: baseReleaseData.title,
-      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
-    });
+    if (!paidResend.supplement) {
+      notifications.push({
+        releaseId: existing.id,
+        releaseTitle: baseReleaseData.title,
+        artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+      });
+    }
 
     const response: ReleaseSubmitSuccessResponse & { payment_required?: true; paid?: false } = {
       ok: true,
@@ -702,11 +706,13 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
         { sourceReleaseId: paidPredecessor.id }
       ) as Prisma.InputJsonValue
     });
-    notifications.push({
-      releaseId: existing.id,
-      releaseTitle: baseReleaseData.title,
-      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
-    });
+    if (!paidResend.supplement) {
+      notifications.push({
+        releaseId: existing.id,
+        releaseTitle: baseReleaseData.title,
+        artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+      });
+    }
 
     const response: ReleaseSubmitSuccessResponse & { payment_required?: true; paid?: false } = {
       ok: true,
@@ -880,11 +886,7 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
         withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation")
       ) as Prisma.InputJsonValue
     });
-    notifications.push({
-      releaseId: existing.id,
-      releaseTitle: baseReleaseData.title,
-      artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
-    });
+    // Not paid yet: it waits for payment, and the admin is told once it is paid.
 
     const response: ReleaseSubmitSuccessResponse & {
       payment_required: true;
@@ -897,8 +899,8 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       paid: false,
       ...(freeReleaseFallback ? { freeReleaseFallback: freeReleaseFallback.message } : {}),
       message: fallbackNote + (quota.isActive
-        ? "Релиз отправлен на модерацию. Лимит подписки исчерпан, релиз нужно оплатить отдельно."
-        : "Релиз отправлен на модерацию. Активной подписки нет, релиз нужно оплатить отдельно.")
+        ? "Релиз сохранён и ждёт оплаты: лимит подписки исчерпан. Модерация начнётся сразу после оплаты."
+        : "Релиз сохранён и ждёт оплаты: активной подписки нет. Модерация начнётся сразу после оплаты.")
     };
 
     return NextResponse.json(response, { status: 200 });

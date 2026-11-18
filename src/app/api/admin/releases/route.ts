@@ -8,6 +8,7 @@ import { canManageReleasesSession } from "@/lib/admin-release-service";
 
 const allowedStatuses = new Set<AdminReleaseStatusFilter>([
   "moderation",
+  "awaiting_payment",
   "pending_verification",
   "deletion_requests",
   "all",

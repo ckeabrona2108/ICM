@@ -1,4 +1,5 @@
 import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
+import { isReleaseAwaitingPayment } from "@/lib/release-awaiting-payment";
 import { prisma } from "@/lib/prisma";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
@@ -41,6 +42,7 @@ function readCopyChangeSummary(roles: unknown): { changeAreas?: ReleaseChangeAre
 
 export type AdminReleaseStatusFilter =
   | "moderation"
+  | "awaiting_payment"
   | "pending_verification"
   | "deletion_requests"
   | "all"
@@ -130,7 +132,10 @@ function matchStatus(source: {
   if (filter === "approved") return accepted;
   if (filter === "rejected") return status === "rejected";
   if (filter === "pending_verification") return status === "pending_verification";
-  return isActuallyOnModeration(source);
+  // Sent but not paid yet: not a moderator's work until the payment arrives.
+  const awaitingPayment = isReleaseAwaitingPayment(source);
+  if (filter === "awaiting_payment") return awaitingPayment;
+  return isActuallyOnModeration(source) && !awaitingPayment;
 }
 
 export function resolveAdminReleaseCoverUrl(input: {
@@ -383,7 +388,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
           ? "Оплачен ранее"
           : source.confirmed
           ? paymentDisplay?.label ?? "Оплачен/Подтверждён"
-          : supplementLabel ?? "Не оплачен/Не подтверждён",
+          : supplementLabel ?? (onModeration ? "Ждёт оплаты" : "Не оплачен/Не подтверждён"),
         paymentUsage: null,
         paymentPlan: paymentDisplay?.usage?.plan ?? null,
         metadataLanguage: source.language,

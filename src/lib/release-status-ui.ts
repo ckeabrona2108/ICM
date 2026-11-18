@@ -55,9 +55,14 @@ function normalizeStatusKey(status: string): UiReleaseStatus | null {
   return statusAliases[normalized] ?? null;
 }
 
-export function getReleaseStatusDescriptor(status: string): ReleaseStatusDescriptor | null {
+/**
+ * `paid: false` on a release "on moderation" means it was sent but not paid yet: moderation has
+ * not started and will only after the payment, so the artist sees "Ожидает оплаты" instead.
+ */
+export function getReleaseStatusDescriptor(status: string, paid?: boolean): ReleaseStatusDescriptor | null {
   const key = normalizeStatusKey(status);
   if (!key) return null;
+  if (key === "moderation" && paid === false) return { label: "Ожидает оплаты", variant: "warning" };
   return releaseStatusDescriptorMap[key];
 }
 

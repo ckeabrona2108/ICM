@@ -31,7 +31,7 @@ export function ReleaseGridCard({ release }: { release: CabinetRelease }) {
     release.cover ||
     "";
   const coverSrc = !coverBroken ? resolveRenderableStoredFileUrl({ url: coverSource, storageKey: null }) : null;
-  const status = getReleaseStatusDescriptor(release.status);
+  const status = getReleaseStatusDescriptor(release.status, release.paid);
   // Неоплаченный релиз на модерации: по клику открывается страница релиза с оплатой.
   const awaitingPayment = getReleaseTimelineState(release.status, release.paid).showPayButton;
   const href =

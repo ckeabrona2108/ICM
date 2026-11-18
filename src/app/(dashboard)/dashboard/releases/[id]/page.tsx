@@ -105,7 +105,7 @@ export default async function ReleaseDetailsPage({
             <CardTitle>Информация о релизе</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
-            <Row label="Status" value={<StatusBadge status={release.status} />} />
+            <Row label="Status" value={<StatusBadge status={release.status} paid={release.paid} />} />
             <Row label="Оплата" value={release.paymentLabel || (release.paid ? "Оплачен" : "Не оплачен")} />
             {paymentResult?.applied ? (
               <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">

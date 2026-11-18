@@ -32,6 +32,8 @@ export interface TelegramContractSignedNotificationPayload {
 export interface TelegramReleaseModerationNotificationPayload {
   releaseTitle: string;
   artistName: string;
+  /** Sent when a release that waited for payment was paid and only now enters the queue. */
+  paid?: boolean;
 }
 
 function resolveAppUrl(): string {
@@ -219,7 +221,9 @@ export async function notifyAdminContractSigned(
 export function buildReleaseModerationTelegramText(
   payload: TelegramReleaseModerationNotificationPayload
 ): string {
-  return `Релиз на модерацию: ${payload.releaseTitle} — ${payload.artistName}`;
+  return payload.paid
+    ? `Релиз оплачен и ждёт модерации: ${payload.releaseTitle} — ${payload.artistName}`
+    : `Релиз на модерацию: ${payload.releaseTitle} — ${payload.artistName}`;
 }
 
 export async function notifyAdminReleaseSubmitted(

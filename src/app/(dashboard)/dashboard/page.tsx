@@ -224,7 +224,7 @@ export default async function DashboardPage() {
                       <span className="block truncate text-[15px] font-semibold text-white">{release.title}</span>
                       <span className="block truncate text-[13px] text-white/45">{release.artist}</span>
                     </span>
-                    <StatusBadge status={release.status} />
+                    <StatusBadge status={release.status} paid={release.paid} />
                   </Link>
                 </li>
               ))}

@@ -14,6 +14,7 @@ export type DashboardOverviewRelease = {
   title: string;
   artist: string;
   status: CabinetReleaseStatus;
+  paid: boolean;
   coverSrc: string | null;
   releaseDate: string;
 };
@@ -83,6 +84,7 @@ export async function getDashboardOverview(userId: string): Promise<DashboardOve
                 title: release.title?.trim() || "Без названия",
                 artist: release.artist?.trim() || "Исполнитель не указан",
                 status: release.status,
+                paid: release.paid,
                 coverSrc: coverSource ? resolveRenderableStoredFileUrl({ url: coverSource, storageKey: null }) : null,
                 releaseDate: release.releaseDate?.trim() || ""
               };

@@ -24,6 +24,8 @@ import {
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
 import { readPendingExtrasSupplement, withExtrasSupplementPaid } from "@/lib/release-extras-supplement";
+import { getReleaseLifecycleStatus } from "@/lib/release-counts";
+import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 import { normalizeSubscriptionBillingPeriod } from "@/lib/subscription-billing";
 import { grantSubscriptionFromConfirmedPayment } from "@/lib/subscription-payment-service";
 import { sendAiTokensCreditedEmail, sendAiTokensPendingEmail } from "@/lib/user-event-email";
@@ -337,7 +339,7 @@ async function applyConfirmedOrder(params: {
     if (releaseId) {
       const release = await params.prisma.release.findFirst({
         where: { id: releaseId, userId: params.order.userId },
-        select: { id: true, roles: true, confirmed: true }
+        select: { id: true, roles: true, confirmed: true, status: true, title: true, performer: true }
       });
       // A supplement for added extras keeps the release's original payment record.
       const supplementRoles =
@@ -351,14 +353,25 @@ async function applyConfirmedOrder(params: {
             buildStandalonePaymentUsage({ orderId: params.order.id })
           );
       if (release && !release.confirmed) {
-        await params.prisma.release.updateMany({
-          where: { id: releaseId, userId: params.order.userId },
+        // Only the request that actually confirms the release enters it into the queue and
+        // tells the admin (the webhook and the return page may apply the same payment).
+        const entered = await params.prisma.release.updateMany({
+          where: { id: releaseId, userId: params.order.userId, confirmed: false },
           data: {
             confirmed: true,
             status: "moderating",
             roles: markSubmittedToModeration(paymentRoles)
           }
         });
+        if (entered.count > 0 && getReleaseLifecycleStatus(release.status, release.roles) === "moderation") {
+          void notifyAdminReleaseSubmitted({
+            releaseTitle: release.title?.trim() || "Без названия",
+            artistName: release.performer?.trim() || "Неизвестный исполнитель",
+            paid: true
+          }).catch((error) => {
+            console.error("[telegram] paid release notification failed", { releaseId, error });
+          });
+        }
       } else if (release && !readMetadata(readMetadata(release.roles).paymentUsage).type) {
         // Already marked paid (e.g. by an admin) and possibly approved: keep its status,
         // only record which payment covered it.

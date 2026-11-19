@@ -5,6 +5,8 @@ import * as React from "react";
 import { FINANCE_RULE_LABELS } from "@/lib/finance-import-overview";
 import type { SupplementCandidate, UnallocatedImportSummary } from "@/lib/finance-unallocated";
 
+import { FinanceUnallocatedDetails } from "./finance-unallocated-details";
+
 type Overview = { totalAmount: number; totalRows: number; imports: UnallocatedImportSummary[] };
 type ScanStats = {
   scannedRows: number;
@@ -39,6 +41,8 @@ export function FinanceUnallocatedPanel({ onApplied }: { onApplied?: () => void 
   const [applyingKey, setApplyingKey] = React.useState<string | null>(null);
   const [periods, setPeriods] = React.useState<Record<string, { quarter: number; year: number }>>({});
   const [showImports, setShowImports] = React.useState(false);
+  const [showDetails, setShowDetails] = React.useState(false);
+  const [detailsImportId, setDetailsImportId] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
   const [done, setDone] = React.useState<string | null>(null);
 
@@ -141,6 +145,15 @@ export function FinanceUnallocatedPanel({ onApplied }: { onApplied?: () => void 
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {overview && overview.totalRows > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowDetails((value) => !value)}
+              className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-[13px] text-white/70 hover:text-white"
+            >
+              {showDetails ? "Скрыть, что внутри" : "Что внутри"}
+            </button>
+          ) : null}
           {overview && overview.imports.length ? (
             <button
               type="button"
@@ -173,6 +186,7 @@ export function FinanceUnallocatedPanel({ onApplied }: { onApplied?: () => void 
                 <th className="px-3 py-2 font-medium">Было нераспределено</th>
                 <th className="px-3 py-2 font-medium">Доначислено позже</th>
                 <th className="px-3 py-2 font-medium">Осталось</th>
+                <th className="px-3 py-2 font-medium" />
               </tr>
             </thead>
             <tbody>
@@ -183,11 +197,34 @@ export function FinanceUnallocatedPanel({ onApplied }: { onApplied?: () => void 
                   <td className="px-3 py-2">{rub.format(item.unallocatedAmount)}</td>
                   <td className="px-3 py-2">{item.supplementedAmount ? rub.format(item.supplementedAmount) : "—"}</td>
                   <td className="px-3 py-2 font-semibold text-white">{rub.format(item.remainingAmount)}</td>
+                  <td className="px-3 py-2">
+                    {item.remainingRows > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailsImportId(item.importId);
+                          setShowDetails(true);
+                        }}
+                        className="whitespace-nowrap font-semibold text-[#b79bff] hover:text-white"
+                      >
+                        Что внутри
+                      </button>
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      ) : null}
+
+      {showDetails && overview ? (
+        <FinanceUnallocatedDetails
+          imports={overview.imports.filter((item) => item.remainingRows > 0)}
+          importId={detailsImportId}
+          onImportChange={setDetailsImportId}
+          reloadKey={overview}
+        />
       ) : null}
 
       {stats ? (

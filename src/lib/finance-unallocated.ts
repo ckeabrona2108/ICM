@@ -249,3 +249,137 @@ function toAmount(value: unknown): number {
 function round(value: number): number {
   return Number(value.toFixed(2));
 }
+
+// ---------------------------------------------------------------------------------------------
+// "Что внутри": the money still in the pool, one line per track, to see whose it is and why it
+// matched nobody. Read-only.
+
+export type UnallocatedDetailRow = {
+  id: string;
+  import_id: string;
+  action: string;
+  user_id?: string | null;
+  gross_amount?: unknown;
+  error_message?: string | null;
+  normalized_data?: unknown;
+};
+
+export type UnallocatedTrackGroup = {
+  key: string;
+  title: string;
+  artist: string;
+  album: string;
+  isrc: string;
+  upcs: string[];
+  codes: string[];
+  platforms: string[];
+  imports: Array<{ importId: string; fileName: string; quarterLabel: string }>;
+  rows: number;
+  streams: number;
+  amount: number;
+  reasons: string[];
+};
+
+const REASON_TRANSLATIONS: Record<string, string> = {
+  "UPC was not found in catalog.": "UPC не найден в каталоге",
+  "Financial row is missing UPC.": "В строке нет UPC",
+  "Multiple tracks found by ISRC": "По ISRC нашлось несколько треков",
+  "Fuzzy match found but needs review": "Похожий трек найден, нужна проверка"
+};
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : typeof value === "number" ? String(value) : "";
+}
+
+export const EMPTY_ROW_REASON = "Пустая строка: нет названия, артиста и UPC — похоже на итоговую строку файла";
+
+function readReason(row: UnallocatedDetailRow, data: Record<string, unknown>): string {
+  if (!text(data.title) && !text(data.artist) && !text(data.upc) && !text(data.isrc)) return EMPTY_ROW_REASON;
+  const preview = (data.__preview ?? {}) as Record<string, unknown>;
+  const raw = text(row.error_message) || text(preview.reason);
+  if (raw) return REASON_TRANSLATIONS[raw] ?? raw;
+  if (row.user_id) return "Строка не применена";
+  return "Владелец не найден";
+}
+
+export function formatQuarterLabel(quarter: number | null, year: number | null): string {
+  return quarter && year ? `${quarter} кв ${year}` : "квартал не указан";
+}
+
+/** The same track across rows and imports: by ISRC, then UPC + title, then title + artist. */
+export function unallocatedTrackKey(data: Record<string, unknown>): string {
+  const isrc = text(data.isrc).toUpperCase();
+  if (isrc) return `isrc:${isrc}`;
+  const title = text(data.title).toLowerCase();
+  const upc = text(data.upc);
+  if (upc) return `upc:${upc}|${title}`;
+  return `t:${title}|a:${text(data.artist).toLowerCase()}`;
+}
+
+function addUnique(list: string[], value: string) {
+  if (value && !list.includes(value)) list.push(value);
+}
+
+export function groupUnallocatedRows(params: {
+  rows: UnallocatedDetailRow[];
+  imports: Map<string, { fileName: string; quarter: number | null; year: number | null }>;
+  claimed: Set<string>;
+}): { totalAmount: number; totalRows: number; groups: UnallocatedTrackGroup[] } {
+  const groups = new Map<string, UnallocatedTrackGroup & { reasonCounts: Map<string, number> }>();
+  for (const row of params.rows) {
+    if (!isUnallocatedRow(row) || params.claimed.has(row.id)) continue;
+    const source = params.imports.get(row.import_id);
+    if (!source) continue;
+    const data = (row.normalized_data && typeof row.normalized_data === "object" ? row.normalized_data : {}) as Record<string, unknown>;
+    const key = unallocatedTrackKey(data);
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        title: text(data.title) || "Без названия",
+        artist: text(data.artist),
+        album: text(data.album_title),
+        isrc: text(data.isrc).toUpperCase(),
+        upcs: [],
+        codes: [],
+        platforms: [],
+        imports: [],
+        rows: 0,
+        streams: 0,
+        amount: 0,
+        reasons: [],
+        reasonCounts: new Map()
+      };
+      groups.set(key, group);
+    }
+    if (!group.artist) group.artist = text(data.artist);
+    if (!group.album) group.album = text(data.album_title);
+    addUnique(group.upcs, text(data.upc));
+    addUnique(group.codes, text(data.internal_code) || text(data.licensee_code));
+    for (const platform of text(data.platform).split(",")) addUnique(group.platforms, platform.trim());
+    if (!group.imports.some((item) => item.importId === row.import_id)) {
+      group.imports.push({
+        importId: row.import_id,
+        fileName: source.fileName,
+        quarterLabel: formatQuarterLabel(source.quarter, source.year)
+      });
+    }
+    const reason = readReason(row, data);
+    group.reasonCounts.set(reason, (group.reasonCounts.get(reason) ?? 0) + 1);
+    group.rows += 1;
+    group.streams += Number(text(data.streams).replace(/\s/gu, "").replace(",", ".")) || 0;
+    group.amount += toAmount(row.gross_amount);
+  }
+  const list = [...groups.values()]
+    .map(({ reasonCounts, ...group }) => ({
+      ...group,
+      amount: round(group.amount),
+      reasons: [...reasonCounts.entries()].sort((a, b) => b[1] - a[1]).map(([reason]) => reason)
+    }))
+    .sort((left, right) => right.amount - left.amount || left.title.localeCompare(right.title, "ru"));
+  return {
+    totalAmount: round(list.reduce((sum, group) => sum + group.amount, 0)),
+    totalRows: list.reduce((sum, group) => sum + group.rows, 0),
+    groups: list
+  };
+}

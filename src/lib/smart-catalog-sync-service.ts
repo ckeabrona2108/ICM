@@ -22,6 +22,7 @@ import {
   describeSourceRollbackBlock,
   findActiveSupplementsOf,
   groupSupplementCandidates,
+  groupUnallocatedRows,
   readSupplementSummary,
   summarizeUnallocated,
   supplementReportComment,
@@ -3803,6 +3804,58 @@ export async function getFinanceUnallocatedOverview() {
     select: { id: true, import_id: true, action: true, user_id: true, gross_amount: true }
   });
   return summarizeUnallocated({ imports: sources, rows, claimed: collectClaimedSourceRowIds(supplements) });
+}
+
+/** "Что внутри": the money still in the pool grouped by track, optionally of one import. */
+export async function getFinanceUnallocatedDetails(params: { importId?: string } = {}) {
+  const [sources, supplements] = await Promise.all([loadUnallocatedSources(params.importId), loadSupplementImports()]);
+  if (!sources.length) return { totalAmount: 0, totalRows: 0, groups: [] };
+  const rows = await prisma.financial_import_rows.findMany({
+    where: unallocatedRowsWhere(sources.map((item) => item.id)),
+    select: {
+      id: true,
+      import_id: true,
+      action: true,
+      user_id: true,
+      gross_amount: true,
+      error_message: true,
+      normalized_data: true
+    }
+  });
+  return groupUnallocatedRows({
+    rows,
+    imports: new Map(
+      sources.map((item) => [item.id, { fileName: item.source_file_name, quarter: item.quarter, year: item.year }])
+    ),
+    claimed: collectClaimedSourceRowIds(supplements)
+  });
+}
+
+export async function buildFinanceUnallocatedWorkbook(params: { importId?: string } = {}) {
+  const details = await getFinanceUnallocatedDetails(params);
+  const sheetRows = details.groups.map((group) => ({
+    "Трек": group.title,
+    "Артист": group.artist,
+    "Альбом": group.album,
+    ISRC: group.isrc,
+    UPC: group.upcs.join(", "),
+    "Код": group.codes.join(", "),
+    "Площадки": group.platforms.join(", "),
+    "Импорты": group.imports.map((item) => `${item.fileName} (${item.quarterLabel})`).join("; "),
+    "Строк": group.rows,
+    "Прослушивания": group.streams,
+    "Сумма, ₽": group.amount,
+    "Почему не распределено": group.reasons.join("; ")
+  }));
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.json_to_sheet(sheetRows);
+  worksheet["!cols"] = [32, 24, 24, 16, 18, 14, 28, 40, 8, 14, 12, 40].map((wch) => ({ wch }));
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Нераспределённое");
+  const day = new Date().toISOString().slice(0, 10);
+  return {
+    buffer: XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer,
+    fileName: `unallocated-${params.importId ? `${params.importId.slice(0, 8)}-` : ""}${day}.xlsx`
+  };
 }
 
 type ScannedCandidateRow = CandidateRow & {

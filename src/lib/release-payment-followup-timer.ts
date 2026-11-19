@@ -1,3 +1,4 @@
+import { runAccountReminders } from "@/lib/account-lifecycle-notifications";
 import { prisma } from "@/lib/prisma";
 import { runReleasePaymentFollowup } from "@/lib/release-payment-followup";
 
@@ -22,6 +23,16 @@ async function runOnce() {
     }
   } catch (error) {
     console.error("[release-payment-followup] run failed", error);
+  }
+  // Delayed account reminders (signup, draft, release out, next release, subscription end):
+  // the same 10-minute beat, daytime in Moscow only, each reminder claimed once.
+  try {
+    const reminders = await runAccountReminders({ prisma });
+    if (reminders.sent.length || reminders.errors.length) {
+      console.info("[account-reminders]", { sent: reminders.sent.length, errors: reminders.errors });
+    }
+  } catch (error) {
+    console.error("[account-reminders] run failed", error);
   } finally {
     running = false;
   }
@@ -34,5 +45,5 @@ export function startReleasePaymentFollowupTimer() {
   const timer = setInterval(() => void runOnce(), INTERVAL_MS);
   timer.unref?.();
   globalForTimer.releasePaymentFollowupTimer = timer;
-  console.info("[release-payment-followup] in-app schedule started, every 10 minutes");
+  console.info("[release-payment-followup] in-app schedule started, every 10 minutes (with account reminders)");
 }

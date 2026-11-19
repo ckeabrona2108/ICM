@@ -22,6 +22,7 @@ export function VideoSnippetsPage({
   const artist = firstParam(searchParams?.artist);
   const coverUrl = firstParam(searchParams?.cover);
   const audioUrl = firstParam(searchParams?.audio);
+  const releaseId = firstParam(searchParams?.releaseId);
   const isClassic = firstParam(searchParams?.editor) === "classic";
 
   return (
@@ -58,7 +59,7 @@ export function VideoSnippetsPage({
           }}
         />
       ) : (
-        <SnippetStudio initialSeed={{ title, artist, coverUrl, audioUrl }} />
+        <SnippetStudio initialSeed={{ title, artist, coverUrl, audioUrl, releaseId }} />
       )}
     </DashboardShell>
   );

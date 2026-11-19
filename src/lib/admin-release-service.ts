@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 import { sendReleaseDecisionEmail } from "@/lib/user-event-email";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
-import { buildReleaseApprovedVkMessage, RELEASE_APPROVED_VK_HREF } from "@/lib/vk-messages";
+import { buildReleaseApprovedVkMessage, buildSnippetStudioHref } from "@/lib/vk-messages";
 import type { ModerationRemark } from "@/lib/cabinet-types";
 import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
 import { withReleaseTimelineStamp } from "@/lib/release-timeline";
@@ -457,7 +457,8 @@ export async function approveReleaseByAdmin(params: {
     message: `Релиз «${release.title ?? "Без названия"}» принят. Загрузите 30-секундный фрагмент, чтобы попасть на витрину.`,
     href: `/dashboard/showcase?releaseId=${encodeURIComponent(release.id)}`,
     vkMessage: buildReleaseApprovedVkMessage(release.title),
-    vkHref: RELEASE_APPROVED_VK_HREF,
+    // Approval means the release goes out to the platforms: in VK the artist is offered a story snippet.
+    vkHref: buildSnippetStudioHref(release.id),
     sendEmail: false,
     resetReadState: true
   });

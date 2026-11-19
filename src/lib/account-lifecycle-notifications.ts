@@ -4,10 +4,11 @@ import { deliverUserNotificationSafely } from "@/lib/notification-delivery-servi
 import { mapReleaseStatusToSection, shouldTreatReleaseAsApproved } from "@/lib/release-counts";
 import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 import { getDraftLastChangedAt } from "@/lib/draft-retention";
+import { toAbsoluteAppUrl } from "@/lib/vk-messages";
 
 // Account events that no user action triggers directly: the welcome, and the delayed reminders a
-// cron run sends (no track a day after signing up, an abandoned draft, a release that came out,
-// the next release after the free one). Every reminder goes to all channels once per user and key.
+// scheduled run sends (no track a day after signing up, an abandoned draft, a release that came out,
+// the next release after the free one, a subscription running out). Every reminder goes to all channels once per user and key.
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -24,6 +25,13 @@ export const ACCOUNT_REMINDER_WINDOWS = {
   // Three days after the free single was accepted.
   freeReleaseNext: { afterMs: 3 * DAY_MS, untilMs: 14 * DAY_MS }
 } as const;
+
+// Subscription end, counted from now: each stage covers one day, so a daytime run catches it once.
+export const SUBSCRIPTION_REMINDER_STAGES = [
+  { stage: "3d", fromMs: 2 * DAY_MS, toMs: 3 * DAY_MS },
+  { stage: "1d", fromMs: 0, toMs: DAY_MS },
+  { stage: "ended", fromMs: -DAY_MS, toMs: 0 }
+] as const;
 
 // Reminders wait for the daytime in Moscow (UTC+3, no DST): 09:00–22:00.
 export function isWithinReminderHours(now: Date): boolean {
@@ -85,6 +93,8 @@ type Reminder = {
   href: string;
   sourceType?: string;
   sourceId?: string;
+  /** When the event the reminder is about happened; events before the launch are not reminded. */
+  eventAt?: Date;
 };
 
 // Claims the reminder before sending it: a second cron run, or one running in parallel, skips it.
@@ -101,10 +111,10 @@ async function claimReminder(prisma: PrismaClient, userId: string, key: string):
 async function findSignupNoTrackReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
   const welcomes = await prisma.ai_user_notifications.findMany({
     where: { kind: WELCOME_KIND, created_at: windowRange(now, ACCOUNT_REMINDER_WINDOWS.signupNoTrack) },
-    select: { user_id: true }
+    select: { user_id: true, created_at: true }
   });
   const reminders: Reminder[] = [];
-  for (const { user_id: userId } of welcomes) {
+  for (const { user_id: userId, created_at: signedUpAt } of welcomes) {
     const tracks = await prisma.track.count({ where: { release: { userId } } });
     if (tracks > 0) continue;
     reminders.push({
@@ -113,7 +123,8 @@ async function findSignupNoTrackReminders(prisma: PrismaClient, now: Date): Prom
       kind: "account_signup_reminder",
       title: "Осталось 3 шага до релиза",
       message: "Загрузите трек, добавьте обложку и отправьте релиз на модерацию.",
-      href: "/dashboard/releases/new"
+      href: "/dashboard/releases/new",
+      eventAt: signedUpAt
     });
   }
   return reminders;
@@ -142,41 +153,57 @@ async function findAbandonedDraftReminders(prisma: PrismaClient, now: Date): Pro
       message: `Черновик «${title}» ждёт вас. Закончите загрузку и отправьте релиз на модерацию.`,
       href: `/dashboard/releases/${release.id}/edit`,
       sourceType: "release",
-      sourceId: release.id
+      sourceId: release.id,
+      eventAt: changedAt
     });
   }
   return reminders;
 }
 
 async function findReleaseOutReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
-  const releases = await prisma.release.findMany({
+  const found = await prisma.release.findMany({
     where: {
       startDate: windowRange(now, ACCOUNT_REMINDER_WINDOWS.releaseOut),
       OR: [{ status: "approved" }, { upc: { not: null } }]
     },
-    select: { id: true, title: true, userId: true, status: true, confirmed: true, upc: true, roles: true }
+    select: { id: true, title: true, userId: true, status: true, confirmed: true, upc: true, roles: true, startDate: true }
   });
-  return releases
-    .filter((release) => shouldTreatReleaseAsApproved(release) && !isReleaseHiddenFromCabinet(release.roles))
-    .map((release) => ({
+  const releases = found.filter(
+    (release) => shouldTreatReleaseAsApproved(release) && !isReleaseHiddenFromCabinet(release.roles)
+  );
+  if (releases.length === 0) return [];
+  // Smart links are made automatically: give the ready one to share.
+  const promos = await prisma.promo_links.findMany({
+    where: { releaseId: { in: releases.map((release) => release.id) } },
+    select: { releaseId: true, shortName: true }
+  });
+  const shortNameByRelease = new Map(promos.map((promo) => [promo.releaseId, promo.shortName]));
+  return releases.map((release) => {
+    const title = release.title?.trim() || "Без названия";
+    const shortName = shortNameByRelease.get(release.id);
+    return {
       userId: release.userId,
       key: `release_out:${release.id}`,
       kind: "release_published",
       title: "Релиз вышел",
-      message: `«${release.title?.trim() || "Без названия"}» уже на площадках. Соберите все ссылки на одной странице — создайте смарт-линк.`,
+      message: shortName
+        ? `«${title}» уже на площадках. Смарт-ссылка со всеми площадками — делитесь ей: ${toAbsoluteAppUrl(`/l/${shortName}`)}`
+        : `«${title}» уже на площадках. Ссылки на площадки появятся в смарт-ссылке, как только релиз найдётся на них.`,
       href: `/dashboard/releases/${release.id}/smart-link`,
       sourceType: "release",
-      sourceId: release.id
-    }));
+      sourceId: release.id,
+      eventAt: release.startDate ?? undefined
+    };
+  });
 }
 
 async function findFreeReleaseNextReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
   const claims = await prisma.free_release_claims.findMany({
     where: { consumed_at: windowRange(now, ACCOUNT_REMINDER_WINDOWS.freeReleaseNext) },
-    select: { user_id: true, release_id: true }
+    select: { user_id: true, release_id: true, consumed_at: true }
   });
   const reminders: Reminder[] = [];
-  for (const { user_id: userId, release_id: releaseId } of claims) {
+  for (const { user_id: userId, release_id: releaseId, consumed_at: consumedAt } of claims) {
     // Already working on the next one.
     const otherReleases = await prisma.release.count({ where: { userId, ...(releaseId ? { id: { not: releaseId } } : {}) } });
     if (otherReleases > 0) continue;
@@ -186,17 +213,138 @@ async function findFreeReleaseNextReminders(prisma: PrismaClient, now: Date): Pr
       kind: "release_next_offer",
       title: "Готовы ко второму релизу?",
       message: "Бесплатный сингл принят. Выпустите следующий релиз — загрузка займёт несколько минут.",
-      href: "/dashboard/releases/new"
+      href: "/dashboard/releases/new",
+      eventAt: consumedAt ?? undefined
     });
   }
   return reminders;
 }
 
+function formatMoscowDate(date: Date): string {
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long", timeZone: "Europe/Moscow" });
+}
+
+/** The reminder due for a subscription ending at `expiresAt`, or null. Exported for tests. */
+export function planSubscriptionReminder(expiresAt: Date, now: Date): Omit<Reminder, "userId"> | null {
+  const left = expiresAt.getTime() - now.getTime();
+  const due = SUBSCRIPTION_REMINDER_STAGES.find((item) => left > item.fromMs && left <= item.toMs);
+  if (!due) return null;
+  // Keyed by the end date too: after a renewal the next end gets its own reminders.
+  const key = `subscription_${due.stage}:${expiresAt.toISOString().slice(0, 10)}`;
+  const until = formatMoscowDate(expiresAt);
+  const href = "/dashboard/subscription";
+  if (due.stage === "ended") {
+    return {
+      key,
+      kind: "account_subscription_ended",
+      title: "Подписка закончилась",
+      message: "Новые релизы теперь ждут оплаты перед модерацией. Продлите подписку, чтобы выпускать их по подписке.",
+      href
+    };
+  }
+  return {
+    key,
+    kind: "account_subscription_ending",
+    title: due.stage === "3d" ? "Подписка заканчивается через 3 дня" : "Подписка заканчивается завтра",
+    message: `Подписка действует до ${until}. Продлите её, чтобы следующие релизы уходили на модерацию без отдельной оплаты.`,
+    href
+  };
+}
+
+async function findSubscriptionReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
+  const first = SUBSCRIPTION_REMINDER_STAGES.reduce((min, item) => Math.min(min, item.fromMs), 0);
+  const last = SUBSCRIPTION_REMINDER_STAGES.reduce((max, item) => Math.max(max, item.toMs), 0);
+  const users = await prisma.user.findMany({
+    where: {
+      isSubscribed: true,
+      expiresAt: { gt: new Date(now.getTime() + first), lte: new Date(now.getTime() + last) }
+    },
+    select: { id: true, expiresAt: true }
+  });
+  const reminders: Reminder[] = [];
+  for (const user of users) {
+    if (!user.expiresAt) continue;
+    const reminder = planSubscriptionReminder(user.expiresAt, now);
+    if (reminder) reminders.push({ ...reminder, userId: user.id });
+  }
+  return reminders;
+}
+
+/**
+ * Reminders started going out on 19.11.2026. What happened before that day is not reminded, so the
+ * first run does not drop a backlog of old drafts and signups on artists. Subscription ends are
+ * about money and are still reminded.
+ */
+export const ACCOUNT_REMINDERS_STARTED_AT = new Date("2026-11-19T00:00:00+03:00");
+
+/** Reminders and tips nobody asked for: an artist gets at most one of them a day. */
+export const NUDGE_KINDS = [
+  "account_signup_reminder",
+  "release_draft_reminder",
+  "release_published",
+  "release_next_offer",
+  "account_subscription_ending",
+  "account_subscription_ended",
+  "release_tip_snippet",
+  "release_tip_lyrics"
+];
+
+type NudgeDb = Pick<PrismaClient, "ai_user_notifications">;
+
+/** Artists who already got a reminder or a tip in the last 24 hours. */
+export async function findRecentlyNudgedUsers(db: NudgeDb, userIds: string[], now: Date): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  const rows = await db.ai_user_notifications.findMany({
+    where: {
+      user_id: { in: userIds },
+      kind: { in: NUDGE_KINDS },
+      created_at: { gte: new Date(now.getTime() - DAY_MS) }
+    },
+    select: { user_id: true }
+  });
+  return new Set(rows.map((row) => row.user_id));
+}
+
+/** Most important first: money, then unfinished work, then news and offers. */
+const REMINDER_PRIORITY = [
+  "account_subscription_ended",
+  "account_subscription_ending",
+  "release_draft_reminder",
+  "account_signup_reminder",
+  "release_published",
+  "release_next_offer"
+];
+
+function pluralDrafts(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return "черновик";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "черновика";
+  return "черновиков";
+}
+
+/** Several abandoned drafts of one artist become one message; the latest one is named. */
+function mergeDrafts(drafts: Reminder[]): Reminder {
+  if (drafts.length === 1) return drafts[0];
+  const latest = [...drafts].sort((a, b) => (b.eventAt?.getTime() ?? 0) - (a.eventAt?.getTime() ?? 0))[0];
+  const title = latest.message.match(/«(.*)»/u)?.[1] ?? "Без названия";
+  return {
+    ...latest,
+    title: "Черновики ждут отправки",
+    message: `У вас ${drafts.length} ${pluralDrafts(drafts.length)}, последний — «${title}». Закончите загрузку и отправьте релиз на модерацию.`,
+    href: "/dashboard/drafts",
+    sourceType: undefined,
+    sourceId: undefined
+  };
+}
+
 export async function runAccountReminders(params: {
   prisma: PrismaClient;
   now?: Date;
+  startedAt?: Date;
 }): Promise<AccountRemindersResult> {
   const now = params.now ?? new Date();
+  const startedAt = params.startedAt ?? ACCOUNT_REMINDERS_STARTED_AT;
   const result: AccountRemindersResult = { sent: [], errors: [] };
   if (!isWithinReminderHours(now)) return { ...result, skipped: "outside_reminder_hours" };
 
@@ -204,22 +352,54 @@ export async function runAccountReminders(params: {
     findSignupNoTrackReminders,
     findAbandonedDraftReminders,
     findReleaseOutReminders,
-    findFreeReleaseNextReminders
+    findFreeReleaseNextReminders,
+    findSubscriptionReminders
   ];
+  const byUser = new Map<string, Reminder[]>();
   for (const find of finders) {
-    let reminders: Reminder[];
     try {
-      reminders = await find(params.prisma, now);
+      for (const reminder of await find(params.prisma, now)) {
+        if (reminder.eventAt && reminder.eventAt < startedAt) continue;
+        byUser.set(reminder.userId, [...(byUser.get(reminder.userId) ?? []), reminder]);
+      }
     } catch (error) {
       result.errors.push({ id: find.name, error: error instanceof Error ? error.message : String(error) });
-      continue;
     }
-    for (const reminder of reminders) {
+  }
+  if (byUser.size === 0) return result;
+
+  let nudged: Set<string>;
+  try {
+    nudged = await findRecentlyNudgedUsers(params.prisma, [...byUser.keys()], now);
+  } catch (error) {
+    // Without knowing who was reminded today, send nothing rather than risk a burst.
+    result.errors.push({ id: "recent_nudges", error: error instanceof Error ? error.message : String(error) });
+    return result;
+  }
+
+  for (const [userId, reminders] of byUser) {
+    // One reminder a day: the rest wait for the next days while they are still relevant.
+    if (nudged.has(userId)) continue;
+    const groups = new Map<string, Reminder[]>();
+    for (const reminder of reminders) groups.set(reminder.kind, [...(groups.get(reminder.kind) ?? []), reminder]);
+    const kinds = [...groups.keys()].sort((a, b) => REMINDER_PRIORITY.indexOf(a) - REMINDER_PRIORITY.indexOf(b));
+
+    for (const kind of kinds) {
+      const group = groups.get(kind) ?? [];
       try {
-        if (!(await claimReminder(params.prisma, reminder.userId, reminder.key))) continue;
+        const fresh: Reminder[] = [];
+        const mergeable = kind === "release_draft_reminder";
+        for (const reminder of group) {
+          if (await claimReminder(params.prisma, userId, reminder.key)) fresh.push(reminder);
+          // Other kinds go one per day: the next release waits for tomorrow, unclaimed.
+          if (!mergeable && fresh.length > 0) break;
+        }
+        if (fresh.length === 0) continue;
+        // Several reminders of one kind (only drafts can repeat) go out as one message.
+        const reminder = mergeable ? mergeDrafts(fresh) : fresh[0];
         await deliverUserNotificationSafely(params.prisma, {
-          id: `account-reminder-${reminder.userId}-${reminder.key}`,
-          userId: reminder.userId,
+          id: `account-reminder-${userId}-${reminder.key}`,
+          userId,
           kind: reminder.kind,
           title: reminder.title,
           message: reminder.message,
@@ -229,12 +409,11 @@ export async function runAccountReminders(params: {
           sourceId: reminder.sourceId,
           resetReadState: true
         });
-        result.sent.push({ userId: reminder.userId, key: reminder.key });
+        for (const sent of fresh) result.sent.push({ userId, key: sent.key });
+        break;
       } catch (error) {
-        result.errors.push({
-          id: `${reminder.userId}:${reminder.key}`,
-          error: error instanceof Error ? error.message : String(error)
-        });
+        result.errors.push({ id: `${userId}:${kind}`, error: error instanceof Error ? error.message : String(error) });
+        break;
       }
     }
   }

@@ -1,11 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { findRecentlyNudgedUsers } from "@/lib/account-lifecycle-notifications";
 import { deliverUserNotificationSafely, type UserNotificationEvent } from "@/lib/notification-delivery-service";
 import { toNotificationStorageId } from "@/lib/notification-storage-id";
 import { getReleaseLifecycleStatus } from "@/lib/release-counts";
 import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 import { getSceneShowcaseState } from "@/lib/scene-showcase-state";
 import { isMergedResubmissionCopy } from "@/lib/release-timeline";
+import { buildSnippetStudioHref } from "@/lib/vk-messages";
 
 /**
  * Tips sent once after a release is approved, each only while it still helps:
@@ -68,7 +70,7 @@ export function planReleaseTips(releases: ReadonlyArray<ReleaseTipCandidate>, no
         message: hasShowcaseFragment
           ? `Вертикальное видео с треком «${title}» для сторис, Reels и клипов VK собирается в Snippet Studio за пару минут.`
           : `Вертикальное видео с треком «${title}» для сторис, Reels и клипов VK собирается в Snippet Studio за пару минут. И загрузите 30-секундный фрагмент — релиз попадёт на витрину.`,
-        href: "/dashboard/video-snippets"
+        href: buildSnippetStudioHref(release.id)
       });
     }
 
@@ -93,7 +95,10 @@ export function planReleaseTips(releases: ReadonlyArray<ReleaseTipCandidate>, no
   return events;
 }
 
-/** Daily: sends the tips due now, each tip at most once per release. */
+/**
+ * Daily: sends the tips due now, each tip at most once per release. Like the account reminders,
+ * an artist gets at most one tip or reminder a day; the rest wait for the next days in their window.
+ */
 export async function runReleaseTipsJob(prisma: PrismaClient, now = new Date()): Promise<{ sent: number }> {
   const since = new Date(now.getTime() - (LYRICS_TIP_AFTER_DAYS + TIP_WINDOW_DAYS + 1) * DAY_MS);
   const releases = await prisma.release.findMany({
@@ -122,9 +127,12 @@ export async function runReleaseTipsJob(prisma: PrismaClient, now = new Date()):
     (await prisma.ai_user_notifications.findMany({ where: { id: { in: storageIds } }, select: { id: true } }))
       .map((row) => row.id)
   );
+  const due = events.filter((event) => !alreadySent.has(toNotificationStorageId(event.id)));
+  const nudged = await findRecentlyNudgedUsers(prisma, [...new Set(due.map((event) => event.userId))], now);
   let sent = 0;
-  for (const event of events) {
-    if (alreadySent.has(toNotificationStorageId(event.id))) continue;
+  for (const event of due) {
+    if (nudged.has(event.userId)) continue;
+    nudged.add(event.userId);
     await deliverUserNotificationSafely(prisma, event);
     sent += 1;
   }

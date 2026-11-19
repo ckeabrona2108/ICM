@@ -3,12 +3,18 @@ import test from "node:test";
 
 import { Prisma } from "@prisma/client";
 
-import { isWithinReminderHours, runAccountReminders, WELCOME_KIND } from "@/lib/account-lifecycle-notifications";
+import {
+  isWithinReminderHours,
+  planSubscriptionReminder,
+  runAccountReminders,
+  WELCOME_KIND
+} from "@/lib/account-lifecycle-notifications";
 
 const HOUR_MS = 60 * 60 * 1000;
 // 12:00 in Moscow.
 const now = new Date("2026-11-02T09:00:00.000Z");
 const ago = (ms: number) => new Date(now.getTime() - ms);
+const EPOCH = new Date(0);
 
 function fakePrisma(data: {
   welcomes?: Array<{ user_id: string; created_at: Date }>;
@@ -17,14 +23,26 @@ function fakePrisma(data: {
   claims?: Array<{ user_id: string; release_id: string | null; consumed_at: Date }>;
   releaseCountByUser?: Record<string, number>;
   claimedKeys?: string[];
+  promos?: Array<{ releaseId: string; shortName: string }>;
+  subscribers?: Array<{ id: string; expiresAt: Date }>;
+  recentNudges?: Array<{ user_id: string; kind: string }>;
 }) {
   const claimed = new Set(data.claimedKeys ?? []);
   const notifications: Array<Record<string, unknown>> = [];
   const inRange = (date: Date, range: { gte: Date; lte: Date }) => date >= range.gte && date <= range.lte;
   const prisma = {
     ai_user_notifications: {
-      findMany: async (args: { where: { kind: string; created_at: { gte: Date; lte: Date } } }) =>
-        (data.welcomes ?? []).filter((row) => args.where.kind === WELCOME_KIND && inRange(row.created_at, args.where.created_at)),
+      findMany: async (args: { where: { kind: string | { in: string[] }; user_id?: { in: string[] }; created_at: { gte: Date; lte?: Date } } }) => {
+        const kind = args.where.kind;
+        if (typeof kind !== "string") {
+          // Reminders already sent in the last day (the daily cap).
+          return [...(data.recentNudges ?? []), ...notifications.map((row) => ({ user_id: String(row.user_id), kind: String(row.kind) }))]
+            .filter((row) => kind.in.includes(row.kind) && (args.where.user_id?.in ?? []).includes(row.user_id));
+        }
+        return (data.welcomes ?? []).filter(
+          (row) => kind === WELCOME_KIND && inRange(row.created_at, args.where.created_at as { gte: Date; lte: Date })
+        );
+      },
       upsert: async (args: { create: Record<string, unknown> }) => {
         notifications.push(args.create);
         return args.create;
@@ -55,7 +73,17 @@ function fakePrisma(data: {
         return args.data;
       }
     },
-    user: { findUnique: async () => null },
+    promo_links: {
+      findMany: async (args: { where: { releaseId: { in: string[] } } }) =>
+        (data.promos ?? []).filter((row) => args.where.releaseId.in.includes(row.releaseId))
+    },
+    user: {
+      findUnique: async () => null,
+      findMany: async (args: { where: { expiresAt: { gt: Date; lte: Date } } }) =>
+        (data.subscribers ?? []).filter(
+          (row) => row.expiresAt > args.where.expiresAt.gt && row.expiresAt <= args.where.expiresAt.lte
+        )
+    },
     push_subscriptions: { findMany: async () => [] },
     vk_links: { findUnique: async () => null }
   } as never;
@@ -86,7 +114,7 @@ test("a day after signing up without a track the artist gets the 3-steps reminde
     claimedKeys: ["u-done:signup_no_track"]
   });
 
-  const result = await runAccountReminders({ prisma, now });
+  const result = await runAccountReminders({ prisma, now, startedAt: EPOCH });
   assert.deepEqual(result.sent, [{ userId: "u-no-track", key: "signup_no_track" }]);
   assert.equal(notifications[0].title, "Осталось 3 шага до релиза");
   assert.equal(notifications[0].cta_href, "/dashboard/releases/new");
@@ -112,7 +140,7 @@ test("an abandoned draft is reminded two hours after the last change, with a lin
     ]
   });
 
-  const result = await runAccountReminders({ prisma, now });
+  const result = await runAccountReminders({ prisma, now, startedAt: EPOCH });
   assert.deepEqual(result.sent, [{ userId: "u1", key: "draft:11111111-1111-4111-8111-111111111111" }]);
   assert.equal(notifications[0].cta_href, "/dashboard/releases/11111111-1111-4111-8111-111111111111/edit");
   assert.match(String(notifications[0].message), /Draft 11111111/);
@@ -134,13 +162,37 @@ test("a release whose date has come gets the smart link offer; old ones do not",
       release("55555555-5555-4555-8555-555555555555", HOUR_MS),
       release("66666666-6666-4666-8666-666666666666", 10 * 24 * HOUR_MS),
       release("77777777-7777-4777-8777-777777777777", HOUR_MS, "rejected")
-    ]
+    ],
+    promos: [{ releaseId: "55555555-5555-4555-8555-555555555555", shortName: "hit" }]
   });
 
-  const result = await runAccountReminders({ prisma, now });
+  const result = await runAccountReminders({ prisma, now, startedAt: EPOCH });
   assert.deepEqual(result.sent, [{ userId: "u1", key: "release_out:55555555-5555-4555-8555-555555555555" }]);
   assert.equal(notifications[0].kind, "release_published");
   assert.equal(notifications[0].cta_href, "/dashboard/releases/55555555-5555-4555-8555-555555555555/smart-link");
+  assert.match(String(notifications[0].message), /\/l\/hit$/u);
+});
+
+test("a subscription gets a reminder 3 days and 1 day before its end and on the day it ends", () => {
+  const at = (ms: number) => new Date(now.getTime() + ms);
+  assert.equal(planSubscriptionReminder(at(2.5 * 24 * HOUR_MS), now)?.title, "Подписка заканчивается через 3 дня");
+  assert.equal(planSubscriptionReminder(at(1.5 * 24 * HOUR_MS), now), null);
+  assert.equal(planSubscriptionReminder(at(5 * HOUR_MS), now)?.title, "Подписка заканчивается завтра");
+  assert.equal(planSubscriptionReminder(at(-5 * HOUR_MS), now)?.kind, "account_subscription_ended");
+  assert.equal(planSubscriptionReminder(at(-3 * 24 * HOUR_MS), now), null);
+  assert.equal(planSubscriptionReminder(at(10 * 24 * HOUR_MS), now), null);
+});
+
+test("subscription reminders go once per end date, a renewal gets new ones", async () => {
+  const end = new Date(now.getTime() + 5 * HOUR_MS);
+  const { prisma, notifications } = fakePrisma({ subscribers: [{ id: "u9", expiresAt: end }] });
+  const first = await runAccountReminders({ prisma, now, startedAt: EPOCH });
+  const second = await runAccountReminders({ prisma, now, startedAt: EPOCH });
+  assert.deepEqual(first.sent, [{ userId: "u9", key: `subscription_1d:${end.toISOString().slice(0, 10)}` }]);
+  assert.deepEqual(second.sent, []);
+  assert.equal(notifications[0].cta_href, "/dashboard/subscription");
+  assert.equal(planSubscriptionReminder(new Date(end.getTime() + 30 * 24 * HOUR_MS), new Date(end.getTime() + 29.5 * 24 * HOUR_MS))?.key,
+    `subscription_1d:${new Date(end.getTime() + 30 * 24 * HOUR_MS).toISOString().slice(0, 10)}`);
 });
 
 test("after the free single the artist is offered a second release unless one already exists", async () => {
@@ -153,7 +205,50 @@ test("after the free single the artist is offered a second release unless one al
     releaseCountByUser: { "u-has-next": 1 }
   });
 
-  const result = await runAccountReminders({ prisma, now });
+  const result = await runAccountReminders({ prisma, now, startedAt: EPOCH });
   assert.deepEqual(result.sent, [{ userId: "u-free", key: "free_release_next" }]);
   assert.equal(notifications[0].title, "Готовы ко второму релизу?");
+});
+
+test("an artist gets one reminder a day: the most important first, several drafts as one message", async () => {
+  const draft = (id: string, title: string, changedAgoMs: number) => ({
+    id,
+    title,
+    userId: "u1",
+    status: "moderating",
+    confirmed: false,
+    upc: null,
+    roles: { lifecycleState: "draft", draftUpdatedAt: ago(changedAgoMs).toISOString() }
+  });
+  const { prisma, notifications } = fakePrisma({
+    releases: [
+      draft("11111111-1111-4111-8111-111111111111", "Старый", 20 * HOUR_MS),
+      draft("22222222-2222-4222-8222-222222222222", "Ночью", 3 * HOUR_MS),
+      draft("33333333-3333-4333-8333-333333333333", "Утро", 10 * HOUR_MS)
+    ],
+    welcomes: [{ user_id: "u1", created_at: ago(30 * HOUR_MS) }],
+    subscribers: [{ id: "u2", expiresAt: new Date(now.getTime() + 5 * HOUR_MS) }],
+    recentNudges: [{ user_id: "u2", kind: "release_tip_snippet" }]
+  });
+
+  const result = await runAccountReminders({ prisma, now, startedAt: EPOCH });
+  // u1: three drafts in one message, the signup reminder waits; u2 already got a tip today.
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].title, "Черновики ждут отправки");
+  assert.equal(notifications[0].cta_href, "/dashboard/drafts");
+  assert.match(String(notifications[0].message), /3 черновика, последний — «Ночью»/u);
+  assert.equal(result.sent.length, 3);
+
+  const again = await runAccountReminders({ prisma, now: new Date(now.getTime() + HOUR_MS), startedAt: EPOCH });
+  assert.deepEqual(again.sent, []);
+});
+
+test("events from before the reminders started are not reminded, subscription ends still are", async () => {
+  const { prisma, notifications } = fakePrisma({
+    welcomes: [{ user_id: "u1", created_at: ago(30 * HOUR_MS) }],
+    subscribers: [{ id: "u2", expiresAt: new Date(now.getTime() + 5 * HOUR_MS) }]
+  });
+  const result = await runAccountReminders({ prisma, now, startedAt: ago(HOUR_MS) });
+  assert.deepEqual(result.sent.map((item) => item.userId), ["u2"]);
+  assert.equal(notifications[0].kind, "account_subscription_ending");
 });

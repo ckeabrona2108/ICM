@@ -186,7 +186,9 @@ function SectionTitle(props: { children: React.ReactNode }) {
   return <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-white/60">{props.children}</div>;
 }
 
-export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: string; coverUrl?: string; audioUrl?: string } }) {
+export function SnippetStudio(props: {
+  initialSeed?: { title?: string; artist?: string; coverUrl?: string; audioUrl?: string; releaseId?: string };
+}) {
   const seed = props.initialSeed;
   const [settings, setSettings] = React.useState<SceneSettings>(() => {
     const initial = createDefaultSceneSettings();
@@ -340,6 +342,17 @@ export function SnippetStudio(props: { initialSeed?: { title?: string; artist?: 
       setAudioStatus("Не удалось загрузить аудио — загрузи файл вручную.");
     }
   };
+
+  // Opened from a notification or a release page: pick that release once the catalogue loads.
+  const seedReleaseId = seed?.releaseId;
+  const seededReleaseRef = React.useRef(false);
+  React.useEffect(() => {
+    if (seededReleaseRef.current || !seedReleaseId || !sources) return;
+    seededReleaseRef.current = true;
+    if (sources.some((item) => item.releaseId === seedReleaseId)) void selectRelease(seedReleaseId);
+    // Runs once, when the catalogue arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources, seedReleaseId]);
 
   const onAudioUpload = async (file: File | null) => {
     if (!file) return;

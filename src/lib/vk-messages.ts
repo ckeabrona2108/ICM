@@ -180,8 +180,10 @@ export function isVkNotificationKind(kind: string): boolean {
   return VK_NOTIFICATION_KINDS.has(kind) || VK_NOTIFICATION_KIND_PREFIXES.some((prefix) => kind.startsWith(prefix));
 }
 
-// Approval means the release goes out to the platforms: in VK the artist is offered a story snippet.
-export const RELEASE_APPROVED_VK_HREF = "/dashboard/video-snippets";
+/** Snippet Studio opened on this release: cover, track and smart link are filled in. */
+export function buildSnippetStudioHref(releaseId: string): string {
+  return `/dashboard/video-snippets?releaseId=${encodeURIComponent(releaseId)}`;
+}
 
 export function buildReleaseApprovedVkMessage(releaseTitle: string | null | undefined): string {
   return `Релиз «${releaseTitle?.trim() || "Без названия"}» принят и отправлен на площадки. Сделайте вертикальный сниппет для сторис в Snippet Studio:`;

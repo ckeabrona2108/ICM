@@ -27,7 +27,7 @@ export function LandingSubscriptionSection() {
           Выберите тариф под свой ритм релизов
         </h2>
         <p className="mx-auto mt-4 max-w-3xl text-[15px] leading-relaxed text-white/64 sm:text-[16px]">
-          Платите помесячно или сразу за год — годовая оплата выгоднее до 20%.
+          Платите помесячно или сразу за год — годовая оплата выгоднее на 40%. На ENTERPRISE артисту остаётся 100% дохода.
         </p>
       </Reveal>
 

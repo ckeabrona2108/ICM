@@ -18,6 +18,7 @@ import {
   Music2,
   PanelLeft,
   Plus,
+  Rocket,
   Sparkles,
   UserRound,
   Wallet
@@ -149,6 +150,11 @@ function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
       return {
         icon: MessageSquareText,
         toneClassName: "border-cyan-400/20 bg-cyan-500/10 text-cyan-200"
+      };
+    case "release_promo_status":
+      return {
+        icon: Rocket,
+        toneClassName: "border-fuchsia-400/20 bg-fuchsia-500/10 text-fuchsia-200"
       };
     case "artist_release_published":
     case "artist_post_published":

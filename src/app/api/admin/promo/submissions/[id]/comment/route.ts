@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { PromoValidationError, updatePromoSubmissionComment } from "@/lib/promo-service";
+import { notifyArtistPromoComment } from "@/lib/promo-notifications";
+import { getAdminPromoSubmissionById, PromoValidationError, updatePromoSubmissionComment } from "@/lib/promo-service";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +27,14 @@ export async function PATCH(request: Request, context: { params: { id: string } 
   }
 
   try {
+    const previous = await getAdminPromoSubmissionById(prisma, context.params.id).catch(() => null);
     const item = await updatePromoSubmissionComment({
       prisma,
       submissionId: context.params.id,
       adminId: auth.session.user.id,
       adminComment: payload.adminComment
     });
+    await notifyArtistPromoComment(prisma, item, previous?.adminComment ?? null);
     return NextResponse.json({ ok: true, item }, { status: 200 });
   } catch (error) {
     if (error instanceof PromoValidationError) {

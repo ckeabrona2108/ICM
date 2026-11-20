@@ -233,7 +233,7 @@ function PriceBreakdownDialog({
         </div>
 
         <p className="mt-2 px-1 text-[11.5px] text-white/40">
-          С подпиской текст, караоке и видео входят в тариф.{" "}
+          С подпиской PRO и ENTERPRISE текст, караоке и видео входят в тариф.{" "}
           <Link href="/dashboard/subscription" className="text-[#c4b5fd] transition hover:text-white">
             Тарифы
           </Link>

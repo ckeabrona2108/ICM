@@ -2,6 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { addMonths } from "date-fns";
 
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import { readPendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import { getReleaseResubmission } from "@/lib/release-resubmission";
 
 export type ReleaseQuotaPlan = "STANDARD" | "PRO" | "ENTERPRISE";
@@ -47,11 +48,19 @@ function mapSubscribeLevelToPlan(level: unknown): ReleaseQuotaPlan {
   return "STANDARD";
 }
 
+/**
+ * Lyrics, karaoke and video come free with PRO and ENTERPRISE. STANDARD covers the release
+ * itself; its extras are paid at the pay-as-you-go prices.
+ */
+export function extrasIncludedInSubscription(quota: Pick<UserReleaseQuota, "plan" | "isActive">): boolean {
+  return quota.isActive && quota.plan !== "STANDARD";
+}
+
 function includedLimitForPlan(plan: ReleaseQuotaPlan, active: boolean): number | null {
   if (!active) return 0;
   if (plan === "ENTERPRISE") return null;
   if (plan === "PRO") return 6;
-  return 2;
+  return 3;
 }
 
 function isInsidePeriod(value: Date, start: Date, end: Date): boolean {
@@ -84,6 +93,8 @@ function parseDate(value: unknown): Date | null {
 function readReleaseIdFromOrderMetadata(metadata: unknown): string | null {
   const record = asRecord(metadata);
   if (!record) return null;
+  // A paid supplement for extras does not turn a subscription release into a paid one.
+  if (record.extrasSupplement === true || record.extrasSupplement === "1") return null;
   return asString(record.releaseId);
 }
 
@@ -323,13 +334,12 @@ export async function getUserReleaseQuota(
 
   const [releases, releaseOrders] = await Promise.all([
     client.release.findMany({
-      where: {
-        userId,
-        confirmed: true
-      },
+      // Unpaid ones too: a STANDARD release waiting only for its extras already holds a slot.
+      where: { userId },
       select: {
         id: true,
         date: true,
+        confirmed: true,
         roles: true
       }
     }),
@@ -354,6 +364,9 @@ export async function getUserReleaseQuota(
   let used = 0;
   for (const release of releases) {
     const usage = getReleasePaymentUsageFromRoles(release.roles);
+    if (release.confirmed === false && !(usage?.type === "subscription" && readPendingExtrasSupplement(release.roles))) {
+      continue;
+    }
     if (usage?.type === "standalone_payment") continue;
     if (usage?.type === "partner_code") continue;
     if (usage?.type === "free_first_release") continue;

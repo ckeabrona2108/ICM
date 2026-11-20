@@ -13,7 +13,8 @@ import {
 } from "@/lib/release-presave";
 
 import { useWizard } from "./wizard-context";
-import { Checkbox, DateInput, FieldLabel, Select, TextArea, WizardCard } from "./wizard-ui";
+import { Checkbox, FieldLabel, Select, TextArea, WizardCard } from "./wizard-ui";
+import { ReleaseDatePicker } from "./release-date-picker";
 
 function formatRuDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
@@ -155,7 +156,7 @@ function PreSaveDateField({
   return (
     <div className="min-w-0">
       <FieldLabel>Дата pre-save</FieldLabel>
-      <DateInput value={date} onChange={onChange} max={latest || undefined} className="justify-start" />
+      <ReleaseDatePicker value={date} onChange={onChange} max={latest || undefined} promo={false} label="Дата pre-save" />
       {error ? (
         <p className="mt-2 text-[12px] text-rose-300">{error}</p>
       ) : (
@@ -357,10 +358,11 @@ export function StepExtras() {
             </div>
             {data.vkStartDate ? (
               <div className="mt-2">
-                <DateInput
+                <ReleaseDatePicker
                   value={data.vkStartDate.trim()}
                   onChange={(value) => set("vkStartDate", value)}
-                  className="justify-start"
+                  promo={false}
+                  label="Дата старта в VK Музыке"
                 />
               </div>
             ) : null}

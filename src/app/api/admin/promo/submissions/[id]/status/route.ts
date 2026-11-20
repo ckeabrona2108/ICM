@@ -2,8 +2,10 @@ import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
+import { notifyArtistPromoStatus } from "@/lib/promo-notifications";
 import { prisma } from "@/lib/prisma";
 import {
+  getAdminPromoSubmissionById,
   promoSubmissionStatuses,
   PromoValidationError,
   type PromoSubmissionStatus,
@@ -31,12 +33,14 @@ export async function PATCH(request: Request, context: { params: { id: string } 
   }
 
   try {
+    const previous = await getAdminPromoSubmissionById(prisma, context.params.id).catch(() => null);
     const item = await updatePromoSubmissionStatus({
       prisma,
       submissionId: context.params.id,
       adminId: auth.session.user.id,
       status: payload.status as PromoSubmissionStatus
     });
+    await notifyArtistPromoStatus(prisma, item, previous?.status ?? null);
     return NextResponse.json({ ok: true, item }, { status: 200 });
   } catch (error) {
     if (error instanceof PromoValidationError) {

@@ -132,7 +132,8 @@ export type DashboardNotificationKind =
   | "artist_release_liked"
   | "artist_release_commented"
   | "artist_release_comment_reacted"
-  | "artist_profile_followed";
+  | "artist_profile_followed"
+  | "release_promo_status";
 
 export interface DashboardNotificationItemResponse {
   id: string;
@@ -429,6 +430,8 @@ export interface AdminReleaseDetailsResponse {
   payment_label?: string;
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
+  /** Admin-only: how this release's royalties are commissioned. */
+  commission_basis?: string | null;
   priority: boolean;
   media_health?: {
     broken_cover: boolean;

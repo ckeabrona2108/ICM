@@ -115,7 +115,13 @@ function GlobalRateCard({ state, onState }: { state: CommissionState; onState: (
     <section className="rounded-2xl border border-white/[0.06] bg-[#161720] p-5">
       <h2 className="text-[18px] font-semibold text-white">Общая ставка</h2>
       <p className="mt-1 text-[13.5px] leading-relaxed text-white/52">
-        Действует для всех артистов, у которых нет индивидуальной ставки.
+        Действует для артистов без активной подписки и без индивидуальной ставки: разовые релизы и
+        бесплатный сингл.
+      </p>
+      <p className="mt-2 text-[12.5px] leading-relaxed text-white/40">
+        Релиз, отправленный по подписке, навсегда сохраняет ставку своего тарифа: STANDARD — 10%,
+        PRO — 5%, ENTERPRISE — 0%. Договор, индивидуальная ставка и ставка лейбла важнее тарифа.
+        Основание ставки видно в каждой строке импорта отчёта.
       </p>
       <p className="mt-4 text-[34px] font-semibold tabular-nums text-white">{formatPercent(state.globalPercent)}</p>
       <label className="mt-3 block text-[13px] font-semibold text-white/70">

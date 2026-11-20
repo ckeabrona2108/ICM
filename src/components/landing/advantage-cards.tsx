@@ -28,7 +28,7 @@ const ADVANTAGES: Advantage[] = [
   {
     icon: DollarSign,
     title: "Заработайте больше",
-    description: "Мы берём комиссию в 10%, что является одним из самых лучших результатов на рынке."
+    description: "На ENTERPRISE весь доход ваш — 100%, на PRO — 95%, на STANDARD — 90%."
   },
   {
     icon: Zap,

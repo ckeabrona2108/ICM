@@ -8,7 +8,8 @@ import {
   calculateSubscriptionEndDate,
   mapActivePlanToTariffId,
   getSubscriptionTariffConfig,
-  mapPlanToTariffId
+  mapPlanToTariffId,
+  isAcceptedSubscriptionAmount
 } from "@/lib/subscription-billing";
 
 test("getSubscriptionTariffConfig returns expected amount", () => {
@@ -20,10 +21,25 @@ test("getSubscriptionTariffConfig returns expected amount", () => {
 test("getSubscriptionTariffConfig returns yearly pricing metadata", () => {
   const tariff = getSubscriptionTariffConfig("standard", "yearly");
   assert.ok(tariff);
-  assert.equal(tariff?.amountRub, 5490);
+  assert.equal(tariff?.amountRub, 2520);
   assert.equal(tariff?.durationMonths, 12);
-  assert.equal(tariff?.yearlyMonthlyEquivalentRub, 458);
-  assert.equal(tariff?.yearlySavingsRub, 1110);
+  assert.equal(tariff?.yearlyMonthlyEquivalentRub, 210);
+  assert.equal(tariff?.yearlySavingsRub, 1680);
+  assert.equal(tariff?.yearlySavingsPercent, 40);
+});
+
+test("yearly price is 40% off twelve months on every tariff", () => {
+  assert.equal(getSubscriptionTariffConfig("standard")?.amountRub, 350);
+  assert.equal(getSubscriptionTariffConfig("pro", "yearly")?.amountRub, 7128);
+  assert.equal(getSubscriptionTariffConfig("enterprise", "yearly")?.amountRub, 14328);
+});
+
+test("a payment started at the old price is still accepted", () => {
+  assert.equal(isAcceptedSubscriptionAmount("standard", "monthly", 350), true);
+  assert.equal(isAcceptedSubscriptionAmount("standard", "monthly", 550), true);
+  assert.equal(isAcceptedSubscriptionAmount("standard", "yearly", 5490), true);
+  assert.equal(isAcceptedSubscriptionAmount("standard", "monthly", 100), false);
+  assert.equal(isAcceptedSubscriptionAmount("pro", "monthly", 550), false);
 });
 
 test("calculateSubscriptionEndDate extends yearly subscriptions by 12 months", () => {

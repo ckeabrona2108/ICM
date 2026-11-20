@@ -4,6 +4,7 @@ import * as aiStudioActivation from "@/lib/ai-studio-activation";
 import * as aiTokenService from "@/lib/ai-token-service";
 import {
   getSubscriptionTariffConfig,
+  isAcceptedSubscriptionAmount,
   normalizeSubscriptionBillingPeriod,
   type SubscriptionBillingPeriod,
   type SubscriptionTariffId
@@ -98,7 +99,7 @@ export function readConfirmedSubscriptionPayment(metadata: unknown): ParsedSubsc
   }
 
   const amountRub = parseAmountRub(payload.amountRub);
-  if (amountRub != null && amountRub != tariffConfig.amountRub) {
+  if (amountRub != null && !isAcceptedSubscriptionAmount(tariffId, billingPeriod, amountRub)) {
     throw new Error(
       `Subscription payment amount mismatch for ${tariffId}:${billingPeriod}. Expected ${tariffConfig.amountRub}, received ${amountRub}.`
     );

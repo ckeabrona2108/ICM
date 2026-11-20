@@ -3,6 +3,7 @@ import { ZodError } from "zod";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
+import { notifyAdminPromoSubmitted } from "@/lib/promo-notifications";
 import { prisma } from "@/lib/prisma";
 import {
   createPromoSubmission,
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
       userId: session.user.id,
       input: payload
     });
+    void notifyAdminPromoSubmitted(item);
     return NextResponse.json({ ok: true, item }, { status: 201 });
   } catch (error) {
     if (error instanceof PromoValidationError) {

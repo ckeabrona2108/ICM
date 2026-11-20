@@ -5,6 +5,7 @@ import { FinanceImportOverviewPanel } from "@/components/admin/finance-import-ov
 import { FinanceOrphanAccrualsPanel } from "@/components/admin/finance-orphan-accruals-panel";
 import { FinanceUnallocatedPanel } from "@/components/admin/finance-unallocated-panel";
 import { FINANCE_RULE_LABELS, type FinanceFileMeta } from "@/lib/finance-import-overview";
+import { COMMISSION_BASIS_KEY, describeCommissionBasis, readCommissionBasis } from "@/lib/commission-basis";
 
 type SmartKind = "catalog" | "finance";
 
@@ -1015,6 +1016,7 @@ export function AdminCatalogSyncClient() {
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Вознаграждение Лицензиара</th> : null}
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Комиссия ICECREAMMUSIC</th> : null}
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Комиссия %</th> : null}
+                        {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">Основание ставки</th> : null}
                         {selectedKind === "finance" ? <th className="px-3 py-2 font-medium">К начислению артисту</th> : null}
                         <th className="px-3 py-2 font-medium">{selectedKind === "finance" ? "Почему пропущено" : "Error"}</th>
                       </tr>
@@ -1049,6 +1051,11 @@ export function AdminCatalogSyncClient() {
                           ) : null}
                           {selectedKind === "finance" ? (
                             <td className="px-3 py-2 text-white/80">{formatNumber((Number(row.commission_rate ?? 0) * 100).toFixed(2))}%</td>
+                          ) : null}
+                          {selectedKind === "finance" ? (
+                            <td className="whitespace-nowrap px-3 py-2">
+                              <CommissionBasisBadge row={row} />
+                            </td>
                           ) : null}
                           {selectedKind === "finance" ? (
                             <td className="px-3 py-2">
@@ -1090,5 +1097,26 @@ export function AdminCatalogSyncClient() {
         </div>
       </section>
     </div>
+  );
+}
+
+function CommissionBasisBadge({ row }: { row: CatalogRow }) {
+  const basis = readCommissionBasis(row.normalized_data?.[COMMISSION_BASIS_KEY]);
+  if (!row.user_id || !["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action)) return <span className="text-white/35">—</span>;
+  if (!basis) return <span className="text-white/35">не записано</span>;
+  const tone =
+    basis.kind === "tariff"
+      ? basis.plan === "ENTERPRISE"
+        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+        : basis.plan === "PRO"
+          ? "border-violet-400/30 bg-violet-400/10 text-violet-200"
+          : "border-sky-400/30 bg-sky-400/10 text-sky-200"
+      : basis.kind === "global"
+        ? "border-white/15 bg-white/[0.05] text-white/70"
+        : "border-amber-400/30 bg-amber-400/10 text-amber-200";
+  return (
+    <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${tone}`}>
+      {describeCommissionBasis(basis)}
+    </span>
   );
 }

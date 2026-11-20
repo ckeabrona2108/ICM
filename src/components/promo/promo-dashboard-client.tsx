@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Globe2, Lock, Pencil, Rocket, Send, ShieldAlert, Trash2 } from "lucide-react";
+import { CheckCircle2, Clock3, Globe2, Lock, Pencil, Rocket, Send, ShieldAlert, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ReleaseDatePicker } from "@/components/release-wizard/release-date-picker";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -168,6 +169,7 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
   const releaseSections = React.useMemo(
     () => [
       { key: "available", title: "Доступно для промо", items: releases.filter((item) => item.promoSection === "available" && item.isPromoAvailable) },
+      { key: "closed", title: "Сейчас недоступно", items: releases.filter((item) => item.promoSection === "available" && !item.isPromoAvailable) },
       { key: "sent", title: "Отправленные", items: releases.filter((item) => item.promoSection === "sent") },
       { key: "changes_required", title: "Требуются изменения", items: releases.filter((item) => item.promoSection === "changes_required") },
       { key: "history", title: "История", items: releases.filter((item) => item.promoSection === "history") }
@@ -421,7 +423,7 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
                     ) : null}
                   </div>
                   <div className="mt-3 grid gap-2 text-sm text-white/62 sm:grid-cols-2">
-                    <p>Дата релиза: <span className="text-white">{release.releaseDate}</span></p>
+                    <p>Дата релиза: <span className="text-white">{formatRuDay(release.releaseDate)}</span></p>
                     <p>UPC: <span className="text-white">{release.upc || "—"}</span></p>
                     <p className="sm:col-span-2">Жанр: <span className="text-white">{release.genre}</span></p>
                   </div>
@@ -430,10 +432,18 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
                       <ShieldAlert className="h-3.5 w-3.5" />
                       {release.unavailableReason}
                     </div>
+                  ) : release.pitchingLate ? (
+                    <div className="mt-3 inline-flex items-start gap-2 rounded-xl border border-amber-400/18 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-100">
+                      <Clock3 className="mt-px h-3.5 w-3.5 shrink-0" />
+                      <span>Для питчинга в плейлисты уже поздно. Заявку примем как промо-поддержку до дня выхода.</span>
+                    </div>
                   ) : (
-                    <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-emerald-400/18 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100">
-                      <Rocket className="h-3.5 w-3.5" />
-                      Доступно для отправки на промо
+                    <div className="mt-3 inline-flex items-start gap-2 rounded-xl border border-emerald-400/18 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-100">
+                      <Rocket className="mt-px h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Успеваете на питчинг: подайте заявку до{" "}
+                        {release.pitchingDeadline ? formatRuDay(release.pitchingDeadline) : "выхода"}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -490,7 +500,7 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
         <div ref={formRef} className="rounded-2xl border border-white/[0.08] bg-[#13151d]/92 p-5 sm:p-6">
           <div className="mb-5">
             <h2 className="text-2xl font-semibold text-white">
-              {selectedRelease.promoEditable ? "Исправление промо-заявки" : "Приоритетный релиз"}
+              {selectedRelease.promoEditable ? "Исправление заявки на промо" : "Заявка на промо"}
             </h2>
             {selectedRelease.promoAdminComment ? (
               <div className="mt-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
@@ -498,8 +508,10 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
               </div>
             ) : null}
             <p className="mt-2 max-w-3xl text-[14px] text-white/68">
-              Заполните форму для предоставления информации о вашем приоритетном релизе. Форма должна быть заполнена заранее. Релизы, отправленные слишком поздно, могут быть не рассмотрены.
+              Расскажите о релизе и артисте: по этой заявке мы предложим релиз редакциям площадок и партнёрам. Редакциям нужно около
+              двух недель на питчинг, поэтому заявку лучше отправить не позднее чем за 13 дней до выхода.
             </p>
+            <PitchingDeadlineNotice release={selectedRelease} />
           </div>
 
           <form className="space-y-5" onSubmit={handleSubmit}>
@@ -530,7 +542,13 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
               </div>
               <div>
                 <label className="mb-2 block text-sm font-semibold text-white">Дата релиза</label>
-                <Input type="date" className={cn(getFieldErrorClass(fieldErrors.releaseDate))} value={form.releaseDate} onChange={(event) => patchField("releaseDate", event.target.value)} required />
+                <ReleaseDatePicker
+                  value={form.releaseDate}
+                  onChange={(value) => patchField("releaseDate", value)}
+                  promo={false}
+                  label="Дата релиза"
+                  className={cn("h-12 justify-start rounded-xl px-4 text-[15px]", getFieldErrorClass(fieldErrors.releaseDate))}
+                />
               </div>
               <div>
                 <label className="mb-2 block text-sm font-semibold text-white">Жанр</label>
@@ -670,6 +688,38 @@ export function PromoDashboardClient({ initialReleases }: { initialReleases: Pro
           </form>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** YYYY-MM-DD as DD.MM.YYYY. */
+function formatRuDay(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(value);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
+}
+
+/** Whether the request still leaves editors time for playlist pitching. */
+function PitchingDeadlineNotice({ release }: { release: PromoReleaseListItem }) {
+  if (!release.pitchingDeadline) return null;
+  if (release.pitchingLate) {
+    return (
+      <div className="mt-3 flex items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        <Clock3 className="mt-0.5 h-4 w-4 shrink-0" />
+        <p>
+          До выхода меньше 13 дней: срок для питчинга в плейлисты прошёл {formatRuDay(release.pitchingDeadline)}.
+          Заявку можно отправить до {formatRuDay(release.releaseDate)}, мы рассмотрим её для промо-поддержки, но
+          попадание в подборки площадок уже не гарантируем.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 flex items-start gap-3 rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+      <Rocket className="mt-0.5 h-4 w-4 shrink-0" />
+      <p>
+        Успеваете на питчинг: отправьте заявку до {formatRuDay(release.pitchingDeadline)} включительно, тогда редакции
+        площадок успеют её рассмотреть. Позже заявку тоже примем, но уже без гарантии питчинга.
+      </p>
     </div>
   );
 }

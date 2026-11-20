@@ -34,6 +34,7 @@ interface AdminReleaseDetailsResponse {
   payment_label?: string;
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
+  commission_basis?: string | null;
   priority: boolean;
   hidden?: boolean;
   resubmission?: { source_release_id?: string; source_release_title?: string } | null;
@@ -700,6 +701,14 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
               <span className="text-[12px] text-white/60">
                 Оплата: {details.payment_label ?? (details.payment_status === "paid" ? "Оплачен" : "Не оплачен")}
               </span>
+              {details.commission_basis ? (
+                <span
+                  title="Ставка по отчётам для этого релиза. Договор, индивидуальная ставка и ставка лейбла важнее."
+                  className="inline-flex items-center rounded-full border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-[11px] font-semibold text-violet-200"
+                >
+                  Комиссия: {details.commission_basis}
+                </span>
+              ) : null}
               {details.priority ? (
                 <span className="inline-flex items-center rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-200">
                   Приоритетный

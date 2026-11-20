@@ -90,8 +90,9 @@ export function StepIntro() {
                 <div className="pt-4">
                   <h3 className="text-[18px] font-semibold text-white">Какие финансовые условия?</h3>
                   <p className="mt-2 max-w-3xl text-[13px] leading-6 text-white/72">
-                    Вы будете получать 90% прибыли. Вывод средств доступен при накоплении
-                    минимального баланса в 2000 рублей.
+                    Ваша доля зависит от тарифа: 100% на ENTERPRISE, 95% на PRO, 90% на STANDARD
+                    и разовых релизах. Вывод средств доступен при накоплении минимального
+                    баланса в 2000 рублей.
                   </p>
                 </div>
               </div>

@@ -9,6 +9,7 @@ import type { ModerationRemark } from "@/lib/cabinet-types";
 import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
 import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { markFreeReleaseConsumed } from "@/lib/free-release";
+import { notifyArtistPromoOpen } from "@/lib/promo-notifications";
 import {
   findPaidPredecessorRelease,
   readReleaseCopySourceId,
@@ -332,6 +333,7 @@ export async function approveReleaseByAdmin(params: {
     select: {
       id: true,
       title: true,
+      date: true,
       status: true,
       confirmed: true,
       roles: true,
@@ -462,6 +464,8 @@ export async function approveReleaseByAdmin(params: {
     sendEmail: false,
     resetReadState: true
   });
+  // Promo requests open with the approval: tell the artist until when pitching is still possible.
+  await notifyArtistPromoOpen(params.prisma, release);
 
   return {
     releaseId: params.releaseId,

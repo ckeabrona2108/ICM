@@ -12,6 +12,14 @@ import {
 } from "@/lib/smart-catalog-sync-config";
 import { createAdminLog } from "@/lib/admin-log-service";
 import { readGlobalCommissionRate } from "@/lib/commission-settings";
+import {
+  COMMISSION_BASIS_KEY,
+  describeCommissionBasis,
+  readCommissionBasis,
+  readGlobalCommissionPayment,
+  resolveReleaseTariffCommission,
+  type ResolvedCommission
+} from "@/lib/tariff-commission";
 import { normalizeAnalyticsUpc } from "@/lib/analytics-upc";
 import { prisma } from "@/lib/prisma";
 import {
@@ -126,7 +134,7 @@ type FinancialApplyState = {
 };
 
 type FinancialApplyContext = {
-  commissionRates: Map<string, number>;
+  commissionRates: Map<string, ResolvedCommission>;
 };
 
 type FinancialAllocationAdjustment = {
@@ -980,6 +988,7 @@ export function buildFinancialImportDetailsExportRows(rows: Array<Record<string,
         "Сумма до комиссии": source.amount,
         "Комиссия ICECREAMMUSIC": rowCommissionAmount,
         "Комиссия ICECREAMMUSIC, %": canApply ? Number((commissionRate * 100).toFixed(2)) : 0,
+        "Основание комиссии": canApply ? describeCommissionBasis(readCommissionBasis(normalizedData?.[COMMISSION_BASIS_KEY])) : "",
         "К начислению": netAmount,
         "Статус сопоставления": String(row.action ?? "")
       };
@@ -1865,20 +1874,16 @@ async function writeFinancialPreviewImport(params: {
       row.matched_release_id
         ? await prisma.release.findUnique({
             where: { id: row.matched_release_id },
-            select: { labelName: true }
+            select: { id: true, labelName: true, roles: true }
           })
         : null;
     const canApplyCommission =
       !params.commissionAlreadyDeducted &&
       row.owner_user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action);
-    const commissionRate =
-      canApplyCommission
-        ? await resolvePlatformCommissionRateCached(
-            row.owner_user_id,
-            matchedRelease?.labelName ?? null,
-            previewContext
-          )
-        : 0;
+    const commission = canApplyCommission
+      ? await resolvePlatformCommissionCached(row.owner_user_id, matchedRelease, previewContext)
+      : null;
+    const commissionRate = commission?.rate ?? 0;
     const commissionAmount =
       canApplyCommission
         ? Number((grossAmount * commissionRate).toFixed(2))
@@ -1896,7 +1901,7 @@ async function writeFinancialPreviewImport(params: {
       action: row.action,
       confidence_score: row.confidence_score,
       raw_data: row.raw_data,
-      normalized_data: row.normalized_data,
+      normalized_data: withCommissionBasis(row.normalized_data, commission),
       detected_match_rule: row.detected_match_rule ?? null,
       error_message: row.error_message ?? null,
       matched_release_id: row.matched_release_id ?? null,
@@ -2000,9 +2005,10 @@ async function recomputeFinancialPreviewSnapshot(importId: string) {
       const incoming = (preview?.incoming_values as Record<string, unknown> | undefined) ?? {};
       const grossAmount = resolveFinancialNetAmount(incoming);
       const canApply = Boolean(row.user_id && ["MATCH", "UPDATE", "NEEDS_REVIEW"].includes(row.action));
-      const commissionRate = canApply && !commissionAlreadyDeducted
-        ? await resolvePlatformCommissionRateCached(row.user_id, row.matched_release?.labelName ?? null, previewContext)
-        : 0;
+      const commission = canApply && !commissionAlreadyDeducted
+        ? await resolvePlatformCommissionCached(row.user_id, row.matched_release, previewContext)
+        : null;
+      const commissionRate = commission?.rate ?? 0;
       const commissionAmount = canApply && !commissionAlreadyDeducted
         ? Number((grossAmount * commissionRate).toFixed(2))
         : 0;
@@ -2017,7 +2023,8 @@ async function recomputeFinancialPreviewSnapshot(importId: string) {
         gross_amount: grossAmount,
         commission_rate: commissionRate,
         commission_amount: commissionAmount,
-        net_amount: netAmount
+        net_amount: netAmount,
+        normalized_data: withCommissionBasis(row.normalized_data, commission)
       };
     })
   );
@@ -2029,7 +2036,8 @@ async function recomputeFinancialPreviewSnapshot(importId: string) {
         gross_amount: row.gross_amount,
         commission_rate: row.commission_rate,
         commission_amount: row.commission_amount,
-        net_amount: row.net_amount
+        net_amount: row.net_amount,
+        normalized_data: row.normalized_data as Prisma.InputJsonValue
       }
     })
   );
@@ -2418,13 +2426,18 @@ export async function buildPersonalReportReplacementFromFile(params: {
   };
 }
 
-async function resolvePlatformCommissionRate(userId: string | null | undefined, labelName: string | null | undefined) {
+type CommissionRelease = { id?: string | null; labelName?: string | null; roles?: unknown } | null | undefined;
+
+async function resolvePlatformCommission(
+  userId: string | null | undefined,
+  release: CommissionRelease
+): Promise<ResolvedCommission> {
   if (userId) {
     const contractRate = await prisma.contract_commission_rates.findFirst({
       where: { user_id: userId, active: true },
       orderBy: { created_at: "desc" }
     });
-    if (contractRate) return numberFromLoose(contractRate.commission_rate);
+    if (contractRate) return { rate: numberFromLoose(contractRate.commission_rate), basis: { kind: "contract" } };
   }
 
   // An artist's individual rate (admin "Комиссия" page) wins over a label rate.
@@ -2433,34 +2446,52 @@ async function resolvePlatformCommissionRate(userId: string | null | undefined, 
       where: { user_id: userId, active: true },
       orderBy: { created_at: "desc" }
     });
-    if (userRate) return numberFromLoose(userRate.commission_rate);
+    if (userRate) return { rate: numberFromLoose(userRate.commission_rate), basis: { kind: "user" } };
   }
 
+  const labelName = release?.labelName ?? null;
   if (labelName) {
     const labelRate = await prisma.label_commission_rates.findFirst({
       where: { label_name: labelName, active: true },
       orderBy: { created_at: "desc" }
     });
-    if (labelRate) return numberFromLoose(labelRate.commission_rate);
+    if (labelRate) return { rate: numberFromLoose(labelRate.commission_rate), basis: { kind: "label" } };
   }
+
+  // The subscription the release was sent under: STANDARD 10%, PRO 5%, ENTERPRISE 0%.
+  const tariff = resolveReleaseTariffCommission(release?.roles);
+  if (tariff) return tariff;
 
   // Set in the admin "Комиссия" page; 0% is a valid global rate.
-  return readGlobalCommissionRate(prisma);
+  return {
+    rate: await readGlobalCommissionRate(prisma),
+    basis: { kind: "global", payment: readGlobalCommissionPayment(release?.roles, Boolean(release)) }
+  };
 }
 
-async function resolvePlatformCommissionRateCached(
+async function resolvePlatformCommissionCached(
   userId: string | null | undefined,
-  labelName: string | null | undefined,
+  release: CommissionRelease,
   context: FinancialApplyContext
-) {
-  const cacheKey = `${userId ?? "anon"}::${normalizeCompact(labelName)}`;
-  if (context.commissionRates.has(cacheKey)) {
-    return context.commissionRates.get(cacheKey) ?? SMART_DEFAULT_PLATFORM_COMMISSION_RATE;
-  }
+): Promise<ResolvedCommission> {
+  const cacheKey = `${userId ?? "anon"}::${release?.id ?? "no-release"}::${normalizeCompact(release?.labelName)}`;
+  const cached = context.commissionRates.get(cacheKey);
+  if (cached) return cached;
 
-  const resolved = await resolvePlatformCommissionRate(userId, labelName);
+  const resolved = await resolvePlatformCommission(userId, release);
   context.commissionRates.set(cacheKey, resolved);
   return resolved;
+}
+
+/** normalized_data with the commission basis kept for the admin preview and the export. */
+function withCommissionBasis(normalized: unknown, commission: ResolvedCommission | null): Record<string, unknown> {
+  const base =
+    normalized && typeof normalized === "object" && !Array.isArray(normalized)
+      ? { ...(normalized as Record<string, unknown>) }
+      : {};
+  if (commission) base[COMMISSION_BASIS_KEY] = commission.basis;
+  else delete base[COMMISSION_BASIS_KEY];
+  return base;
 }
 
 function pickReleaseUpdates(normalized: Record<string, unknown>, release: Record<string, unknown>) {
@@ -3042,11 +3073,7 @@ export async function applyFinancialImport(params: {
         commissionAmount = Number((grossAmount - netAmount).toFixed(2));
         commissionRate = grossAmount > 0 ? Number((commissionAmount / grossAmount).toFixed(4)) : 0;
       } else if (!netAmount && !commissionAmount) {
-        commissionRate = await resolvePlatformCommissionRateCached(
-          row.user_id,
-          release?.labelName ?? null,
-          applyContext
-        );
+        commissionRate = (await resolvePlatformCommissionCached(row.user_id, release, applyContext)).rate;
         commissionAmount = Number((grossAmount * commissionRate).toFixed(2));
         netAmount = Number((grossAmount - commissionAmount).toFixed(2));
       } else {

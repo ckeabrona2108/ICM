@@ -14,43 +14,70 @@ export interface SubscriptionTariffConfig {
   yearlySavingsRub: number;
   yearlySavingsPercent: number;
   yearlyBadge: string;
+  /** Prices of earlier price lists, kept for payments started before a change. */
+  previousAmountsRub: { monthly: number[]; yearly: number[] };
+}
+
+/** Yearly payment is 40% off twelve monthly payments. */
+const YEARLY_DISCOUNT_PERCENT = 40;
+
+function tariff(params: {
+  id: SubscriptionTariffId;
+  plan: SubscriptionPlan;
+  monthlyAmountRub: number;
+  previousAmountsRub: { monthly: number[]; yearly: number[] };
+}): SubscriptionTariffConfig {
+  const fullYearRub = params.monthlyAmountRub * 12;
+  const yearlyAmountRub = Math.round((fullYearRub * (100 - YEARLY_DISCOUNT_PERCENT)) / 100);
+  return {
+    id: params.id,
+    title: params.id.toUpperCase(),
+    plan: params.plan,
+    monthlyAmountRub: params.monthlyAmountRub,
+    yearlyAmountRub,
+    yearlyMonthlyEquivalentRub: Math.round(yearlyAmountRub / 12),
+    yearlySavingsRub: fullYearRub - yearlyAmountRub,
+    yearlySavingsPercent: YEARLY_DISCOUNT_PERCENT,
+    yearlyBadge: `Экономия ${YEARLY_DISCOUNT_PERCENT}%`,
+    previousAmountsRub: params.previousAmountsRub
+  };
 }
 
 export const subscriptionTariffs: SubscriptionTariffConfig[] = [
-  {
+  tariff({
     id: "standard",
-    title: "STANDARD",
     plan: "STANDARD" as SubscriptionPlan,
-    monthlyAmountRub: 550,
-    yearlyAmountRub: 5490,
-    yearlyMonthlyEquivalentRub: 458,
-    yearlySavingsRub: 1110,
-    yearlySavingsPercent: 17,
-    yearlyBadge: "2 месяца бесплатно"
-  },
-  {
+    monthlyAmountRub: 350,
+    previousAmountsRub: { monthly: [550], yearly: [5490] }
+  }),
+  tariff({
     id: "pro",
-    title: "PRO",
     plan: "PRO" as SubscriptionPlan,
     monthlyAmountRub: 990,
-    yearlyAmountRub: 9490,
-    yearlyMonthlyEquivalentRub: 790,
-    yearlySavingsRub: 2390,
-    yearlySavingsPercent: 20,
-    yearlyBadge: "Экономия 20%"
-  },
-  {
+    previousAmountsRub: { monthly: [], yearly: [9490] }
+  }),
+  tariff({
     id: "enterprise",
-    title: "ENTERPRISE",
     plan: "ENTERPRISE" as SubscriptionPlan,
     monthlyAmountRub: 1990,
-    yearlyAmountRub: 18990,
-    yearlyMonthlyEquivalentRub: 1582,
-    yearlySavingsRub: 4890,
-    yearlySavingsPercent: 20,
-    yearlyBadge: "Экономия 20%"
-  }
+    previousAmountsRub: { monthly: [], yearly: [18990] }
+  })
 ];
+
+/**
+ * A payment started at the price shown before a price change is still accepted when the bank
+ * confirms it later: the artist paid what the page asked.
+ */
+export function isAcceptedSubscriptionAmount(
+  tariffId: string,
+  billingPeriod: SubscriptionBillingPeriod,
+  amountRub: number
+): boolean {
+  const config = getSubscriptionTariffConfig(tariffId, billingPeriod);
+  if (!config) return false;
+  if (amountRub === config.amountRub) return true;
+  return config.previousAmountsRub[billingPeriod].includes(amountRub);
+}
 
 export function getSubscriptionTariffConfig(
   tariffId: string,

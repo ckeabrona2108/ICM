@@ -3,67 +3,51 @@ import assert from "node:assert/strict";
 
 import { computePromoAvailability } from "@/lib/promo-service";
 
-test("promo is available immediately when UPC exists even before release date", () => {
-  const result = computePromoAvailability({
-    releaseDate: new Date("2026-07-12T00:00:00.000Z"),
-    alreadySubmitted: false,
-    upc: "123456789012",
-    status: "approved",
-    now: new Date("2026-07-05T12:00:00.000Z")
-  });
+const NOW = new Date("2026-07-05T12:00:00.000Z");
 
+function check(releaseDate: string, upc = "123456789012", alreadySubmitted = false) {
+  return computePromoAvailability({
+    releaseDate: new Date(`${releaseDate}T00:00:00.000Z`),
+    alreadySubmitted,
+    upc,
+    status: "approved",
+    now: NOW
+  });
+}
+
+test("a request 13 or more days before the release is on time for pitching", () => {
+  const result = check("2026-07-18");
   assert.equal(result.isPromoAvailable, true);
   assert.equal(result.unavailableReason, null);
+  assert.equal(result.pitchingLate, false);
+  assert.equal(result.pitchingDeadline, "2026-07-05");
 });
 
-test("promo stays available up to 7 days after release when UPC exists", () => {
-  const result = computePromoAvailability({
-    releaseDate: new Date("2026-06-28T00:00:00.000Z"),
-    alreadySubmitted: false,
-    upc: "123456789012",
-    status: "approved",
-    now: new Date("2026-07-05T12:00:00.000Z")
-  });
+test("a later request is accepted with a warning until the release day", () => {
+  const soon = check("2026-07-17");
+  assert.equal(soon.isPromoAvailable, true);
+  assert.equal(soon.pitchingLate, true);
+  assert.equal(soon.pitchingDeadline, "2026-07-04");
 
-  assert.equal(result.isPromoAvailable, true);
-  assert.equal(result.unavailableReason, null);
+  const releaseDay = check("2026-07-05");
+  assert.equal(releaseDay.isPromoAvailable, true);
+  assert.equal(releaseDay.pitchingLate, true);
 });
 
-test("promo is blocked after 7 days from release even when UPC exists", () => {
-  const result = computePromoAvailability({
-    releaseDate: new Date("2026-06-27T00:00:00.000Z"),
-    alreadySubmitted: false,
-    upc: "123456789012",
-    status: "approved",
-    now: new Date("2026-07-05T12:00:00.000Z")
-  });
-
+test("requests close once the release is out", () => {
+  const result = check("2026-07-04");
   assert.equal(result.isPromoAvailable, false);
-  assert.equal(result.unavailableReason, "Недоступно: после выхода прошло больше 7 дней");
+  assert.equal(result.unavailableReason, "Недоступно: релиз уже вышел. Заявку на промо можно подать до дня выхода");
 });
 
-test("promo is blocked when release has no UPC", () => {
-  const result = computePromoAvailability({
-    releaseDate: new Date("2026-07-05T00:00:00.000Z"),
-    alreadySubmitted: false,
-    upc: "",
-    status: "approved",
-    now: new Date("2026-07-05T12:00:00.000Z")
-  });
-
+test("promo waits for the UPC given on approval", () => {
+  const result = check("2026-08-01", "");
   assert.equal(result.isPromoAvailable, false);
-  assert.equal(result.unavailableReason, "Недоступно: у релиза ещё нет UPC");
+  assert.equal(result.unavailableReason, "Откроется после модерации: у релиза ещё нет UPC");
 });
 
 test("promo is blocked after repeat submission", () => {
-  const result = computePromoAvailability({
-    releaseDate: new Date("2026-07-05T00:00:00.000Z"),
-    alreadySubmitted: true,
-    upc: "123456789012",
-    status: "approved",
-    now: new Date("2026-07-05T12:00:00.000Z")
-  });
-
+  const result = check("2026-08-01", "123456789012", true);
   assert.equal(result.isPromoAvailable, false);
   assert.equal(result.unavailableReason, "Недоступно: релиз уже отправлен на промо");
 });

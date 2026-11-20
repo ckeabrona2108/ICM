@@ -20,6 +20,7 @@ import {
 import { StepIntro } from "./step-intro";
 import { StepChanges, StepLyrics } from "./change-request";
 import { StepNumberContext } from "./step-number";
+import { ServerBusyNotice, ServerCheckSummary, type ServerCheckState } from "./server-check";
 import { StepInfo } from "./step-info";
 import { StepTracks } from "./step-tracks";
 import { StepExtras } from "./step-extras";
@@ -722,6 +723,56 @@ function WizardInner({
 
     return grouped;
   }, [stepIssues, submitErrorsBySection]);
+  // Review step: the server re-checks the release before the artist sends it.
+  const [serverCheck, setServerCheck] = React.useState<ServerCheckState>({ status: "idle" });
+  const serverCheckRunRef = React.useRef(0);
+  const runServerCheck = React.useCallback(async () => {
+    const run = ++serverCheckRunRef.current;
+    setServerCheck({ status: "checking" });
+    // A local cover is uploaded on send; its size and format travel in coverMeta.
+    const payloadData =
+      typeof submissionData.cover === "string" && submissionData.cover.startsWith("data:")
+        ? { ...submissionData, cover: "local-cover" }
+        : submissionData;
+    const pendingLocalAudioIndexes = data.tracks
+      .map((track, index) => (track.localAudioFile ? index : -1))
+      .filter((index) => index >= 0);
+    try {
+      const response = await fetch("/api/releases/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data: payloadData,
+          pendingLocalAudioIndexes,
+          mode: submissionMode === "new" && !data.changeRequest ? "new" : "edit"
+        })
+      });
+      const body = await response.json().catch(() => null);
+      if (run !== serverCheckRunRef.current) return;
+      if (!response.ok || !body || typeof body.ok !== "boolean") {
+        setServerCheck({
+          status: "error",
+          message: body?.error || "Не удалось проверить релиз на сервере. Отправить его всё равно можно."
+        });
+        return;
+      }
+      setServerCheck({ status: "done", result: body });
+    } catch {
+      if (run !== serverCheckRunRef.current) return;
+      setServerCheck({ status: "error", message: "Нет связи с сервером. Проверьте интернет и попробуйте ещё раз." });
+    }
+  }, [data.changeRequest, data.tracks, submissionData, submissionMode]);
+  const runServerCheckRef = React.useRef(runServerCheck);
+  runServerCheckRef.current = runServerCheck;
+  React.useEffect(() => {
+    if (step !== "review") {
+      serverCheckRunRef.current += 1;
+      setServerCheck({ status: "idle" });
+      return;
+    }
+    void runServerCheckRef.current();
+  }, [step]);
+
   const submissionDataSnapshot = React.useMemo(
     () => JSON.stringify(submissionData),
     [submissionData]
@@ -1738,6 +1789,8 @@ function WizardInner({
             </div>
           ) : null}
 
+          <ServerBusyNotice visible={serverCheck.status === "checking" || submitting} />
+
           {validationToast ? (
             <div className="pointer-events-none fixed bottom-6 right-6 z-[70] max-w-[420px] rounded-[18px] border border-rose-400/45 bg-[linear-gradient(180deg,rgba(127,29,29,0.3),rgba(32,18,20,0.96))] px-4 py-3 text-[13.5px] text-rose-50 shadow-[0_24px_60px_-28px_rgba(251,113,133,0.55)]">
               <div className="flex items-start gap-3">
@@ -1767,6 +1820,11 @@ function WizardInner({
               {step === "tracks" ? <StepTracks /> : null}
               {step === "lyrics" ? <StepLyrics /> : null}
               {step === "extras" ? <StepExtras /> : null}
+              {step === "review" ? (
+                <div className="mb-5">
+                  <ServerCheckSummary state={serverCheck} onRetry={() => void runServerCheck()} />
+                </div>
+              ) : null}
               {step === "review" ? (
                 <StepReview
                   onSubmit={handleSubmit}

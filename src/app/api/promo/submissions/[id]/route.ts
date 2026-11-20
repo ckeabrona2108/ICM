@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
 import { authOptions } from "@/lib/auth";
+import { notifyAdminPromoSubmitted } from "@/lib/promo-notifications";
 import { prisma } from "@/lib/prisma";
 import {
   deletePromoSubmissionForUser,
@@ -40,6 +41,7 @@ export async function PATCH(request: Request, context: { params: { id: string } 
       submissionId: context.params.id,
       input: payload
     });
+    void notifyAdminPromoSubmitted(item, { resubmitted: true });
     return NextResponse.json({ ok: true, item }, { status: 200 });
   } catch (error) {
     if (error instanceof PromoValidationError) {

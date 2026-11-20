@@ -32,7 +32,7 @@ export function SubscriptionPeriodToggle({
             value === "yearly" ? "bg-[#7b61ff] text-white" : "bg-[#7b61ff]/20 text-[#c4b5fd]"
           )}
         >
-          до −20%
+          −40%
         </span>
       </ToggleButton>
     </div>

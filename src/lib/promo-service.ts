@@ -4,6 +4,7 @@ import type { PrismaClient, verification_status } from "@prisma/client";
 import { getReleaseCoverAsset } from "@/lib/release-cover";
 import { releaseSubmissionDataSchema } from "@/lib/release-policy";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
+import { PROMO_MIN_LEAD_DAYS } from "@/lib/release-promo-dates";
 
 export const promoSubmissionStatuses = [
   "SUBMITTED",
@@ -109,6 +110,9 @@ export interface PromoReleaseListItem {
   coverUrl: string;
   isPromoAvailable: boolean;
   unavailableReason: string | null;
+  /** Last day to send the request with time left for playlist pitching, YYYY-MM-DD. */
+  pitchingDeadline: string | null;
+  pitchingLate: boolean;
   alreadySubmitted: boolean;
   promoSubmissionId: string | null;
   promoSubmissionStatus: PromoSubmissionStatus | null;
@@ -247,6 +251,20 @@ function startOfTodayUtc(now = new Date()): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
+export interface PromoAvailability {
+  isPromoAvailable: boolean;
+  unavailableReason: string | null;
+  /** Last day to send the request with time left for playlist pitching, YYYY-MM-DD. */
+  pitchingDeadline: string | null;
+  /** The request is still accepted, but editors may not have time to pitch it. */
+  pitchingLate: boolean;
+}
+
+/**
+ * Promo requests open once the release is approved and has a UPC, and close on the release day.
+ * Editors need about two weeks for pitching: a request sent PROMO_MIN_LEAD_DAYS days or more
+ * before the release is on time, a later one is accepted with a warning.
+ */
 export function computePromoAvailability(params: {
   releaseDate: Date | null | undefined;
   alreadySubmitted: boolean;
@@ -255,43 +273,27 @@ export function computePromoAvailability(params: {
   status?: verification_status | string | null;
   roles?: unknown;
   now?: Date;
-}): { isPromoAvailable: boolean; unavailableReason: string | null } {
-  if (params.alreadySubmitted) {
-    return {
-      isPromoAvailable: false,
-      unavailableReason: "Недоступно: релиз уже отправлен на промо"
-    };
+}): PromoAvailability {
+  const releaseDay =
+    params.releaseDate && !Number.isNaN(params.releaseDate.getTime()) ? getUtcDayNumber(params.releaseDate) : null;
+  const pitchingDeadline =
+    releaseDay == null ? null : formatDateOnly(new Date((releaseDay - PROMO_MIN_LEAD_DAYS) * 86_400_000));
+  const daysUntilRelease = releaseDay == null ? null : releaseDay - getUtcDayNumber(startOfTodayUtc(params.now));
+  const pitchingLate = daysUntilRelease != null && daysUntilRelease < PROMO_MIN_LEAD_DAYS;
+  const closed = (reason: string): PromoAvailability => ({
+    isPromoAvailable: false,
+    unavailableReason: reason,
+    pitchingDeadline,
+    pitchingLate
+  });
+
+  if (params.alreadySubmitted) return closed("Недоступно: релиз уже отправлен на промо");
+  if (!params.upc?.trim()) return closed("Откроется после модерации: у релиза ещё нет UPC");
+  if (daysUntilRelease != null && daysUntilRelease < 0) {
+    return closed("Недоступно: релиз уже вышел. Заявку на промо можно подать до дня выхода");
   }
 
-  if (!params.upc?.trim()) {
-    return {
-      isPromoAvailable: false,
-      unavailableReason: "Недоступно: у релиза ещё нет UPC"
-    };
-  }
-
-  if (!params.releaseDate || Number.isNaN(params.releaseDate.getTime())) {
-    return {
-      isPromoAvailable: true,
-      unavailableReason: null
-    };
-  }
-
-  const todayDay = getUtcDayNumber(startOfTodayUtc(params.now));
-  const releaseDay = getUtcDayNumber(params.releaseDate);
-  const daysSinceRelease = todayDay - releaseDay;
-
-  if (daysSinceRelease > 7) {
-    return {
-      isPromoAvailable: false,
-      unavailableReason: "Недоступно: после выхода прошло больше 7 дней"
-    };
-  }
-
-  return {
-    isPromoAvailable: true,
-    unavailableReason: null
-  };
+  return { isPromoAvailable: true, unavailableReason: null, pitchingDeadline, pitchingLate };
 }
 
 function parseSubmissionData(roles: unknown) {
@@ -620,6 +622,8 @@ export async function getPromoReleasesForUser(prisma: PrismaClient, userId: stri
         coverUrl: cover.url ?? "",
         isPromoAvailable: availability.isPromoAvailable,
         unavailableReason: availability.unavailableReason,
+        pitchingDeadline: defaultAvailability.pitchingDeadline,
+        pitchingLate: defaultAvailability.pitchingLate,
         alreadySubmitted: Boolean(existing),
         promoSubmissionId: existing?.id ?? null,
         promoSubmissionStatus: promoStatus,
@@ -661,8 +665,8 @@ export async function getPromoReleasesForUser(prisma: PrismaClient, userId: stri
     })
   );
 
+  // Every approved release is listed; the ones outside the promo window say why.
   return items
-    .filter((item) => item.isPromoAvailable || item.promoSubmissionId !== null)
     .sort((left, right) => {
       if (left.isPromoAvailable !== right.isPromoAvailable) return left.isPromoAvailable ? -1 : 1;
       return right.releaseDate.localeCompare(left.releaseDate);

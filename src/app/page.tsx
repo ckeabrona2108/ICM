@@ -59,21 +59,34 @@ export const metadata: Metadata = {
 
 const COMPANY_STATS = [
   {
-    value: "с 2023",
-    label: "",
-    note: "помогаем артистам пройти путь от подготовки релиза до публикации и сопровождения",
-    compact: true,
-    kicker: "Старт"
+    kicker: "Старт",
+    value: "2023",
+    label: "год запуска",
+    note: "помогаем артистам пройти путь от подготовки релиза до публикации и сопровождения"
   },
-  { value: "1 500+", label: "релизов выпущено", note: "от первых синглов до полноформатных альбомов" },
-  { value: "90%", label: "дохода остается артисту", note: "Вы получаете максимум от каждого релиза" },
-  { value: "240+", label: "площадок", note: "мировые стриминговые сервисы, социальные платформы и локальные музыкальные витрины" },
   {
+    kicker: "Релизы",
+    value: "1 500+",
+    label: "релизов",
+    note: "выпустили — от первых синглов до полноформатных альбомов"
+  },
+  {
+    kicker: "Доход",
+    value: "100%",
+    label: "дохода артисту",
+    note: "на ENTERPRISE. На PRO — 95%, на STANDARD — 90%"
+  },
+  {
+    kicker: "Охват",
+    value: "240+",
+    label: "площадок",
+    note: "мировые стриминговые сервисы, социальные платформы и локальные музыкальные витрины"
+  },
+  {
+    kicker: "На связи",
     value: "7/7",
     label: "поддержка",
-    note: "помогаем с релизами, модерацией, правками и вопросами по выплатам",
-    compact: true,
-    kicker: "На связи"
+    note: "помогаем с релизами, модерацией, правками и вопросами по выплатам"
   }
 ] as const;
 
@@ -170,7 +183,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "Сколько процентов дохода остаётся артисту?",
-    a: "90% дохода с прослушиваний остаётся вам. Начисления видны в разделе «Кошелёк» личного кабинета."
+    a: "Зависит от тарифа: на ENTERPRISE — 100%, на PRO — 95%, на STANDARD, разовых релизах и бесплатном сингле — 90%. Доля закрепляется за релизом: считается по тарифу, с которым релиз был отправлен на модерацию. Начисления видны в разделе «Кошелёк» личного кабинета."
+  },
+  {
+    q: "Что будет с релизами, если подписка закончится?",
+    a: "Ничего не удалится. Все выпущенные релизы остаются на площадках и продолжают приносить доход, а ваша доля по ним не меняется: она закреплена за тарифом, с которым релиз был отправлен. Без подписки новые релизы можно выпускать разово за 450 ₽ или продлить подписку в любой момент."
   },
   {
     q: "За сколько дней до релиза нужно загрузить трек?",
@@ -398,32 +415,16 @@ export default async function HomePage() {
           <Stagger className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-5" stagger={0.06}>
             {COMPANY_STATS.map((item) => (
               <StaggerItem key={item.label}>
-                <div
-                  className={`h-full rounded-[26px] border p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
-                    "compact" in item && item.compact
-                      ? "border-[#8b5cf6]/14 bg-[linear-gradient(180deg,rgba(123,97,255,0.08),rgba(13,13,20,0.92))]"
-                      : "border-white/[0.08] bg-[#0d0d14]/90"
-                  }`}
-                >
-                  {"compact" in item && item.compact && "kicker" in item ? (
-                    <div className="inline-flex rounded-full border border-[#8b5cf6]/20 bg-[#8b5cf6]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#cfc0ff]">
-                      {item.kicker}
-                    </div>
-                  ) : null}
-                  <div
-                    className={`font-bold leading-none tracking-[-0.04em] text-white ${
-                      "compact" in item && item.compact
-                        ? "mt-4 text-[32px] sm:text-[38px]"
-                        : "text-[40px] sm:text-[48px]"
-                    }`}
-                  >
+                <div className="flex h-full flex-col rounded-[26px] border border-[#8b5cf6]/14 bg-[linear-gradient(180deg,rgba(123,97,255,0.08),rgba(13,13,20,0.92))] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+                  <div className="inline-flex self-start rounded-full border border-[#8b5cf6]/20 bg-[#8b5cf6]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#cfc0ff]">
+                    {item.kicker}
+                  </div>
+                  <div className="mt-4 whitespace-nowrap text-[38px] font-bold leading-none tracking-[-0.04em] text-white sm:text-[42px]">
                     {item.value}
                   </div>
-                  {item.label ? (
-                    <div className="mt-3 text-[12px] font-semibold uppercase tracking-[0.22em] text-[#c4b5fd]">
-                      {item.label}
-                    </div>
-                  ) : null}
+                  <div className="mt-3 text-[12px] font-semibold uppercase tracking-[0.22em] text-[#c4b5fd]">
+                    {item.label}
+                  </div>
                   <p className="mt-3 text-[13px] leading-relaxed text-white/55">{item.note}</p>
                 </div>
               </StaggerItem>

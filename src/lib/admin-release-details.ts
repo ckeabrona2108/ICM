@@ -1,4 +1,6 @@
 import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
+import { getReleasePaymentUsageFromRoles } from "@/lib/release-quota";
+import { describeReleaseCommissionBasis, readReleaseSubscriptionPlan } from "@/lib/tariff-commission";
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
 import {
@@ -42,6 +44,8 @@ interface AdminReleaseDetailsResponse {
   payment_label?: string;
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
+  /** How royalties of this release are commissioned, e.g. "Подписка PRO · 5%". Admin-only. */
+  commission_basis?: string | null;
   priority: boolean;
   hidden?: boolean;
   resubmission?: { source_release_id?: string; source_release_title?: string } | null;
@@ -1139,8 +1143,9 @@ export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetai
     payment_label: Boolean(release.confirmed)
       ? "Оплачен"
       : describePendingExtrasSupplement(release.roles, false) ?? "Не оплачен",
-    payment_usage: null,
-    payment_plan: null,
+    payment_usage: getReleasePaymentUsageFromRoles(release.roles)?.type ?? null,
+    payment_plan: readReleaseSubscriptionPlan(release.roles),
+    commission_basis: describeReleaseCommissionBasis(release.roles),
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),
     cover: {
       url: coverCandidateUrls[0] ?? "",

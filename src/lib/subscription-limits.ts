@@ -171,7 +171,7 @@ function getPlanLimits(plan: EffectivePlan, hasActiveSubscription: boolean): Pla
 
   if (plan === "STANDARD") {
     return {
-      releasesLimit: hasActiveSubscription ? 2 : 0,
+      releasesLimit: hasActiveSubscription ? 3 : 0,
       aiDayLimit: 0,
       aiMonthLimit: 0,
       aiEnabled: false

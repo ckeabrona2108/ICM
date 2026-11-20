@@ -21,10 +21,11 @@ import {
 } from "@/lib/release-platforms";
 
 import { ArtistPlatformPicker } from "./artist-platform-picker";
+import { CoverConfirmModal } from "./cover-confirm-modal";
+import { ReleaseDatePicker } from "./release-date-picker";
 import { useStepNumber } from "./step-number";
 import { useWizard, type PersonRole } from "./wizard-context";
 import {
-  DateInput,
   FieldLabel,
   Select,
   TextInput,
@@ -149,9 +150,26 @@ export function StepInfo({
     });
   }, [normalizedPartnerCode, partnerCodeState.validatedCode]);
 
+  // A cover that passed the size checks waits for the artist's "Убедитесь" confirmation.
+  const [pendingCover, setPendingCover] = React.useState<{
+    dataUrl: string;
+    meta: { mimeType: string; sizeBytes: number; width: number; height: number; dpi: number };
+  } | null>(null);
+  const savePendingCover = React.useCallback(() => {
+    if (!pendingCover) return;
+    patch({ cover: pendingCover.dataUrl, coverUpload: null, coverMeta: pendingCover.meta });
+    setPendingCover(null);
+  }, [patch, pendingCover]);
+  const replacePendingCover = React.useCallback(() => {
+    setPendingCover(null);
+    document.getElementById("cover-upload")?.click();
+  }, []);
+
   const onCoverPick = React.useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      // The same file can be picked again after "Заменить файл".
+      e.target.value = "";
       if (!file) return;
 
       setCoverError(null);
@@ -181,10 +199,9 @@ export function StepInfo({
 
         const dataUrl = await readAsDataUrl(file);
 
-        patch({
-          cover: dataUrl,
-          coverUpload: null,
-          coverMeta: {
+        setPendingCover({
+          dataUrl,
+          meta: {
             mimeType: file.type,
             sizeBytes: file.size,
             width,
@@ -196,7 +213,7 @@ export function StepInfo({
         setCoverError("Не удалось обработать обложку. Попробуйте другой файл.");
       }
     },
-    [patch]
+    []
   );
 
   const addPerson = () => {
@@ -336,6 +353,14 @@ export function StepInfo({
         JPG/PNG, до 20 МБ, 1400×1400 — 6000×6000, не менее 72 dpi.
       </p>
       {coverError ? <p className="mt-2 text-[12px] text-rose-300">{coverError}</p> : null}
+      {pendingCover ? (
+        <CoverConfirmModal
+          src={pendingCover.dataUrl}
+          onReplace={replacePendingCover}
+          onSave={savePendingCover}
+          onClose={() => setPendingCover(null)}
+        />
+      ) : null}
     </div>
   );
 
@@ -642,23 +667,27 @@ export function StepInfo({
                   <div className="grid gap-x-6 gap-y-10 sm:grid-cols-2">
                     <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
                       <CodesFieldLabel required>Дата предзаказа</CodesFieldLabel>
-                      <DateInput
+                      <ReleaseDatePicker
                         value={data.preorderDate}
                         onChange={(value) => set("preorderDate", value)}
+                        promo={false}
+                        label="Дата предзаказа"
                         className="min-w-0 w-full"
                       />
                     </div>
                     <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
                       <CodesFieldLabel required>Дата старта</CodesFieldLabel>
-                      <DateInput
+                      <ReleaseDatePicker
                         value={data.startDate}
                         onChange={(value) => set("startDate", value)}
+                        promo={false}
+                        label="Дата старта"
                         className="min-w-0 w-full"
                       />
                     </div>
                     <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
                       <CodesFieldLabel required>Дата релиза</CodesFieldLabel>
-                      <DateInput
+                      <ReleaseDatePicker
                         value={data.releaseDate}
                         onChange={(value) => set("releaseDate", value)}
                         className="min-w-0 w-full"
@@ -670,7 +699,9 @@ export function StepInfo({
                         value={data.rightsYear}
                         onChange={(e) => set("rightsYear", e.target.value)}
                         placeholder="YYYY"
-                        className="min-w-0 w-full"
+                        inputMode="numeric"
+                        maxLength={4}
+                        className="min-w-0 w-full text-center text-[14px] tabular-nums"
                       />
                     </div>
                   </div>

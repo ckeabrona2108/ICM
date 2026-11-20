@@ -70,7 +70,7 @@ export function StepChanges() {
         })}
       </div>
       <p className="mt-3 text-[12.5px] leading-5 text-white/50">
-        Новые текст, караоке или видео к трекам оплачиваются отдельно (с подпиской — входят в тариф).
+        Новые текст, караоке или видео к трекам оплачиваются отдельно (с подпиской PRO и ENTERPRISE — входят в тариф).
         Проверка изменений начнётся после доплаты.
       </p>
       <label className="mt-5 block text-[13px] font-medium text-white/75" htmlFor="wizard-change-request-comment">

@@ -37,6 +37,7 @@ import {
   buildFreeFirstReleasePaymentUsage,
   buildPartnerCodePaymentUsage,
   buildSubscriptionPaymentUsage,
+  extrasIncludedInSubscription,
   getUserReleaseQuota,
   mergeReleaseRolesPaymentUsage
 } from "@/lib/release-quota";
@@ -50,6 +51,7 @@ import {
 } from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
 import {
+  calculateExtrasSupplement,
   planExtrasSupplement,
   readPendingExtrasSupplement,
   withExtrasSupplement,
@@ -368,7 +370,7 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
   });
 
   // A paid release re-sent with more lyrics / karaoke / video than was paid for waits for a
-  // supplement payment before moderation. Active subscribers have extras included.
+  // supplement payment before moderation. Active PRO / ENTERPRISE subscribers have extras included.
   // Once confirmed (paid, or marked paid / approved by an admin), the release's tracks are the baseline.
   const pendingSupplement = existing.confirmed ? null : readPendingExtrasSupplement(existing.roles);
   const resolvePaidResend = async (params: {
@@ -384,7 +386,7 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       paidTracks,
       nextTracks: trackRows,
       pending: pendingSupplement,
-      extrasIncluded: quota.isActive
+      extrasIncluded: extrasIncludedInSubscription(quota)
     });
     const roles = withoutExtrasSupplement(params.roles);
     if (!plan) return { confirmed: true, roles, supplement: null };
@@ -906,17 +908,50 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     return NextResponse.json(response, { status: 200 });
   }
 
+  const subscriptionRoles = mergeReleaseRolesPaymentUsage(
+    existing.roles,
+    buildSubscriptionPaymentUsage({ quota }),
+    submissionData
+  ) as Record<string, unknown>;
+
+  // STANDARD covers the release itself: lyrics, karaoke and video on it are paid separately.
+  // The release takes its subscription slot now and waits only for the extras payment.
+  const standardExtras = extrasIncludedInSubscription(quota)
+    ? null
+    : calculateExtrasSupplement(trackRows, { lyrics: 0, karaoke: 0, video: 0 });
+  if (standardExtras && standardExtras.totalRub > 0) {
+    await updateReleaseAndSyncTracks({
+      confirmed: false,
+      status: "moderating",
+      roles: withReleasePaymentWaitingSince(
+        withReleaseLifecycleState(
+          withExtrasSupplement(subscriptionRoles, {
+            paid: { lyrics: 0, karaoke: 0, video: 0 },
+            amountRub: standardExtras.totalRub
+          }),
+          "moderation"
+        )
+      ) as Prisma.InputJsonValue
+    });
+
+    const response: ReleaseSubmitSuccessResponse & { payment_required: true; paid: false } = {
+      ok: true,
+      releaseId: existing.id,
+      nextStatus: "moderation",
+      payment_required: true,
+      paid: false,
+      ...(freeReleaseFallback ? { freeReleaseFallback: freeReleaseFallback.message } : {}),
+      message: `${fallbackNote}Релиз входит в подписку STANDARD, а дополнения (${standardExtras.lines
+        .map((line) => (line.count > 1 ? `${line.label.toLowerCase()} × ${line.count}` : line.label.toLowerCase()))
+        .join(", ")}) оплачиваются отдельно: ${standardExtras.totalRub} ₽. Модерация начнётся сразу после оплаты.`
+    };
+    return NextResponse.json(response, { status: 200 });
+  }
+
   await updateReleaseAndSyncTracks({
     confirmed: true,
     status: "moderating",
-    roles: withReleaseLifecycleState(
-      mergeReleaseRolesPaymentUsage(
-        existing.roles,
-        buildSubscriptionPaymentUsage({ quota }),
-        submissionData
-      ),
-      "moderation"
-    ) as Prisma.InputJsonValue
+    roles: withReleaseLifecycleState(subscriptionRoles, "moderation") as Prisma.InputJsonValue
   });
   notifications.push({
     releaseId: existing.id,

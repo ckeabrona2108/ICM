@@ -96,3 +96,32 @@ export function ServerCheckSummary({ state, onRetry }: { state: ServerCheckState
     </div>
   );
 }
+
+/**
+ * The artist is sending a new release that looks like a paid one sent back for changes. Fixing the
+ * paid release is the usual way; a new release with the same UPC takes its payment over.
+ */
+export function PaidTwinNotice({ twin }: { twin: { id: string; title: string; match: "upc" | "title" } | null }) {
+  if (!twin) return null;
+  return (
+    <div className="rounded-[20px] border border-amber-400/40 bg-amber-500/[0.08] px-4 py-3.5 text-[13.5px] text-amber-50">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+        <div className="min-w-0">
+          <p className="font-semibold">У вас уже есть оплаченный релиз «{twin.title}», он ждёт исправлений</p>
+          <p className="mt-1 leading-5 text-amber-100/85">
+            {twin.match === "upc"
+              ? "Если отправите этот релиз, оплата перенесётся с него, а старый релиз закроется. Но проще исправить оплаченный релиз: там уже есть замечание модератора."
+              : "Платить второй раз не нужно: откройте оплаченный релиз и исправьте то, что отметил модератор. Новый релиз с другим UPC будет оплачиваться отдельно."}
+          </p>
+          <a
+            href={`/dashboard/releases/${encodeURIComponent(twin.id)}/edit`}
+            className="mt-2 inline-flex font-semibold text-amber-200 underline-offset-2 hover:underline"
+          >
+            Исправить «{twin.title}»
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}

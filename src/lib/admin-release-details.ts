@@ -1,5 +1,6 @@
 import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import { getReleasePaymentUsageFromRoles } from "@/lib/release-quota";
+import { findPaidTwin, PAYMENT_TRANSFER_KEY } from "@/lib/release-payment-transfer";
 import { describeReleaseCommissionBasis, readReleaseSubscriptionPlan } from "@/lib/tariff-commission";
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
@@ -46,6 +47,10 @@ interface AdminReleaseDetailsResponse {
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   /** How royalties of this release are commissioned, e.g. "Подписка PRO · 5%". Admin-only. */
   commission_basis?: string | null;
+  /** A paid release of the same artist sent back for changes that this unpaid one duplicates. */
+  paid_twin?: { id: string; title: string; match: "upc" | "title" } | null;
+  /** The release whose payment was moved here. */
+  payment_transferred_from?: { id: string; title: string } | null;
   priority: boolean;
   hidden?: boolean;
   resubmission?: { source_release_id?: string; source_release_title?: string } | null;
@@ -1340,6 +1345,23 @@ export async function getAdminReleaseDetailsById(releaseId: string) {
   if (!release) return null;
   const details = mapAdminReleaseDetails(release);
   details.hidden = getReleaseDeletionState(release.roles)?.status === "deleted";
+  // A new release made instead of fixing a paid one: the admin can move the payment over.
+  if (!release.confirmed && !details.hidden) {
+    const submission = asRecord(asRecord(release.roles)?.submissionData);
+    details.paid_twin = await findPaidTwin(prisma, {
+      userId: release.userId,
+      releaseId: release.id,
+      title: release.title,
+      upc: release.upc?.trim() || (typeof submission?.upc === "string" ? submission.upc.trim() : "") || null
+    }).catch(() => null);
+  }
+  const transfer = asRecord(asRecord(release.roles)?.[PAYMENT_TRANSFER_KEY]);
+  if (transfer && typeof transfer.releaseId === "string") {
+    details.payment_transferred_from = {
+      id: transfer.releaseId,
+      title: typeof transfer.title === "string" ? transfer.title : "Без названия"
+    };
+  }
   details.performer_mismatches = findTrackPerformerMismatches(parseSubmissionData(release)).map(
     describeTrackPerformerMismatch
   );

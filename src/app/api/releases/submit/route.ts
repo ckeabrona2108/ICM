@@ -50,6 +50,7 @@ import {
   withReleaseResubmission
 } from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
+import { findPaidTwin, transferReleasePayment } from "@/lib/release-payment-transfer";
 import {
   calculateExtrasSupplement,
   planExtrasSupplement,
@@ -733,6 +734,51 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
 
   // Not a re-sent paid release any more: an old supplement no longer prices it.
   existing.roles = withoutExtrasSupplement(asRecord(existing.roles) ?? {}) as Prisma.JsonValue;
+
+  // A new release made instead of fixing a paid one sent back for changes (same UPC): the old
+  // payment moves here and the old release is closed, so the artist does not pay twice.
+  if (!copySourceId) {
+    const paidTwin = await findPaidTwin(db, {
+      userId: session.user.id,
+      releaseId: existing.id,
+      title: baseReleaseData.title,
+      upc: submissionData.upc?.trim() || null
+    });
+    const moved =
+      paidTwin?.match === "upc"
+        ? await transferReleasePayment(db, { fromReleaseId: paidTwin.id, toReleaseId: existing.id, adminId: null })
+        : null;
+    if (paidTwin && moved) {
+      const transferred = await db.release.findUnique({ where: { id: existing.id }, select: { roles: true } });
+      const paidResend = await resolvePaidResend({
+        roles: mergeSubmissionData(withoutExtrasSupplement(asRecord(transferred?.roles) ?? {}), submissionData),
+        paidReleaseId: paidTwin.id
+      });
+      await updateReleaseAndSyncTracks({
+        confirmed: paidResend.confirmed,
+        status: "moderating",
+        roles: withReleaseLifecycleState(paidResend.roles, "moderation") as Prisma.InputJsonValue
+      });
+      if (!paidResend.supplement) {
+        notifications.push({
+          releaseId: existing.id,
+          releaseTitle: baseReleaseData.title,
+          artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+        });
+      }
+      const transferNote = `Оплата перенесена с релиза «${moved.fromTitle}», который был возвращён на исправление: платить повторно не нужно.`;
+      const response: ReleaseSubmitSuccessResponse & { payment_required?: true; paid?: false } = {
+        ok: true,
+        releaseId: existing.id,
+        nextStatus: "moderation",
+        ...(paidResend.supplement ? { payment_required: true as const, paid: false as const } : {}),
+        message: paidResend.supplement
+          ? `${transferNote} ${supplementMessage(paidResend.supplement)}`
+          : `${transferNote} Релиз отправлен на модерацию.`
+      };
+      return NextResponse.json(response, { status: 200 });
+    }
+  }
 
   // If the free release does not apply for any reason, the release still goes out the usual
   // way (subscription or payment); the artist is told why and the reason is kept for admins.

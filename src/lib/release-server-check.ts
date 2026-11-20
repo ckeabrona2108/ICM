@@ -6,6 +6,7 @@ import { calculateReleasePrice } from "@/lib/release-pricing";
 import { extrasIncludedInSubscription, getUserReleaseQuota } from "@/lib/release-quota";
 import { calculateExtrasSupplement } from "@/lib/release-extras-supplement";
 import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
+import { findPaidTwin } from "@/lib/release-payment-transfer";
 import { buildTrackCreateManyInput } from "@/lib/release-submit-tracks";
 
 /**
@@ -19,13 +20,17 @@ export interface ReleaseServerCheckRequest {
   pendingLocalAudioIndexes?: number[];
   /** Edits keep the way the release was paid, so no price is shown for them. */
   mode?: "new" | "edit";
+  /** The draft being checked, so it is not taken for its own twin. */
+  releaseId?: string;
 }
 
 export interface ReleaseServerCheckResult {
   ok: boolean;
   issues: string[];
   /** What sending costs, for a new release; null when unknown. */
-  payment: { kind: "included" | "extras" | "release"; amountRub: number; note: string } | null;
+  payment: { kind: "included" | "extras" | "release" | "transfer"; amountRub: number; note: string } | null;
+  /** A paid release of the artist sent back for changes that this release looks like. */
+  paidTwin: { id: string; title: string; match: "upc" | "title" } | null;
 }
 
 const AUDIO_FIELD = /^tracks\.(\d+)\.audioFile$/u;
@@ -41,7 +46,7 @@ export async function checkReleaseOnServer(params: {
 }): Promise<ReleaseServerCheckResult> {
   const parsed = releaseSubmissionDataSchema.safeParse(params.request.data);
   if (!parsed.success) {
-    return { ok: false, issues: ["Некорректные данные релиза. Обновите страницу и проверьте шаги заново."], payment: null };
+    return { ok: false, issues: ["Некорректные данные релиза. Обновите страницу и проверьте шаги заново."], payment: null, paidTwin: null };
   }
   const data = parsed.data;
   const pendingAudio = new Set(params.request.pendingLocalAudioIndexes ?? []);
@@ -80,7 +85,22 @@ export async function checkReleaseOnServer(params: {
   }
 
   let payment: ReleaseServerCheckResult["payment"] = null;
+  let paidTwin: ReleaseServerCheckResult["paidTwin"] = null;
   if (params.request.mode !== "edit") {
+    paidTwin = await findPaidTwin(params.prisma, {
+      userId: params.userId,
+      releaseId: params.request.releaseId ?? "",
+      title: data.title ?? null,
+      upc: data.upc?.trim() || null
+    });
+  }
+  if (paidTwin?.match === "upc") {
+    payment = {
+      kind: "transfer",
+      amountRub: 0,
+      note: `Оплата перенесётся с релиза «${paidTwin.title}», который вернули на исправление: платить повторно не нужно. Старый релиз закроется.`
+    };
+  } else if (params.request.mode !== "edit") {
     const quota = await getUserReleaseQuota(params.userId, params.prisma);
     const tracks = buildTrackCreateManyInput({
       releaseId: "check",
@@ -114,5 +134,5 @@ export async function checkReleaseOnServer(params: {
     }
   }
 
-  return { ok: issues.length === 0, issues: [...new Set(issues)], payment };
+  return { ok: issues.length === 0, issues: [...new Set(issues)], payment, paidTwin };
 }

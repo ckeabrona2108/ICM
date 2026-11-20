@@ -35,6 +35,8 @@ interface AdminReleaseDetailsResponse {
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   commission_basis?: string | null;
+  paid_twin?: { id: string; title: string; match: "upc" | "title" } | null;
+  payment_transferred_from?: { id: string; title: string } | null;
   priority: boolean;
   hidden?: boolean;
   resubmission?: { source_release_id?: string; source_release_title?: string } | null;
@@ -737,6 +739,19 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
                 .
               </p>
             ) : null}
+            {details.payment_transferred_from ? (
+              <p className="text-[12px] text-white/55">
+                Оплата перенесена с релиза{" "}
+                <Link
+                  href={`/admin/releases/${details.payment_transferred_from.id}`}
+                  className="text-sky-200 underline-offset-2 hover:underline"
+                >
+                  «{details.payment_transferred_from.title}»
+                </Link>
+                , который вернули на исправление.
+              </p>
+            ) : null}
+            {details.paid_twin ? <PaidTwinTransferBlock releaseId={details.id} twin={details.paid_twin} /> : null}
             {details.copy_changes ? <AdminReleaseCopyChangesBlock value={details.copy_changes} /> : null}
             {details.performer_mismatches?.length ? (
               <div className="rounded-2xl border border-amber-400/30 bg-amber-500/[0.08] p-4 text-[12.5px] leading-5 text-amber-100">
@@ -1595,6 +1610,57 @@ function ModalCard({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** An unpaid release that duplicates a paid one sent back for changes: offer to move the payment. */
+function PaidTwinTransferBlock({
+  releaseId,
+  twin
+}: {
+  releaseId: string;
+  twin: { id: string; title: string; match: "upc" | "title" };
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const transfer = async () => {
+    if (!window.confirm(`Перенести оплату с релиза «${twin.title}» на этот релиз? Старый релиз закроется и скроется у артиста.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${encodeURIComponent(releaseId)}/transfer-payment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromReleaseId: twin.id })
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error || "Не удалось перенести оплату.");
+      window.location.reload();
+    } catch (transferError) {
+      setError(transferError instanceof Error ? transferError.message : "Не удалось перенести оплату.");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-2 rounded-2xl border border-amber-400/30 bg-amber-500/[0.08] px-4 py-3 text-[13px] text-amber-50">
+      <p className="font-semibold">У артиста есть оплаченный релиз, который вернули на исправление</p>
+      <p className="mt-1 leading-5 text-amber-100/80">
+        <Link href={`/admin/releases/${twin.id}`} className="text-amber-200 underline-offset-2 hover:underline">
+          «{twin.title}»
+        </Link>{" "}
+        {twin.match === "upc" ? "с тем же UPC" : "с тем же названием"}. Похоже, артист отправил исправленную версию новым
+        релизом вместо исправления оплаченного.
+      </p>
+      <button
+        type="button"
+        onClick={() => void transfer()}
+        disabled={busy}
+        className="mt-2 inline-flex h-9 items-center rounded-xl bg-amber-400/90 px-4 text-[12.5px] font-semibold text-black transition hover:bg-amber-300 disabled:opacity-50"
+      >
+        {busy ? "Переносим…" : "Перенести оплату"}
+      </button>
+      {error ? <p className="mt-2 text-[12px] text-rose-300">{error}</p> : null}
     </div>
   );
 }

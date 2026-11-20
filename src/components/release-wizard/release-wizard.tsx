@@ -20,7 +20,7 @@ import {
 import { StepIntro } from "./step-intro";
 import { StepChanges, StepLyrics } from "./change-request";
 import { StepNumberContext } from "./step-number";
-import { ServerBusyNotice, ServerCheckSummary, type ServerCheckState } from "./server-check";
+import { PaidTwinNotice, ServerBusyNotice, ServerCheckSummary, type ServerCheckState } from "./server-check";
 import { StepInfo } from "./step-info";
 import { StepTracks } from "./step-tracks";
 import { StepExtras } from "./step-extras";
@@ -744,7 +744,8 @@ function WizardInner({
         body: JSON.stringify({
           data: payloadData,
           pendingLocalAudioIndexes,
-          mode: submissionMode === "new" && !data.changeRequest ? "new" : "edit"
+          mode: submissionMode === "new" && !data.changeRequest ? "new" : "edit",
+          releaseId: draftReleaseIdRef.current
         })
       });
       const body = await response.json().catch(() => null);
@@ -1821,7 +1822,8 @@ function WizardInner({
               {step === "lyrics" ? <StepLyrics /> : null}
               {step === "extras" ? <StepExtras /> : null}
               {step === "review" ? (
-                <div className="mb-5">
+                <div className="mb-5 space-y-3">
+                  {serverCheck.status === "done" ? <PaidTwinNotice twin={serverCheck.result.paidTwin} /> : null}
                   <ServerCheckSummary state={serverCheck} onRetry={() => void runServerCheck()} />
                 </div>
               ) : null}

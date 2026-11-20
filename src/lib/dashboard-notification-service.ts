@@ -47,7 +47,8 @@ const DASHBOARD_NOTIFICATION_KINDS = new Set<DashboardNotificationKind>([
   "artist_release_commented",
   "artist_release_comment_reacted",
   "artist_profile_followed",
-  "release_promo_status"
+  "release_promo_status",
+  "release_payment_transferred"
 ]);
 const RELEASE_NOTIFICATION_KINDS = new Set<DashboardNotificationKind>([
   "release_approved",

@@ -133,7 +133,8 @@ export type DashboardNotificationKind =
   | "artist_release_commented"
   | "artist_release_comment_reacted"
   | "artist_profile_followed"
-  | "release_promo_status";
+  | "release_promo_status"
+  | "release_payment_transferred";
 
 export interface DashboardNotificationItemResponse {
   id: string;
@@ -432,6 +433,10 @@ export interface AdminReleaseDetailsResponse {
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
   /** Admin-only: how this release's royalties are commissioned. */
   commission_basis?: string | null;
+  /** A paid release of the same artist sent back for changes that this unpaid one duplicates. */
+  paid_twin?: { id: string; title: string; match: "upc" | "title" } | null;
+  /** The release whose payment was moved here. */
+  payment_transferred_from?: { id: string; title: string } | null;
   priority: boolean;
   media_health?: {
     broken_cover: boolean;

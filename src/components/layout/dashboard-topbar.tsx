@@ -139,6 +139,7 @@ function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
 } {
   switch (kind) {
     case "release_approved":
+    case "release_payment_transferred":
     case "report_agreed":
     case "payout_paid":
       return {

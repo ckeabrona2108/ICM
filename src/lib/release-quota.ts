@@ -367,6 +367,8 @@ export async function getUserReleaseQuota(
     if (release.confirmed === false && !(usage?.type === "subscription" && readPendingExtrasSupplement(release.roles))) {
       continue;
     }
+    // Its payment moved to the release the artist sent instead; that one holds the slot.
+    if (typeof asRecord(release.roles)?.paymentMovedToReleaseId === "string") continue;
     if (usage?.type === "standalone_payment") continue;
     if (usage?.type === "partner_code") continue;
     if (usage?.type === "free_first_release") continue;

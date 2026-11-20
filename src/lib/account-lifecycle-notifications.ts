@@ -5,10 +5,20 @@ import { mapReleaseStatusToSection, shouldTreatReleaseAsApproved } from "@/lib/r
 import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 import { getDraftLastChangedAt } from "@/lib/draft-retention";
 import { toAbsoluteAppUrl } from "@/lib/vk-messages";
+import { formatRubCurrency } from "@/lib/currency-format";
+import { listUserReports } from "@/lib/report-service";
+import {
+  describeReportsToConfirm,
+  planReportConfirmReminder,
+  REPORT_CONFIRM_FIRST_AFTER_MS,
+  REPORT_CONFIRM_KEY_PREFIX,
+  REPORT_CONFIRM_REMINDER_KIND,
+  summarizeReportsToConfirm
+} from "@/lib/report-confirm-reminder";
 
 // Account events that no user action triggers directly: the welcome, and the delayed reminders a
 // scheduled run sends (no track a day after signing up, an abandoned draft, a release that came out,
-// the next release after the free one, a subscription running out). Every reminder goes to all channels once per user and key.
+// the next release after the free one, a subscription running out, reports not confirmed). Every reminder goes to all channels once per user and key.
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -271,6 +281,37 @@ async function findSubscriptionReminders(prisma: PrismaClient, now: Date): Promi
 }
 
 /**
+ * Reports waiting for the artist's confirmation: a weekly reminder until they are confirmed (see
+ * report-confirm-reminder). Old reports are reminded too: their money is stuck until confirmed.
+ */
+async function findReportConfirmReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
+  const rows = await prisma.financeReport.findMany({
+    where: { status: { not: "AGREED" }, createdAt: { lte: new Date(now.getTime() - REPORT_CONFIRM_FIRST_AFTER_MS) } },
+    select: { userId: true },
+    distinct: ["userId"]
+  });
+  const reminders: Reminder[] = [];
+  for (const { userId } of rows) {
+    const summary = summarizeReportsToConfirm(await listUserReports(prisma, userId));
+    if (!summary.newestAt) continue;
+    const remindersSinceNewest = await prisma.user_notification_reminders.count({
+      where: { user_id: userId, key: { startsWith: REPORT_CONFIRM_KEY_PREFIX }, created_at: { gte: summary.newestAt } }
+    });
+    const key = planReportConfirmReminder({ summary, remindersSinceNewest, now });
+    if (!key) continue;
+    reminders.push({
+      userId,
+      key,
+      kind: REPORT_CONFIRM_REMINDER_KIND,
+      title: "Подтвердите финансовый отчёт",
+      message: describeReportsToConfirm(summary, formatRubCurrency),
+      href: "/dashboard/finance"
+    });
+  }
+  return reminders;
+}
+
+/**
  * Reminders started going out on 19.11.2026. What happened before that day is not reminded, so the
  * first run does not drop a backlog of old drafts and signups on artists. Subscription ends are
  * about money and are still reminded.
@@ -279,6 +320,7 @@ export const ACCOUNT_REMINDERS_STARTED_AT = new Date("2026-11-19T00:00:00+03:00"
 
 /** Reminders and tips nobody asked for: an artist gets at most one of them a day. */
 export const NUDGE_KINDS = [
+  REPORT_CONFIRM_REMINDER_KIND,
   "account_signup_reminder",
   "release_draft_reminder",
   "release_published",
@@ -307,6 +349,7 @@ export async function findRecentlyNudgedUsers(db: NudgeDb, userIds: string[], no
 
 /** Most important first: money, then unfinished work, then news and offers. */
 const REMINDER_PRIORITY = [
+  REPORT_CONFIRM_REMINDER_KIND,
   "account_subscription_ended",
   "account_subscription_ending",
   "release_draft_reminder",
@@ -353,7 +396,8 @@ export async function runAccountReminders(params: {
     findAbandonedDraftReminders,
     findReleaseOutReminders,
     findFreeReleaseNextReminders,
-    findSubscriptionReminders
+    findSubscriptionReminders,
+    findReportConfirmReminders
   ];
   const byUser = new Map<string, Reminder[]>();
   for (const find of finders) {

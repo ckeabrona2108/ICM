@@ -32,6 +32,7 @@ const DASHBOARD_NOTIFICATION_KINDS = new Set<DashboardNotificationKind>([
   "report_ready",
   "report_changes_requested",
   "report_agreed",
+  "report_confirm_reminder",
   "payout_requested",
   "payout_paid",
   "payout_rejected",
@@ -48,7 +49,9 @@ const DASHBOARD_NOTIFICATION_KINDS = new Set<DashboardNotificationKind>([
   "artist_release_comment_reacted",
   "artist_profile_followed",
   "release_promo_status",
-  "release_payment_transferred"
+  "release_payment_transferred",
+  "account_contract_approved",
+  "account_contract_rejected"
 ]);
 const RELEASE_NOTIFICATION_KINDS = new Set<DashboardNotificationKind>([
   "release_approved",

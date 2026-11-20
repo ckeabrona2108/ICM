@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
 import { isPrismaColumnMissingError } from "@/lib/prisma-errors";
+import type { PayoutPeriodShare } from "@/lib/payout-quarter";
 
 export type PayoutRequestStatusValue = "REQUESTED" | "PROCESSING" | "PAID" | "REJECTED";
 
@@ -11,6 +12,8 @@ export type PayoutRequestSummary = {
   createdAt: string;
   quarter: number | null;
   year: number | null;
+  /** Quarters of a request that covers several of them, with the part taken from each. */
+  periods: PayoutPeriodShare[];
   rejectionReason: string | null;
   recipientName: string | null;
   bankName: string | null;
@@ -44,6 +47,29 @@ export function getPayoutPeriod(requisites: unknown): { quarter: number | null; 
     quarter: Number.isInteger(quarter) && quarter >= 1 && quarter <= 4 ? quarter : null,
     year: Number.isInteger(year) && year >= 2020 && year <= 2100 ? year : null
   };
+}
+
+/**
+ * Quarters the payout takes its money from. A multi-quarter request stores them in `periods`;
+ * an older one names a single quarter, which then carries the whole amount.
+ */
+export function getPayoutPeriods(requisites: unknown, amount: unknown): PayoutPeriodShare[] {
+  const value = asRecord(requisites);
+  if (Array.isArray(value.periods)) {
+    const shares = value.periods.flatMap((item) => {
+      const share = asRecord(item);
+      const period = getPayoutPeriod(share);
+      const shareAmount = Number(share.amount);
+      if (!period.quarter || !period.year || !Number.isFinite(shareAmount)) return [];
+      const reportId = String(share.reportId ?? "").trim() || null;
+      return [{ quarter: period.quarter, year: period.year, amount: shareAmount, reportId }];
+    });
+    if (shares.length) return shares;
+  }
+  const period = getPayoutPeriod(value);
+  if (!period.quarter || !period.year) return [];
+  const reportId = String(value.reportId ?? "").trim() || null;
+  return [{ quarter: period.quarter, year: period.year, amount: Math.abs(Number(amount ?? 0)) || 0, reportId }];
 }
 
 export function getPayoutRejectionReason(requisites: unknown): string | null {
@@ -89,6 +115,7 @@ export function mapPayoutSummary(row: PayoutSummaryRow): PayoutRequestSummary {
       : row.confirmed === true ? "PAID" : "REQUESTED",
     createdAt: createdAt.toISOString(),
     ...period,
+    periods: getPayoutPeriods(row.requisites, row.amount),
     rejectionReason: getPayoutRejectionReason(row.requisites),
     ...getPayoutDetails(row.requisites)
   };
@@ -141,11 +168,12 @@ export async function findReportPayoutConflicts(
   return rows
     .filter((row) => {
       if (!PAYOUT_STATUSES_HOLDING_REPORT_MONEY.has(String(row.status)) && row.confirmed !== true) return false;
+      const shares = getPayoutPeriods(row.requisites, row.amount);
       const reportId = String(asRecord(row.requisites).reportId ?? "").trim();
       if (reportId && reportIds.has(reportId)) return true;
-      const period = getPayoutPeriod(row.requisites);
+      if (shares.some((share) => share.reportId && reportIds.has(share.reportId))) return true;
       return params.quarter !== null && params.year !== null &&
-        period.quarter === params.quarter && period.year === params.year;
+        shares.some((share) => share.quarter === params.quarter && share.year === params.year);
     })
     .map((row) => ({ id: row.id, userId: row.userId, status: String(row.status), amount: Number(row.amount ?? 0) }));
 }

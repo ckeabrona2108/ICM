@@ -5,6 +5,12 @@ import { authOptions } from "@/lib/auth";
 import { canManageUsers } from "@/lib/admin-user-service";
 import { rejectContractSignatureByAdmin } from "@/lib/contract-verification";
 import { prisma } from "@/lib/prisma";
+import {
+  buildContractApprovedNotification,
+  buildContractRejectedNotification,
+  notifyArtistContractReviewed,
+  readVerificationOwner
+} from "@/lib/contract-notifications";
 
 export async function POST(
   request: Request,
@@ -28,6 +34,9 @@ export async function POST(
     payload && typeof payload === "object" && "reason" in payload
       ? String((payload as { reason?: unknown }).reason ?? "")
       : "";
+
+  // Whether the contract was approved before: then the artist hears it is cancelled, not rejected.
+  const before = await readVerificationOwner(prisma, verificationId);
 
   let result;
   try {
@@ -56,6 +65,17 @@ export async function POST(
       );
     }
     return NextResponse.json({ error: result.error ?? "Не удалось отклонить верификацию." }, { status: 400 });
+  }
+
+  const owner = before ?? (await readVerificationOwner(prisma, verificationId));
+  if (owner) {
+    await notifyArtistContractReviewed(prisma, buildContractRejectedNotification({
+      userId: owner.userId,
+      verificationId,
+      reason: reason.trim(),
+      wasApproved: before?.status === "approved",
+      movedReleaseCount: result.movedReleaseIds?.length ?? 0
+    }));
   }
 
   return NextResponse.json(

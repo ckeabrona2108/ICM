@@ -113,7 +113,7 @@ test("validatePayoutRequest blocks a payout above the selected quarter balance",
   const payload = validRequest();
   payload.amount = 300;
   const issues = validatePayoutRequest(payload, { ...validContext(), selectedQuarterBalance: 200 });
-  assert.ok(issues.some((issue) => issue.field === "amount" && issue.message.includes("выбранному кварталу")));
+  assert.ok(issues.some((issue) => issue.field === "amount" && issue.message.includes("выбранным кварталам")));
 });
 
 test("validatePayoutRequest blocks a duplicate selected quarter", () => {

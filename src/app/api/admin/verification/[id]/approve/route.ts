@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { canManageUsers } from "@/lib/admin-user-service";
-import { approveContractSignatureByAdmin } from "@/lib/contract-verification";
+import { approveContractSignatureByAdmin, getUserContractStatus } from "@/lib/contract-verification";
 import { prisma } from "@/lib/prisma";
+import {
+  buildContractApprovedNotification,
+  notifyArtistContractReviewed,
+  readVerificationOwner
+} from "@/lib/contract-notifications";
 
 export async function POST(
   _request: Request,
@@ -49,6 +54,17 @@ export async function POST(
       );
     }
     return NextResponse.json({ error: result.error ?? "Не удалось подтвердить верификацию." }, { status: 400 });
+  }
+
+  const owner = await readVerificationOwner(prisma, verificationId);
+  if (owner) {
+    const contract = await getUserContractStatus({ prisma, userId: owner.userId }).catch(() => null);
+    await notifyArtistContractReviewed(prisma, buildContractApprovedNotification({
+      userId: owner.userId,
+      verificationId,
+      contractNumber: contract?.contractNumber ?? null,
+      movedReleaseCount: result.movedReleaseIds?.length ?? 0
+    }));
   }
 
   return NextResponse.json(

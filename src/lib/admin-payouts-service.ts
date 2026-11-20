@@ -1,4 +1,6 @@
 import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
+import { getPayoutPeriods } from "@/lib/payout-request";
+import type { PayoutPeriodShare } from "@/lib/payout-quarter";
 
 export interface AdminPayoutUserInfo {
   id: string;
@@ -37,6 +39,8 @@ export interface AdminPayoutDetails {
   payoutPeriodLabel: string | null;
   quarter: number | null;
   year: number | null;
+  /** Quarters of a request over several of them, with the part taken from each; empty for one quarter. */
+  periods: PayoutPeriodShare[];
   taxStatus: string | null;
   bankBik: string;
   reportId: string | null;
@@ -57,6 +61,8 @@ export interface ParsedPayoutRequisites {
   payoutPeriodLabel: string | null;
   quarter: number | null;
   year: number | null;
+  /** Quarters of a request over several of them, with the part taken from each; empty for one quarter. */
+  periods: PayoutPeriodShare[];
   taxStatus: string | null;
   bankBik: string;
   reportId: string | null;
@@ -124,6 +130,7 @@ export function parsePayoutRequisites(
     payoutPeriodLabel: payoutWindow ? String(payoutWindow.periodLabel ?? "").trim() || null : null,
     quarter: asOptionalNumber(source.quarter),
     year: asOptionalNumber(source.year),
+    periods: Array.isArray(source.periods) ? getPayoutPeriods(source, 0) : [],
     taxStatus: String(source.taxStatus ?? "").trim() || null,
     bankBik: String(source.bankBik ?? "").trim(),
     reportId: String(source.reportId ?? "").trim() || null,

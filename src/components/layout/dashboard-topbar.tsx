@@ -140,6 +140,7 @@ function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
   switch (kind) {
     case "release_approved":
     case "release_payment_transferred":
+    case "account_contract_approved":
     case "report_agreed":
     case "payout_paid":
       return {
@@ -165,6 +166,7 @@ function getNotificationMeta(kind: DashboardNotificationItemResponse["kind"]): {
       };
     case "report_ready":
     case "report_changes_requested":
+    case "report_confirm_reminder":
       return {
         icon: FileSpreadsheet,
         toneClassName: "border-sky-400/20 bg-sky-500/10 text-sky-200"

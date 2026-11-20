@@ -26,6 +26,8 @@ function fakePrisma(data: {
   promos?: Array<{ releaseId: string; shortName: string }>;
   subscribers?: Array<{ id: string; expiresAt: Date }>;
   recentNudges?: Array<{ user_id: string; kind: string }>;
+  financeReports?: Array<{ id: string; userId: string; status: string; amount: number; createdAt: Date; quarter: number; year: number }>;
+  earlierReportReminders?: number;
 }) {
   const claimed = new Set(data.claimedKeys ?? []);
   const notifications: Array<Record<string, unknown>> = [];
@@ -63,7 +65,26 @@ function fakePrisma(data: {
       findMany: async (args: { where: { consumed_at: { gte: Date; lte: Date } } }) =>
         (data.claims ?? []).filter((row) => inRange(row.consumed_at, args.where.consumed_at))
     },
+    financeReport: {
+      findMany: async (args: { where: { userId?: string; status?: { not: string }; createdAt?: { lte: Date } } }) => {
+        const rows = data.financeReports ?? [];
+        if (args.where.userId) {
+          return rows
+            .filter((row) => row.userId === args.where.userId)
+            .map((row) => ({
+              ...row,
+              periodStart: new Date(Date.UTC(row.year, (row.quarter - 1) * 3, 1)),
+              periodEnd: new Date(Date.UTC(row.year, row.quarter * 3, 0)),
+              currency: "RUB",
+              agreedAt: null
+            }));
+        }
+        const pending = rows.filter((row) => row.status !== "AGREED" && row.createdAt <= (args.where.createdAt?.lte ?? now));
+        return Array.from(new Set(pending.map((row) => row.userId))).map((userId) => ({ userId }));
+      }
+    },
     user_notification_reminders: {
+      count: async () => data.earlierReportReminders ?? 0,
       create: async (args: { data: { user_id: string; key: string } }) => {
         const id = `${args.data.user_id}:${args.data.key}`;
         if (claimed.has(id)) {
@@ -251,4 +272,24 @@ test("events from before the reminders started are not reminded, subscription en
   const result = await runAccountReminders({ prisma, now, startedAt: ago(HOUR_MS) });
   assert.deepEqual(result.sent.map((item) => item.userId), ["u2"]);
   assert.equal(notifications[0].kind, "account_subscription_ending");
+});
+
+test("an artist with reports to confirm gets one weekly reminder with the total", async () => {
+  const financeReports = [
+    { id: "r1", userId: "u-reports", status: "READY_TO_CONFIRM", amount: 1900, createdAt: ago(40 * 24 * HOUR_MS), quarter: 2, year: 2026 },
+    { id: "r2", userId: "u-reports", status: "READY_TO_CONFIRM", amount: 1000, createdAt: ago(5 * 24 * HOUR_MS), quarter: 3, year: 2026 },
+    { id: "r3", userId: "u-fresh", status: "READY_TO_CONFIRM", amount: 500, createdAt: ago(HOUR_MS), quarter: 3, year: 2026 }
+  ];
+  const { prisma, notifications } = fakePrisma({ financeReports });
+  const result = await runAccountReminders({ prisma, now });
+  assert.deepEqual(result.errors, []);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0]?.user_id, "u-reports");
+  assert.equal(notifications[0]?.kind, "report_confirm_reminder");
+  assert.match(String(notifications[0]?.message), /^2 отчёта на 2\s900,00\s₽ ждут подтверждения/u);
+
+  // Four reminders after the newest report are enough.
+  const capped = fakePrisma({ financeReports, earlierReportReminders: 4 });
+  await runAccountReminders({ prisma: capped.prisma, now });
+  assert.equal(capped.notifications.length, 0);
 });

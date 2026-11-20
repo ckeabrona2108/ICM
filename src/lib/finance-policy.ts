@@ -26,6 +26,15 @@ export const payoutRequestSchema = z.object({
   amount: z.number().finite(),
   quarter: z.number().int().min(1).max(4),
   year: z.number().int().min(2020).max(2100),
+  /**
+   * Quarters to withdraw together in one request, each with its agreed report. Without it the
+   * request covers `quarter`/`year` and `documents.reportId` only.
+   */
+  periods: z.array(z.object({
+    quarter: z.number().int().min(1).max(4),
+    year: z.number().int().min(2020).max(2100),
+    reportId: z.string().uuid()
+  })).min(1).max(16).optional(),
   taxStatus: payoutTaxStatusSchema,
   requisites: z.object({
     recipientName: z.string().trim(),
@@ -110,14 +119,14 @@ export function validatePayoutRequest(
       issues,
       "invalid",
       "quarter",
-      "За выбранный квартал нет доступных средств: всё уже выплачено или отчёт не согласован."
+      "За выбранные кварталы нет доступных средств: всё уже выплачено или отчёт не согласован."
     );
   } else if (input.amount > (context.selectedQuarterBalance ?? 0)) {
     pushIssue(
       issues,
       "invalid",
       "amount",
-      "Сумма выплаты превышает доступную сумму по выбранному кварталу."
+      "Сумма выплаты превышает доступную сумму по выбранным кварталам."
     );
   }
 
@@ -126,7 +135,7 @@ export function validatePayoutRequest(
       issues,
       "forbidden",
       "quarter",
-      "По выбранному кварталу уже есть заявка в обработке. Новую можно создать после её выплаты или отклонения."
+      "По одному из выбранных кварталов уже есть заявка в обработке. Новую по нему можно создать после её выплаты или отклонения."
     );
   }
 

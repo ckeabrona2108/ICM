@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -97,6 +98,7 @@ export function FinancePageClient({
   initialPayoutRequests: PayoutRequestSummary[];
   contractNumber: number | null;
 }) {
+  const router = useRouter();
   const [reports, setReports] = React.useState(initialReports);
   const [agreedBalance, setAgreedBalance] = React.useState(initialAgreedBalance);
   const [pendingPayout] = React.useState<number>(initialPendingPayout);
@@ -184,6 +186,9 @@ export function FinancePageClient({
               }
         )
       );
+
+      // The cabinet banner and the balance in the top bar come from the layout.
+      router.refresh();
 
       if (decision === "agree") {
         setAgreedBalance((current) => current + selectedReport.amount);

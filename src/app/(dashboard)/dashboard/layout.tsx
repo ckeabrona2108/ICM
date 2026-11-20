@@ -18,6 +18,9 @@ import { getReleaseSidebarCountsForUser } from "@/lib/release-counts";
 import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionOverview } from "@/lib/subscription-limits";
 import { getAiTokenBalance } from "@/lib/ai-token-service";
+import { listUserReports } from "@/lib/report-service";
+import { summarizeReportsToConfirm } from "@/lib/report-confirm-reminder";
+import { ReportsToConfirmBanner } from "@/components/finance/reports-to-confirm-banner";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +63,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     verificationId: null
   };
 
-  const [releaseCounts, userProfile, balanceTotals, subscriptionOverview, contractStatus] = await Promise.all([
+  const [releaseCounts, userProfile, balanceTotals, subscriptionOverview, contractStatus, reportsToConfirm] = await Promise.all([
     getReleaseSidebarCountsForUser({
       userId: session.user.id,
       prisma
@@ -169,7 +172,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
         return unavailableContractStatus;
       }
       throw error;
-    })
+    }),
+    // The banner is a reminder: the cabinet opens without it if reports cannot be read.
+    listUserReports(prisma, session.user.id)
+      .then(summarizeReportsToConfirm)
+      .catch((error) => {
+        console.error("[dashboard] reports to confirm unavailable", error);
+        return summarizeReportsToConfirm([]);
+      })
   ]);
 
   const sidebarCounts = {
@@ -222,6 +232,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
               hasSubscription={hasSubscription}
               subscriptionEndsAt={subscriptionOverview.endsAt}
               contractStatus={contractStatus}
+            />
+            <ReportsToConfirmBanner
+              count={reportsToConfirm.count}
+              amount={reportsToConfirm.amount}
+              quarterLabels={reportsToConfirm.quarterLabels}
             />
             {children}
           </div>

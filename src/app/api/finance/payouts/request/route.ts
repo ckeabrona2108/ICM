@@ -26,8 +26,14 @@ import {
   retryPrismaSerializationConflict
 } from "@/lib/prisma-errors";
 import { getCurrentPayoutWindowState } from "@/lib/payout-schedule";
-import { getPayoutPeriod } from "@/lib/payout-request";
-import { computeQuarterPayoutStates } from "@/lib/payout-quarter";
+import { getPayoutPeriod, getPayoutPeriods } from "@/lib/payout-request";
+import {
+  allocatePayoutAcrossQuarters,
+  computeQuarterPayoutStates,
+  formatPayoutPeriods,
+  quarterKey,
+  type PayoutPeriodShare
+} from "@/lib/payout-quarter";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { notifyAdminPayoutRequested } from "@/lib/telegram-notifier";
 
@@ -111,7 +117,15 @@ export async function POST(request: Request) {
     return NextResponse.json(response, { status: 400 });
   }
 
-  let result: { issues: PayoutRequestFailureResponse["errors"]; payoutId: string | null };
+  // Quarters withdrawn together; an older client sends one quarter with its report.
+  const requestedPeriods = Array.from(
+    new Map(
+      (parsed.data.periods ?? [{ quarter: parsed.data.quarter, year: parsed.data.year, reportId: parsed.data.documents.reportId }])
+        .map((period) => [quarterKey(period.quarter, period.year)!, period])
+    ).values()
+  );
+
+  let result: { issues: PayoutRequestFailureResponse["errors"]; payoutId: string | null; shares: PayoutPeriodShare[] };
   try {
     result = await retryPrismaSerializationConflict(() => prisma.$transaction(
     async (tx) => {
@@ -132,14 +146,9 @@ export async function POST(request: Request) {
             ? "changes_requested" as const
             : "ready_to_confirm" as const
       );
-      const selectedReports = reports.filter(
-        (report) => report.lifecycleState === "agreed" &&
-          report.quarter === parsed.data.quarter &&
-          report.year === parsed.data.year
-      );
-      // What is left of the quarter after earlier requests: a quarter can be withdrawn in parts,
+      // What is left of each quarter after earlier requests: a quarter can be withdrawn in parts,
       // and money added to it later (a supplement, an admin credit) can still be withdrawn.
-      const quarterState = computeQuarterPayoutStates(
+      const quarterStates = computeQuarterPayoutStates(
         reports.map((report) => ({
           quarter: report.quarter,
           year: report.year,
@@ -150,11 +159,13 @@ export async function POST(request: Request) {
           ...getPayoutPeriod(payout.requisites),
           amount: Number(payout.amount ?? 0),
           status: String(payout.status),
-          confirmed: payout.confirmed
+          confirmed: payout.confirmed,
+          periods: getPayoutPeriods(payout.requisites, payout.amount)
         }))
-      ).get(`${parsed.data.year}-${parsed.data.quarter}`);
-      const selectedQuarterBalance = quarterState?.remaining ?? 0;
-      const duplicateQuarterRequest = Boolean(quarterState?.hasOpenRequest);
+      );
+      const selectedStates = requestedPeriods.map((period) => quarterStates.get(quarterKey(period.quarter, period.year)!));
+      const selectedQuarterBalance = selectedStates.reduce((sum, state) => sum + (state?.remaining ?? 0), 0);
+      const duplicateQuarterRequest = selectedStates.some((state) => state?.hasOpenRequest);
       const documentKeyPrefix = `private/payout-documents/${session.user.id}/`;
       const documentBelongsToUser = parsed.data.documents.supportingDocument.key.startsWith(documentKeyPrefix);
       const issues = validatePayoutRequest(parsed.data, {
@@ -174,14 +185,37 @@ export async function POST(request: Request) {
           message: "Документ должен быть загружен из текущего кабинета."
         });
       }
-      if (!selectedReports.some((report) => report.id === parsed.data.documents.reportId)) {
+      const reportMismatch = requestedPeriods.some((period) => !reports.some(
+        (report) => report.id === period.reportId &&
+          report.lifecycleState === "agreed" &&
+          report.quarter === period.quarter &&
+          report.year === period.year
+      ));
+      if (reportMismatch) {
         issues.push({
           code: "invalid",
           field: "documents.reportId",
           message: "Отчетная ведомость должна соответствовать выбранному кварталу."
         });
       }
-      if (issues.length > 0) return { issues, payoutId: null };
+      const shares = issues.length > 0
+        ? null
+        : allocatePayoutAcrossQuarters(
+            parsed.data.amount,
+            requestedPeriods.map((period) => ({
+              ...period,
+              remaining: quarterStates.get(quarterKey(period.quarter, period.year)!)?.remaining ?? 0
+            }))
+          );
+      if (issues.length === 0 && !shares?.length) {
+        issues.push({
+          code: "invalid",
+          field: "amount",
+          message: "Сумма выплаты превышает доступную сумму по выбранным кварталам."
+        });
+      }
+      if (issues.length > 0 || !shares?.length) return { issues, payoutId: null, shares: [] };
+      const first = shares[0]!;
 
       const requisites = parsed.data.requisites;
       const methodByInput = {
@@ -204,10 +238,12 @@ export async function POST(request: Request) {
             bankName: requisites.bankName,
             taxId: requisites.taxId,
             bankBik: requisites.bankBik,
-            quarter: parsed.data.quarter,
-            year: parsed.data.year,
+            // The first (oldest) quarter stays in quarter/year/reportId for older readers.
+            quarter: first.quarter,
+            year: first.year,
+            periods: shares.map((share) => ({ ...share })),
             taxStatus: parsed.data.taxStatus,
-            reportId: parsed.data.documents.reportId,
+            reportId: first.reportId ?? parsed.data.documents.reportId,
             supportingDocument: parsed.data.documents.supportingDocument,
             receiptDetails: parsed.data.taxStatus === "individual"
               ? {
@@ -233,7 +269,7 @@ export async function POST(request: Request) {
         },
         select: { id: true }
       });
-      return { issues: [], payoutId: payout.id };
+      return { issues: [], payoutId: payout.id, shares };
     },
     {
       isolationLevel: "Serializable",
@@ -269,7 +305,7 @@ export async function POST(request: Request) {
     userId: session.user.id,
     kind: "payout_requested",
     title: "Заявка на вывод отправлена",
-    message: `Сумма: ${formatRubCurrency(parsed.data.amount)}. Договор № ${contractNumber}.`,
+    message: `Сумма: ${formatRubCurrency(parsed.data.amount)} за ${formatPayoutPeriods(result.shares)}. Договор № ${contractNumber}.`,
     href: "/dashboard/finance"
   });
 
@@ -278,8 +314,7 @@ export async function POST(request: Request) {
     artistName: session.user.name?.trim() || session.user.email || session.user.id,
     userEmail: session.user.email ?? "—",
     amountLabel: formatRubCurrency(parsed.data.amount),
-    quarter: parsed.data.quarter,
-    year: parsed.data.year,
+    periodLabel: formatPayoutPeriods(result.shares),
     contractNumber
   }).catch((error) => {
     console.error("[telegram] payout request notification failed", { payoutId: result.payoutId, error });

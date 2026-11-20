@@ -39,7 +39,7 @@ import {
 import {
   describeReportPayoutConflicts,
   findReportPayoutConflicts,
-  getPayoutPeriod,
+  getPayoutPeriods,
   isActivePayoutStatus
 } from "@/lib/payout-request";
 import { isPrismaTableMissingError } from "@/lib/prisma-errors";
@@ -3991,10 +3991,10 @@ export async function scanFinanceUnallocatedCandidates(params: { importId?: stri
   const payoutQuarters = new Map<string, Set<string>>();
   for (const payout of payouts) {
     if (!(isActivePayoutStatus(payout.status) || payout.status === "PAID" || payout.confirmed === true)) continue;
-    const period = getPayoutPeriod(payout.requisites);
-    if (!period.quarter || !period.year) continue;
+    const periods = getPayoutPeriods(payout.requisites, 0);
+    if (!periods.length) continue;
     const set = payoutQuarters.get(payout.userId) ?? new Set<string>();
-    set.add(`${period.year}-${period.quarter}`);
+    for (const period of periods) set.add(`${period.year}-${period.quarter}`);
     payoutQuarters.set(payout.userId, set);
   }
   const candidates = groupSupplementCandidates({

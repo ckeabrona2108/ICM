@@ -236,8 +236,8 @@ export interface TelegramPayoutRequestNotificationPayload {
   artistName: string;
   userEmail: string;
   amountLabel: string;
-  quarter: number;
-  year: number;
+  /** "2 квартал 2026" or, for a request over several quarters, "1, 2 и 3 квартал 2026". */
+  periodLabel: string;
   contractNumber: number;
 }
 
@@ -249,7 +249,7 @@ export function buildPayoutRequestedTelegramText(payload: TelegramPayoutRequestN
     `Артист: ${payload.artistName}`,
     `Email: ${payload.userEmail}`,
     `Сумма: ${payload.amountLabel}`,
-    `Период: ${payload.quarter} квартал ${payload.year}`,
+    `Период: ${payload.periodLabel}`,
     `Договор № ${payload.contractNumber}`,
     "",
     "Открыть заявки:",

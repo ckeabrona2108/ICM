@@ -5,6 +5,7 @@ import { CheckCircle2, Download, Loader2, PenLine, X } from "lucide-react";
 
 import {
   CONTRACT_VERSION,
+  getContractBirthDateIssue,
   type ContractSignatureStatus,
   type ContractSignerFormData,
   type ContractSignerValidationIssue
@@ -71,8 +72,9 @@ function validateForm(form: ContractSignerFormData): ContractSignerValidationIss
     issues.push({ field: "fullName", message: "Укажите ФИО (минимум имя и фамилия)." });
   }
 
-  if (!form.birthDate?.trim()) {
-    issues.push({ field: "birthDate", message: "Укажите дату рождения." });
+  const birthDateIssue = getContractBirthDateIssue(form.birthDate);
+  if (birthDateIssue) {
+    issues.push({ field: "birthDate", message: birthDateIssue });
   }
 
   if (!form.passportNumber?.trim()) {
@@ -450,6 +452,8 @@ export function ContractVerificationModal({
                 <Field label="Дата рождения" required error={fieldError(issues, "birthDate")}>
                   <Input
                     type="date"
+                    min="1900-01-01"
+                    max={new Date().toISOString().slice(0, 10)}
                     value={form.birthDate ?? ""}
                     onChange={(event) => setForm((prev) => ({ ...prev, birthDate: event.target.value }))}
                   />

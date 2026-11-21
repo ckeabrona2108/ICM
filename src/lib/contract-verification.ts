@@ -22,6 +22,7 @@ import {
   CONTRACT_FILE_URL,
   CONTRACT_NUMBER_START,
   CONTRACT_VERSION,
+  getContractBirthDateIssue,
   type ContractSignerFormData,
   type ContractSignerValidationIssue,
   type ContractSignatureStatus,
@@ -567,7 +568,9 @@ function formatContractHeaderDate(value: string): string {
     year: "numeric",
     timeZone: "Europe/Kaliningrad"
   }).format(date);
-  return formatted.replace(/^(\d+)/u, "«$1»") + " г.";
+  // Intl already ends the ru-RU long date with "г.", so only add it when missing.
+  const withYearMark = /г\.$/u.test(formatted) ? formatted : `${formatted} г.`;
+  return withYearMark.replace(/^(\d+)/u, "«$1»");
 }
 
 function formatContractSignedAt(value: string): string {
@@ -1439,8 +1442,9 @@ export function validateContractSignerData(input: ContractSignerFormData): Contr
     issues.push({ field: "fullName", message: "Укажите ФИО (минимум имя и фамилия)." });
   }
 
-  if (!data.birthDate) {
-    issues.push({ field: "birthDate", message: "Укажите дату рождения." });
+  const birthDateIssue = getContractBirthDateIssue(data.birthDate);
+  if (birthDateIssue) {
+    issues.push({ field: "birthDate", message: birthDateIssue });
   }
 
   if (!data.passportNumber) {

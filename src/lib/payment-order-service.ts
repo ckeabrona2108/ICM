@@ -25,6 +25,7 @@ import {
 } from "@/lib/release-quota";
 import { readPendingExtrasSupplement, withExtrasSupplementPaid } from "@/lib/release-extras-supplement";
 import { getReleaseLifecycleStatus } from "@/lib/release-counts";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 import { normalizeSubscriptionBillingPeriod } from "@/lib/subscription-billing";
 import { grantSubscriptionFromConfirmedPayment } from "@/lib/subscription-payment-service";
@@ -360,7 +361,8 @@ async function applyConfirmedOrder(params: {
           data: {
             confirmed: true,
             status: "moderating",
-            roles: markSubmittedToModeration(paymentRoles)
+            // The moderators get it now, not when the artist sent it: moderation times count from here.
+            roles: withReleaseTimelineStamp(markSubmittedToModeration(paymentRoles), "queuedAt") as Prisma.InputJsonValue
           }
         });
         if (entered.count > 0 && getReleaseLifecycleStatus(release.status, release.roles) === "moderation") {

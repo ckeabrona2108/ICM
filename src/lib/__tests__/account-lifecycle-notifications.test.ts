@@ -343,3 +343,37 @@ test("a release still in moderation a working day after the expected answer gets
   const again = await runAccountReminders({ prisma, now: at, startedAt: EPOCH });
   assert.deepEqual(again.sent, []);
 });
+
+test("a release paid days after sending is not reported late until the days counted from the payment pass", async () => {
+  const sentAt = (value: string) => new Date(`${value}:00+03:00`).toISOString();
+  const paidLater = (id: string, userId: string, roles: Record<string, unknown>) => ({
+    id,
+    title: `Релиз ${id.slice(0, 2)}`,
+    userId,
+    status: "moderating",
+    confirmed: true,
+    upc: null,
+    moderationStartedAt: null,
+    roles: { lifecycleState: "moderation", ...roles }
+  });
+  const { prisma } = fakePrisma({
+    releases: [
+      // Sent Mon 23.11, paid Thu 26.11 (queue mark): not late on Thursday afternoon.
+      paidLater("11111111-1111-4111-8111-111111111111", "u1", {
+        timeline: { submittedAt: sentAt("2026-11-23T12:00"), queuedAt: sentAt("2026-11-26T12:00") }
+      }),
+      // Paid on Thursday before the queue mark existed: the payment record tells.
+      paidLater("22222222-2222-4222-8222-222222222222", "u2", {
+        timeline: { submittedAt: sentAt("2026-11-23T12:00") },
+        paymentUsage: { type: "standalone_payment", usedAt: sentAt("2026-11-26T12:00") }
+      })
+    ],
+    claimedKeys: []
+  });
+
+  const thursday = await runAccountReminders({ prisma, now: new Date("2026-11-26T10:30:00.000Z"), startedAt: EPOCH });
+  assert.deepEqual(thursday.sent, []);
+  // Monday 30.11, 13:00 in Moscow: the answer was due Thu or Fri.
+  const monday = await runAccountReminders({ prisma, now: new Date("2026-11-30T10:00:00.000Z"), startedAt: EPOCH });
+  assert.deepEqual(monday.sent.map((item) => item.userId).sort(), ["u1", "u2"]);
+});

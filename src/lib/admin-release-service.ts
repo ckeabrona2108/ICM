@@ -600,7 +600,7 @@ export async function updateReleasePaymentStatusByAdmin(params: {
 }) {
   const release = await params.prisma.release.findUnique({
     where: { id: params.releaseId },
-    select: { id: true, confirmed: true }
+    select: { id: true, confirmed: true, roles: true }
   });
   if (!release) return null;
 
@@ -614,7 +614,13 @@ export async function updateReleasePaymentStatusByAdmin(params: {
   await params.prisma.release.update({
     where: { id: params.releaseId },
     data: {
-      confirmed: params.paid
+      confirmed: params.paid,
+      // Marked paid: the moderators get it now, moderation times count from here. Paid mark taken
+      // back: the release waits for payment again, so it is no longer "в работе" and the artist
+      // may withdraw it as before.
+      roles: (params.paid
+        ? withReleaseTimelineStamp(release.roles, "queuedAt")
+        : withoutReleaseModerationClaim(release.roles)) as Prisma.InputJsonValue
     }
   });
 

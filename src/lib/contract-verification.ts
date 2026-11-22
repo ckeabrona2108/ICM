@@ -32,6 +32,7 @@ import { escapeContractHtml, renderContractTextPagesHtml } from "@/lib/contract-
 import { sendVerificationDecisionEmail } from "@/lib/user-event-email";
 import { getReleaseLifecycleStatus, withReleaseLifecycleState } from "@/lib/release-counts";
 import { isReleaseAwaitingPayment } from "@/lib/release-awaiting-payment";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 
 const RELEASE_STATUS_MODERATION = "moderating";
 const RELEASE_LIFECYCLE_PENDING_VERIFICATION = "pending_verification";
@@ -1890,7 +1891,8 @@ async function movePendingVerificationReleasesToModeration(params: {
       where: { id: release.id },
       data: {
         status: RELEASE_STATUS_MODERATION,
-        roles: withReleaseLifecycleState(release.roles, "moderation"),
+        // Checked contract: the release reaches the moderators now.
+        roles: withReleaseTimelineStamp(withReleaseLifecycleState(release.roles, "moderation"), "queuedAt", params.now),
         moderatorComment: null,
         rejectReason: null,
         ...(params.skipModerationTimestamps

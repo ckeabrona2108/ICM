@@ -404,7 +404,7 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
     moderationRemarks: moderationRemarks.length > 0 ? moderationRemarks : undefined,
     moderationReturnedAt: resolveModerationReturnedAt(release),
     moderationSentAt:
-      readReleaseTimeline(release.roles, { moderationStartedAt: release.moderationStartedAt }).submittedAt?.toISOString() ??
+      readReleaseTimeline(release.roles, { moderationStartedAt: release.moderationStartedAt }).queuedAt?.toISOString() ??
       undefined,
     rejectionReason,
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),

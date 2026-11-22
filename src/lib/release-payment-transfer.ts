@@ -4,6 +4,7 @@ import { getReleaseLifecycleStatus } from "@/lib/release-counts";
 import { getReleaseDeletionState, withReleaseDeletionApproved } from "@/lib/release-deletion-state";
 import { getReleasePaymentUsageFromRoles } from "@/lib/release-quota";
 import { readReleaseUpc } from "@/lib/release-resubmission";
+import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 
 /**
  * A paid release sent back for changes, and a new release the artist made instead of fixing it.
@@ -149,10 +150,15 @@ export async function transferReleasePayment(
     where: { id: to.id },
     data: {
       confirmed: true,
-      roles: withTransferredPayment(to.roles, { id: from.id, title: fromTitle, roles: from.roles }, {
-        by: params.adminId ?? "auto",
-        at: params.at
-      }) as Prisma.InputJsonValue
+      // A release waiting for payment enters the moderation queue with the moved payment.
+      roles: withReleaseTimelineStamp(
+        withTransferredPayment(to.roles, { id: from.id, title: fromTitle, roles: from.roles }, {
+          by: params.adminId ?? "auto",
+          at: params.at
+        }),
+        "queuedAt",
+        params.at
+      ) as Prisma.InputJsonValue
     }
   });
   await db.release.update({

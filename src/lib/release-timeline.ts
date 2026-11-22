@@ -7,12 +7,24 @@ import { toNotificationStorageId } from "@/lib/notification-storage-id";
  * `date` is the planned release date, so these are kept in `roles.timeline` from now on and,
  * for older releases, recovered from what was recorded at the time (see readReleaseTimeline).
  */
-export type ReleaseTimelineKey = "createdAt" | "submittedAt" | "approvedAt" | "rejectedAt" | "changesRequestedAt";
+export type ReleaseTimelineKey =
+  | "createdAt"
+  | "submittedAt"
+  | "queuedAt"
+  | "approvedAt"
+  | "rejectedAt"
+  | "changesRequestedAt";
 
 export interface ReleaseTimeline {
   createdAt: Date | null;
   updatedAt: Date | null;
   submittedAt: Date | null;
+  /**
+   * When the moderators got the current version: the sending itself, or the later moment it
+   * stopped waiting (payment, an admin's "paid" mark, a moved payment, a checked contract).
+   * Moderation times (late moderation) count from here. Never earlier than `submittedAt`.
+   */
+  queuedAt: Date | null;
   approvedAt: Date | null;
   rejectedAt: Date | null;
   changesRequestedAt: Date | null;
@@ -60,18 +72,50 @@ export function readReleaseTimeline(
   const paymentReminders = asRecord(root.paymentReminders);
   const updatedAt = asDate(root.draftUpdatedAt) ?? asDate(root.draftLastChangedAt);
 
+  const submittedAt =
+    asDate(timeline.submittedAt) ??
+    asDate(resubmission?.submittedAt) ??
+    extra.moderationStartedAt ??
+    asDate(paymentReminders?.waitingSince);
+
   return {
     createdAt: asDate(timeline.createdAt),
     updatedAt,
-    submittedAt:
-      asDate(timeline.submittedAt) ??
-      asDate(resubmission?.submittedAt) ??
-      extra.moderationStartedAt ??
-      asDate(paymentReminders?.waitingSince),
+    submittedAt,
+    queuedAt: readQueuedAt(root, timeline, submittedAt, extra.moderationStartedAt ?? null),
     approvedAt: asDate(timeline.approvedAt) ?? extra.decisions?.approvedAt ?? null,
     rejectedAt: asDate(timeline.rejectedAt) ?? extra.decisions?.rejectedAt ?? null,
     changesRequestedAt: asDate(timeline.changesRequestedAt) ?? extra.decisions?.changesRequestedAt ?? null
   };
+}
+
+function latest(dates: Array<Date | null>): Date | null {
+  let result: Date | null = null;
+  for (const date of dates) if (date && (!result || date.getTime() > result.getTime())) result = date;
+  return result;
+}
+
+/**
+ * A stamp left from an earlier round is older than the latest sending and loses to it. Releases
+ * that waited before `queuedAt` was stamped get the moment from what was recorded then: the
+ * payment, the paid extras, the moved payment, the checked contract.
+ */
+function readQueuedAt(
+  root: Record<string, unknown>,
+  timeline: Record<string, unknown>,
+  submittedAt: Date | null,
+  moderationStartedAt: Date | null
+): Date | null {
+  const stamped = asDate(timeline.queuedAt);
+  if (stamped) return latest([submittedAt, stamped]);
+  const usage = asRecord(root.paymentUsage);
+  return latest([
+    submittedAt,
+    usage?.type === "standalone_payment" ? asDate(usage.usedAt) : null,
+    asDate(asRecord(root.extrasSupplement)?.paidAt),
+    asDate(asRecord(root.paymentTransferredFrom)?.at),
+    moderationStartedAt
+  ]);
 }
 
 export interface ReleaseDecisionDates {

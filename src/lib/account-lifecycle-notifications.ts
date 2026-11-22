@@ -226,8 +226,11 @@ async function findModerationDelayedReminders(prisma: PrismaClient, now: Date): 
   for (const release of releases) {
     if (!release.confirmed || getReleaseLifecycleStatus(release.status, release.roles) !== "moderation") continue;
     if (isReleaseHiddenFromCabinet(release.roles) || isMergedResubmissionCopy(release.roles)) continue;
-    const sentAt = readReleaseTimeline(release.roles, { moderationStartedAt: release.moderationStartedAt }).submittedAt;
-    if (!sentAt || sentAt < MODERATION_DELAY_NOTICES_STARTED_AT || !isModerationDelayed(sentAt, now)) continue;
+    const timeline = readReleaseTimeline(release.roles, { moderationStartedAt: release.moderationStartedAt });
+    const sentAt = timeline.submittedAt;
+    // Counted from the moment the moderators got it: a release paid days after sending is not late yet.
+    const queuedAt = timeline.queuedAt ?? sentAt;
+    if (!sentAt || !queuedAt || sentAt < MODERATION_DELAY_NOTICES_STARTED_AT || !isModerationDelayed(queuedAt, now)) continue;
     const title = release.title?.trim() || "Без названия";
     reminders.push({
       userId: release.userId,

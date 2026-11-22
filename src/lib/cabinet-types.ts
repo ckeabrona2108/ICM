@@ -74,7 +74,7 @@ export interface CabinetRelease {
   moderationClaimed?: boolean;
   moderationRemarks?: ModerationRemark[];
   moderationReturnedAt?: string;
-  /** ISO time the current version was sent to moderation. */
+  /** ISO time the moderators got the current version (sent, or paid later): late moderation counts from it. */
   moderationSentAt?: string;
   rejectionReason?: string;
   priority?: boolean;

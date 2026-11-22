@@ -1191,6 +1191,8 @@ model user {
   vk_link                      vk_links?
   artist_platform_profiles     artist_platform_profiles[]
   oauth_accounts               oauth_accounts[]
+  security_codes               security_codes[]
+  security_channel_holds       security_channel_holds[]
   notification_settings        user_notification_settings?
   notification_reminders       user_notification_reminders[]
   free_release_claim           free_release_claims?
@@ -1992,6 +1994,39 @@ model verification {
   contract            String              @default("")
   user                user                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "verification_userId_user_id_fk")
 
+  @@schema("icecream")
+}
+
+/// One-time 6-digit codes that confirm money and account-access actions (payout, password, email,
+/// disconnecting a sign-in method). Only an HMAC of the code is stored. A verified code is a one-use
+/// grant for its action for 10 minutes.
+model security_codes {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String    @db.Uuid
+  action      String    @db.VarChar(32)
+  channel     String    @db.VarChar(16)
+  code_hash   String    @db.VarChar(128)
+  attempts    Int       @default(0)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  expires_at  DateTime  @db.Timestamptz(6)
+  verified_at DateTime? @db.Timestamptz(6)
+  used_at     DateTime? @db.Timestamptz(6)
+  user        user      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([user_id, action, created_at])
+  @@schema("icecream")
+}
+
+/// A code channel (telegram, vk, email) added without a code from another channel receives codes only
+/// from trusted_from (48 hours later), so a stolen session cannot route codes to the thief.
+model security_channel_holds {
+  user_id      String   @db.Uuid
+  channel      String   @db.VarChar(16)
+  trusted_from DateTime @db.Timestamptz(6)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  user         user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([user_id, channel])
   @@schema("icecream")
 }
 

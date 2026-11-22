@@ -15,6 +15,7 @@ import {
   VK_LINK_COOKIE,
   VK_LINK_RETURN_COOKIE
 } from "@/lib/vk-id";
+import { formatHoldUntil, holdNewCodeChannel, notifySecurityEvent } from "@/lib/security-codes";
 
 // VK ID redirects here after the artist confirms the link. The path is fixed in the
 // VK ID app settings as a trusted redirect URL; it sits beside NextAuth's catch-all.
@@ -69,6 +70,7 @@ export async function GET(request: Request) {
     return finish(baseUrl, "vk_error=failed");
   }
 
+  let linkedNew = false;
   let isMember = false;
   let memberCheckedAt: Date | null = null;
   try {
@@ -82,6 +84,8 @@ export async function GET(request: Request) {
   try {
     const owner = await prisma.vk_links.findUnique({ where: { vk_user_id: vkUserId }, select: { user_id: true } });
     if (owner && owner.user_id !== session.user.id) return finish(baseUrl, "vk_error=taken");
+    const previous = await prisma.vk_links.findUnique({ where: { user_id: session.user.id }, select: { vk_user_id: true } });
+    linkedNew = previous?.vk_user_id !== vkUserId;
 
     await prisma.vk_links.upsert({
       where: { user_id: session.user.id },
@@ -106,6 +110,20 @@ export async function GET(request: Request) {
       return finish(baseUrl, "vk_error=unavailable");
     }
     throw error;
+  }
+
+  if (linkedNew) {
+    // Like a new Telegram: codes reach this VK only after 48 hours, the other channels are told now.
+    const codesFrom = await holdNewCodeChannel(prisma, session.user.id, "vk");
+    await notifySecurityEvent(prisma, {
+      userId: session.user.id,
+      eventId: `vk-linked-${vkUserId}`,
+      title: "К кабинету подключён VK",
+      message: codesFrom
+        ? `Коды подтверждения начнут приходить в сообщения VK ${formatHoldUntil(codesFrom)} (МСК).`
+        : "Через него можно входить в кабинет.",
+      skip: ["vk"]
+    });
   }
 
   return finish(baseUrl, isMember ? "vk=linked" : "vk=linked_not_member");

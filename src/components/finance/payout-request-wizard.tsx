@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useSecurityCode } from "@/components/security/security-code-dialog";
 import type { PayoutRequestBody, PayoutRequestFailureResponse, PayoutRequestSuccessResponse } from "@/lib/api/contracts";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { PayoutRequestSummary } from "@/lib/payout-request";
@@ -188,6 +189,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
   const [supportingDocument, setSupportingDocument] = React.useState<UploadedDocument | null>(null);
   const [uploading, setUploading] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const securityCode = useSecurityCode();
   const [notice, setNotice] = React.useState<string | null>(null);
 
   const availableIds = agreedReports.map((report) => report.id).join(",");
@@ -288,7 +290,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
       documents: { reportId: covered[0]!.id, supportingDocument, receiptDetails: taxStatus === "individual" ? receiptDetails : undefined, receiptAcknowledged: taxStatus === "individual" ? true : undefined }
     };
     try {
-      const response = await fetch("/api/finance/payouts/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await securityCode.guard(() => fetch("/api/finance/payouts/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }));
       const data = await response.json().catch(() => null) as PayoutRequestSuccessResponse | PayoutRequestFailureResponse | { error?: string } | null;
       if (!response.ok) {
         const message = data && "errors" in data ? data.errors.map((error) => error.message).join(" ") : data && "error" in data ? data.error : "Не удалось отправить заявку.";
@@ -323,6 +325,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
   }
 
   return <div className="space-y-4">
+    {securityCode.dialog}
     <PayoutRequestHistory requests={payoutRequests} />
     <section className="rounded-[24px] border border-white/[0.09] bg-[#13151d] p-5 sm:p-7">
     <ol className="mb-7 flex items-center" aria-label="Этапы создания заявки">

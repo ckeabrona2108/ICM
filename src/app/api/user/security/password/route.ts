@@ -7,6 +7,8 @@ import { authOptions } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { requireSecurityCode } from "@/lib/security-code-route";
+import { notifySecurityEvent } from "@/lib/security-codes";
 
 export const dynamic = "force-dynamic";
 
@@ -45,7 +47,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Текущий пароль указан неверно" }, { status: 400 });
   }
 
+  // The current password is checked first, so a typo does not spend a code.
+  const securityCode = await requireSecurityCode(userId, "password");
+  if (!securityCode.ok) return securityCode.response;
+
   await prisma.user.update({ where: { id: userId }, data: { password: await hashPassword(parsed.data.newPassword) } });
   await notifyPasswordChanged({ user, kind: "changed", baseUrl: resolveAppBaseUrl(request) });
+  await notifySecurityEvent(prisma, {
+    userId,
+    eventId: `password-changed-${Date.now()}`,
+    title: "Пароль от кабинета изменён",
+    message: "Пароль для входа в ICECREAMMUSIC только что сменили.",
+    skip: ["email"]
+  });
   return NextResponse.json({ ok: true });
 }

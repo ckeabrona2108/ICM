@@ -224,7 +224,7 @@ export async function findPendingEmail(userId: string): Promise<string | null> {
 export async function confirmEmailToken(
   token: string,
   baseUrl: string
-): Promise<{ ok: true } | { ok: false; error: EmailConfirmError }> {
+): Promise<{ ok: true; userId: string; changed: boolean; email: string } | { ok: false; error: EmailConfirmError }> {
   const row = await prisma.verification_tokens.findUnique({
     where: { token },
     select: { user_id: true, type: true, email: true, expires: true, user: { select: { email: true, name: true } } }
@@ -266,7 +266,7 @@ export async function confirmEmailToken(
       "email changed"
     );
   }
-  return { ok: true };
+  return { ok: true, userId: row.user_id, changed: oldEmail.toLowerCase() !== newEmail.toLowerCase(), email: newEmail };
 }
 
 export async function notifyPasswordChanged(params: {

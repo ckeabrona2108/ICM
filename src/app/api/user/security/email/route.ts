@@ -8,6 +8,8 @@ import { isOAuthPlaceholderEmail } from "@/lib/oauth-login";
 import { verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
+import { requireSecurityCode } from "@/lib/security-code-route";
+import { holdNewCodeChannel, releaseCodeChannelHold } from "@/lib/security-codes";
 import { userProfileEmailSchema } from "@/lib/user-profile-policy";
 
 export const dynamic = "force-dynamic";
@@ -57,10 +59,22 @@ export async function POST(request: Request) {
     if (taken) return NextResponse.json({ error: "Этот email уже используется" }, { status: 409 });
   }
 
+  // A new address needs a code from a channel the cabinet already has. Without any, the change
+  // goes through, but the new address receives codes only after the 48-hour hold.
+  let release: () => Promise<void> = async () => undefined;
+  if (!isCurrent) {
+    const securityCode = await requireSecurityCode(userId, "email");
+    if (!securityCode.ok) return securityCode.response;
+    release = securityCode.release;
+    if (securityCode.viaCode) await releaseCodeChannelHold(prisma, userId, "email");
+    else await holdNewCodeChannel(prisma, userId, "email");
+  }
+
   try {
     await issueEmailConfirmation({ user, email, baseUrl: resolveAppBaseUrl(request) });
   } catch (error) {
     if (!(error instanceof AccountEmailUnavailableError)) console.error("[security/email] send failed", error);
+    await release();
     return NextResponse.json({ error: "Почтовый сервис временно недоступен" }, { status: 503 });
   }
   return NextResponse.json({ ok: true, pendingEmail: email });

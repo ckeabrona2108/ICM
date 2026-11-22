@@ -36,6 +36,7 @@ import {
 } from "@/lib/payout-quarter";
 import { getUserContractStatus } from "@/lib/contract-verification";
 import { notifyAdminPayoutRequested } from "@/lib/telegram-notifier";
+import { requireSecurityCode } from "@/lib/security-code-route";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +125,10 @@ export async function POST(request: Request) {
         .map((period) => [quarterKey(period.quarter, period.year)!, period])
     ).values()
   );
+
+  // The money leaves only with a code from the artist's Telegram, VK or confirmed email.
+  const securityCode = await requireSecurityCode(session.user.id, "payout");
+  if (!securityCode.ok) return securityCode.response;
 
   let result: { issues: PayoutRequestFailureResponse["errors"]; payoutId: string | null; shares: PayoutPeriodShare[] };
   try {
@@ -279,6 +284,7 @@ export async function POST(request: Request) {
     ));
   } catch (error) {
     console.error("Unable to create payout request", error);
+    await securityCode.release();
 
     if (isAnyPrismaColumnMissingError(error, ["payouts.status", "payouts.method", "payouts.requisites", "status", "method", "requisites"])) {
       return unavailableResponse("Сервис заявок обновляется. Попробуйте через несколько минут.");
@@ -290,6 +296,7 @@ export async function POST(request: Request) {
   }
 
   if (result.issues.length > 0 || !result.payoutId) {
+    await securityCode.release();
     const response: PayoutRequestFailureResponse = { ok: false, errors: result.issues };
     return NextResponse.json(response, { status: 400 });
   }

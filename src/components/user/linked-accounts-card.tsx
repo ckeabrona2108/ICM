@@ -9,6 +9,7 @@ import { requestTelegramAuth, useTelegramWidget } from "@/components/auth/telegr
 import { Card, CardContent } from "@/components/ui/card";
 import type { LinkedAccountsState, LoginMethodId } from "@/lib/linked-accounts";
 import { cn } from "@/lib/utils";
+import { useSecurityCode } from "@/components/security/security-code-dialog";
 
 const VK_COMMUNITY_CHAT_URL = "https://vk.me/icecreammusicru";
 
@@ -69,11 +70,14 @@ function readQueryNotice(): Notice {
   return notice;
 }
 
-async function request(url: string, init?: RequestInit) {
-  const response = await fetch(url, {
-    ...init,
-    headers: init?.body ? { "content-type": "application/json" } : undefined
-  });
+// Disconnecting a sign-in method may ask for a code; `guard` shows the code window then.
+async function request(url: string, init?: RequestInit, guard?: (run: () => Promise<Response>) => Promise<Response>) {
+  const run = () =>
+    fetch(url, {
+      ...init,
+      headers: init?.body ? { "content-type": "application/json" } : undefined
+    });
+  const response = guard ? await guard(run) : await run();
   const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
   if (!response.ok) {
     throw new Error(typeof payload?.error === "string" ? payload.error : "Не удалось выполнить запрос");
@@ -102,6 +106,7 @@ async function currentPushSubscription(): Promise<PushSubscription | null> {
 type ChannelId = "email" | "vk" | "telegram";
 
 export function LinkedAccountsCard() {
+  const securityCode = useSecurityCode();
   const [state, setState] = React.useState<LinkedAccountsState | null>(null);
   const [notice, setNotice] = React.useState<Notice>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -150,9 +155,12 @@ export function LinkedAccountsCard() {
       method: "POST",
       body: JSON.stringify({ payload: data })
     });
-    return result.messages === "blocked"
-      ? "Telegram подключён. Чтобы получать уведомления, откройте бота и нажмите «Start»."
-      : "Telegram подключён. Уведомления будут приходить от бота.";
+    const base =
+      result.messages === "blocked"
+        ? "Telegram подключён. Чтобы получать уведомления, откройте бота и нажмите «Start»."
+        : "Telegram подключён. Уведомления будут приходить от бота.";
+    // A newly connected Telegram receives confirmation codes only after 48 hours.
+    return typeof result.codesFrom === "string" ? `${base} Коды подтверждения начнут приходить сюда через 48 часов.` : base;
   }
 
   function connect(method: LoginMethodId, scope: NoticeScope = "accounts") {
@@ -187,7 +195,7 @@ export function LinkedAccountsCard() {
   function disconnect(method: LoginMethodId) {
     if (!window.confirm(DISCONNECT_WARNINGS[method])) return;
     void run(`disconnect:${method}`, async () => {
-      await request(`/api/user/linked-accounts?method=${method}`, { method: "DELETE" });
+      await request(`/api/user/linked-accounts?method=${method}`, { method: "DELETE" }, securityCode.guard);
       return `${METHOD_LABELS[method]}: отключено.`;
     });
   }
@@ -306,6 +314,7 @@ export function LinkedAccountsCard() {
 
   return (
     <>
+      {securityCode.dialog}
       <Card id="linked-accounts" className="scroll-mt-28">
         <CardContent className="space-y-5">
           <SectionHeader

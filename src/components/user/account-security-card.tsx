@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useSecurityCode } from "@/components/security/security-code-dialog";
 
 interface SecurityState {
   email: string | null;
@@ -26,12 +27,17 @@ const EMAIL_RESULT_NOTICES: Record<string, Notice> = {
   taken: { tone: "error", text: "Этот email уже занят другим аккаунтом." }
 };
 
-async function postJson(url: string, body?: unknown) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+type Guard = (run: () => Promise<Response>) => Promise<Response>;
+
+// Changing the email or the password may ask for a code; `guard` shows the code window then.
+async function postJson(url: string, body?: unknown, guard?: Guard) {
+  const run = () =>
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  const response = guard ? await guard(run) : await run();
   const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
   if (!response.ok) {
     throw new Error(typeof payload?.error === "string" ? payload.error : "Не удалось выполнить запрос");
@@ -40,6 +46,7 @@ async function postJson(url: string, body?: unknown) {
 }
 
 export function AccountSecurityCard() {
+  const securityCode = useSecurityCode();
   const [state, setState] = React.useState<SecurityState | null>(null);
   const [notice, setNotice] = React.useState<Notice>(null);
   const [busy, setBusy] = React.useState<"email" | "verify" | "password" | "link" | null>(null);
@@ -81,6 +88,7 @@ export function AccountSecurityCard() {
 
   return (
     <Card id="security" className="scroll-mt-28">
+      {securityCode.dialog}
       <CardContent className="space-y-6">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c7bcff]">Безопасность</p>
@@ -154,7 +162,7 @@ export function AccountSecurityCard() {
                   await postJson("/api/user/security/email", {
                     email: emailForm.email,
                     currentPassword: state.hasPassword ? emailForm.currentPassword : undefined
-                  });
+                  }, securityCode.guard);
                   setEmailFormOpen(false);
                   setEmailForm({ email: "", currentPassword: "" });
                   return `Мы отправили ссылку на ${emailForm.email.trim()}. Email сменится, когда вы её откроете.`;
@@ -211,7 +219,7 @@ export function AccountSecurityCard() {
               onSubmit={(event) => {
                 event.preventDefault();
                 void run("password", async () => {
-                  await postJson("/api/user/security/password", passwordForm);
+                  await postJson("/api/user/security/password", passwordForm, securityCode.guard);
                   setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
                   return "Пароль изменён.";
                 });

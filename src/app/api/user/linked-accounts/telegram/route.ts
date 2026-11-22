@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getTelegramLoginConfig, verifyTelegramLogin } from "@/lib/telegram-login";
 import { sendTelegramWelcome } from "@/lib/telegram-notification-channel";
+import { formatHoldUntil, holdNewCodeChannel, notifySecurityEvent } from "@/lib/security-codes";
 
 // "Connect Telegram" in the profile: the Login Widget data is checked locally and the Telegram
 // account joins the signed-in cabinet.
@@ -43,8 +44,28 @@ export async function POST(request: Request) {
   );
   if (!result.ok) return NextResponse.json({ error: LINK_ERRORS[result.error] }, { status: 409 });
 
+  // A Telegram connected from an open session receives codes only after 48 hours, and the
+  // other channels hear about it: whoever stole the session cannot route the codes to themselves.
+  let codesFrom: Date | null = null;
+  if (result.created) {
+    codesFrom = await holdNewCodeChannel(prisma, userId, "telegram");
+    await notifySecurityEvent(prisma, {
+      userId,
+      eventId: `telegram-linked-${check.telegramUserId}`,
+      title: "К кабинету подключён Telegram",
+      message: codesFrom
+        ? `Коды подтверждения начнут приходить в этот Telegram ${formatHoldUntil(codesFrom)} (МСК).`
+        : "Через него можно входить в кабинет.",
+      skip: ["telegram"]
+    });
+  }
+
   const welcome = await sendTelegramWelcome(prisma, check.telegramUserId);
-  return NextResponse.json({ ok: true, messages: welcome === "sent" ? "allowed" : welcome === "blocked" ? "blocked" : "unknown" });
+  return NextResponse.json({
+    ok: true,
+    messages: welcome === "sent" ? "allowed" : welcome === "blocked" ? "blocked" : "unknown",
+    codesFrom: codesFrom?.toISOString() ?? null
+  });
 }
 
 // "Check" in the notifications block: after the artist pressed Start in the bot, a test message

@@ -28,6 +28,7 @@ import {
   validateReleaseSubmission
 } from "@/lib/release-policy";
 import { sanitizePriorityReleaseFlag } from "@/lib/release-priority";
+import { isReleaseClaimedByModerator } from "@/lib/release-moderation-claim";
 import {
   isFreeReleaseClaimedBy,
   isFreeReleaseSubmissionAllowed,
@@ -297,7 +298,8 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
   }
   const editPermission = canEditRelease({
     status: lifecycle,
-    moderationStarted: Boolean(existing.status === "moderating")
+    moderationStarted: Boolean(existing.status === "moderating"),
+    claimedByModerator: isReleaseClaimedByModerator(existing.status, existing.roles)
   });
   if (!editPermission.allowed) {
     return NextResponse.json({ error: editPermission.message }, { status: 409 });

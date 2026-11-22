@@ -4,6 +4,8 @@ import { findPaidTwin, PAYMENT_TRANSFER_KEY } from "@/lib/release-payment-transf
 import { describeReleaseCommissionBasis, readReleaseSubscriptionPlan } from "@/lib/tariff-commission";
 import { prisma } from "@/lib/prisma";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
+import { getActiveReleaseModerationClaim } from "@/lib/release-moderation-claim";
+import { formatMoscowDateTime } from "@/lib/release-timeline";
 import {
   getReleaseLifecycleStatus,
   shouldTreatReleaseAsApproved
@@ -42,6 +44,8 @@ interface AdminReleaseDetailsResponse {
   id: string;
   status: string;
   payment_status: string;
+  /** "Взять в работу": the moderator checking this release now (the artist cannot change it). */
+  moderation_claim?: { admin_id: string; admin_name: string | null; claimed_at: string } | null;
   payment_label?: string;
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
@@ -951,6 +955,19 @@ function getTrackFileByType(trackData: Record<string, unknown>, type: "audio" | 
   if (fromUploaded.url || fromUploaded.storageKey) return fromUploaded;
   return pickLegacyFileRef(asString(trackData.video));
 }
+function toModerationClaimResponse(
+  status: string | null | undefined,
+  roles: unknown
+): AdminReleaseDetailsResponse["moderation_claim"] {
+  const claim = getActiveReleaseModerationClaim(status, roles);
+  if (!claim) return null;
+  return {
+    admin_id: claim.adminId,
+    admin_name: claim.adminName,
+    claimed_at: formatMoscowDateTime(claim.claimedAt)
+  };
+}
+
 export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetailsResponse {
   const release = (releaseInput ?? {}) as Record<string, unknown>;
   const submissionData = parseSubmissionData(release);
@@ -1145,6 +1162,7 @@ export function mapAdminReleaseDetails(releaseInput: unknown): AdminReleaseDetai
       upc: asString(submissionData?.upc) ?? asString(release.upc)
     }),
     payment_status: Boolean(release.confirmed) ? "paid" : "unpaid",
+    moderation_claim: toModerationClaimResponse(asString(release.status), release.roles),
     payment_label: Boolean(release.confirmed)
       ? "Оплачен"
       : describePendingExtrasSupplement(release.roles, false) ?? "Не оплачен",

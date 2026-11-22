@@ -1,5 +1,6 @@
 import { describePendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import { isReleaseAwaitingPayment } from "@/lib/release-awaiting-payment";
+import { getActiveReleaseModerationClaim, type ReleaseModerationClaim } from "@/lib/release-moderation-claim";
 import { prisma } from "@/lib/prisma";
 import type { AdminReleaseDetails, AdminReleaseStatus } from "@/lib/admin-data";
 import { getReleasePriorityFromRoles } from "@/lib/release-priority";
@@ -38,6 +39,11 @@ function readCopyChangeSummary(roles: unknown): { changeAreas?: ReleaseChangeAre
     ...(changeAreas.length > 0 ? { changeAreas } : {}),
     ...(unmarkedAreas.length > 0 ? { unmarkedAreas } : {})
   };
+}
+
+function toModerationClaim(claim: ReleaseModerationClaim | null): AdminReleaseDetails["moderationClaim"] {
+  if (!claim) return null;
+  return { adminId: claim.adminId, adminName: claim.adminName, claimedAt: formatMoscowDateTime(claim.claimedAt) };
 }
 
 export type AdminReleaseStatusFilter =
@@ -382,6 +388,7 @@ export async function getAdminReleases(filter: AdminReleaseStatusFilter): Promis
         deletionComment: deletionState?.comment,
         hidden: deletionState?.status === "deleted",
         resubmission,
+        moderationClaim: toModerationClaim(getActiveReleaseModerationClaim(source.status, source.roles)),
         paid,
         paymentKind: paid ? paymentDisplay?.kind ?? "paid" : "unpaid",
         paymentLabel: paidEarlier

@@ -66,6 +66,8 @@ export interface AdminReleaseDetails {
   deletionRequestedAt?: string;
   deletionComment?: string;
   hidden?: boolean;
+  /** "Взять в работу": the moderator checking this release now (the artist cannot change it). */
+  moderationClaim?: { adminId: string; adminName: string | null; claimedAt: string } | null;
   resubmission?: {
     sourceReleaseId?: string;
     sourceReleaseTitle?: string;

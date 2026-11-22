@@ -1018,11 +1018,21 @@ export function validateReleaseSubmission(data: ReleaseSubmissionData): ReleaseV
   return issues;
 }
 
+/** Shown when a moderator took the release in work ("Взять в работу"): see release-moderation-claim. */
+export const RELEASE_MODERATION_CLAIMED_MESSAGE =
+  "Релиз уже проверяет модератор. Изменить его можно будет после проверки.";
+
 export function canEditRelease(params: {
   status: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
+  /** A moderator took the release in work: nothing changes until their decision. */
+  claimedByModerator?: boolean;
 }): EditPermissionResult {
   const { status } = params;
+
+  if (status === "moderation" && params.claimedByModerator) {
+    return { allowed: false, message: RELEASE_MODERATION_CLAIMED_MESSAGE };
+  }
 
   if (status === "archived") {
     return {
@@ -1054,8 +1064,13 @@ export function canEditRelease(params: {
 export function canCancelModeration(params: {
   status: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
+  claimedByModerator?: boolean;
 }): EditPermissionResult {
   const { status, moderationStarted = false } = params;
+
+  if (status === "moderation" && params.claimedByModerator) {
+    return { allowed: false, message: RELEASE_MODERATION_CLAIMED_MESSAGE };
+  }
 
   if (status !== "moderation") {
     return {

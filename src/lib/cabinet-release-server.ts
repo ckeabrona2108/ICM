@@ -19,6 +19,7 @@ import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
 import { getSceneShowcaseState } from "@/lib/scene-showcase-state";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
 import { readReleaseTimeline } from "@/lib/release-timeline";
+import { isReleaseClaimedByModerator } from "@/lib/release-moderation-claim";
 
 export interface CabinetReleaseSource {
   id: string;
@@ -399,6 +400,7 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
     moderationStarted:
       cabinetStatus === "moderation" &&
       (Boolean(release.moderationStartedAt) || Boolean(release.confirmed)),
+    moderationClaimed: cabinetStatus === "moderation" && isReleaseClaimedByModerator(release.status, release.roles),
     moderationRemarks: moderationRemarks.length > 0 ? moderationRemarks : undefined,
     moderationReturnedAt: resolveModerationReturnedAt(release),
     moderationSentAt:

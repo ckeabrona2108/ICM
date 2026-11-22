@@ -208,6 +208,31 @@ export function AdminReleasesClient({
     }
   }
 
+  // "Взять в работу" / "Вернуть в очередь": while taken, the artist cannot change the release.
+  async function toggleModerationClaim(release: AdminReleaseDetails, claim: boolean) {
+    setBusyId(release.id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${release.id}/claim`, { method: claim ? "POST" : "DELETE" });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? (claim ? "Не удалось взять релиз в работу." : "Не удалось вернуть релиз в очередь."));
+      }
+      setToast(claim ? "Релиз взят в работу: артист не сможет его изменить до решения." : "Релиз возвращён в очередь.");
+      await loadReleases(tab);
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? actionError.message
+          : claim
+            ? "Не удалось взять релиз в работу."
+            : "Не удалось вернуть релиз в очередь."
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function submitDeletionRequestAction(
     release: AdminReleaseDetails,
     action: "approve" | "restore"
@@ -365,6 +390,12 @@ export function AdminReleasesClient({
                           Скрыт
                         </span>
                       ) : null}
+                      {canReject && release.moderationClaim ? (
+                        <span className="inline-flex items-center rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-100">
+                          В работе: {release.moderationClaim.adminName ?? "модератор"}
+                          {release.moderationClaim.claimedAt ? `, ${release.moderationClaim.claimedAt}` : ""}
+                        </span>
+                      ) : null}
                       {release.resubmission ? (
                         <span className="inline-flex items-center rounded-full border border-sky-400/25 bg-sky-500/10 px-2 py-0.5 text-[11px] font-semibold text-sky-200">
                           Повторная модерация
@@ -458,6 +489,23 @@ export function AdminReleasesClient({
                     >
                       Открыть
                     </Link>
+                    {canReject ? (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
+                          void toggleModerationClaim(release, !release.moderationClaim);
+                        }}
+                        title={
+                          release.moderationClaim
+                            ? "Снять отметку: артист снова сможет изменить или отозвать релиз"
+                            : "Артист не сможет изменить или отозвать релиз до вашего решения"
+                        }
+                        className="inline-flex h-10 items-center justify-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 text-[13px] font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {release.moderationClaim ? "Вернуть в очередь" : "Взять в работу"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={!canApprove || isBusy}

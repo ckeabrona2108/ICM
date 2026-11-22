@@ -31,6 +31,8 @@ interface AdminReleaseDetailsResponse {
   id: string;
   status: string;
   payment_status: string;
+  /** "Взять в работу": the moderator checking this release now (the artist cannot change it). */
+  moderation_claim?: { admin_id: string; admin_name: string | null; claimed_at: string } | null;
   payment_label?: string;
   payment_usage?: string | null;
   payment_plan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
@@ -170,7 +172,7 @@ interface FileItem {
   diagnosis?: MediaDiagnosisSummary;
 }
 
-type ActionKind = "approve" | "reject" | "delete" | "payment" | "edit" | "restore";
+type ActionKind = "approve" | "reject" | "delete" | "payment" | "edit" | "restore" | "claim";
 type RepairTarget = "cover" | "track_audio";
 
 interface MediaDiagnosisSummary {
@@ -570,6 +572,30 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
       router.refresh();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Не удалось восстановить релиз.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // "Взять в работу" / "Вернуть в очередь": while taken, the artist cannot change the release.
+  const toggleModerationClaim = async (claim: boolean) => {
+    setBusy("claim");
+    setError(null);
+    try {
+      const response = await fetch(`/api/admin/releases/${details.id}/claim`, { method: claim ? "POST" : "DELETE" });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? (claim ? "Не удалось взять релиз в работу." : "Не удалось вернуть релиз в очередь."));
+      }
+      router.refresh();
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? actionError.message
+          : claim
+            ? "Не удалось взять релиз в работу."
+            : "Не удалось вернуть релиз в очередь."
+      );
     } finally {
       setBusy(null);
     }
@@ -1015,6 +1041,39 @@ export function AdminReleaseDetailsClient({ details }: { details: AdminReleaseDe
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        {canReject ? (
+          details.moderation_claim ? (
+            <>
+              <span className="inline-flex h-10 items-center rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 text-[12.5px] text-amber-100">
+                В работе: {details.moderation_claim.admin_name ?? "модератор"}
+                {details.moderation_claim.claimed_at ? `, ${details.moderation_claim.claimed_at}` : ""}
+              </span>
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => {
+                  void toggleModerationClaim(false);
+                }}
+                title="Снять отметку: артист снова сможет изменить или отозвать релиз"
+                className="inline-flex h-10 items-center gap-1 rounded-lg border border-white/[0.14] bg-white/[0.04] px-3 text-[13px] font-semibold text-white transition hover:bg-white/[0.08] disabled:opacity-50"
+              >
+                {busy === "claim" ? "Возвращаем..." : "Вернуть в очередь"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => {
+                void toggleModerationClaim(true);
+              }}
+              title="Артист не сможет изменить или отозвать релиз до вашего решения"
+              className="inline-flex h-10 items-center gap-1 rounded-lg border border-amber-400/40 bg-amber-500/15 px-3 text-[13px] font-semibold text-amber-100 transition hover:bg-amber-500/25 disabled:opacity-50"
+            >
+              {busy === "claim" ? "Берём..." : "Взять в работу"}
+            </button>
+          )
+        ) : null}
         <button
           type="button"
           disabled={busy !== null || !canApprove}

@@ -70,6 +70,8 @@ export interface CabinetRelease {
   releaseCatalogId?: string;
   moderationStatusTag?: string;
   moderationStarted?: boolean;
+  /** A moderator took the release in work: it cannot be changed or withdrawn until their decision. */
+  moderationClaimed?: boolean;
   moderationRemarks?: ModerationRemark[];
   moderationReturnedAt?: string;
   /** ISO time the current version was sent to moderation. */

@@ -15,6 +15,7 @@ import {
   withReleaseLifecycleState
 } from "@/lib/release-counts";
 import { canEditRelease } from "@/lib/release-policy";
+import { isReleaseClaimedByModerator } from "@/lib/release-moderation-claim";
 import { readReleaseTypeFromSubmissionData } from "@/lib/release-submit-tracks";
 import { withReleaseCopySource } from "@/lib/release-resubmission";
 
@@ -242,7 +243,8 @@ export async function PATCH(request: Request) {
   const lifecycle = getReleaseLifecycleStatus(existing.status, existing.roles) ?? "draft";
   const editPermission = canEditRelease({
     status: lifecycle,
-    moderationStarted: existing.status === "moderating"
+    moderationStarted: existing.status === "moderating",
+    claimedByModerator: isReleaseClaimedByModerator(existing.status, existing.roles)
   });
   if (!editPermission.allowed) {
     return NextResponse.json({ error: editPermission.message }, { status: 409 });

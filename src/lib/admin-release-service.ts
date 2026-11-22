@@ -8,6 +8,15 @@ import { buildReleaseApprovedVkMessage, buildSnippetStudioHref } from "@/lib/vk-
 import type { ModerationRemark } from "@/lib/cabinet-types";
 import { withReleaseDeletionApproved } from "@/lib/release-deletion-state";
 import { withReleaseTimelineStamp } from "@/lib/release-timeline";
+import { createAdminLog } from "@/lib/admin-log-service";
+import { isReleaseAwaitingPayment } from "@/lib/release-awaiting-payment";
+import {
+  getActiveReleaseModerationClaim,
+  RELEASE_MODERATION_CLAIM_KEY,
+  withReleaseModerationClaim,
+  withoutReleaseModerationClaim,
+  type ReleaseModerationClaim
+} from "@/lib/release-moderation-claim";
 import { markFreeReleaseConsumed } from "@/lib/free-release";
 import { notifyArtistPromoOpen } from "@/lib/promo-notifications";
 import {
@@ -89,6 +98,8 @@ function resetNeedsChangesFlags(roles: unknown): Prisma.InputJsonValue | undefin
   next.moderationReturnedAt = null;
   next.lifecycleState = "approved";
   delete next.submittedToModeration;
+  // The decision is made: the artist may act on the release again.
+  delete next[RELEASE_MODERATION_CLAIM_KEY];
 
   const submission = asRecord(next.submissionData);
   if (submission) {
@@ -119,7 +130,8 @@ export function withAdminReleaseChangesRequiredState(
     returnedAt?: string;
   }
 ): Record<string, unknown> {
-  const next = withReleaseLifecycleState(roles, "changes_required");
+  // The decision is made: the artist may act on the release again.
+  const next = withReleaseLifecycleState(withoutReleaseModerationClaim(roles), "changes_required");
   const moderationRemarks = normalizeModerationRemarks(options?.remarks);
   const moderationReturnedAt = options?.returnedAt?.trim() || null;
   const moderationStatus = options?.action === "reject" ? "rejected" : "changes_required";
@@ -230,7 +242,9 @@ async function mergeResubmittedCopyIntoSource(params: {
   delete sourceRoles.resubmission;
   const mergedRoles = resetNeedsChangesFlags(sourceRoles);
 
-  const copyRoles = withReleaseDeletionApproved(copy.roles, { adminId: params.adminId }) as Record<string, unknown>;
+  const copyRoles = withReleaseDeletionApproved(withoutReleaseModerationClaim(copy.roles), {
+    adminId: params.adminId
+  }) as Record<string, unknown>;
   copyRoles.deletionRequest = {
     ...(asRecord(copyRoles.deletionRequest) ?? {}),
     comment: "Повторная модерация принята: изменения перенесены в исходный релиз."
@@ -608,4 +622,78 @@ export async function updateReleasePaymentStatusByAdmin(params: {
     releaseId: params.releaseId,
     confirmed: params.paid
   } as const;
+}
+
+export type ReleaseModerationClaimResult =
+  | { ok: true; claim: ReleaseModerationClaim | null }
+  | { ok: false; status: 404 | 409; error: string };
+
+/**
+ * "Взять в работу" (claim: true) / "Вернуть в очередь" (claim: false). The row is locked like the
+ * artist's cancel/edit routes lock it, so a claim and an artist's change never both pass.
+ */
+export async function setReleaseModerationClaimByAdmin(params: {
+  prisma: PrismaClient;
+  adminId: string;
+  adminName?: string | null;
+  releaseId: string;
+  claim: boolean;
+  now?: Date;
+}): Promise<ReleaseModerationClaimResult> {
+  return params.prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "icecream"."release" WHERE id::text = ${params.releaseId} FOR UPDATE`;
+    const release = await tx.release.findUnique({
+      where: { id: params.releaseId },
+      select: { id: true, status: true, confirmed: true, roles: true }
+    });
+    if (!release) return { ok: false as const, status: 404 as const, error: "Релиз не найден." };
+
+    const current = getActiveReleaseModerationClaim(release.status, release.roles);
+    if (!params.claim) {
+      if (!current) return { ok: true as const, claim: null };
+      await tx.release.update({
+        where: { id: release.id },
+        data: { roles: withoutReleaseModerationClaim(release.roles) as Prisma.InputJsonValue }
+      });
+      await createAdminLog(tx, {
+        adminId: params.adminId,
+        action: "release.moderation_unclaim",
+        targetType: "release",
+        targetId: release.id,
+        oldValue: current
+      });
+      return { ok: true as const, claim: null };
+    }
+
+    if (getReleaseLifecycleStatus(release.status, release.roles) !== "moderation") {
+      return { ok: false as const, status: 409 as const, error: "Взять в работу можно только релиз на модерации." };
+    }
+    if (isReleaseAwaitingPayment(release)) {
+      return { ok: false as const, status: 409 as const, error: "Релиз ждёт оплаты: возьмите его в работу после оплаты." };
+    }
+    if (current) {
+      if (current.adminId === params.adminId) return { ok: true as const, claim: current };
+      return {
+        ok: false as const,
+        status: 409 as const,
+        error: `Релиз уже взял в работу ${current.adminName ?? "другой модератор"}.`
+      };
+    }
+
+    const roles = withReleaseModerationClaim(release.roles, {
+      adminId: params.adminId,
+      adminName: params.adminName,
+      at: params.now
+    });
+    await tx.release.update({ where: { id: release.id }, data: { roles: roles as Prisma.InputJsonValue } });
+    const claim = getActiveReleaseModerationClaim(release.status, roles);
+    await createAdminLog(tx, {
+      adminId: params.adminId,
+      action: "release.moderation_claim",
+      targetType: "release",
+      targetId: release.id,
+      newValue: claim
+    });
+    return { ok: true as const, claim };
+  });
 }

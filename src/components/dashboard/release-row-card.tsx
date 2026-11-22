@@ -51,6 +51,7 @@ import { resolveRenderableStoredFileUrl } from "@/lib/s3";
 import { PaymentStatusBadge } from "@/components/releases/payment-status-badge";
 import { StatusBadge } from "@/components/releases/status-badge";
 import { ReleaseChangesNotice } from "./release-changes-notice";
+import { ModerationTimingNotice } from "./moderation-timing-notice";
 import { ReleaseModerationStepper } from "./release-moderation-stepper";
 
 interface ReleaseRowCardProps {
@@ -781,6 +782,9 @@ function ReleaseRowCardBase({
           steps={timelineState.steps}
           activeIndex={timelineState.activeIndex}
         />
+        {release.status === "moderation" && release.moderationStarted ? (
+          <ModerationTimingNotice sentAt={release.moderationSentAt} />
+        ) : null}
         {showPendingVerificationNotice ? (
           <div className="mt-4 rounded-2xl border border-cyan-300/18 bg-cyan-500/8 p-4 text-[13px] text-cyan-100/88">
             После подтверждения верификации релиз будет отправлен на модерацию.

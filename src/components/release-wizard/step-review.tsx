@@ -28,6 +28,7 @@ import {
 
 import { CopyChangesReview } from "./change-request";
 import { FreeReleaseOption } from "./free-release-option";
+import { ModerationSubmitNotices } from "./moderation-date-notice";
 import { useWizard, type PersonRole, type TrackFile } from "./wizard-context";
 
 const TYPE_LABEL = {
@@ -625,6 +626,13 @@ export function StepReview({
                 ? "Проверьте изменения выше. Опубликованная версия останется на площадках, пока модератор не примет правки."
                 : "Проверьте все разделы выше. После отправки релиз уйдёт на модерацию с текущими данными формы."}
             </p>
+
+            <ModerationSubmitNotices
+              dates={[data.preorderDate, data.startDate, data.releaseDate]}
+              checkDates={!isReleaseEdit}
+              onChangeDate={() => setStep("codes")}
+              className="mt-4"
+            />
 
             {hasBlockingErrors ? (
               <div className="mt-4 rounded-[18px] border border-rose-400/22 bg-rose-500/[0.06] px-4 py-3 text-[12.5px] text-rose-100/90">

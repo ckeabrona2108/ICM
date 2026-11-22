@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 
 import {
   isWithinReminderHours,
+  MODERATION_DELAYED_KIND,
   planSubscriptionReminder,
   runAccountReminders,
   WELCOME_KIND
@@ -54,7 +55,10 @@ function fakePrisma(data: {
       count: async (args: { where: { release: { userId: string } } }) => data.tracksByUser?.[args.where.release.userId] ?? 0
     },
     release: {
-      findMany: async (args: { where: { startDate?: { gte: Date; lte: Date } } }) => {
+      findMany: async (args: { where: { startDate?: { gte: Date; lte: Date }; status?: string; confirmed?: boolean } }) => {
+        if (args.where.status === "moderating" && args.where.confirmed === true) {
+          return (data.releases ?? []).filter((row) => row.status === "moderating" && row.confirmed === true);
+        }
         const range = args.where.startDate;
         if (range) return (data.releases ?? []).filter((row) => row.startDate instanceof Date && inRange(row.startDate, range));
         return (data.releases ?? []).filter((row) => row.confirmed === false && !row.upc);
@@ -292,4 +296,50 @@ test("an artist with reports to confirm gets one weekly reminder with the total"
   const capped = fakePrisma({ financeReports, earlierReportReminders: 4 });
   await runAccountReminders({ prisma: capped.prisma, now });
   assert.equal(capped.notifications.length, 0);
+});
+
+test("a release still in moderation a working day after the expected answer gets the late notice once", async () => {
+  // Thursday 26.11.2026, 13:00 in Moscow.
+  const at = new Date("2026-11-26T10:00:00.000Z");
+  const sentAt = (value: string) => new Date(`${value}:00+03:00`).toISOString();
+  const moderated = (id: string, userId: string, sent: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    title: `Релиз ${id.slice(0, 2)}`,
+    userId,
+    status: "moderating",
+    confirmed: true,
+    upc: null,
+    moderationStartedAt: null,
+    roles: { lifecycleState: "moderation", timeline: { submittedAt: sentAt(sent) } },
+    ...extra
+  });
+  const { prisma, notifications } = fakePrisma({
+    releases: [
+      // Mon 23.11: answer Mon or Tue, late from Wed noon.
+      moderated("11111111-1111-4111-8111-111111111111", "u1", "2026-11-23T12:00"),
+      // Wed 25.11: answer Wed or Thu, not late yet.
+      moderated("22222222-2222-4222-8222-222222222222", "u3", "2026-11-25T10:00"),
+      // Sent before late notices started: not reported.
+      moderated("33333333-3333-4333-8333-333333333333", "u4", "2026-11-18T12:00"),
+      // Not paid: waits for payment, not for moderators.
+      moderated("44444444-4444-4444-8444-444444444444", "u5", "2026-11-23T12:00", { confirmed: false }),
+      // Another artist already got a reminder today: the late notice still goes.
+      moderated("55555555-5555-4555-8555-555555555555", "u2", "2026-11-23T12:00")
+    ],
+    recentNudges: [{ user_id: "u2", kind: "release_draft_reminder" }],
+    claimedKeys: []
+  });
+
+  const result = await runAccountReminders({ prisma, now: at, startedAt: EPOCH });
+  assert.deepEqual(
+    result.sent.map((item) => item.userId).sort(),
+    ["u1", "u2"]
+  );
+  assert.equal(notifications[0].kind, MODERATION_DELAYED_KIND);
+  assert.equal(notifications[0].title, "Модерация релиза задерживается");
+  assert.match(String(notifications[0].message), /проверяется дольше обычного/u);
+  assert.equal(notifications[0].cta_href, "/dashboard/releases/11111111-1111-4111-8111-111111111111");
+
+  const again = await runAccountReminders({ prisma, now: at, startedAt: EPOCH });
+  assert.deepEqual(again.sent, []);
 });

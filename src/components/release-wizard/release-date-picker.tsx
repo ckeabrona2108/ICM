@@ -6,6 +6,13 @@ import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { buildMonthWeeks, daysBetween, isPromoReleaseDate, parseIsoDay, toIsoDay } from "@/lib/release-promo-dates";
+import { getRussianHoliday } from "@/lib/russian-holidays";
+
+function monthHasHolidays(year: number, month: number): boolean {
+  const days = new Date(year, month + 1, 0).getDate();
+  for (let day = 1; day <= days; day += 1) if (getRussianHoliday(year, month, day)) return true;
+  return false;
+}
 
 const MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
 const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -52,6 +59,7 @@ function MonthGrid({
           const past = daysBetween(today, day) < 0 || Boolean(max && iso > max);
           const promo = showPromo && !past && isPromoReleaseDate(day, today);
           const isSelected = iso === selected;
+          const holiday = getRussianHoliday(day.getFullYear(), day.getMonth(), day.getDate());
           return (
             <button
               key={iso}
@@ -59,11 +67,13 @@ function MonthGrid({
               disabled={past}
               onClick={() => onPick(iso)}
               aria-pressed={isSelected}
-              aria-label={`${formatRu(iso)}${promo ? ", можно подать на промо" : ""}`}
+              title={holiday ? `${holiday}: модерация не работает` : undefined}
+              aria-label={`${formatRu(iso)}${holiday ? `, ${holiday.toLowerCase()}` : ""}${promo ? ", можно подать на промо" : ""}`}
               className={cn(
                 "mx-auto flex h-[50px] w-full max-w-[52px] flex-col items-center justify-center rounded-[14px] transition-colors",
                 past && "cursor-not-allowed text-white/20",
-                !past && !isSelected && "text-white hover:bg-white/[0.07]",
+                !past && !isSelected && (holiday ? "text-rose-300 hover:bg-rose-500/[0.10]" : "text-white hover:bg-white/[0.07]"),
+                past && holiday && "text-rose-300/25",
                 isSelected && "bg-[var(--ux-accent,#7b61ff)] text-white shadow-[0_8px_22px_-10px_rgba(123,97,255,0.9)]"
               )}
             >
@@ -144,6 +154,8 @@ export function ReleaseDatePicker({
     anchor.getFullYear() > today.getFullYear() ||
     (anchor.getFullYear() === today.getFullYear() && anchor.getMonth() > today.getMonth());
   const display = formatRu(value);
+  const showsHolidays =
+    monthHasHolidays(anchor.getFullYear(), anchor.getMonth()) || monthHasHolidays(next.getFullYear(), next.getMonth());
 
   return (
     <div className="w-full min-w-0">
@@ -209,14 +221,22 @@ export function ReleaseDatePicker({
                   </div>
                 </div>
                 <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                  {promo ? (
-                    <p className="text-[13px] leading-5 text-white/55">
-                      Для питчинга в плейлисты выбирайте даты с пометкой{" "}
-                      <span className="font-semibold text-emerald-300">«промо»</span>.
-                    </p>
-                  ) : (
-                    <p className="text-[13px] leading-5 text-white/55">{label}</p>
-                  )}
+                  <div className="space-y-1">
+                    {promo ? (
+                      <p className="text-[13px] leading-5 text-white/55">
+                        Для питчинга в плейлисты выбирайте даты с пометкой{" "}
+                        <span className="font-semibold text-emerald-300">«промо»</span>.
+                      </p>
+                    ) : (
+                      <p className="text-[13px] leading-5 text-white/55">{label}</p>
+                    )}
+                    {showsHolidays ? (
+                      <p className="text-[13px] leading-5 text-white/55">
+                        <span className="font-semibold text-rose-300">Красным</span> отмечены праздники: в эти дни
+                        модерация не работает.
+                      </p>
+                    ) : null}
+                  </div>
                   <button
                     type="button"
                     disabled={!pending}

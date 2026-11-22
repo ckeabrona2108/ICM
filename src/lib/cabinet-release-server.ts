@@ -18,6 +18,7 @@ import { getReleaseCoverAsset } from "@/lib/release-cover";
 import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
 import { getSceneShowcaseState } from "@/lib/scene-showcase-state";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
+import { readReleaseTimeline } from "@/lib/release-timeline";
 
 export interface CabinetReleaseSource {
   id: string;
@@ -400,6 +401,9 @@ export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, 
       (Boolean(release.moderationStartedAt) || Boolean(release.confirmed)),
     moderationRemarks: moderationRemarks.length > 0 ? moderationRemarks : undefined,
     moderationReturnedAt: resolveModerationReturnedAt(release),
+    moderationSentAt:
+      readReleaseTimeline(release.roles, { moderationStartedAt: release.moderationStartedAt }).submittedAt?.toISOString() ??
+      undefined,
     rejectionReason,
     priority: getReleasePriorityFromRoles(release.roles, Boolean(release.priority)),
     deletionStatus: deletionState?.status,

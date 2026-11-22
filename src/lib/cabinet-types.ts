@@ -72,6 +72,8 @@ export interface CabinetRelease {
   moderationStarted?: boolean;
   moderationRemarks?: ModerationRemark[];
   moderationReturnedAt?: string;
+  /** ISO time the current version was sent to moderation. */
+  moderationSentAt?: string;
   rejectionReason?: string;
   priority?: boolean;
   deletionStatus?: "requested" | "deleted" | "restored";

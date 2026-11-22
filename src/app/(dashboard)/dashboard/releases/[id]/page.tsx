@@ -7,6 +7,7 @@ import { getCabinetReleaseByIdForUser } from "@/lib/cabinet-release-queries";
 import { StatusBadge } from "@/components/releases/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
+import { ModerationTimingNotice } from "@/components/dashboard/moderation-timing-notice";
 import { ReleaseModerationStepper } from "@/components/dashboard/release-moderation-stepper";
 import { confirmYooKassaOrderAfterReturn } from "@/lib/payment-order-service";
 import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
@@ -126,6 +127,9 @@ export default async function ReleaseDetailsPage({
             ) : null}
             <div className="pt-2">
               <ReleaseModerationStepper steps={timeline.steps} activeIndex={timeline.activeIndex} />
+              {release.status === "moderation" && release.moderationStarted ? (
+                <ModerationTimingNotice sentAt={release.moderationSentAt} />
+              ) : null}
             </div>
             <Row label="Дата релиза" value={release.releaseDate} />
             <Row label="UPC" value={release.upc || "—"} />

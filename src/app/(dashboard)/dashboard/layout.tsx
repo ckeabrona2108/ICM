@@ -21,6 +21,9 @@ import { getAiTokenBalance } from "@/lib/ai-token-service";
 import { listUserReports } from "@/lib/report-service";
 import { summarizeReportsToConfirm } from "@/lib/report-confirm-reminder";
 import { ReportsToConfirmBanner } from "@/components/finance/reports-to-confirm-banner";
+import { HolidayModerationBanner } from "@/components/dashboard/holiday-moderation-banner";
+import { ModerationCalendarProvider } from "@/components/moderation-calendar-provider";
+import { loadModerationCalendar } from "@/lib/moderation-calendar-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -63,7 +66,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     verificationId: null
   };
 
-  const [releaseCounts, userProfile, balanceTotals, subscriptionOverview, contractStatus, reportsToConfirm] = await Promise.all([
+  const [releaseCounts, userProfile, balanceTotals, subscriptionOverview, contractStatus, reportsToConfirm, moderationCalendar] = await Promise.all([
     getReleaseSidebarCountsForUser({
       userId: session.user.id,
       prisma
@@ -179,7 +182,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
       .catch((error) => {
         console.error("[dashboard] reports to confirm unavailable", error);
         return summarizeReportsToConfirm([]);
-      })
+      }),
+    // Days off and working days the admin set on top of the production calendar.
+    loadModerationCalendar(prisma)
   ]);
 
   const sidebarCounts = {
@@ -212,6 +217,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const aiTokenBalanceLabel = aiTokenBalance.toLocaleString("ru-RU");
 
   return (
+    <ModerationCalendarProvider calendar={moderationCalendar}>
     <div className="dashboard-ui relative min-h-screen overflow-x-clip bg-[radial-gradient(circle_at_top_right,rgba(123,97,255,0.16),transparent_34%),linear-gradient(180deg,#101322_0%,#0c1020_44%,#0b0f1a_100%)] text-white [--dashboard-mobile-bottom-nav-height:72px] [--dashboard-mobile-header-height:calc(72px+env(safe-area-inset-top))] [--dashboard-mobile-header-offset:calc(104px+env(safe-area-inset-top))]">
       {/* ambient corner glow (top-right) */}
       <div className="pointer-events-none absolute right-0 top-[-160px] h-[520px] w-[520px] translate-x-1/3 rounded-full bg-[#7b61ff]/[0.12] blur-[96px]" />
@@ -238,10 +244,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
               amount={reportsToConfirm.amount}
               quarterLabels={reportsToConfirm.quarterLabels}
             />
+            <HolidayModerationBanner />
             {children}
           </div>
         </div>
       </div>
     </div>
+    </ModerationCalendarProvider>
   );
 }

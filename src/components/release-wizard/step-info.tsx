@@ -22,6 +22,7 @@ import {
 
 import { ArtistPlatformPicker } from "./artist-platform-picker";
 import { CoverConfirmModal } from "./cover-confirm-modal";
+import { ModerationDateHint } from "./moderation-date-notice";
 import { ReleaseDatePicker } from "./release-date-picker";
 import { useStepNumber } from "./step-number";
 import { useWizard, type PersonRole } from "./wizard-context";
@@ -705,6 +706,10 @@ export function StepInfo({
                       />
                     </div>
                   </div>
+                  <ModerationDateHint
+                    dates={[data.preorderDate, data.startDate, data.releaseDate]}
+                    className="-mt-4"
+                  />
                 </div>
               </div>
             </section>

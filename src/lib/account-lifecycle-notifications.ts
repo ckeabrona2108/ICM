@@ -1,9 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
-import { mapReleaseStatusToSection, shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import { getReleaseLifecycleStatus, mapReleaseStatusToSection, shouldTreatReleaseAsApproved } from "@/lib/release-counts";
 import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 import { getDraftLastChangedAt } from "@/lib/draft-retention";
+import { loadModerationCalendar } from "@/lib/moderation-calendar-settings";
+import { isModerationDelayed } from "@/lib/moderation-schedule";
+import { isMergedResubmissionCopy, readReleaseTimeline } from "@/lib/release-timeline";
 import { toAbsoluteAppUrl } from "@/lib/vk-messages";
 import { formatRubCurrency } from "@/lib/currency-format";
 import { listUserReports } from "@/lib/report-service";
@@ -207,6 +210,40 @@ async function findReleaseOutReminders(prisma: PrismaClient, now: Date): Promise
   });
 }
 
+export const MODERATION_DELAYED_KIND = "release_moderation_delayed";
+/** Late moderation is reported for releases sent from this day on, so old ones are not reported in a burst. */
+export const MODERATION_DELAY_NOTICES_STARTED_AT = new Date("2026-11-21T00:00:00+03:00");
+
+// A release sent to moderation is still not checked a working day after the expected 1–2 days.
+// Reported once per sending: a release sent again after changes can be reported again.
+async function findModerationDelayedReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
+  await loadModerationCalendar(prisma);
+  const releases = await prisma.release.findMany({
+    where: { status: "moderating", confirmed: true },
+    select: { id: true, title: true, userId: true, status: true, confirmed: true, roles: true, moderationStartedAt: true }
+  });
+  const reminders: Reminder[] = [];
+  for (const release of releases) {
+    if (!release.confirmed || getReleaseLifecycleStatus(release.status, release.roles) !== "moderation") continue;
+    if (isReleaseHiddenFromCabinet(release.roles) || isMergedResubmissionCopy(release.roles)) continue;
+    const sentAt = readReleaseTimeline(release.roles, { moderationStartedAt: release.moderationStartedAt }).submittedAt;
+    if (!sentAt || sentAt < MODERATION_DELAY_NOTICES_STARTED_AT || !isModerationDelayed(sentAt, now)) continue;
+    const title = release.title?.trim() || "Без названия";
+    reminders.push({
+      userId: release.userId,
+      key: `moderation_delayed:${release.id}:${sentAt.toISOString()}`,
+      kind: MODERATION_DELAYED_KIND,
+      title: "Модерация релиза задерживается",
+      message: `Релиз «${title}» проверяется дольше обычного. Мы уже разбираемся и постараемся проверить его как можно скорее.`,
+      href: `/dashboard/releases/${release.id}`,
+      sourceType: "release",
+      sourceId: release.id,
+      eventAt: sentAt
+    });
+  }
+  return reminders;
+}
+
 async function findFreeReleaseNextReminders(prisma: PrismaClient, now: Date): Promise<Reminder[]> {
   const claims = await prisma.free_release_claims.findMany({
     where: { consumed_at: windowRange(now, ACCOUNT_REMINDER_WINDOWS.freeReleaseNext) },
@@ -349,6 +386,7 @@ export async function findRecentlyNudgedUsers(db: NudgeDb, userIds: string[], no
 
 /** Most important first: money, then unfinished work, then news and offers. */
 const REMINDER_PRIORITY = [
+  MODERATION_DELAYED_KIND,
   REPORT_CONFIRM_REMINDER_KIND,
   "account_subscription_ended",
   "account_subscription_ending",
@@ -397,7 +435,8 @@ export async function runAccountReminders(params: {
     findReleaseOutReminders,
     findFreeReleaseNextReminders,
     findSubscriptionReminders,
-    findReportConfirmReminders
+    findReportConfirmReminders,
+    findModerationDelayedReminders
   ];
   const byUser = new Map<string, Reminder[]>();
   for (const find of finders) {
@@ -421,9 +460,11 @@ export async function runAccountReminders(params: {
     return result;
   }
 
-  for (const [userId, reminders] of byUser) {
-    // One reminder a day: the rest wait for the next days while they are still relevant.
-    if (nudged.has(userId)) continue;
+  for (const [userId, all] of byUser) {
+    // One reminder a day: the rest wait for the next days while they are still relevant. News about
+    // the artist's own release (late moderation) is not a reminder and is not held back by them.
+    const reminders = nudged.has(userId) ? all.filter((reminder) => !NUDGE_KINDS.includes(reminder.kind)) : all;
+    if (reminders.length === 0) continue;
     const groups = new Map<string, Reminder[]>();
     for (const reminder of reminders) groups.set(reminder.kind, [...(groups.get(reminder.kind) ?? []), reminder]);
     const kinds = [...groups.keys()].sort((a, b) => REMINDER_PRIORITY.indexOf(a) - REMINDER_PRIORITY.indexOf(b));

@@ -1193,6 +1193,8 @@ model user {
   oauth_accounts               oauth_accounts[]
   security_codes               security_codes[]
   security_channel_holds       security_channel_holds[]
+  marketing_email_optout       marketing_email_optouts?
+  email_campaign_sends         email_campaign_sends[]
   notification_settings        user_notification_settings?
   notification_reminders       user_notification_reminders[]
   free_release_claim           free_release_claims?
@@ -1994,6 +1996,32 @@ model verification {
   contract            String              @default("")
   user                user                @relation(fields: [userId], references: [id], onDelete: Cascade, map: "verification_userId_user_id_fk")
 
+  @@schema("icecream")
+}
+
+/// Artists who unsubscribed from campaign letters ("we miss you" and similar). Account mail
+/// (codes, release decisions, payouts) still goes to them.
+model marketing_email_optouts {
+  user_id    String   @id @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@schema("icecream")
+}
+
+/// One row per campaign letter sent, so a campaign never reaches the same artist twice.
+model email_campaign_sends {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign    String   @db.VarChar(64)
+  user_id     String   @db.Uuid
+  email       String
+  sent_at     DateTime @default(now()) @db.Timestamptz(6)
+  message_id  String?
+  /// Random token in the letter's unsubscribe link.
+  token       String   @unique @db.VarChar(64)
+  user        user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([campaign, user_id])
   @@schema("icecream")
 }
 

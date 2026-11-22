@@ -10,6 +10,7 @@ import {
   generateSecurityCode,
   hashSecurityCode,
   issueSecurityCode,
+  maskEmail,
   normalizeSecurityCode,
   resolveCodeChannels,
   restoreSecurityGrant,
@@ -61,8 +62,8 @@ test("a channel on hold receives no codes until the hold ends", () => {
 });
 
 test("payouts always need a code; other actions only when the cabinet has a channel", () => {
-  const none = { ready: [], held: [] };
-  const some = { ready: ["email" as const], held: [] };
+  const none = { ready: [], held: [], confirmEmail: null };
+  const some = { ready: ["email" as const], held: [], confirmEmail: null };
   assert.equal(decideSecurityRequirement("payout", none), true);
   assert.equal(decideSecurityRequirement("password", none), false);
   assert.equal(decideSecurityRequirement("email", none), false);
@@ -150,7 +151,19 @@ function fakeDb(channels: Partial<ChannelFacts> = { telegramLinked: true, emailC
         return { count };
       }
     },
-    user: { findUnique: async () => ({ email: "artist@example.com", emailVerified: channels.emailConfirmed ? NOW : null }) },
+    user: {
+      state: { email: channels.email === undefined ? "artist@example.com" : channels.email, emailVerified: channels.emailConfirmed ? NOW : null } as { email: string | null; emailVerified: Date | null },
+      async findUnique() {
+        return this.state;
+      },
+      async updateMany({ where, data }: { where: { emailVerified: null }; data: { emailVerified: Date } }) {
+        if (where.emailVerified === null && this.state.emailVerified === null) {
+          this.state.emailVerified = data.emailVerified;
+          return { count: 1 };
+        }
+        return { count: 0 };
+      }
+    },
     oauth_accounts: { findUnique: async () => (channels.telegramLinked ? { id: "tg" } : null) },
     vk_links: { findUnique: async () => (channels.vkMessagesAllowed ? { messages_allowed: true } : null) },
     security_channel_holds: { findMany: async () => channels.holds ?? [] }
@@ -279,4 +292,59 @@ test("a channel the cabinet does not have is refused", async () => {
     const result = await issueSecurityCode(db as never, { userId: "u1", action: "payout", channel: "vk", senders, services: allServices, now: NOW, secret: SECRET });
     assert.equal(result.ok, false);
   }
+});
+
+test("an unconfirmed own email is offered only when nothing else can take a code", () => {
+  const own = resolveCodeChannels(facts({ email: "dima@mail.ru" }), NOW);
+  assert.deepEqual(own.ready, []);
+  assert.match(own.confirmEmail ?? "", /^di\*+@mail\.ru$/u);
+
+  // With a ready channel the code goes there; the email is not offered.
+  assert.equal(resolveCodeChannels(facts({ email: "dima@mail.ru", telegramLinked: true }), NOW).confirmEmail, null);
+  // An address changed in without a code waits out its hold instead.
+  const held = resolveCodeChannels(
+    facts({ email: "new@mail.ru", holds: [{ channel: "email", trusted_from: new Date(NOW.getTime() + CHANNEL_HOLD_MS) }] }),
+    NOW
+  );
+  assert.equal(held.confirmEmail, null);
+  // No real address (a VK placeholder) means nothing to offer.
+  assert.equal(resolveCodeChannels(facts({ email: null }), NOW).confirmEmail, null);
+});
+
+test("emails are masked in the window", () => {
+  assert.match(maskEmail("dima@mail.ru"), /^di\*+@mail\.ru$/u);
+  assert.match(maskEmail("a@x.ru"), /^a\*+@x\.ru$/u);
+});
+
+test("a code sent to the unconfirmed own email confirms it and lets the payout through", async () => {
+  const db = fakeDb({ email: "dima@mail.ru", emailConfirmed: false });
+  const { sent, senders } = recordingSenders();
+  const issued = await issueSecurityCode(db as never, { userId: "u1", action: "payout", senders, services: allServices, now: NOW, secret: SECRET });
+  assert.ok(issued.ok);
+  if (!issued.ok) return;
+  assert.equal(issued.channel, "email_confirm");
+  assert.deepEqual(sent.map((item) => item.channel), ["email_confirm"]);
+
+  const right = await verifySecurityCode(db as never, { userId: "u1", challengeId: issued.challengeId, code: sent[0]!.code, now: NOW, secret: SECRET });
+  assert.deepEqual(right, { ok: true, action: "payout" });
+  assert.ok(db.user.state.emailVerified);
+  assert.ok(await consumeSecurityGrant(db as never, { userId: "u1", action: "payout", now: NOW }));
+});
+
+test("a wrong code does not confirm the email", async () => {
+  const db = fakeDb({ email: "dima@mail.ru", emailConfirmed: false });
+  const { sent, senders } = recordingSenders();
+  const issued = await issueSecurityCode(db as never, { userId: "u1", action: "payout", senders, services: allServices, now: NOW, secret: SECRET });
+  assert.ok(issued.ok);
+  if (!issued.ok) return;
+  const wrong = sent[0]!.code === "000000" ? "111111" : "000000";
+  await verifySecurityCode(db as never, { userId: "u1", challengeId: issued.challengeId, code: wrong, now: NOW, secret: SECRET });
+  assert.equal(db.user.state.emailVerified, null);
+});
+
+test("email_confirm is refused once the cabinet has a channel", async () => {
+  const db = fakeDb({ email: "dima@mail.ru", telegramLinked: true });
+  const { senders } = recordingSenders();
+  const result = await issueSecurityCode(db as never, { userId: "u1", action: "payout", channel: "email_confirm", senders, services: allServices, now: NOW, secret: SECRET });
+  assert.deepEqual(result, { ok: false, error: "channel_unavailable" });
 });

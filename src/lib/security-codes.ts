@@ -25,6 +25,13 @@ import { getVkMessagesConfig, sendVkCommunityMessage, vkRandomIdFor, type VkMess
 export type SecurityAction = "payout" | "password" | "email" | "unlink";
 export const SECURITY_ACTIONS: readonly SecurityAction[] = ["payout", "password", "email", "unlink"];
 export type CodeChannel = "telegram" | "vk" | "email";
+/**
+ * Where a code can be sent: a channel, or the cabinet's own email that is not confirmed yet.
+ * A correct code sent there confirms that email too, so an artist without any channel gets
+ * through a payout in one window.
+ */
+export type SendChannel = CodeChannel | "email_confirm";
+export const SEND_CHANNELS: readonly SendChannel[] = ["telegram", "vk", "email", "email_confirm"];
 export const CODE_CHANNELS: readonly CodeChannel[] = ["telegram", "vk", "email"];
 
 export const CODE_TTL_MS = 10 * 60_000;
@@ -96,12 +103,19 @@ export interface CodeChannelState {
   ready: CodeChannel[];
   /** Channels still on the 48-hour hold, with the moment they start receiving codes. */
   held: Array<{ channel: CodeChannel; until: Date }>;
+  /**
+   * The cabinet's own email, masked, when nothing else can take a code and the address is real but
+   * not confirmed: a code sent there confirms it. Null otherwise.
+   */
+  confirmEmail: string | null;
 }
 
 export interface ChannelFacts {
   telegramLinked: boolean;
   vkMessagesAllowed: boolean;
   emailConfirmed: boolean;
+  /** A real address (not a VK placeholder), confirmed or not. */
+  email?: string | null;
   holds: Array<{ channel: string; trusted_from: Date }>;
   services: { telegram: boolean; vk: boolean; email: boolean };
 }
@@ -112,14 +126,26 @@ export function resolveCodeChannels(facts: ChannelFacts, now: Date = new Date())
     vk: facts.services.vk && facts.vkMessagesAllowed,
     email: facts.services.email && facts.emailConfirmed
   };
-  const state: CodeChannelState = { ready: [], held: [] };
+  const state: CodeChannelState = { ready: [], held: [], confirmEmail: null };
   for (const channel of CODE_CHANNELS) {
     if (!present[channel]) continue;
     const hold = facts.holds.find((row) => row.channel === channel);
     if (hold && hold.trusted_from.getTime() > now.getTime()) state.held.push({ channel, until: hold.trusted_from });
     else state.ready.push(channel);
   }
+  // The address the artist registered with belongs to them; an address changed in without a
+  // code is on hold and is not offered.
+  const emailHold = facts.holds.find((row) => row.channel === "email" && row.trusted_from.getTime() > now.getTime());
+  if (state.ready.length === 0 && state.held.length === 0 && !facts.emailConfirmed && facts.email && facts.services.email && !emailHold) {
+    state.confirmEmail = maskEmail(facts.email);
+  }
   return state;
+}
+
+export function maskEmail(email: string): string {
+  const [local = "", domain = ""] = email.split("@");
+  const visible = local.slice(0, Math.min(2, Math.max(1, local.length - 1)));
+  return `${visible}${"*".repeat(Math.max(3, local.length - visible.length))}@${domain}`;
 }
 
 // Local development only: codes and notices go to the server log instead of Telegram, VK and mail.
@@ -156,6 +182,7 @@ export async function readCodeChannels(
       telegramLinked: Boolean(telegram),
       vkMessagesAllowed: Boolean(vk?.messages_allowed),
       emailConfirmed: Boolean(user && canReceiveAccountEmail(user.email) && user.emailVerified),
+      email: user && canReceiveAccountEmail(user.email) ? user.email : null,
       holds,
       services
     },
@@ -201,23 +228,25 @@ export async function releaseCodeChannelHold(
 type CodeDb = Pick<PrismaClient, "security_codes">;
 
 export type SendCodeResult =
-  | { ok: true; challengeId: string; channel: CodeChannel; expiresAt: Date; resendAt: Date }
+  | { ok: true; challengeId: string; channel: SendChannel; expiresAt: Date; resendAt: Date }
   | { ok: false; error: "no_channel" | "channel_unavailable" | "too_soon" | "too_many" | "delivery_failed"; retryAt?: Date };
 
 export interface CodeSenders {
-  send(channel: CodeChannel, userId: string, text: { plain: string; subject: string; html: string }, eventId: string): Promise<"sent" | "blocked" | "failed">;
+  send(channel: SendChannel, userId: string, text: { plain: string; subject: string; html: string }, eventId: string): Promise<"sent" | "blocked" | "failed">;
 }
 
-export function buildSecurityCodeText(params: { code: string; action: SecurityAction }) {
+export function buildSecurityCodeText(params: { code: string; action: SecurityAction; confirmsEmail?: boolean }) {
   const subject = `Код для ${ACTION_TITLES[params.action]}: ${params.code}`;
   const what = `Код для ${ACTION_TITLES[params.action]}`;
+  const confirms = params.confirmsEmail ? "Этот же код подтвердит вашу почту: дальше коды будут приходить сюда." : null;
   const plain = [
     `${what}: ${params.code}`,
+    ...(confirms ? ["", confirms] : []),
     "",
     "Действует 10 минут. Никому его не сообщайте, даже поддержке ICECREAMMUSIC.",
     "Если это не вы, смените пароль и напишите в поддержку: кто-то вошёл в ваш кабинет."
   ].join("\n");
-  const html = `<p>${escapeEmailHtml(what)}:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${params.code}</p><p>Действует 10 минут. Никому его не сообщайте, даже поддержке ICECREAMMUSIC.</p><p>Если это не вы, смените пароль и напишите в поддержку: кто-то вошёл в ваш кабинет.</p>`;
+  const html = `<p>${escapeEmailHtml(what)}:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px">${params.code}</p>${confirms ? `<p>${escapeEmailHtml(confirms)}</p>` : ""}<p>Действует 10 минут. Никому его не сообщайте, даже поддержке ICECREAMMUSIC.</p><p>Если это не вы, смените пароль и напишите в поддержку: кто-то вошёл в ваш кабинет.</p>`;
   return { plain, subject, html };
 }
 
@@ -226,7 +255,7 @@ export async function issueSecurityCode(
   params: {
     userId: string;
     action: SecurityAction;
-    channel?: CodeChannel | null;
+    channel?: SendChannel | null;
     senders?: CodeSenders;
     /** Tests pass the configured services instead of reading the server environment. */
     services?: ChannelFacts["services"];
@@ -236,9 +265,11 @@ export async function issueSecurityCode(
 ): Promise<SendCodeResult> {
   const now = params.now ?? new Date();
   const channels = await readCodeChannels(db, params.userId, now, params.services);
-  if (channels.ready.length === 0) return { ok: false, error: "no_channel" };
-  const channel = params.channel ?? channels.ready[0]!;
-  if (!channels.ready.includes(channel)) return { ok: false, error: "channel_unavailable" };
+  const channel: SendChannel | undefined =
+    params.channel ?? channels.ready[0] ?? (channels.confirmEmail ? "email_confirm" : undefined);
+  if (!channel) return { ok: false, error: "no_channel" };
+  const allowed = channel === "email_confirm" ? Boolean(channels.confirmEmail) : channels.ready.includes(channel);
+  if (!allowed) return { ok: false, error: "channel_unavailable" };
 
   const recent = await db.security_codes.findMany({
     where: { user_id: params.userId, created_at: { gt: new Date(now.getTime() - 60 * 60_000) } },
@@ -270,7 +301,7 @@ export async function issueSecurityCode(
   const result = await (params.senders ?? defaultSenders(db)).send(
     channel,
     params.userId,
-    buildSecurityCodeText({ code, action: params.action }),
+    buildSecurityCodeText({ code, action: params.action, confirmsEmail: channel === "email_confirm" }),
     `security-code-${row.id}`
   );
   if (result !== "sent") {
@@ -292,13 +323,13 @@ export type VerifyCodeResult =
   | { ok: false; error: "invalid" | "expired" | "attempts"; attemptsLeft?: number };
 
 export async function verifySecurityCode(
-  db: CodeDb,
+  db: CodeDb & Pick<PrismaClient, "user">,
   params: { userId: string; challengeId: string; code: string; now?: Date; secret?: string }
 ): Promise<VerifyCodeResult> {
   const now = params.now ?? new Date();
   const row = await db.security_codes.findFirst({
     where: { id: params.challengeId, user_id: params.userId },
-    select: { id: true, action: true, code_hash: true, attempts: true, expires_at: true, verified_at: true, used_at: true }
+    select: { id: true, action: true, channel: true, code_hash: true, attempts: true, expires_at: true, verified_at: true, used_at: true }
   });
   if (!row || !isSecurityAction(row.action) || row.used_at) return { ok: false, error: "expired" };
   if (row.verified_at) return { ok: true, action: row.action };
@@ -318,6 +349,10 @@ export async function verifySecurityCode(
     return attemptsLeft > 0 ? { ok: false, error: "invalid", attemptsLeft } : { ok: false, error: "attempts" };
   }
   await db.security_codes.update({ where: { id: row.id }, data: { verified_at: now }, select: { id: true } });
+  // The code reached the cabinet's own address, which proves it: from now on codes go there.
+  if (row.channel === "email_confirm") {
+    await db.user.updateMany({ where: { id: params.userId, emailVerified: null }, data: { emailVerified: now } });
+  }
   return { ok: true, action: row.action };
 }
 
@@ -363,6 +398,8 @@ export interface SecurityCodeChallenge {
   action: SecurityAction;
   channels: CodeChannel[];
   held: Array<{ channel: CodeChannel; until: string }>;
+  /** Masked own email that a code can confirm, when the cabinet has no channel yet. */
+  confirmEmail: string | null;
 }
 
 export type SecurityGate =
@@ -384,7 +421,8 @@ export async function checkSecurityGate(
       challenge: {
         action: params.action,
         channels: channels.ready,
-        held: channels.held.map((hold) => ({ channel: hold.channel, until: hold.until.toISOString() }))
+        held: channels.held.map((hold) => ({ channel: hold.channel, until: hold.until.toISOString() })),
+        confirmEmail: channels.confirmEmail
       }
     };
   } catch (error) {
@@ -440,9 +478,15 @@ async function sendToVk(
   }
 }
 
-async function sendToEmail(db: Pick<PrismaClient, "user">, userId: string, text: { plain: string; subject: string; html: string }) {
+async function sendToEmail(
+  db: Pick<PrismaClient, "user">,
+  userId: string,
+  text: { plain: string; subject: string; html: string },
+  options: { unconfirmed?: boolean } = {}
+) {
   const user = await db.user.findUnique({ where: { id: userId }, select: { email: true, emailVerified: true } });
-  if (!user || !canReceiveAccountEmail(user.email) || !user.emailVerified) return "blocked" as const;
+  if (!user || !canReceiveAccountEmail(user.email)) return "blocked" as const;
+  if (!user.emailVerified && !options.unconfirmed) return "blocked" as const;
   try {
     await sendAccountEmail({ to: user.email, subject: text.subject, text: text.plain, html: text.html });
     return "sent" as const;
@@ -467,7 +511,7 @@ function defaultSenders(db: Pick<PrismaClient, "oauth_accounts" | "vk_links" | "
         const config = getVkMessagesConfig();
         return config ? sendToVk(db, config, userId, text.plain, eventId) : "failed";
       }
-      return sendToEmail(db, userId, text);
+      return sendToEmail(db, userId, text, { unconfirmed: channel === "email_confirm" });
     }
   };
 }

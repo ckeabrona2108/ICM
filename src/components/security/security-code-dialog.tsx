@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Loader2, ShieldCheck, X } from "lucide-react";
 
-import type { CodeChannel, SecurityAction, SecurityCodeChallenge } from "@/lib/security-codes";
+import type { CodeChannel, SecurityAction, SecurityCodeChallenge, SendChannel } from "@/lib/security-codes";
 
 // The code window. A protected request answers 428 with the channels the cabinet has; the window
 // sends a code, checks what the artist types and lets the caller repeat the request once.
@@ -17,10 +17,11 @@ const TITLES: Record<SecurityAction, string> = {
   unlink: "Подтвердите отключение входа"
 };
 
-const SENT_TO: Record<CodeChannel, string> = {
+const SENT_TO: Record<SendChannel, string> = {
   telegram: "в Telegram",
   vk: "в сообщения VK",
-  email: "на почту"
+  email: "на почту",
+  email_confirm: "на почту"
 };
 
 const SEND_VIA: Record<CodeChannel, string> = {
@@ -82,9 +83,9 @@ export function useSecurityCode() {
 }
 
 type SendState =
-  | { kind: "sending"; channel: CodeChannel }
-  | { kind: "sent"; channel: CodeChannel; challengeId: string; resendAt: number }
-  | { kind: "failed"; channel: CodeChannel; message: string; retryAt: number | null };
+  | { kind: "sending"; channel: SendChannel }
+  | { kind: "sent"; channel: SendChannel; challengeId: string; resendAt: number }
+  | { kind: "failed"; channel: SendChannel; message: string; retryAt: number | null };
 
 async function postJson(url: string, body: unknown) {
   const response = await fetch(url, {
@@ -115,7 +116,7 @@ function SecurityCodeDialog({
   const startedRef = React.useRef(false);
 
   const sendCode = React.useCallback(
-    async (channel: CodeChannel) => {
+    async (channel: SendChannel) => {
       setSend({ kind: "sending", channel });
       setError(null);
       setCode("");
@@ -131,7 +132,6 @@ function SecurityCodeDialog({
           challengeId: payload.challengeId,
           resendAt: typeof payload.resendAt === "string" ? Date.parse(payload.resendAt) : Date.now() + 60_000
         });
-        window.setTimeout(() => inputRef.current?.focus(), 0);
         return;
       }
       setSend({
@@ -149,6 +149,12 @@ function SecurityCodeDialog({
     startedRef.current = true;
     void sendCode(challenge.channels[0]!);
   }, [challenge.channels, sendCode]);
+
+  // The field is enabled only after the code is out, so it takes the focus once it is.
+  const sentId = send?.kind === "sent" ? send.challengeId : null;
+  React.useEffect(() => {
+    if (sentId) inputRef.current?.focus();
+  }, [sentId]);
 
   React.useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -187,10 +193,11 @@ function SecurityCodeDialog({
     if (digits.length === 6) void verify(digits);
   }
 
-  const current = send?.channel ?? challenge.channels[0] ?? null;
+  const current: SendChannel | null = send?.channel ?? challenge.channels[0] ?? null;
   const others = challenge.channels.filter((channel) => channel !== current);
   const resendIn = send?.kind === "sent" ? Math.max(0, Math.ceil((send.resendAt - now) / 1000)) : 0;
-  const noChannel = challenge.channels.length === 0;
+  // Once a code went to the unconfirmed own email, the window shows the usual code field.
+  const noChannel = challenge.channels.length === 0 && !send;
 
   return (
     <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center">
@@ -221,7 +228,24 @@ function SecurityCodeDialog({
           </button>
         </div>
 
-        {noChannel ? (
+        {noChannel && challenge.confirmEmail ? (
+          <div className="mt-4 space-y-3 text-[13.5px] leading-relaxed text-white/70">
+            <p>
+              Чтобы вывести деньги, подтвердите почту <span className="font-medium text-white">{challenge.confirmEmail}</span>.
+              Мы пришлём на неё код: он подтвердит и почту, и выплату.
+            </p>
+            <button
+              type="button"
+              onClick={() => void sendCode("email_confirm")}
+              className="w-full rounded-xl bg-violet-500 px-4 py-2.5 text-[14px] font-semibold text-white transition hover:bg-violet-400"
+            >
+              Подтвердить почту
+            </button>
+            <p className="text-[12px] text-white/45">
+              Это нужно один раз. Дальше коды будут приходить на эту почту сразу.
+            </p>
+          </div>
+        ) : noChannel ? (
           <div className="mt-4 space-y-3 text-[13.5px] leading-relaxed text-white/70">
             <p>
               Выплаты подтверждаются кодом. Чтобы его получить, подключите Telegram или VK, либо подтвердите почту в профиле.
@@ -339,7 +363,7 @@ function SecurityCodeDialog({
               </p>
             ) : null}
 
-            {others.length === 0 && !challenge.channels.includes("email") && challenge.held.length === 0 ? (
+            {others.length === 0 && challenge.channels.length > 0 && !challenge.channels.includes("email") && challenge.held.length === 0 ? (
               <p className="text-[12px] leading-relaxed text-white/45">
                 Совет: подтвердите почту в{" "}
                 <Link href="/dashboard/profile#security" onClick={onCancel} className="text-violet-200 hover:underline">

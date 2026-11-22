@@ -12,7 +12,7 @@ import {
   isSecurityStorageMissing,
   readCodeChannels,
   SECURITY_ACTIONS,
-  CODE_CHANNELS
+  SEND_CHANNELS
 } from "@/lib/security-codes";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 // Sends a code for one action to the chosen channel (or the first one the cabinet has).
 const bodySchema = z.object({
   action: z.enum(SECURITY_ACTIONS as [string, ...string[]]),
-  channel: z.enum(CODE_CHANNELS as [string, ...string[]]).optional()
+  channel: z.enum(SEND_CHANNELS as [string, ...string[]]).optional()
 });
 
 const ERRORS = {
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Некорректный запрос." }, { status: 400 });
   const action = parsed.data.action as (typeof SECURITY_ACTIONS)[number];
-  const channel = (parsed.data.channel ?? null) as (typeof CODE_CHANNELS)[number] | null;
+  const channel = (parsed.data.channel ?? null) as (typeof SEND_CHANNELS)[number] | null;
 
   try {
     const result = await issueSecurityCode(prisma, { userId, action, channel });

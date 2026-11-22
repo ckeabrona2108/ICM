@@ -16,6 +16,7 @@ export interface SecurityCodeRequiredResponse {
 
 export function securityCodeRequiredMessage(challenge: SecurityCodeChallenge): string {
   if (challenge.channels.length > 0) return "Подтвердите действие кодом.";
+  if (challenge.confirmEmail) return "Подтвердите почту кодом, чтобы вывести деньги.";
   return challenge.held.length > 0
     ? "Новый способ получения кодов ещё не активен."
     : "Чтобы вывести деньги, подключите Telegram или подтвердите почту.";

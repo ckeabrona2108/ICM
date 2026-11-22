@@ -58,7 +58,7 @@ export function SupportTicketChat() {
   const [retryMode, setRetryMode] = React.useState<"load" | "details" | "create" | "message" | null>(null);
   const [search, setSearch] = React.useState("");
   const [filter, setFilter] = React.useState<TicketFilter>("all");
-  const listEndRef = React.useRef<HTMLDivElement>(null);
+  const messagesRef = React.useRef<HTMLDivElement>(null);
   const newBodyRef = React.useRef<HTMLTextAreaElement>(null);
 
   const active = tickets.find((t) => t.id === activeId) ?? null;
@@ -141,8 +141,15 @@ export function SupportTicketChat() {
     void loadTickets();
   }, [loadTickets]);
 
+  const scrolledTicketRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    listEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // Only the message list scrolls to the newest message; the page itself stays where it is.
+    // An opened ticket jumps straight to the end, a new message in the same ticket slides in.
+    const list = messagesRef.current;
+    if (!list || !activeId) return;
+    const sameTicket = scrolledTicketRef.current === activeId;
+    scrolledTicketRef.current = activeId;
+    list.scrollTo({ top: list.scrollHeight, behavior: sameTicket ? "smooth" : "auto" });
   }, [active?.messages?.length, activeId]);
 
   const loadTicketDetails = React.useCallback(async (ticketId: string) => {
@@ -335,8 +342,8 @@ export function SupportTicketChat() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-stretch">
-        <aside className="ux-surface flex min-h-[260px] flex-col rounded-[28px] p-4 sm:p-5">
+      <section className="grid gap-4 lg:h-[clamp(560px,calc(100dvh-140px),820px)] lg:grid-cols-[340px_minmax(0,1fr)] lg:items-stretch">
+        <aside className="ux-surface flex max-h-[360px] min-h-[260px] flex-col rounded-[28px] p-4 sm:p-5 lg:max-h-none lg:min-h-0">
           <div className="flex items-center gap-2">
             <label className="flex h-10 flex-1 items-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 text-white/45 focus-within:border-[#7b61ff]/50">
               <Search className="h-4 w-4 shrink-0" />
@@ -373,7 +380,7 @@ export function SupportTicketChat() {
             ))}
           </div>
 
-          <div className="mt-3 flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+          <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
             {loading ? (
               <div className="ux-loading flex items-center gap-2 rounded-[22px] px-4 py-4 text-[14px] font-medium text-white/65">
                 <Loader2 className="h-4 w-4 animate-spin text-[#a78bfa]" />
@@ -421,9 +428,9 @@ export function SupportTicketChat() {
           </div>
         </aside>
 
-        <section className="ux-surface flex min-h-[520px] flex-col overflow-hidden rounded-[28px]">
+        <section className="ux-surface flex h-[78dvh] min-h-[480px] flex-col overflow-hidden rounded-[28px] lg:h-auto lg:min-h-0">
           {creating ? (
-            <div className="flex flex-1 flex-col p-5 sm:p-6">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5 sm:p-6">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c7bcff]">Новое обращение</p>
                 <h2 className="mt-3 text-[28px] font-semibold tracking-[-0.03em] text-white">Опишите вопрос</h2>
@@ -493,8 +500,8 @@ export function SupportTicketChat() {
                 </div>
               </header>
 
-              <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div ref={messagesRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
                   {active.messages?.length ? (
                     active.messages.map((message) => (
                       <article
@@ -536,7 +543,6 @@ export function SupportTicketChat() {
                       Сообщений пока нет. Первым сообщением станет ваше описание проблемы.
                     </div>
                   )}
-                  <div ref={listEndRef} />
                 </div>
 
                 <div className="border-t border-white/[0.08] px-4 py-4 sm:px-6">

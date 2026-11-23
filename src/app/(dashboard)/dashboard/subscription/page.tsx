@@ -15,6 +15,7 @@ import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionOverview, type EffectivePlan } from "@/lib/subscription-limits";
 import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
 import { getCabinetReleasesByUser } from "@/lib/cabinet-release-queries";
+import type { CabinetReleaseStatus } from "@/lib/cabinet-types";
 import { RELEASE_SHARE_PERCENTS, type ReleaseShare, type ReleaseSharePercent } from "@/lib/release-share";
 
 type TariffId = "standard" | "pro" | "enterprise";
@@ -193,17 +194,19 @@ function QuotaCard({
   );
 }
 
+const ACCEPTED_STATUSES = new Set<CabinetReleaseStatus>(["approved", "distributed", "dsp_confirmed"]);
+
 interface ReleaseShareGroup {
   share: ReleaseShare;
   count: number;
 }
 
-/** Sent releases grouped by "Ваша доля"; drafts have no share yet. */
+/** Accepted releases (the ones that earn) grouped by "Ваша доля". */
 async function loadReleaseShareGroups(userId: string): Promise<ReleaseShareGroup[]> {
   const releases = await getCabinetReleasesByUser(userId);
   const groups = new Map<ReleaseSharePercent, ReleaseShareGroup>();
   for (const release of releases) {
-    if (release.status === "draft" || !release.share) continue;
+    if (!ACCEPTED_STATUSES.has(release.status) || !release.share) continue;
     const group = groups.get(release.share.percent);
     if (group) group.count += 1;
     else groups.set(release.share.percent, { share: release.share, count: 1 });
@@ -231,7 +234,7 @@ function ReleaseSharesBlock({ groups, currentPlan }: { groups: ReleaseShareGroup
         : "На PRO новые релизы будут приносить вам 95% дохода, на ENTERPRISE — 100%.";
   return (
     <div className="mb-5 rounded-[24px] border border-[#7b61ff]/35 bg-[#7b61ff]/[0.08] p-4 sm:p-5">
-      <p className="text-[15px] font-bold text-white">Ваша доля дохода по релизам</p>
+      <p className="text-[15px] font-bold text-white">Ваша доля дохода по принятым релизам</p>
       <p className="mt-0.5 text-[13px] text-white/60">Доля закрепляется за релизом в момент отправки.</p>
       <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
         {groups.map((group) => (

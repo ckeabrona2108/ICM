@@ -1,9 +1,13 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 import type { ReleaseShare, ReleaseSharePercent } from "@/lib/release-share";
+
+const TOOLTIP_WIDTH = 240;
+const VIEWPORT_GAP = 8;
 
 const TONES: Record<ReleaseSharePercent, string> = {
   90: "border-white/[0.18] bg-white/[0.08] text-white/80",
@@ -33,15 +37,36 @@ export function ReleaseShareBadge({
   className?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [position, setPosition] = React.useState<{ left: number; bottom: number } | null>(null);
   const ref = React.useRef<HTMLSpanElement>(null);
+
+  // The tooltip is drawn over the whole page (a portal with fixed position) and kept inside the
+  // window, so a badge at the edge of a card, next to the sidebar or the screen edge, is not cut off.
+  React.useLayoutEffect(() => {
+    if (!open || !ref.current) {
+      setPosition(null);
+      return;
+    }
+    const rect = ref.current.getBoundingClientRect();
+    const preferred = align === "right" ? rect.right - TOOLTIP_WIDTH : rect.left;
+    const left = Math.min(Math.max(preferred, VIEWPORT_GAP), window.innerWidth - TOOLTIP_WIDTH - VIEWPORT_GAP);
+    setPosition({ left, bottom: window.innerHeight - rect.top + 10 });
+  }, [open, align]);
 
   React.useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
+    const hide = () => setOpen(false);
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("resize", hide);
+    };
   }, [open]);
 
   const toggle = (event: React.SyntheticEvent) => {
@@ -71,19 +96,20 @@ export function ReleaseShareBadge({
       )}
     >
       {short ? `${share.percent}%` : `Ваша доля ${share.percent}%`}
-      {open ? (
-        <span
-          role="tooltip"
-          className={cn(
-            "absolute bottom-[calc(100%+10px)] z-50 w-[240px] cursor-default whitespace-normal rounded-xl border border-white/12 bg-[#1d1f2b] px-3 py-2.5 text-left text-[12px] font-medium leading-[1.45] text-white/75 shadow-[0_20px_40px_-12px_rgba(0,0,0,0.7)]",
-            align === "right" ? "-right-1.5" : "-left-1.5"
-          )}
-        >
-          <span className="mb-0.5 block text-[13px] font-bold text-white">{share.title}</span>
-          {share.hint}
-          {share.upsell ? <span className="mt-1.5 block text-[#c4b5fd]">{share.upsell}</span> : null}
-        </span>
-      ) : null}
+      {open && position
+        ? createPortal(
+            <span
+              role="tooltip"
+              style={{ left: position.left, bottom: position.bottom, width: TOOLTIP_WIDTH }}
+              className="pointer-events-none fixed z-[1000] block whitespace-normal rounded-xl border border-white/12 bg-[#1d1f2b] px-3 py-2.5 text-left text-[12px] font-medium leading-[1.45] text-white/75 shadow-[0_20px_40px_-12px_rgba(0,0,0,0.7)]"
+            >
+              <span className="mb-0.5 block text-[13px] font-bold text-white">{share.title}</span>
+              {share.hint}
+              {share.upsell ? <span className="mt-1.5 block text-[#c4b5fd]">{share.upsell}</span> : null}
+            </span>,
+            document.body
+          )
+        : null}
     </span>
   );
 }

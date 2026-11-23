@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { addMonths } from "date-fns";
 
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import {
@@ -140,7 +141,7 @@ export async function recordReferralPayment(
     UPDATE icecream.referrals
     SET paid_order_id = ${order.id}::uuid,
         paid_at = now(),
-        reward_due_at = now() + make_interval(days => ${REFERRAL_REWARD_DELAY_DAYS})
+        reward_due_at = now() + make_interval(days => ${REFERRAL_REWARD_DELAY_DAYS}::int)
     WHERE referred_id = ${order.userId}::uuid AND paid_at IS NULL AND revoked_at IS NULL
     RETURNING id, referrer_id, reward_due_at`;
   const row = rows[0];
@@ -162,17 +163,23 @@ export async function recordReferralPayment(
 const PLAN_RANK = { STANDARD: 1, PRO: 2, ENTERPRISE: 3 } as const;
 
 async function grantLadderMonth(db: Db, userId: string, plan: "PRO" | "ENTERPRISE"): Promise<void> {
-  // A month of the reward plan; an artist already on a higher active plan keeps it and gets a month more.
+  // A month of the reward plan on top of whatever is left; an artist already on a higher active
+  // plan keeps it and gets a month more.
   const quota = await getUserReleaseQuota(userId, db);
   const keep = quota.isActive && PLAN_RANK[quota.plan] > PLAN_RANK[plan] ? quota.plan : plan;
+  const current = await db.user.findUnique({ where: { id: userId }, select: { expiresAt: true } });
+  const now = new Date();
+  const base = quota.isActive && current?.expiresAt && current.expiresAt > now ? current.expiresAt : now;
+  const endsAt = addMonths(base, 1);
   await db.$transaction(async (tx) => {
-    const sub = await applySubscriptionUpgrade({ tx, userId, plan: keep });
+    // Keeps the subscription records (and this month's release counter) in line with a paid month.
+    await applySubscriptionUpgrade({ tx, userId, plan: keep });
     await tx.user.update({
       where: { id: userId },
       data: {
         isSubscribed: true,
         subscribeLevel: keep === "ENTERPRISE" ? "enterprise" : keep === "PRO" ? "professional" : "standard",
-        expiresAt: sub.endsAt
+        expiresAt: endsAt
       }
     });
   });
@@ -193,7 +200,13 @@ export async function settleReferralRewards(db: Db, referrerId?: string): Promis
     const order = row.paid_order_id
       ? await db.orders.findUnique({ where: { id: row.paid_order_id }, select: { confirmed: true, payment_status: true } })
       : null;
-    if (!order?.confirmed || ["canceled", "cancelled", "refunded", "failed"].includes(order.payment_status)) continue;
+    if (!order?.confirmed || ["canceled", "cancelled", "refunded", "failed"].includes(order.payment_status)) {
+      // The payment was cancelled or refunded: this friend does not count.
+      await db.$executeRaw`
+        UPDATE icecream.referrals SET revoked_at = now(), revoke_reason = 'Оплата отменена или возвращена'
+        WHERE id = ${row.id}::uuid AND rewarded_at IS NULL AND revoked_at IS NULL`;
+      continue;
+    }
 
     const claimed = await db.$queryRaw<Array<{ id: string }>>`
       UPDATE icecream.referrals SET rewarded_at = now()
@@ -232,27 +245,48 @@ export async function settleReferralRewards(db: Db, referrerId?: string): Promis
         ON CONFLICT DO NOTHING
         RETURNING step`;
       if (!inserted[0]) continue;
-      try {
-        await grantLadderMonth(db, userId, rung.plan);
-      } catch (error) {
-        // Not granted: forget the row so the next settle tries again.
-        await db.$executeRaw`
-          DELETE FROM icecream.referral_ladder_rewards WHERE user_id = ${userId}::uuid AND step = ${rung.step}`;
-        console.error("[referrals] ladder month failed", { userId, step: rung.step, error });
-        continue;
-      }
+      // Earned, not switched on: the artist activates the month with a button when it suits them.
       await deliverUserNotificationSafely(db, {
         id: `referral-ladder-${userId}-${rung.step}`,
         userId,
         kind: "referral_ladder",
         title: `${rung.step} оплативших друга — ${rung.label} твой!`,
-        message: `Подписка ${rung.plan} включена на месяц. Спасибо, что зовёшь друзей.`,
-        href: "/dashboard/subscription",
+        message: `Активируй его на странице «Пригласить друга», когда будет удобно: месяц ${rung.plan} добавится к текущей подписке.`,
+        href: "/dashboard/referrals",
         sendTelegram: true,
         sendVk: true
       });
     }
   }
+}
+
+/**
+ * Switches on an earned ladder month. It is added on top of the current subscription; an artist
+ * on a higher plan keeps it and gets a month more. Each month can be activated once.
+ */
+export async function activateLadderReward(
+  db: Db,
+  params: { userId: string; step: number }
+): Promise<{ ok: true; plan: string } | { ok: false; reason: "not_earned" | "already_active" }> {
+  const rows = await db.$queryRaw<Array<{ plan: string }>>`
+    UPDATE icecream.referral_ladder_rewards SET activated_at = now()
+    WHERE user_id = ${params.userId}::uuid AND step = ${params.step} AND activated_at IS NULL
+    RETURNING plan`;
+  const plan = rows[0]?.plan;
+  if (!plan) {
+    const exists = await db.$queryRaw<Array<{ step: number }>>`
+      SELECT step FROM icecream.referral_ladder_rewards WHERE user_id = ${params.userId}::uuid AND step = ${params.step}`;
+    return { ok: false, reason: exists[0] ? "already_active" : "not_earned" };
+  }
+  try {
+    await grantLadderMonth(db, params.userId, plan === "ENTERPRISE" ? "ENTERPRISE" : "PRO");
+  } catch (error) {
+    await db.$executeRaw`
+      UPDATE icecream.referral_ladder_rewards SET activated_at = NULL
+      WHERE user_id = ${params.userId}::uuid AND step = ${params.step}`;
+    throw error;
+  }
+  return { ok: true, plan };
 }
 
 export async function getReferralBonusBalance(db: Db | Prisma.TransactionClient, userId: string): Promise<number> {
@@ -307,13 +341,20 @@ export async function getReferralOverview(db: Db, userId: string): Promise<Refer
     }))
   );
   const payingFriends = friends.filter((friend) => friend.status === "paid" || friend.status === "rewarded").length;
+  const earned = await db.$queryRaw<Array<{ step: number; activated_at: Date | null }>>`
+    SELECT step, activated_at FROM icecream.referral_ladder_rewards WHERE user_id = ${userId}::uuid`;
+  const earnedByStep = new Map(earned.map((row) => [row.step, row.activated_at]));
   return {
     code,
     link: buildReferralLink(code),
     bonusBalance: await getReferralBonusBalance(db, userId),
     payingFriends,
     friends,
-    ladder: REFERRAL_LADDER.map((rung) => ({ ...rung, reached: payingFriends >= rung.step }))
+    ladder: REFERRAL_LADDER.map((rung) => ({
+      ...rung,
+      reached: payingFriends >= rung.step,
+      state: !earnedByStep.has(rung.step) ? "locked" : earnedByStep.get(rung.step) ? "activated" : "available"
+    }))
   };
 }
 

@@ -5,6 +5,8 @@ import * as React from "react";
 import { authOptions } from "@/lib/auth";
 import { getCabinetReleaseByIdForUser } from "@/lib/cabinet-release-queries";
 import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
+import { ReferralDiscountNotice } from "@/components/referrals/referral-discount-notice";
+import { getReferralDiscountPercent } from "@/lib/referrals";
 import { StatusBadge } from "@/components/releases/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
@@ -77,6 +79,10 @@ export default async function ReleaseDetailsPage({
         .then((stored) => (stored ? resolveReleaseAmountDue(stored.roles, stored.track) : null))
     : null;
   const releasePrice = amountDue?.price ?? null;
+  const referralDiscount =
+    awaitingPayment && !amountDue?.supplement
+      ? await getReferralDiscountPercent(prisma, session.user.id).catch(() => 0)
+      : 0;
   const paymentReturnState =
     paymentResult?.status === "canceled"
       ? { kind: "failed" as const, message: describeYooKassaCancellation(paymentResult.cancellationReason) }
@@ -133,6 +139,8 @@ export default async function ReleaseDetailsPage({
                 Оплата подтверждена. Релиз отправлен на модерацию.
               </p>
             ) : awaitingPayment ? (
+              <>
+              <ReferralDiscountNotice percent={referralDiscount} fullRub={releasePrice?.totalRub} what="первую оплату" />
               <ReleasePaymentPanel
                 releaseId={release.id}
                 price={releasePrice}
@@ -140,6 +148,7 @@ export default async function ReleaseDetailsPage({
                 autoStart={searchParams?.pay === "1" && !payOrderId}
                 returnState={paymentReturnState}
               />
+              </>
             ) : wasJustSubmitted ? (
               <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
                 Релиз отправлен на модерацию. Повторная отправка не требуется.

@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy, Send } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Copy, Gift, Send } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import {
@@ -31,7 +32,33 @@ function shareText(): string {
 }
 
 export function ReferralPageClient({ overview }: { overview: ReferralOverview }) {
+  const router = useRouter();
   const [copied, setCopied] = React.useState(false);
+  const [activating, setActivating] = React.useState<number | null>(null);
+  const [activationError, setActivationError] = React.useState<string | null>(null);
+
+  const activate = async (step: number) => {
+    setActivating(step);
+    setActivationError(null);
+    try {
+      const response = await fetch("/api/referrals/ladder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step })
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) {
+        setActivationError(payload?.error ?? "Не удалось активировать");
+        router.refresh();
+        return;
+      }
+      // A full reload, so the plan in the top bar shows the new month too.
+      window.location.reload();
+    } finally {
+      setActivating(null);
+    }
+  };
+  const earnedRewards = overview.ladder.filter((rung) => rung.state !== "locked");
 
   const copy = async () => {
     try {
@@ -138,6 +165,44 @@ export function ReferralPageClient({ overview }: { overview: ReferralOverview })
         <p className="mt-4 text-[13px] text-white/60">
           {hint ?? "Все ступени пройдены. За каждого нового оплатившего друга — бесплатный релиз."}
         </p>
+        {earnedRewards.length > 0 ? (
+          <div className="mt-4 space-y-2">
+            {earnedRewards.map((rung) => (
+              <div
+                key={rung.step}
+                className={cn(
+                  "flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3",
+                  rung.state === "available" ? "border-[#7b61ff]/45 bg-[#7b61ff]/10" : "border-white/[0.08] bg-white/[0.02]"
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <Gift className={cn("h-5 w-5 shrink-0", rung.state === "available" ? "text-[#c4b5fd]" : "text-white/40")} />
+                  <div className="min-w-0">
+                    <p className="text-[14px] font-semibold text-white">
+                      {rung.state === "available" ? `${rung.label[0]?.toUpperCase()}${rung.label.slice(1)} доступен` : `${rung.label[0]?.toUpperCase()}${rung.label.slice(1)} активирован`}
+                    </p>
+                    <p className="text-[12.5px] text-white/55">
+                      {rung.state === "available"
+                        ? "Включи, когда будет удобно: месяц добавится к текущей подписке."
+                        : "Месяц уже добавлен к подписке."}
+                    </p>
+                  </div>
+                </div>
+                {rung.state === "available" ? (
+                  <button
+                    type="button"
+                    disabled={activating !== null}
+                    onClick={() => void activate(rung.step)}
+                    className="inline-flex h-10 items-center rounded-xl bg-white px-4 text-[13.5px] font-bold text-black transition hover:bg-white/90 disabled:opacity-60"
+                  >
+                    {activating === rung.step ? "Включаем…" : "Активировать"}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+            {activationError ? <p className="text-[12.5px] text-rose-300">{activationError}</p> : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-[22px] border border-white/[0.08] bg-[#13151d] p-5">

@@ -47,7 +47,8 @@ export interface ReferralOverview {
   /** Friends who paid (bonus given or on its way); the ladder counts these. */
   payingFriends: number;
   friends: ReferralFriendView[];
-  ladder: Array<{ step: number; plan: ReferralLadderPlan; label: string; reached: boolean }>;
+  /** locked = not earned yet; available = earned, the artist can switch it on; activated = used. */
+  ladder: Array<{ step: number; plan: ReferralLadderPlan; label: string; reached: boolean; state: "locked" | "available" | "activated" }>;
 }
 
 /** "Ещё 2 оплативших друга — и месяц ENTERPRISE твой." or null when the ladder is done. */

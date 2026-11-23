@@ -62,21 +62,22 @@ function IcmTariffCardBase({
         <div className="absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(168,140,255,1),transparent)]" />
       ) : null}
 
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-[24px] font-bold tracking-[-0.03em] text-white sm:text-[26px]">{tier.title}</h3>
-        <div className="flex flex-col items-end gap-2">
+      {/* On a narrow card the badges move under the title instead of squeezing next to it. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h3 className="shrink-0 text-[24px] font-bold tracking-[-0.03em] text-white sm:text-[26px]">{tier.title}</h3>
+        <div className="flex flex-wrap items-center gap-2">
           {tier.popular ? (
-            <span className="inline-flex items-center rounded-full bg-[#7b61ff] px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-white shadow-[0_8px_24px_-8px_rgba(123,97,255,0.9)]">
+            <span className="inline-flex items-center whitespace-nowrap rounded-full bg-[#7b61ff] px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.08em] text-white shadow-[0_8px_24px_-8px_rgba(123,97,255,0.9)]">
               Самый популярный
             </span>
           ) : null}
           {showCurrentPlanBadge ? (
-            <span className="rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
+            <span className="whitespace-nowrap rounded-full border border-emerald-400/25 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-semibold text-emerald-200">
               Текущий план
             </span>
           ) : null}
           {showTierBadge ? (
-            <span className="flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70">
+            <span className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-white/[0.08] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-white/70">
               <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
               {tier.badge}
             </span>

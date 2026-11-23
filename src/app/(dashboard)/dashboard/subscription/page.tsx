@@ -15,6 +15,9 @@ import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionOverview, type EffectivePlan } from "@/lib/subscription-limits";
 import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
 import { getCabinetReleasesByUser } from "@/lib/cabinet-release-queries";
+import { ReferralTariffDiscountNotice } from "@/components/referrals/referral-discount-notice";
+import { getReferralDiscountPercent } from "@/lib/referrals";
+import { getSubscriptionTariffConfig } from "@/lib/subscription-billing";
 import type { CabinetReleaseStatus } from "@/lib/cabinet-types";
 import { RELEASE_SHARE_PERCENTS, type ReleaseShare, type ReleaseSharePercent } from "@/lib/release-share";
 
@@ -89,6 +92,7 @@ export default async function SubscriptionPage({
     throw error;
   });
   const releaseQuota = await getUserReleaseQuota(session.user.id, prisma);
+  const referralDiscount = await getReferralDiscountPercent(prisma, session.user.id).catch(() => 0);
   const shareGroups = await loadReleaseShareGroups(session.user.id).catch((error) => {
     console.error("[subscription] release shares failed", error);
     return [];
@@ -154,6 +158,18 @@ export default async function SubscriptionPage({
           </p>
         ) : null}
       </div>
+
+      {referralDiscount ? (
+        <div className="mb-5">
+          <ReferralTariffDiscountNotice
+            percent={referralDiscount}
+            tariffs={(["standard", "pro", "enterprise"] as const)
+              .map((id) => getSubscriptionTariffConfig(id, "monthly"))
+              .filter((tariff): tariff is NonNullable<typeof tariff> => Boolean(tariff))
+              .map((tariff) => ({ title: tariff.title, amountRub: tariff.amountRub }))}
+          />
+        </div>
+      ) : null}
 
       {shareGroups.length > 0 ? (
         <ReleaseSharesBlock groups={shareGroups} currentPlan={overview.hasActiveSubscription ? overview.currentPlan : null} />

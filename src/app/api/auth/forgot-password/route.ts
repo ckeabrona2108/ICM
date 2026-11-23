@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { AccountEmailUnavailableError, canReceiveAccountEmail, issuePasswordLink, resolveAppBaseUrl } from "@/lib/account-security";
+import {
+  AccountEmailUnavailableError,
+  canReceiveAccountEmail,
+  issuePasswordLink,
+  PASSWORD_LINK_COOLDOWN_SECONDS,
+  resolveAppBaseUrl
+} from "@/lib/account-security";
 import { isPrismaConnectionError } from "@/lib/prisma-errors";
 import { prisma } from "@/lib/prisma";
-import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
+import { consumeRateLimit, enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
+
+const SENT_MESSAGE =
+  "Если аккаунт с этим email есть, мы отправили ссылку. Письмо может идти 1–2 минуты. Если его нет во «Входящих», проверьте папку «Спам». Ссылка из любого из последних писем работает 30 минут.";
 
 const forgotSchema = z.object({
   email: z.string().email().transform((value) => value.trim().toLowerCase())
@@ -34,6 +43,23 @@ export async function POST(request: Request) {
   const parsed = forgotSchema.safeParse(payload);
   if (!parsed.success) {
     return NextResponse.json({ error: "Некорректный email" }, { status: 400 });
+  }
+
+  // One letter per address per minute, whether or not the account exists (so the answer does not
+  // reveal which addresses are registered). Repeated letters only confuse people and look like spam.
+  const cooldown = consumeRateLimit({
+    key: `auth:forgot-email:${parsed.data.email}`,
+    limit: 1,
+    windowMs: PASSWORD_LINK_COOLDOWN_SECONDS * 1000
+  });
+  if (!cooldown.allowed) {
+    return NextResponse.json(
+      {
+        error: "Письмо уже отправлено. Оно может идти пару минут, проверьте папку «Спам».",
+        retryAfterSeconds: cooldown.retryAfterSeconds
+      },
+      { status: 429, headers: { "Retry-After": String(cooldown.retryAfterSeconds) } }
+    );
   }
 
   try {
@@ -67,10 +93,7 @@ export async function POST(request: Request) {
         );
       }
 
-      return NextResponse.json({
-        ok: true,
-        message: "Если аккаунт существует, инструкция по восстановлению отправлена."
-      });
+      return NextResponse.json({ ok: true, message: SENT_MESSAGE, cooldownSeconds: PASSWORD_LINK_COOLDOWN_SECONDS });
     }
 
     try {
@@ -90,10 +113,7 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      message: "Если аккаунт существует, инструкция по восстановлению отправлена."
-    });
+    return NextResponse.json({ ok: true, message: SENT_MESSAGE, cooldownSeconds: PASSWORD_LINK_COOLDOWN_SECONDS });
   } catch (error) {
     if (isPrismaConnectionError(error)) {
       return NextResponse.json(

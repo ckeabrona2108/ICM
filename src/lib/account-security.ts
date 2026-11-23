@@ -11,6 +11,9 @@ import { getSmtpBzTransporter, getSmtpFromAddress } from "@/lib/smtp-bz";
 // email address (the address itself is kept on the row until the link is opened).
 
 const PASSWORD_LINK_TTL_MS = 30 * 60_000;
+const MAX_LIVE_PASSWORD_LINKS = 5;
+/** One password letter per address per minute. */
+export const PASSWORD_LINK_COOLDOWN_SECONDS = 60;
 const EMAIL_CONFIRM_TTL_MS = 24 * 60 * 60_000;
 
 export type PasswordLinkKind = "reset" | "set";
@@ -164,10 +167,21 @@ export async function issuePasswordLink(params: {
 }): Promise<void> {
   if (!canReceiveAccountEmail(params.user.email)) throw new AccountEmailUnavailableError();
   const token = newToken();
-  await prisma.verification_tokens.deleteMany({ where: { user_id: params.user.id, type: "recover" } });
+  // Earlier links keep working until they expire: people often press "send" twice and then open
+  // the first letter. Setting the password removes all of them (reset-password route).
+  await prisma.verification_tokens.deleteMany({
+    where: { user_id: params.user.id, type: "recover", expires: { lt: new Date() } }
+  });
   await prisma.verification_tokens.create({
     data: { user_id: params.user.id, token, type: "recover", expires: new Date(Date.now() + PASSWORD_LINK_TTL_MS) }
   });
+  const live = await prisma.verification_tokens.findMany({
+    where: { user_id: params.user.id, type: "recover" },
+    orderBy: { expires: "desc" },
+    select: { token: true }
+  });
+  const stale = live.slice(MAX_LIVE_PASSWORD_LINKS).map((row) => row.token);
+  if (stale.length > 0) await prisma.verification_tokens.deleteMany({ where: { token: { in: stale } } });
   try {
     await sendAccountEmail(
       buildPasswordLinkEmail({

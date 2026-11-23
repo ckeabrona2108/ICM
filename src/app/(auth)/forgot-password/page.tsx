@@ -12,15 +12,27 @@ import { Label } from "@/components/ui/label";
 const inputClassName =
   "h-14 rounded-2xl border-0 bg-white/[0.05] px-5 text-[15px] text-white placeholder:text-white/30 focus-visible:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/25";
 
+function formatCountdown(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
   const [success, setSuccess] = React.useState("");
+  // Seconds until another letter can be requested; the server allows one per address per minute.
+  const [cooldown, setCooldown] = React.useState(0);
+
+  React.useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setTimeout(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (loading) return;
+    if (loading || cooldown > 0) return;
 
     setLoading(true);
     setError("");
@@ -34,17 +46,25 @@ export default function ForgotPasswordPage() {
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | { error?: string; message?: string }
+        | { error?: string; message?: string; cooldownSeconds?: number; retryAfterSeconds?: number }
         | null;
 
       if (!response.ok) {
+        if (response.status === 429 && typeof payload?.retryAfterSeconds === "number") {
+          // Not an error for the person: the letter is on its way, they only need to wait.
+          setCooldown(payload.retryAfterSeconds);
+          setSuccess(payload.error ?? "Письмо уже отправлено.");
+          return;
+        }
         setError(payload?.error ?? "Не удалось отправить инструкцию.");
         return;
       }
 
+      setCooldown(payload?.cooldownSeconds ?? 60);
+
       setSuccess(
         payload?.message ??
-          "Если аккаунт существует, инструкция по восстановлению отправлена."
+          "Если аккаунт с этим email есть, мы отправили ссылку. Письмо может идти 1–2 минуты, проверьте и папку «Спам»."
       );
     } catch {
       setError("Ошибка сети. Попробуйте снова.");
@@ -111,7 +131,7 @@ export default function ForgotPasswordPage() {
 
         <Button
           type="submit"
-          disabled={loading}
+          disabled={loading || cooldown > 0}
           className="group mt-2 h-14 w-full rounded-2xl bg-white text-[15px] font-semibold text-black shadow-[0_8px_24px_-8px_rgba(255,255,255,0.4)] transition-all hover:bg-white/95 disabled:opacity-60"
         >
           <span className="inline-flex items-center justify-center gap-2">
@@ -120,9 +140,11 @@ export default function ForgotPasswordPage() {
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Отправляем…
               </>
+            ) : cooldown > 0 ? (
+              <>Отправить ещё раз через {formatCountdown(cooldown)}</>
             ) : (
               <>
-                Отправить ссылку
+                {success ? "Отправить ещё раз" : "Отправить ссылку"}
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </>
             )}

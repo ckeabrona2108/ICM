@@ -38,6 +38,8 @@ export interface FinanceReportClientItem {
     licenseeCode?: string | null;
     periodStart?: string | null;
     periodEnd?: string | null;
+    /** "Ваша доля" of the line: set only when every line of the report has an exact public share. */
+    sharePercent?: import("@/lib/release-share").ReleaseSharePercent | null;
   }>;
   platformTotals: Array<{
     platformName: string;

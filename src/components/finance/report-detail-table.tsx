@@ -1,7 +1,11 @@
 "use client";
 
 import { formatRubCurrency } from "@/lib/currency-format";
+import * as React from "react";
+
+import { releaseShareTone } from "@/components/releases/release-share-badge";
 import { resolveNetReportRightsAmounts } from "@/lib/finance-client";
+import type { ReleaseSharePercent } from "@/lib/release-share";
 
 type ReportDetailItem = {
   id?: string;
@@ -27,6 +31,7 @@ type ReportDetailItem = {
   relatedRightsShare?: number | null;
   authorAmount?: number | null;
   relatedAmount?: number | null;
+  sharePercent?: ReleaseSharePercent | null;
   periodStart?: string | null;
   periodEnd?: string | null;
 };
@@ -37,6 +42,9 @@ type DetailColumn = {
   format?: "currency" | "date" | "number";
   align?: "right";
   className?: string;
+  render?: (item: ReportDetailItem) => React.ReactNode;
+  /** Shown only when every line has a value (a half-filled column would hint at the rest). */
+  requireAll?: boolean;
 };
 
 function hasValue(value: unknown): boolean {
@@ -95,12 +103,29 @@ const detailColumns: DetailColumn[] = [
     align: "right",
     className: "font-semibold text-white/78"
   },
+  {
+    label: "Ваша доля",
+    value: (item) => item.sharePercent,
+    requireAll: true,
+    render: (item) =>
+      item.sharePercent ? (
+        <span
+          className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-bold ${releaseShareTone(item.sharePercent)}`}
+        >
+          {item.sharePercent}%
+        </span>
+      ) : null
+  },
   { label: "К начислению", value: (item) => item.amount, format: "currency", align: "right", className: "font-semibold text-emerald-300" },
   { label: "Код лицензиара", value: (item) => item.licenseeCode, className: "text-white/54" }
 ];
 
 export function ReportDetailTable({ items }: { items: ReportDetailItem[] }) {
-  const visibleColumns = detailColumns.filter((column) => items.some((item) => hasValue(column.value(item))));
+  const visibleColumns = detailColumns.filter((column) =>
+    column.requireAll
+      ? items.length > 0 && items.every((item) => hasValue(column.value(item)))
+      : items.some((item) => hasValue(column.value(item)))
+  );
 
   return (
     // Scrolls inside its own box (both ways) with a sticky header, so long reports stay readable.
@@ -126,7 +151,7 @@ export function ReportDetailTable({ items }: { items: ReportDetailItem[] }) {
                   key={column.label}
                   className={`px-3.5 py-3 ${column.align === "right" ? "text-right tabular-nums" : ""} ${column.className ?? ""}`}
                 >
-                  {formatValue(column.value(item), column.format)}
+                  {column.render ? column.render(item) : formatValue(column.value(item), column.format)}
                 </td>
               ))}
             </tr>

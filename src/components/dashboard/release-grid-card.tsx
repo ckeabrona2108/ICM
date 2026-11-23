@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { CreditCard, Music2 } from "lucide-react";
 
+import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
 import { cn } from "@/lib/utils";
 import type { CabinetRelease, CabinetReleaseStatus } from "@/lib/cabinet-types";
 import { getReleaseStatusDescriptor } from "@/lib/release-status-ui";
@@ -34,6 +35,8 @@ export function ReleaseGridCard({ release }: { release: CabinetRelease }) {
   const status = getReleaseStatusDescriptor(release.status, release.paid);
   // Неоплаченный релиз на модерации: по клику открывается страница релиза с оплатой.
   const awaitingPayment = getReleaseTimelineState(release.status, release.paid).showPayButton;
+  // A draft has no share yet: it is fixed by the tariff the release is sent under.
+  const showShare = release.status !== "draft";
   const href =
     release.status === "draft" ? `/dashboard/releases/${release.id}/edit` : `/dashboard/releases/${release.id}`;
 
@@ -80,7 +83,11 @@ export function ReleaseGridCard({ release }: { release: CabinetRelease }) {
         <p className="truncate text-[12px] text-white/50">{release.artist?.trim() || "Исполнитель не указан"}</p>
         <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-white/45">
           <span className="truncate">{release.releaseDate?.trim() || "Дата не выбрана"}</span>
-          {release.upc?.trim() ? <span className="truncate tabular-nums">UPC {release.upc.trim()}</span> : null}
+          {showShare && release.share ? (
+            <ReleaseShareBadge share={release.share} />
+          ) : release.upc?.trim() ? (
+            <span className="truncate tabular-nums">UPC {release.upc.trim()}</span>
+          ) : null}
         </div>
       </div>
     </Link>

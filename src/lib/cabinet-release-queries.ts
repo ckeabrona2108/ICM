@@ -4,6 +4,7 @@ import { isReleaseDraftExpired } from "@/lib/draft-retention";
 import { prisma } from "@/lib/prisma";
 import { isReleaseVisibleOnScene } from "@/lib/scene-policy";
 import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
+import { resolveReleaseSharesForUser } from "@/lib/release-share-server";
 
 const cabinetReleaseSelect = {
   id: true,
@@ -41,6 +42,17 @@ const cabinetReleaseSelect = {
   userId: true
 } as const;
 
+type CabinetReleaseRow = { id: string; labelName: string | null; roles: unknown };
+
+async function mapWithShares(userId: string, rows: CabinetReleaseRow[], mapped: CabinetRelease[]): Promise<CabinetRelease[]> {
+  // The share is extra: if it cannot be resolved, the releases still show, just without it.
+  const shares = await resolveReleaseSharesForUser(prisma, userId, rows).catch((error) => {
+    console.error("[cabinet-releases] release shares failed", error);
+    return new Map();
+  });
+  return mapped.map((release) => ({ ...release, share: shares.get(release.id) ?? null }));
+}
+
 async function deleteExpiredDraftsForUser(userId: string, now = new Date()) {
   const releases = await prisma.release.findMany({
     where: { userId },
@@ -75,7 +87,8 @@ export async function getCabinetReleasesByUser(userId: string): Promise<CabinetR
   });
 
   const visible = releases.filter((release) => !isReleaseHiddenFromCabinet(release.roles));
-  return Promise.all(visible.map((release, index) => mapReleaseToCabinetRelease(release, index + 1)));
+  const mapped = await Promise.all(visible.map((release, index) => mapReleaseToCabinetRelease(release, index + 1)));
+  return mapWithShares(userId, visible, mapped);
 }
 
 export async function getSceneEligibleCabinetReleasesByUser(
@@ -128,5 +141,6 @@ export async function getCabinetReleaseByIdForUser(userId: string, releaseId: st
     });
     return null;
   }
-  return mapReleaseToCabinetRelease(release, 1);
+  const [mapped] = await mapWithShares(userId, [release], [await mapReleaseToCabinetRelease(release, 1)]);
+  return mapped ?? null;
 }

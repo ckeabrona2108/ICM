@@ -13,6 +13,9 @@ import { isPrismaTableMissingError } from "@/lib/prisma-errors";
 import { getUserReleaseQuota } from "@/lib/release-quota";
 import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import { getSubscriptionOverview, type EffectivePlan } from "@/lib/subscription-limits";
+import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
+import { getCabinetReleasesByUser } from "@/lib/cabinet-release-queries";
+import { RELEASE_SHARE_PERCENTS, type ReleaseShare, type ReleaseSharePercent } from "@/lib/release-share";
 
 type TariffId = "standard" | "pro" | "enterprise";
 
@@ -85,6 +88,10 @@ export default async function SubscriptionPage({
     throw error;
   });
   const releaseQuota = await getUserReleaseQuota(session.user.id, prisma);
+  const shareGroups = await loadReleaseShareGroups(session.user.id).catch((error) => {
+    console.error("[subscription] release shares failed", error);
+    return [];
+  });
   const currentTariffId = mapPlanToTariffId(overview.currentPlan);
   const quotaLimitLabel =
     releaseQuota.includedLimit == null ? "Безлимит" : String(releaseQuota.includedLimit);
@@ -147,6 +154,10 @@ export default async function SubscriptionPage({
         ) : null}
       </div>
 
+      {shareGroups.length > 0 ? (
+        <ReleaseSharesBlock groups={shareGroups} currentPlan={overview.hasActiveSubscription ? overview.currentPlan : null} />
+      ) : null}
+
       <SubscriptionTiersClient
         hasActiveSubscription={overview.hasActiveSubscription}
         currentTariffId={currentTariffId}
@@ -178,6 +189,59 @@ function QuotaCard({
       >
         {value}
       </p>
+    </div>
+  );
+}
+
+interface ReleaseShareGroup {
+  share: ReleaseShare;
+  count: number;
+}
+
+/** Sent releases grouped by "Ваша доля"; drafts have no share yet. */
+async function loadReleaseShareGroups(userId: string): Promise<ReleaseShareGroup[]> {
+  const releases = await getCabinetReleasesByUser(userId);
+  const groups = new Map<ReleaseSharePercent, ReleaseShareGroup>();
+  for (const release of releases) {
+    if (release.status === "draft" || !release.share) continue;
+    const group = groups.get(release.share.percent);
+    if (group) group.count += 1;
+    else groups.set(release.share.percent, { share: release.share, count: 1 });
+  }
+  return RELEASE_SHARE_PERCENTS.flatMap((percent) => {
+    const group = groups.get(percent);
+    return group ? [group] : [];
+  });
+}
+
+function releasesLabel(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return `${count} релиз`;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${count} релиза`;
+  return `${count} релизов`;
+}
+
+function ReleaseSharesBlock({ groups, currentPlan }: { groups: ReleaseShareGroup[]; currentPlan: EffectivePlan | null }) {
+  const upsell =
+    currentPlan === "ENTERPRISE"
+      ? null
+      : currentPlan === "PRO"
+        ? "На ENTERPRISE новые релизы будут приносить вам 100% дохода."
+        : "На PRO новые релизы будут приносить вам 95% дохода, на ENTERPRISE — 100%.";
+  return (
+    <div className="mb-5 rounded-[24px] border border-[#7b61ff]/35 bg-[#7b61ff]/[0.08] p-4 sm:p-5">
+      <p className="text-[15px] font-bold text-white">Ваша доля дохода по релизам</p>
+      <p className="mt-0.5 text-[13px] text-white/60">Доля закрепляется за релизом в момент отправки.</p>
+      <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
+        {groups.map((group) => (
+          <div key={group.share.percent} className="rounded-2xl border border-white/[0.08] bg-white/[0.03] px-3.5 py-3">
+            <ReleaseShareBadge share={group.share} align="left" />
+            <p className="mt-2 text-[20px] font-bold text-white">{releasesLabel(group.count)}</p>
+          </div>
+        ))}
+      </div>
+      {upsell ? <p className="mt-3 text-[13px] text-[#c4b5fd]">{upsell}</p> : null}
     </div>
   );
 }

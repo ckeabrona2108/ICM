@@ -4,6 +4,7 @@ import * as React from "react";
 
 import { authOptions } from "@/lib/auth";
 import { getCabinetReleaseByIdForUser } from "@/lib/cabinet-release-queries";
+import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
 import { StatusBadge } from "@/components/releases/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/layout/page-header";
@@ -108,6 +109,25 @@ export default async function ReleaseDetailsPage({
           <CardContent className="grid gap-3 text-sm">
             <Row label="Status" value={<StatusBadge status={release.status} paid={release.paid} />} />
             <Row label="Оплата" value={release.paymentLabel || (release.paid ? "Оплачен" : "Не оплачен")} />
+            {release.status !== "draft" && release.share ? (
+              <div className="rounded-xl border border-[#7b61ff]/45 bg-[#7b61ff]/10 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-white/80">Ваша доля дохода</span>
+                  <ReleaseShareBadge share={release.share} short />
+                </div>
+                <p className="mt-1.5 text-[12.5px] leading-[1.5] text-white/55">
+                  {release.share.hint}
+                  {release.share.upsell ? (
+                    <>
+                      {" "}
+                      <Link href="/dashboard/subscription" className="text-[#c4b5fd] hover:underline">
+                        {release.share.upsell}
+                      </Link>
+                    </>
+                  ) : null}
+                </p>
+              </div>
+            ) : null}
             {paymentResult?.applied ? (
               <p className="rounded-xl border border-emerald-400/25 bg-emerald-500/10 px-3 py-2 text-emerald-100">
                 Оплата подтверждена. Релиз отправлен на модерацию.

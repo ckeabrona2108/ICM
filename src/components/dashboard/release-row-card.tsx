@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+import { ReleaseShareBadge } from "@/components/releases/release-share-badge";
 import { cn } from "@/lib/utils";
 import type { CabinetRelease } from "@/lib/cabinet-types";
 import type { ReleaseDraftDeleteResponse } from "@/lib/api/contracts";
@@ -686,6 +687,7 @@ function ReleaseRowCardBase({
           <div className="min-w-0 flex-1 sm:pr-20">
             <div className="flex flex-wrap items-center gap-2">
               <StatusFieldValue release={release} />
+              {release.status !== "draft" && release.share ? <ReleaseShareBadge share={release.share} align="left" /> : null}
               {priorityBadge ? (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-300/95">
                   <Diamond className="h-3 w-3 fill-emerald-400/80 text-emerald-400" />

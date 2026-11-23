@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { withNetReportRights } from "@/lib/finance-client";
+import { withReportLineShares } from "@/lib/release-share";
 import { getUserBalanceTotals } from "@/lib/finance-service";
 import { listUserReports } from "@/lib/report-service";
 import { getCurrentPayoutWindowState, type PayoutWindowState } from "@/lib/payout-schedule";
@@ -200,7 +201,9 @@ export async function getFinanceDashboardViewData(
     quarterLabel: report.quarterLabel,
     adminComment: report.adminComment,
     userComment: report.userComment,
-    items: report.items.map(withNetReportRights),
+    // Shares come from the source amounts, so they are worked out before those are replaced by
+    // the net ones. Only reports with an exact 90 / 95 / 100% on every line get them.
+    items: withReportLineShares(report).map(withNetReportRights),
     platformTotals: report.platformTotals
   }));
 

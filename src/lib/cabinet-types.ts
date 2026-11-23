@@ -65,6 +65,8 @@ export interface CabinetRelease {
   paymentLabel?: string;
   paymentUsage?: string | null;
   paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;
+  /** "Ваша доля 90 / 95 / 100%"; absent for contract, individual and label rates. */
+  share?: import("@/lib/release-share").ReleaseShare | null;
   tracks: CabinetTrack[];
   moderationStep?: 1 | 2 | 3 | 4;
   releaseCatalogId?: string;

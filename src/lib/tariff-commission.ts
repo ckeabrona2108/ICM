@@ -50,7 +50,7 @@ export function readGlobalCommissionPayment(
 ): Extract<CommissionBasis, { kind: "global" }>["payment"] {
   if (!hasRelease) return "no_release";
   const usage = getReleasePaymentUsageFromRoles(roles);
-  if (usage?.type === "standalone_payment" || usage?.type === "partner_code" || usage?.type === "free_first_release") {
+  if (usage?.type === "standalone_payment" || usage?.type === "partner_code" || usage?.type === "free_first_release" || usage?.type === "referral_bonus") {
     return usage.type;
   }
   return "unknown";

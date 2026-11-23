@@ -63,6 +63,8 @@ export function describeReleaseShare(basis: CommissionBasis | null | undefined, 
         ? "Бесплатный релиз"
         : basis.payment === "partner_code"
           ? "Партнёрский код"
+          : basis.payment === "referral_bonus"
+            ? "Бонус за друзей"
           : "Ваш релиз";
   return {
     percent,

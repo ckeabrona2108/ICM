@@ -22,6 +22,21 @@ function readSafeCallbackUrl() {
 export default function RegisterPage() {
   const [callbackUrl, setCallbackUrl] = React.useState<string | null>(null);
   React.useEffect(() => setCallbackUrl(readSafeCallbackUrl()), []);
+  // Who invited (artist name only) when the visitor came from a friend's link.
+  const [referral, setReferral] = React.useState<{ code: string | null; nickname: string; discountPercent: number } | null>(null);
+  React.useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("ref");
+    let cancelled = false;
+    fetch(`/api/referrals/inviter${code ? `?ref=${encodeURIComponent(code)}` : ""}`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { inviter: { nickname: string; discountPercent: number } | null } | null) => {
+        if (!cancelled && payload?.inviter) setReferral({ code, ...payload.inviter });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [created, setCreated] = React.useState(false);
   const [agree, setAgree] = React.useState(false);
   const [termsOpen, setTermsOpen] = React.useState(false);
@@ -49,7 +64,7 @@ export default function RegisterPage() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(form)
+        body: JSON.stringify(referral?.code ? { ...form, referralCode: referral.code } : form)
       });
 
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -132,6 +147,15 @@ export default function RegisterPage() {
         <p className="mx-auto mt-4 max-w-[440px] text-center text-[15px] leading-relaxed text-white/55">
           Дистрибуция, продвижение и аналитика - всё в одном месте за пару минут
         </p>
+        {referral ? (
+          <div className="mx-auto mt-6 max-w-[460px] rounded-[16px] border border-amber-300/45 bg-[linear-gradient(135deg,rgba(250,199,117,0.16),rgba(123,97,255,0.12))] px-4 py-3">
+            <p className="text-[14px] font-semibold text-white">Тебя пригласил {referral.nickname}</p>
+            <p className="mt-0.5 text-[12.5px] leading-5 text-white/70">
+              Скидка <span className="font-semibold text-amber-200">{referral.discountPercent}%</span> на первую оплату релиза
+              или подписки — применится сама.
+            </p>
+          </div>
+        ) : null}
         <div className="mx-auto mt-6 flex max-w-[460px] items-start gap-3 rounded-[16px] border border-[#a78bfa]/25 bg-[#7b61ff]/10 px-4 py-3">
           <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#7b61ff] text-white">
             <Gift className="h-3.5 w-3.5" />

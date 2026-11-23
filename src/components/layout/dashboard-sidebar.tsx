@@ -14,6 +14,7 @@ import {
   ChevronDown,
   CreditCard,
   ExternalLink,
+  Gift,
   Headset,
   HelpCircle,
   LayoutDashboard,
@@ -206,7 +207,8 @@ function buildNav(counts: {
       count: counts.supportUnreadCount,
       countTone: "danger"
     },
-    { type: "leaf", href: "/dashboard/subscription", label: "Тарифы", icon: CreditCard }
+    { type: "leaf", href: "/dashboard/subscription", label: "Тарифы", icon: CreditCard },
+    { type: "leaf", href: "/dashboard/referrals", label: "Пригласить друга", icon: Gift }
   ];
 
   base.splice(3, 0, {

@@ -9,7 +9,7 @@ export function PaymentStatusBadge({
 }: {
   paid: boolean;
   label?: string;
-  kind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
+  kind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release" | "referral_bonus";
 }) {
   const descriptor = getPaymentStatusDescriptor({ paid, label, kind });
 

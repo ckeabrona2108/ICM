@@ -69,7 +69,7 @@ export function getReleaseStatusDescriptor(status: string, paid?: boolean): Rele
 export function getPaymentStatusDescriptor(params: {
   paid: boolean;
   label?: string;
-  kind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
+  kind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release" | "referral_bonus";
 }): {
   label: string;
   variant: BadgeVariant;
@@ -99,7 +99,7 @@ export function getPaymentStatusDescriptor(params: {
       };
     }
 
-    if (params.kind === "free_first_release") {
+    if (params.kind === "free_first_release" || params.kind === "referral_bonus") {
       return {
         label: params.label.trim(),
         variant: "success",

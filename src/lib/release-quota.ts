@@ -6,7 +6,7 @@ import { readPendingExtrasSupplement } from "@/lib/release-extras-supplement";
 import { getReleaseResubmission } from "@/lib/release-resubmission";
 
 export type ReleaseQuotaPlan = "STANDARD" | "PRO" | "ENTERPRISE";
-export type ReleaseUsageType = "subscription" | "standalone_payment" | "partner_code" | "free_first_release";
+export type ReleaseUsageType = "subscription" | "standalone_payment" | "partner_code" | "free_first_release" | "referral_bonus";
 
 export interface UserReleaseQuota {
   plan: ReleaseQuotaPlan;
@@ -108,7 +108,8 @@ export function getReleasePaymentUsageFromRoles(roles: unknown): ReleasePaymentU
     usageType === "subscription" ||
     usageType === "standalone_payment" ||
     usageType === "partner_code" ||
-    usageType === "free_first_release"
+    usageType === "free_first_release" ||
+    usageType === "referral_bonus"
   ) {
     return {
       type: usageType,
@@ -249,6 +250,13 @@ export function buildPartnerCodePaymentUsage(params: {
   };
 }
 
+export function buildReferralBonusPaymentUsage(params?: { usedAt?: Date }): ReleasePaymentUsage {
+  return {
+    type: "referral_bonus",
+    usedAt: (params?.usedAt ?? new Date()).toISOString()
+  };
+}
+
 export function buildFreeFirstReleasePaymentUsage(params?: { usedAt?: Date }): ReleasePaymentUsage {
   return {
     type: "free_first_release",
@@ -257,7 +265,7 @@ export function buildFreeFirstReleasePaymentUsage(params?: { usedAt?: Date }): R
 }
 
 export function getReleasePaymentDisplayFromRoles(roles: unknown): {
-  kind: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
+  kind: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release" | "referral_bonus";
   label: string;
   usage: ReleasePaymentUsage | null;
 } {
@@ -280,6 +288,13 @@ export function getReleasePaymentDisplayFromRoles(roles: unknown): {
     return {
       kind: "partner_code",
       label: usage.partnerCode ? `Партнёрский код ${usage.partnerCode}` : "Оплачено партнёром",
+      usage
+    };
+  }
+  if (usage?.type === "referral_bonus") {
+    return {
+      kind: "referral_bonus",
+      label: "Бонусный релиз за друзей",
       usage
     };
   }
@@ -372,6 +387,7 @@ export async function getUserReleaseQuota(
     if (usage?.type === "standalone_payment") continue;
     if (usage?.type === "partner_code") continue;
     if (usage?.type === "free_first_release") continue;
+    if (usage?.type === "referral_bonus") continue;
     if (standalonePaidReleaseIds.has(release.id)) continue;
     // A resubmitted copy reuses the payment of its source release.
     if (getReleaseResubmission(release.roles)?.sourceReleaseId) continue;

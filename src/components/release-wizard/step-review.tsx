@@ -28,6 +28,7 @@ import {
 
 import { CopyChangesReview } from "./change-request";
 import { FreeReleaseOption } from "./free-release-option";
+import { ReferralBonusOption } from "./referral-bonus-option";
 import { ModerationSubmitNotices } from "./moderation-date-notice";
 import { useWizard, type PersonRole, type TrackFile } from "./wizard-context";
 
@@ -182,6 +183,7 @@ export function StepReview({
   isSubmitting,
   submitPhase = "idle",
   freeRelease,
+  referralBonus,
   copyOriginal,
   onBack
 }: {
@@ -195,6 +197,7 @@ export function StepReview({
   submitPhase?: SubmitPhase;
   // Offered only for new releases; edits keep the way the release was paid.
   freeRelease?: { enabled: boolean; onChange: (value: boolean) => void };
+  referralBonus?: { enabled: boolean; onChange: (value: boolean) => void };
   /** Published version of the release this copy edits. */
   copyOriginal?: ReleaseSubmissionData | null;
   /** Previous step of the current route (an edited copy skips most steps). */
@@ -618,6 +621,7 @@ export function StepReview({
           </section>
 
           {freeRelease ? <FreeReleaseOption enabled={freeRelease.enabled} onChange={freeRelease.onChange} /> : null}
+          {referralBonus ? <ReferralBonusOption enabled={referralBonus.enabled} onChange={referralBonus.onChange} /> : null}
 
           <section className="rounded-[26px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(18,21,34,0.96),rgba(11,14,25,0.98))] p-5 sm:p-6">
             <SectionTitle title="Финальная отправка" />

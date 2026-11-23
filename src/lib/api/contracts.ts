@@ -167,6 +167,8 @@ export interface ReleaseSubmitRequest {
   moderationStarted?: boolean;
   // Use the free first single instead of the subscription or a payment.
   useFreeRelease?: boolean;
+  /** Send this release with one bonus release earned for paying friends. */
+  useReferralBonus?: boolean;
   data: ReleaseSubmissionData;
 }
 

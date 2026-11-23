@@ -8,6 +8,7 @@ import { enforceRateLimit } from "@/lib/rate-limit";
 import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
 import { resolveReleaseAmountDue } from "@/lib/release-extras-supplement";
 import { RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
+import { priceWithReferralDiscount } from "@/lib/referrals";
 import { createYooKassaPayment } from "@/lib/yookassa";
 
 export const dynamic = "force-dynamic";
@@ -66,10 +67,16 @@ export async function POST(request: Request, context: { params: { id: string } }
 
   // A re-sent paid release only owes the extras added since its payment.
   const due = resolveReleaseAmountDue(release.roles, release.track);
-  const amountRub = due.price.totalRub;
-  if (amountRub <= 0) {
+  const fullAmountRub = due.price.totalRub;
+  if (fullAmountRub <= 0) {
     return NextResponse.json({ error: "Сумма к оплате не найдена. Обновите страницу." }, { status: 409 });
   }
+  // A friend invited by a link pays 20% less for their first payment.
+  const { amountRub, discount } = await priceWithReferralDiscount(prisma, {
+    userId: session.user.id,
+    amountRub: fullAmountRub,
+    supplement: due.supplement
+  });
   const orderId = randomUUID();
   const returnUrl = `${getAppBaseUrl(request)}/dashboard/releases/${releaseId}?pay_order=${orderId}`;
   let payment;
@@ -114,6 +121,7 @@ export async function POST(request: Request, context: { params: { id: string } }
       metadata: {
         releaseId,
         amountRub,
+        ...(discount ? { referralDiscountPercent: discount.percent, fullAmountRub: discount.fullAmountRub } : {}),
         ...(due.supplement ? { extrasSupplement: true } : {}),
         providerPaymentId: payment.providerPaymentId,
         returnUrl

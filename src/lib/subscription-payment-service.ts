@@ -99,7 +99,16 @@ export function readConfirmedSubscriptionPayment(metadata: unknown): ParsedSubsc
   }
 
   const amountRub = parseAmountRub(payload.amountRub);
-  if (amountRub != null && !isAcceptedSubscriptionAmount(tariffId, billingPeriod, amountRub)) {
+  // A referral discount is recorded on the order: the full price it was taken from must be valid.
+  const discountPercent = parseAmountRub(payload.referralDiscountPercent);
+  const fullAmountRub = parseAmountRub(payload.fullAmountRub);
+  const discountedOk =
+    amountRub != null &&
+    discountPercent === 20 &&
+    fullAmountRub != null &&
+    isAcceptedSubscriptionAmount(tariffId, billingPeriod, fullAmountRub) &&
+    amountRub === Math.round(fullAmountRub * 0.8);
+  if (amountRub != null && !discountedOk && !isAcceptedSubscriptionAmount(tariffId, billingPeriod, amountRub)) {
     throw new Error(
       `Subscription payment amount mismatch for ${tariffId}:${billingPeriod}. Expected ${tariffConfig.amountRub}, received ${amountRub}.`
     );

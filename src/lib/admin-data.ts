@@ -76,7 +76,7 @@ export interface AdminReleaseDetails {
     unmarkedAreas?: ReleaseChangeArea[];
   } | null;
   paid: boolean;
-  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release";
+  paymentKind?: "paid" | "subscription" | "unpaid" | "partner_code" | "free_first_release" | "referral_bonus";
   paymentLabel?: string;
   paymentUsage?: string | null;
   paymentPlan?: "STANDARD" | "PRO" | "ENTERPRISE" | null;

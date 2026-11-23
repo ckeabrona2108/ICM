@@ -29,6 +29,7 @@ import { withReleaseTimelineStamp } from "@/lib/release-timeline";
 import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
 import { normalizeSubscriptionBillingPeriod } from "@/lib/subscription-billing";
 import { grantSubscriptionFromConfirmedPayment } from "@/lib/subscription-payment-service";
+import { recordReferralPayment } from "@/lib/referrals";
 import { sendAiTokensCreditedEmail, sendAiTokensPendingEmail } from "@/lib/user-event-email";
 import {
   getYooKassaPayment,
@@ -193,6 +194,18 @@ async function readOrderUserProfile(prisma: PrismaClient, userId: string) {
       name: true
     }
   });
+}
+
+// A friend invited by a link becomes "paying": the inviter's bonus is scheduled. Never blocks the payment.
+async function recordReferralPaymentSafely(
+  prisma: PrismaClient,
+  order: { id: string; userId: string; type: OrderType; metadata: unknown }
+): Promise<void> {
+  try {
+    await recordReferralPayment(prisma, order);
+  } catch (error) {
+    console.error("[referrals] payment record failed", { orderId: order.id, error });
+  }
 }
 
 async function applyConfirmedOrder(params: {
@@ -393,6 +406,7 @@ async function applyConfirmedOrder(params: {
       status: "completed",
       completedAt: new Date()
     });
+    await recordReferralPaymentSafely(params.prisma, params.order);
     return;
   }
 
@@ -402,6 +416,7 @@ async function applyConfirmedOrder(params: {
       orderId: params.order.id,
       completedAt: new Date()
     });
+    await recordReferralPaymentSafely(params.prisma, params.order);
 
     const summary = readSubscriptionPaymentSummary(params.order.metadata);
     const user = await readOrderUserProfile(params.prisma, params.order.userId);

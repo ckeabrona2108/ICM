@@ -10,6 +10,7 @@ import {
   getSubscriptionTariffConfig,
   normalizeSubscriptionBillingPeriod
 } from "@/lib/subscription-billing";
+import { priceWithReferralDiscount } from "@/lib/referrals";
 import { createYooKassaPayment } from "@/lib/yookassa";
 import { enforceRateLimit } from "@/lib/rate-limit";
 
@@ -57,10 +58,12 @@ export async function POST(request: Request) {
   }
   const returnUrl =
     parsed.data.returnUrl ?? `${getAppBaseUrl(request)}/dashboard/subscription?pay_order=${orderId}`;
+  // A friend invited by a link pays 20% less for their first payment.
+  const priced = await priceWithReferralDiscount(prisma, { userId: session.user.id, amountRub: tariff.amountRub });
   let payment;
   try {
     payment = await createYooKassaPayment({
-      amountRub: tariff.amountRub,
+      amountRub: priced.amountRub,
       description: `Подписка ICECREAMMUSIC ${tariff.title}`,
       returnUrl,
       customerEmail: session.user.email,
@@ -100,7 +103,10 @@ export async function POST(request: Request) {
         tariffId: parsed.data.tariffId,
         billingPeriod,
         tariffTitle: tariff.title,
-        amountRub: tariff.amountRub,
+        amountRub: priced.amountRub,
+        ...(priced.discount
+          ? { referralDiscountPercent: priced.discount.percent, fullAmountRub: priced.discount.fullAmountRub }
+          : {}),
         providerPaymentId: payment.providerPaymentId,
         returnUrl
       }

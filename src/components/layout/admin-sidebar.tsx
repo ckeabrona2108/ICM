@@ -35,6 +35,7 @@ const items = [
   { href: "/admin/releases", label: "Релизы", icon: Music2 },
   { href: "/admin/ai-tokens", label: "AI-токены пользователей", icon: CreditCard },
   { href: "/admin/partner-codes", label: "Партнёрские коды", icon: Ticket },
+  { href: "/admin/referrals", label: "Приглашения", icon: Ticket },
 	  { href: "/admin/support/tickets", label: "Поддержка", icon: Headset },
 	  { href: "/admin/social-moderation", label: "Жалобы и посты", icon: Flag },
 	  { href: "/admin/promo", label: "Промо", icon: Ticket },

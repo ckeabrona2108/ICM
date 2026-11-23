@@ -10,6 +10,7 @@ import {
   getSubscriptionTariffConfig,
   normalizeSubscriptionBillingPeriod
 } from "@/lib/subscription-billing";
+import { priceWithReferralDiscount } from "@/lib/referrals";
 import { createYooKassaPayment } from "@/lib/yookassa";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
@@ -118,6 +119,14 @@ export async function POST(request: Request) {
     description = due.supplement ? `Доплата за дополнения: ${release.title}` : `Оплата релиза: ${release.title}`;
   }
 
+  // A friend invited by a link pays 20% less for their first payment.
+  const priced = await priceWithReferralDiscount(prisma, {
+    userId: session.user.id,
+    amountRub,
+    supplement: extrasSupplement
+  });
+  amountRub = priced.amountRub;
+
   let payment;
   try {
     payment = await createYooKassaPayment({
@@ -164,6 +173,9 @@ export async function POST(request: Request) {
         billingPeriod: kind === "subscription" ? billingPeriod : null,
         tariffTitle: subscriptionTariff?.title ?? null,
         amountRub,
+        ...(priced.discount
+          ? { referralDiscountPercent: priced.discount.percent, fullAmountRub: priced.discount.fullAmountRub }
+          : {}),
         ...(extrasSupplement ? { extrasSupplement: true } : {}),
         providerPaymentId: payment.providerPaymentId,
         returnUrl

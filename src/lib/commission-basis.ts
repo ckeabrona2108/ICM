@@ -7,12 +7,13 @@ export type CommissionBasis =
   | { kind: "user" }
   | { kind: "label" }
   | { kind: "tariff"; plan: CommissionTariffPlan }
-  | { kind: "global"; payment: "standalone_payment" | "partner_code" | "free_first_release" | "unknown" | "no_release" };
+  | { kind: "global"; payment: "standalone_payment" | "partner_code" | "free_first_release" | "referral_bonus" | "unknown" | "no_release" };
 
 const GLOBAL_PAYMENT_LABELS: Record<Extract<CommissionBasis, { kind: "global" }>["payment"], string> = {
   standalone_payment: "разовая оплата",
   partner_code: "партнёрский код",
   free_first_release: "бесплатный сингл",
+  referral_bonus: "бонус за друзей",
   unknown: "без отметки об оплате",
   no_release: "без релиза"
 };
@@ -47,7 +48,7 @@ export function readCommissionBasis(value: unknown): CommissionBasis | null {
     return {
       kind: "global",
       payment:
-        payment === "standalone_payment" || payment === "partner_code" || payment === "free_first_release" || payment === "no_release"
+        payment === "standalone_payment" || payment === "partner_code" || payment === "free_first_release" || payment === "referral_bonus" || payment === "no_release"
           ? payment
           : "unknown"
     };

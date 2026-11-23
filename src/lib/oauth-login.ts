@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
+import { bindReferralAfterSignUp } from "@/lib/referral-binding";
 import { checkVkGroupMembership, getVkIdConfig } from "@/lib/vk-id";
 
 // Quick sign-in with Yandex ID, VK ID and Telegram. A provider account maps to one cabinet: VK
@@ -169,6 +170,8 @@ async function resolveOnce(
     },
     select: userSelect
   });
+  // A new account from a friend's invite link is tied to that friend.
+  await bindReferralAfterSignUp(user.id);
   return { ok: true, user };
 }
 

@@ -36,6 +36,7 @@ import {
 } from "@/lib/free-release";
 import {
   buildFreeFirstReleasePaymentUsage,
+  buildReferralBonusPaymentUsage,
   buildPartnerCodePaymentUsage,
   buildSubscriptionPaymentUsage,
   extrasIncludedInSubscription,
@@ -78,6 +79,7 @@ import {
 
 import { rememberReleaseArtistProfiles } from "@/lib/platform-link-discovery-service";
 import { executeIdempotentSubmission, validSubmissionKey } from "@/lib/release-submission-idempotency";
+import { claimReferralBonusForRelease } from "@/lib/referrals";
 
 export const dynamic = "force-dynamic";
 
@@ -826,6 +828,61 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       message: "Бесплатный релиз отправлен на модерацию."
     };
     return NextResponse.json(response, { status: 200 });
+  }
+
+  // A bonus release earned for paying friends covers the release itself, like a subscription
+  // slot on STANDARD: lyrics, karaoke and video on it are still paid separately.
+  if (payload.useReferralBonus && !freeClaim?.ok) {
+    const bonusClaimed = await claimReferralBonusForRelease(db, { userId: session.user.id, releaseId: existing.id });
+    if (bonusClaimed) {
+      const bonusRoles = mergeReleaseRolesPaymentUsage(
+        existing.roles,
+        buildReferralBonusPaymentUsage(),
+        submissionData
+      ) as Record<string, unknown>;
+      const bonusExtras = calculateExtrasSupplement(trackRows, { lyrics: 0, karaoke: 0, video: 0 });
+      if (bonusExtras.totalRub > 0) {
+        await updateReleaseAndSyncTracks({
+          confirmed: false,
+          status: "moderating",
+          roles: withReleasePaymentWaitingSince(
+            withReleaseLifecycleState(
+              withExtrasSupplement(bonusRoles, {
+                paid: { lyrics: 0, karaoke: 0, video: 0 },
+                amountRub: bonusExtras.totalRub
+              }),
+              "moderation"
+            )
+          ) as Prisma.InputJsonValue
+        });
+        const response: ReleaseSubmitSuccessResponse & { payment_required: true; paid: false } = {
+          ok: true,
+          releaseId: existing.id,
+          nextStatus: "moderation",
+          payment_required: true,
+          paid: false,
+          message: `${fallbackNote}Релиз отправлен за бонус, а дополнения оплачиваются отдельно: ${bonusExtras.totalRub} ₽. Модерация начнётся сразу после оплаты.`
+        };
+        return NextResponse.json(response, { status: 200 });
+      }
+      await updateReleaseAndSyncTracks({
+        confirmed: true,
+        status: "moderating",
+        roles: withReleaseLifecycleState(bonusRoles, "moderation") as Prisma.InputJsonValue
+      });
+      notifications.push({
+        releaseId: existing.id,
+        releaseTitle: baseReleaseData.title,
+        artistName: baseReleaseData.performer?.trim() || "Неизвестный исполнитель"
+      });
+      const response: ReleaseSubmitSuccessResponse = {
+        ok: true,
+        releaseId: existing.id,
+        nextStatus: "moderation",
+        message: `${fallbackNote}Релиз отправлен на модерацию за бонус за друзей.`
+      };
+      return NextResponse.json(response, { status: 200 });
+    }
   }
 
   const submittedPartnerCode = submissionData.partnerCode?.trim() || "";

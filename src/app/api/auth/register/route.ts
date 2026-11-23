@@ -6,6 +6,7 @@ import { hashPassword } from "@/lib/password";
 import { notifyUserRegistered } from "@/lib/account-lifecycle-notifications";
 import { createLegacyUser, findLegacyUserByEmail, isMissingCanonicalUserTable } from "@/lib/legacy-user-store";
 import { prisma } from "@/lib/prisma";
+import { bindReferralAfterSignUp } from "@/lib/referral-binding";
 import { isAnyPrismaColumnMissingError } from "@/lib/prisma-errors";
 import { enforceRateLimit, getRequestIp } from "@/lib/rate-limit";
 import { ARTIST_PROFILE_TYPES } from "@/lib/artist-profile-type";
@@ -17,7 +18,8 @@ const registerSchema = z.object({
   stageName: z.string().trim().max(120).optional(),
   artistProfileType: z.enum(ARTIST_PROFILE_TYPES).default("artist"),
   email: z.string().email().transform((value) => value.trim().toLowerCase()),
-  password: z.string().min(8).max(128)
+  password: z.string().min(8).max(128),
+  referralCode: z.string().trim().max(32).optional()
 });
 
 export async function POST(request: Request) {
@@ -147,6 +149,7 @@ export async function POST(request: Request) {
   }
 
   await notifyUserRegistered(prisma, user.id);
+  await bindReferralAfterSignUp(user.id, parsed.data.referralCode);
 
   return NextResponse.json(
     {

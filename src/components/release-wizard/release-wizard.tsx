@@ -595,6 +595,7 @@ function WizardInner({
   const [submitting, setSubmitting] = React.useState(false);
   const [submitPhase, setSubmitPhase] = React.useState<SubmitPhase>("idle");
   const [useFreeRelease, setUseFreeRelease] = React.useState(false);
+  const [useReferralBonus, setUseReferralBonus] = React.useState(false);
   const [, setDraftReleaseId] = React.useState<string | undefined>(
     resolveDraftReleaseId(submissionMode, sourceReleaseId)
   );
@@ -1325,6 +1326,7 @@ function WizardInner({
             currentStatus,
             moderationStarted,
             ...(useFreeRelease && submissionMode === "new" ? { useFreeRelease: true } : {}),
+            ...(useReferralBonus && !useFreeRelease && submissionMode === "new" ? { useReferralBonus: true } : {}),
             data: preparedSubmissionData
           };
 
@@ -1469,6 +1471,7 @@ function WizardInner({
     sourceReleaseId,
     submissionMode,
     useFreeRelease,
+    useReferralBonus,
     router
   ]);
 
@@ -1840,6 +1843,11 @@ function WizardInner({
                   freeRelease={
                     submissionMode === "new" && !copyOfReleaseId && !copyOriginal
                       ? { enabled: useFreeRelease, onChange: setUseFreeRelease }
+                      : undefined
+                  }
+                  referralBonus={
+                    submissionMode === "new" && !copyOfReleaseId && !copyOriginal && !useFreeRelease
+                      ? { enabled: useReferralBonus, onChange: setUseReferralBonus }
                       : undefined
                   }
                   copyOriginal={copyOriginal}

@@ -418,7 +418,7 @@ function ReportCard({
         <div>
           <h2 className="text-[18px] font-semibold text-white">Доходы и выплаты артистам</h2>
           <p className="mt-1 text-[13.5px] leading-relaxed text-white/52">
-            По подтверждённым и не откатанным финансовым импортам, по дате импорта.
+            По подтверждённым и не откатанным финансовым импортам, по дате импорта. «Артисту» — суммы из отчётов, с учётом их замены и правок.
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -493,7 +493,12 @@ function ReportCard({
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-white/80">{formatRub(item.gross)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-amber-200">{formatRub(item.commission)}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-emerald-200">{formatRub(item.net)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-emerald-200">
+                      {formatRub(item.net)}
+                      {item.reportAdjusted ? (
+                        <div className="text-[11px] font-normal text-white/45">отчёт заменён</div>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-white/70">{formatPercent(item.effectivePercent)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-white/70">
                       {current !== undefined ? `${formatPercent(current)} (инд.)` : formatPercent(globalPercent)}

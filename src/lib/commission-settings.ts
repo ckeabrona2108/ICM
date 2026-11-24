@@ -171,6 +171,8 @@ export interface CommissionReportArtist {
   net: number;
   /** Commission / gross across the period: shows the rate actually applied. */
   effectivePercent: number;
+  /** A report created by one of the imports was later replaced or edited by hand. */
+  reportAdjusted: boolean;
 }
 
 export interface CommissionReport {
@@ -183,7 +185,66 @@ export interface CommissionReport {
   artists: CommissionReportArtist[];
 }
 
-/** Royalties credited by confirmed, not rolled back imports, split into ICECREAMMUSIC commission and artist share. */
+export interface ImportUserRoyalty {
+  importId: string;
+  userId: string;
+  gross: number;
+  net: number;
+}
+
+/**
+ * What one import really gave one artist. An import credits royalties and creates the
+ * artist's quarterly report; an admin may later replace or edit that report, and the
+ * artist is paid what the report says. So the report amount wins over the import's net.
+ * A report above everything the import brought in means money from outside that import
+ * (a distributor file loaded by hand), counted as received with no commission.
+ */
+export function settleImportRoyalty(row: ImportUserRoyalty, reportAmount: number | null) {
+  if (reportAmount === null) {
+    return { gross: row.gross, net: row.net, commission: roundMoney(row.gross - row.net), adjusted: false };
+  }
+  const net = roundMoney(reportAmount);
+  const gross = roundMoney(Math.max(row.gross, net));
+  return { gross, net, commission: roundMoney(gross - net), adjusted: Math.abs(net - row.net) >= 0.01 };
+}
+
+const reportKey = (importId: string, userId: string) => `${importId}:${userId}`;
+
+/** Current amount of the reports each import created, by import and artist. Deleted reports are absent. */
+async function loadImportReportAmounts(prisma: PrismaClient, importIds: string[]) {
+  const amounts = new Map<string, number>();
+  if (importIds.length === 0) return amounts;
+
+  const history = await prisma.import_history.findMany({
+    where: { import_type: "finance", action: "APPLY", import_id: { in: importIds } },
+    select: { import_id: true, metadata: true }
+  });
+  const importByReport = new Map<string, string>();
+  for (const entry of history) {
+    const ids = (entry.metadata as { financeReportIds?: unknown } | null)?.financeReportIds;
+    if (!entry.import_id || !Array.isArray(ids)) continue;
+    for (const id of ids) if (typeof id === "string") importByReport.set(id, entry.import_id);
+  }
+  if (importByReport.size === 0) return amounts;
+
+  const reports = await prisma.financeReport.findMany({
+    where: { id: { in: [...importByReport.keys()] } },
+    select: { id: true, userId: true, amount: true }
+  });
+  for (const report of reports) {
+    const importId = importByReport.get(report.id);
+    if (!importId) continue;
+    const key = reportKey(importId, report.userId);
+    amounts.set(key, roundMoney((amounts.get(key) ?? 0) + (toNumber(report.amount) ?? 0)));
+  }
+  return amounts;
+}
+
+/**
+ * Royalties from confirmed, not rolled back imports, split into ICECREAMMUSIC commission and
+ * artist share. The artist share follows the reports those imports created, so a replaced
+ * report shows here as well.
+ */
 export async function getCommissionReport(
   prisma: PrismaClient,
   params: { from?: Date | null; to?: Date | null }
@@ -193,35 +254,57 @@ export async function getCommissionReport(
   if (params.to) createdAt.lt = params.to;
 
   const grouped = await prisma.royalty_transactions.groupBy({
-    by: ["user_id"],
+    by: ["financial_import_id", "user_id"],
     where: {
       reversed_at: null,
       import: { is: { status: "CONFIRMED" } },
       ...(params.from || params.to ? { created_at: createdAt } : {})
     },
-    _sum: { gross_amount: true, platform_commission_amount: true, net_amount: true }
+    _sum: { gross_amount: true, net_amount: true }
   });
 
+  const rows: ImportUserRoyalty[] = grouped
+    .filter((row) => row.financial_import_id)
+    .map((row) => ({
+      importId: row.financial_import_id as string,
+      userId: row.user_id,
+      gross: roundMoney(toNumber(row._sum.gross_amount) ?? 0),
+      net: roundMoney(toNumber(row._sum.net_amount) ?? 0)
+    }));
+  const reportAmounts = await loadImportReportAmounts(prisma, [...new Set(rows.map((row) => row.importId))]);
+
+  const byUser = new Map<string, { gross: number; net: number; commission: number; adjusted: boolean }>();
+  for (const row of rows) {
+    const settled = settleImportRoyalty(row, reportAmounts.get(reportKey(row.importId, row.userId)) ?? null);
+    const total = byUser.get(row.userId) ?? { gross: 0, net: 0, commission: 0, adjusted: false };
+    total.gross += settled.gross;
+    total.net += settled.net;
+    total.commission += settled.commission;
+    total.adjusted ||= settled.adjusted;
+    byUser.set(row.userId, total);
+  }
+
   const users = await prisma.user.findMany({
-    where: { id: { in: grouped.map((row) => row.user_id) } },
+    where: { id: { in: [...byUser.keys()] } },
     select: { id: true, name: true, email: true }
   });
   const userById = new Map(users.map((user) => [user.id, user]));
 
-  const artists = grouped
-    .map((row) => {
-      const gross = roundMoney(toNumber(row._sum.gross_amount) ?? 0);
-      const commission = roundMoney(toNumber(row._sum.platform_commission_amount) ?? 0);
-      const net = roundMoney(toNumber(row._sum.net_amount) ?? 0);
-      const user = userById.get(row.user_id);
+  const artists = [...byUser.entries()]
+    .map(([userId, total]) => {
+      const gross = roundMoney(total.gross);
+      const commission = roundMoney(total.commission);
+      const net = roundMoney(total.net);
+      const user = userById.get(userId);
       return {
-        userId: row.user_id,
+        userId,
         userName: user?.name ?? "Удалённый пользователь",
         userEmail: user?.email ?? "",
         gross,
         commission,
         net,
-        effectivePercent: gross > 0 ? Math.round((commission / gross) * 10000) / 100 : 0
+        effectivePercent: gross > 0 ? Math.round((commission / gross) * 10000) / 100 : 0,
+        reportAdjusted: total.adjusted
       };
     })
     .sort((left, right) => right.gross - left.gross);

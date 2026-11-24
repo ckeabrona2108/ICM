@@ -12,6 +12,7 @@ import type {
 } from "@/lib/api/contracts";
 import { toNotificationStorageId } from "@/lib/notification-storage-id";
 import { listUserReports } from "@/lib/report-service";
+import { artistVisibleReportComment } from "@/lib/report-comment";
 import {
   listUserUnreadSupportTicketSummaries
 } from "@/lib/support-service";
@@ -236,7 +237,7 @@ async function listReportNotifications(
         kind: "report_changes_requested",
         title: "Отчёт возвращён на доработку",
         message:
-          report.adminComment?.trim() ||
+          artistVisibleReportComment(report.adminComment) ||
           `${report.quarterLabel} · ${amountLabel}`,
         href: "/dashboard/finance",
         createdAt: toIsoString(report.createdAt),

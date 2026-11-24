@@ -30,6 +30,10 @@ export async function POST(
 
   const formData = await request.formData().catch(() => null);
   const file = formData?.get("file");
+  // What the artist sees on the report. Sent by the admin form (empty means no comment);
+  // older clients that do not send it get the internal summary, which artists never see.
+  const commentField = formData?.get("comment");
+  const customComment = typeof commentField === "string" ? commentField.trim() : null;
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Загрузите CSV, TSV или XLSX файл с исправленными строками." }, { status: 400 });
   }
@@ -104,7 +108,7 @@ export async function POST(
     quarter: existing.quarter,
     year: existing.year,
     items: replacement.items,
-    comment: replacementComment
+    comment: customComment === null ? replacementComment : customComment
   }).catch((error) => {
     console.error("[admin-report-replacement] update failed", error);
     return {

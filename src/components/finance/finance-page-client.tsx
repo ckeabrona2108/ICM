@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { artistVisibleReportComment } from "@/lib/report-comment";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -59,22 +60,6 @@ function reportStatusLabel(status: FinanceReportStatus): string {
   return "Ожидает согласования";
 }
 
-function getVisibleReportComment(comment: string | null): string | null {
-  if (!comment) {
-    return null;
-  }
-
-  const normalizedComment = comment.trim();
-  if (!normalizedComment) {
-    return null;
-  }
-
-  if (/^Импорт\s+.+$/i.test(normalizedComment)) {
-    return null;
-  }
-
-  return normalizedComment;
-}
 
 export function FinancePageClient({
   initialReports,
@@ -707,7 +692,7 @@ function ReportDetailsModal({
   onReject: () => void;
   busy: null | "agree" | "reject";
 }) {
-  const visibleAdminComment = getVisibleReportComment(report.adminComment);
+  const visibleAdminComment = artistVisibleReportComment(report.adminComment);
   if (typeof document === "undefined") {
     return null;
   }

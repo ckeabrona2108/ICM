@@ -2387,10 +2387,25 @@ export async function buildPersonalReportReplacementFromFile(params: {
           amount: lineAmount,
           artistName: sourceRow.artistName ?? normalized.artist ?? null,
           labelName: sourceRow.labelName ?? normalized.label ?? null,
+          // Same detail columns as a regular import, so a replaced report keeps
+          // its period, territory and rights columns.
+          usagePeriod: sourceRow.usagePeriod,
+          rightsType: sourceRow.rightsType,
+          territory: sourceRow.territory,
+          contentType: sourceRow.contentType,
           usageType: sourceRow.usageType ?? normalized.usage_type ?? null,
           quantity: sourceRow.quantity ?? numberFromLoose(normalized.quantity),
+          streams: sourceRow.streams,
+          paidStreams: sourceRow.paidStreams,
           authorAmount: sourceRow.authorAmount,
           relatedAmount: sourceRow.relatedAmount,
+          albumTitle: sourceRow.albumTitle,
+          lyricsAuthor: sourceRow.lyricsAuthor,
+          musicAuthor: sourceRow.musicAuthor,
+          authorRightsShare: sourceRow.authorRightsShare,
+          relatedRightsShare: sourceRow.relatedRightsShare,
+          isrc: sourceRow.isrc,
+          licenseeCode: sourceRow.licenseeCode,
           periodStart: sourceRow.periodStart ?? normalized.release_date ?? null,
           periodEnd: sourceRow.periodEnd ?? normalized.end_date ?? null
         });

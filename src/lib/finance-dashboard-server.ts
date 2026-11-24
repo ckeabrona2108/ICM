@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { prisma } from "@/lib/prisma";
+import { artistVisibleReportComment } from "@/lib/report-comment";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import { withNetReportRights } from "@/lib/finance-client";
 import { withReportLineShares } from "@/lib/release-share";
@@ -199,7 +200,7 @@ export async function getFinanceDashboardViewData(
     quarter: report.quarter,
     year: report.year,
     quarterLabel: report.quarterLabel,
-    adminComment: report.adminComment,
+    adminComment: artistVisibleReportComment(report.adminComment),
     userComment: report.userComment,
     // Shares come from the source amounts, so they are worked out before those are replaced by
     // the net ones. Only reports with an exact 90 / 95 / 100% on every line get them.

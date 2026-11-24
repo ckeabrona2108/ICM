@@ -5,6 +5,7 @@ import Link from "next/link";
 import * as React from "react";
 import { ArrowLeft, Loader2, Trash2 } from "lucide-react";
 
+import { ReportReplacementUpload } from "@/components/admin/report-replacement-upload";
 import { StatusBadge } from "@/components/releases/status-badge";
 import { UserAvatar } from "@/components/user/user-avatar";
 import type { AdminUserProfileDetails } from "@/lib/admin-user-service";
@@ -146,6 +147,7 @@ export function AdminUserDetailClient({
   const [toast, setToast] = React.useState<string | null>(null);
   const [resendingReportId, setResendingReportId] = React.useState<string | null>(null);
   const [deletingReportId, setDeletingReportId] = React.useState<string | null>(null);
+  const [replacingReportId, setReplacingReportId] = React.useState<string | null>(null);
 
   const [releaseStatusFilter, setReleaseStatusFilter] = React.useState<"" | ReleaseStatusFilterValue>("");
 
@@ -915,6 +917,22 @@ export function AdminUserDetailClient({
                     {report.lifecycleState !== "agreed" ? (
                       <button
                         type="button"
+                        onClick={() =>
+                          setReplacingReportId((current) => (current === report.id ? null : report.id))
+                        }
+                        className={cn(
+                          "rounded-md border px-2.5 py-1 text-[12px]",
+                          replacingReportId === report.id
+                            ? "border-sky-300/40 bg-sky-400/15 text-sky-50"
+                            : "border-sky-300/25 bg-sky-400/10 text-sky-100 hover:bg-sky-400/15"
+                        )}
+                      >
+                        Заменить файлом
+                      </button>
+                    ) : null}
+                    {report.lifecycleState !== "agreed" ? (
+                      <button
+                        type="button"
                         onClick={() => loadReportIntoForm(report)}
                         className="rounded-md border border-white/[0.12] bg-white/[0.04] px-2.5 py-1 text-[12px] text-white/85 hover:bg-white/[0.08]"
                       >
@@ -954,6 +972,13 @@ export function AdminUserDetailClient({
                   <p className="mt-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-100">
                     Комментарий пользователя: {report.userComment}
                   </p>
+                ) : null}
+                {replacingReportId === report.id && report.lifecycleState !== "agreed" ? (
+                  <ReportReplacementUpload
+                    userId={profile.id}
+                    reportId={report.id}
+                    onReplaced={reloadAll}
+                  />
                 ) : null}
               </div>
             ))

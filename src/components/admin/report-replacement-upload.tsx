@@ -18,15 +18,18 @@ type ReplacementPreview = {
 
 export function ReportReplacementUpload({
   userId,
-  reportId
+  reportId,
+  onReplaced
 }: {
   userId: string;
   reportId: string;
+  onReplaced?: () => void | Promise<void>;
 }) {
   const router = useRouter();
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const [selectedFile, setSelectedFile] = React.useState<File | null>(null);
   const [preview, setPreview] = React.useState<ReplacementPreview | null>(null);
+  const [comment, setComment] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [applying, setApplying] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
@@ -74,6 +77,7 @@ export function ReportReplacementUpload({
     try {
       const formData = new FormData();
       formData.set("file", selectedFile);
+      formData.set("comment", comment);
       const response = await fetch(`/api/admin/users/${userId}/reports/${reportId}/replace`, {
         method: "POST",
         body: formData
@@ -88,7 +92,9 @@ export function ReportReplacementUpload({
       );
       setSelectedFile(null);
       setPreview(null);
-      router.refresh();
+      setComment("");
+      if (onReplaced) await onReplaced();
+      else router.refresh();
     } catch (applyError) {
       setError(applyError instanceof Error ? applyError.message : "Не удалось заменить отчёт.");
     } finally {
@@ -104,7 +110,7 @@ export function ReportReplacementUpload({
             Персональная замена
           </p>
           <p className="mt-1 text-[13px] leading-relaxed text-white/58">
-            Загрузите исправленный CSV/XLSX только для этого пользователя. Старый отчёт будет заменён новой версией.
+            Загрузите исправленный CSV/XLSX только для этого пользователя. Суммы берутся из файла как есть, без комиссии. Старый отчёт будет заменён новой версией и снова уйдёт артисту на согласование.
           </p>
         </div>
         <input
@@ -149,7 +155,20 @@ export function ReportReplacementUpload({
               </p>
             </div>
           </div>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <label className="mt-4 block">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/38">
+              Комментарий для артиста
+            </span>
+            <textarea
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+              rows={2}
+              maxLength={500}
+              placeholder="Необязательно. Например: «Отчёт обновлён по данным дистрибьютора». Пусто — без комментария."
+              className="mt-1.5 w-full resize-y rounded-xl border border-white/[0.1] bg-black/30 px-3 py-2 text-[13px] text-white placeholder:text-white/32 focus:border-sky-300/40 focus:outline-none"
+            />
+          </label>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
               disabled={applying}
@@ -167,6 +186,7 @@ export function ReportReplacementUpload({
               onClick={() => {
                 setSelectedFile(null);
                 setPreview(null);
+                setComment("");
                 setError(null);
                 setMessage(null);
               }}

@@ -204,6 +204,7 @@ export function ReleaseEditClient({
         copyOriginal={copyOriginal}
         currentStatus={submissionMode === "edit" ? effectiveStatus : undefined}
         moderationStarted={cancelledModeration ? false : release.moderationStarted}
+        unpaidResubmit={submissionMode === "edit" && !release.paid}
       />
     </div>
   );

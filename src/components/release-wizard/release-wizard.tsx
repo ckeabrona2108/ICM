@@ -520,7 +520,8 @@ export function ReleaseWizard({
   copyOfReleaseId,
   copyOriginal,
   currentStatus,
-  moderationStarted
+  moderationStarted,
+  unpaidResubmit
 }: {
   seed?: Partial<WizardData>;
   submissionMode?: WizardSubmissionMode;
@@ -532,6 +533,8 @@ export function ReleaseWizard({
   copyOriginal?: ReleaseSubmissionData | null;
   currentStatus?: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
+  /** An unpaid release taken back to a draft: it may still go out as the free single or for a bonus. */
+  unpaidResubmit?: boolean;
 }) {
   return (
     <WizardProvider seed={seed} submissionMode={submissionMode}>
@@ -542,6 +545,7 @@ export function ReleaseWizard({
         copyOriginal={copyOriginal}
         currentStatus={currentStatus}
         moderationStarted={moderationStarted}
+        unpaidResubmit={unpaidResubmit}
       />
     </WizardProvider>
   );
@@ -553,7 +557,8 @@ function WizardInner({
   copyOfReleaseId,
   copyOriginal,
   currentStatus,
-  moderationStarted
+  moderationStarted,
+  unpaidResubmit = false
 }: {
   pageTitle: string;
   sourceReleaseId?: string;
@@ -561,6 +566,7 @@ function WizardInner({
   copyOriginal?: ReleaseSubmissionData | null;
   currentStatus?: ReleaseLifecycleStatus;
   moderationStarted?: boolean;
+  unpaidResubmit?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1325,8 +1331,8 @@ function WizardInner({
             releaseId,
             currentStatus,
             moderationStarted,
-            ...(useFreeRelease && submissionMode === "new" ? { useFreeRelease: true } : {}),
-            ...(useReferralBonus && !useFreeRelease && submissionMode === "new" ? { useReferralBonus: true } : {}),
+            ...(useFreeRelease && (submissionMode === "new" || unpaidResubmit) ? { useFreeRelease: true } : {}),
+            ...(useReferralBonus && !useFreeRelease && (submissionMode === "new" || unpaidResubmit) ? { useReferralBonus: true } : {}),
             data: preparedSubmissionData
           };
 
@@ -1472,6 +1478,7 @@ function WizardInner({
     submissionMode,
     useFreeRelease,
     useReferralBonus,
+    unpaidResubmit,
     router
   ]);
 
@@ -1841,12 +1848,12 @@ function WizardInner({
                   isSubmitting={submitting}
                   submitPhase={submitPhase}
                   freeRelease={
-                    submissionMode === "new" && !copyOfReleaseId && !copyOriginal
+                    (submissionMode === "new" && !copyOfReleaseId && !copyOriginal) || unpaidResubmit
                       ? { enabled: useFreeRelease, onChange: setUseFreeRelease }
                       : undefined
                   }
                   referralBonus={
-                    submissionMode === "new" && !copyOfReleaseId && !copyOriginal && !useFreeRelease
+                    ((submissionMode === "new" && !copyOfReleaseId && !copyOriginal) || unpaidResubmit) && !useFreeRelease
                       ? { enabled: useReferralBonus, onChange: setUseReferralBonus }
                       : undefined
                   }

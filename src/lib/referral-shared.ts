@@ -41,8 +41,9 @@ export interface ReferralFriendView {
 }
 
 export interface ReferralOverview {
-  link: string;
-  code: string;
+  /** Null until the artist has a signed licence agreement: only they can invite. */
+  link: string | null;
+  code: string | null;
   bonusBalance: number;
   /** Friends who paid (bonus given or on its way); the ladder counts these. */
   payingFriends: number;

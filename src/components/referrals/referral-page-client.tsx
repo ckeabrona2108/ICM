@@ -4,6 +4,9 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Check, Copy, Gift, Send } from "lucide-react";
 
+import { ReferralRulesContent } from "@/components/referrals/referral-rules-content";
+import { ContractVerificationModal } from "@/components/verification/contract-verification-modal";
+import { REFERRAL_RULES_EDITION } from "@/lib/referral-rules";
 import { cn } from "@/lib/utils";
 import {
   nextLadderHint,
@@ -31,7 +34,14 @@ function shareText(): string {
   return `Выпускай музыку на ICECREAMMUSIC — по моей ссылке скидка ${REFERRAL_DISCOUNT_PERCENT}% на первую оплату.`;
 }
 
-export function ReferralPageClient({ overview }: { overview: ReferralOverview }) {
+export function ReferralPageClient({
+  overview,
+  contractState
+}: {
+  overview: ReferralOverview;
+  contractState: "approved" | "pending" | "none";
+}) {
+  const [contractOpen, setContractOpen] = React.useState(false);
   const router = useRouter();
   const [copied, setCopied] = React.useState(false);
   const [activating, setActivating] = React.useState<number | null>(null);
@@ -60,18 +70,20 @@ export function ReferralPageClient({ overview }: { overview: ReferralOverview })
   };
   const earnedRewards = overview.ladder.filter((rung) => rung.state !== "locked");
 
+  const link = overview.link ?? "";
   const copy = async () => {
+    if (!link) return;
     try {
-      await navigator.clipboard.writeText(overview.link);
+      await navigator.clipboard.writeText(link);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
-      window.prompt("Скопируйте ссылку", overview.link);
+      window.prompt("Скопируйте ссылку", link);
     }
   };
 
-  const telegramHref = `https://t.me/share/url?url=${encodeURIComponent(overview.link)}&text=${encodeURIComponent(shareText())}`;
-  const vkHref = `https://vk.com/share.php?url=${encodeURIComponent(overview.link)}&title=${encodeURIComponent(shareText())}`;
+  const telegramHref = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(shareText())}`;
+  const vkHref = `https://vk.com/share.php?url=${encodeURIComponent(link)}&title=${encodeURIComponent(shareText())}`;
   const maxStep = REFERRAL_LADDER[REFERRAL_LADDER.length - 1]?.step ?? 5;
   const steps = [{ step: 1, label: "1 друг — бесплатный релиз", reached: overview.payingFriends >= 1 }, ...overview.ladder.map((rung) => ({
     step: rung.step,
@@ -84,11 +96,12 @@ export function ReferralPageClient({ overview }: { overview: ReferralOverview })
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        {overview.link ? (
         <section className="rounded-[22px] border border-white/[0.08] bg-[#13151d] p-5">
           <p className="text-[17px] font-bold text-white">Твоя ссылка</p>
           <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
             <div className="flex h-12 min-w-0 flex-1 items-center rounded-[14px] border border-white/10 bg-white/[0.05] px-3.5 text-[14px] text-white/85">
-              <span className="truncate">{overview.link.replace(/^https?:\/\//u, "")}</span>
+              <span className="truncate">{link.replace(/^https?:\/\//u, "")}</span>
             </div>
             <button
               type="button"
@@ -119,6 +132,25 @@ export function ReferralPageClient({ overview }: { overview: ReferralOverview })
             </a>
           </div>
         </section>
+        ) : (
+          <section className="rounded-[22px] border border-amber-300/30 bg-amber-300/[0.06] p-5">
+            <p className="text-[17px] font-bold text-white">Твоя ссылка</p>
+            <p className="mt-2 text-[14px] leading-6 text-white/70">
+              {contractState === "pending"
+                ? "Договор на проверке. Ссылка для приглашений появится сразу после его одобрения — обычно в течение дня."
+                : "Приглашать друзей могут артисты с подписанным лицензионным договором. Подпиши договор — и здесь появится твоя ссылка."}
+            </p>
+            {contractState === "none" ? (
+              <button
+                type="button"
+                onClick={() => setContractOpen(true)}
+                className="mt-3 inline-flex h-11 items-center rounded-[14px] bg-white px-5 text-[14px] font-bold text-black transition hover:bg-white/90"
+              >
+                Подписать договор
+              </button>
+            ) : null}
+          </section>
+        )}
 
         <section className="rounded-[22px] border border-white/[0.08] bg-[linear-gradient(135deg,rgba(123,97,255,0.28),#13151d_70%)] p-5">
           <p className="text-[12px] font-bold tracking-[0.14em] text-white/55">БЕСПЛАТНЫХ РЕЛИЗОВ</p>
@@ -188,7 +220,9 @@ export function ReferralPageClient({ overview }: { overview: ReferralOverview })
                     </p>
                   </div>
                 </div>
-                {rung.state === "available" ? (
+                {rung.state === "available" && contractState !== "approved" ? (
+                  <span className="text-[12.5px] text-amber-200/80">Активация после подписания договора</span>
+                ) : rung.state === "available" ? (
                   <button
                     type="button"
                     disabled={activating !== null}
@@ -236,6 +270,27 @@ export function ReferralPageClient({ overview }: { overview: ReferralOverview })
         Бонус начисляется через 14 дней после оплаты друга. Бесплатный первый сингл друга бонус не даёт —
         только оплата релиза или подписки.
       </p>
+
+      <ContractVerificationModal
+        open={contractOpen}
+        onLater={() => setContractOpen(false)}
+        onSigned={() => {
+          setContractOpen(false);
+          window.location.reload();
+        }}
+      />
+
+      <details className="group rounded-[22px] border border-white/[0.08] bg-[#13151d] px-5 py-4">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[14.5px] font-semibold text-white [&::-webkit-details-marker]:hidden">
+          Правила программы «Пригласи друга»
+          <span className="text-[12.5px] font-medium text-white/45 group-open:hidden">Показать</span>
+          <span className="hidden text-[12.5px] font-medium text-white/45 group-open:inline">Скрыть</span>
+        </summary>
+        <div className="mt-4 border-t border-white/[0.06] pt-4">
+          <ReferralRulesContent />
+          <p className="mt-6 text-[12px] text-white/35">{REFERRAL_RULES_EDITION}</p>
+        </div>
+      </details>
     </div>
   );
 }

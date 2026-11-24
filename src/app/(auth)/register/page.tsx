@@ -152,7 +152,10 @@ export default function RegisterPage() {
             <p className="text-[14px] font-semibold text-white">Тебя пригласил {referral.nickname}</p>
             <p className="mt-0.5 text-[12.5px] leading-5 text-white/70">
               Скидка <span className="font-semibold text-amber-200">{referral.discountPercent}%</span> на первую оплату релиза
-              или подписки — применится сама.
+              или подписки — применится сама.{" "}
+              <a href="/referral-rules" target="_blank" rel="noopener" className="text-white/55 underline underline-offset-2 hover:text-white">
+                Правила программы
+              </a>
             </p>
           </div>
         ) : null}

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { activateLadderReward } from "@/lib/referrals";
+import { activateLadderReward, readReferralContractState } from "@/lib/referrals";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,10 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { step?: number };
   const step = Number(body.step);
   if (!Number.isInteger(step)) return NextResponse.json({ error: "Неверная ступень" }, { status: 400 });
+  // Bonus months are for artists with a signed licence agreement (rules, clause 1.2).
+  if ((await readReferralContractState(prisma, session.user.id).catch(() => "none")) !== "approved") {
+    return NextResponse.json({ error: "Активировать месяц можно после подписания договора." }, { status: 403 });
+  }
   try {
     const result = await activateLadderReward(prisma, { userId: session.user.id, step });
     if (!result.ok) {

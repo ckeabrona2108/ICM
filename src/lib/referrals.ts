@@ -318,9 +318,14 @@ function friendStatus(row: { paid_at: Date | null; rewarded_at: Date | null; rev
   return "registered";
 }
 
-export async function getReferralOverview(db: Db, userId: string): Promise<ReferralOverview> {
+export async function getReferralOverview(
+  db: Db,
+  userId: string,
+  options: { canInvite?: boolean } = {}
+): Promise<ReferralOverview> {
   await settleReferralRewards(db, userId).catch((error) => console.error("[referrals] settle failed", error));
-  const code = await getOrCreateReferralCode(db, userId);
+  // Only an artist with a signed licence agreement gets a link (rules, clause 1.2).
+  const code = options.canInvite === false ? null : await getOrCreateReferralCode(db, userId);
   const rows = await db.$queryRaw<Array<{
     referred_id: string;
     created_at: Date;
@@ -346,7 +351,7 @@ export async function getReferralOverview(db: Db, userId: string): Promise<Refer
   const earnedByStep = new Map(earned.map((row) => [row.step, row.activated_at]));
   return {
     code,
-    link: buildReferralLink(code),
+    link: code ? buildReferralLink(code) : null,
     bonusBalance: await getReferralBonusBalance(db, userId),
     payingFriends,
     friends,
@@ -443,4 +448,14 @@ export async function priceWithReferralDiscount(
     amountRub: Math.round(params.amountRub * (100 - percent) / 100),
     discount: { percent, fullAmountRub: params.amountRub }
   };
+}
+
+export type ReferralContractState = "approved" | "pending" | "none";
+
+/** Whether the artist may invite and use the ladder: a signed licence agreement (rules, clause 1.2). */
+export async function readReferralContractState(db: Db, userId: string): Promise<ReferralContractState> {
+  const { getUserContractStatus } = await import("@/lib/contract-verification");
+  const contract = await getUserContractStatus({ prisma: db, userId });
+  if (contract.status !== "unavailable" && contract.canSubmitReleases) return "approved";
+  return contract.status === "pending" ? "pending" : "none";
 }

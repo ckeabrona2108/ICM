@@ -69,8 +69,8 @@ function PreviewModal({
           </p>
         </div>
 
-        <div className="mt-5 grid gap-4">
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+        <div className="mt-5 grid min-w-0 grid-cols-1 gap-4">
+          <div className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
             <h4 className="text-[15px] font-semibold text-white">По площадкам</h4>
             <div className="mt-3 space-y-2">
               {report.platformTotals.length ? (
@@ -79,8 +79,8 @@ function PreviewModal({
                     key={item.platformName}
                     className="flex items-center justify-between gap-3 rounded-xl border border-white/[0.06] bg-black/20 px-3 py-2"
                   >
-                    <span className="text-[14px] text-white/78">{item.platformName}</span>
-                    <span className="text-[14px] font-semibold text-white">
+                    <span className="min-w-0 break-words text-[14px] text-white/78">{item.platformName}</span>
+                    <span className="shrink-0 whitespace-nowrap text-[14px] font-semibold text-white">
                       {formatCurrency(item.amount, "RUB")}
                     </span>
                   </div>
@@ -91,7 +91,7 @@ function PreviewModal({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
+          <div className="min-w-0 rounded-2xl border border-white/[0.08] bg-white/[0.03] p-4">
             <h4 className="text-[15px] font-semibold text-white">Детализация начислений</h4>
             {report.items.length ? (
               <ReportDetailTable items={report.items} />

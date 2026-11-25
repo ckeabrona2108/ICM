@@ -1,3 +1,4 @@
+import { isSurplusOrder } from "@/lib/release-order-surplus";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { addMonths } from "date-fns";
 
@@ -372,6 +373,8 @@ export async function getUserReleaseQuota(
 
   const standalonePaidReleaseIds = new Set(
     releaseOrders
+      // A payment that came on top of an already covered release is refunded: it pays for nothing.
+      .filter((order) => !isSurplusOrder(order.metadata))
       .map((order) => readReleaseIdFromOrderMetadata(order.metadata))
       .filter((id): id is string => Boolean(id))
   );

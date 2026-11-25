@@ -156,7 +156,8 @@ export function withAdminReleaseChangesRequiredState(
       rejectReason: reason,
       rejectionReason: reason,
       moderationComment: reason,
-      moderatorComment: reason,
+      // `submissionData.moderatorComment` is the artist's own comment for the moderator (a wizard
+      // field): the reason is not written there, or it comes back as the artist's comment.
       moderationRemarks: moderationRemarks ?? null,
       moderationReturnedAt
     };

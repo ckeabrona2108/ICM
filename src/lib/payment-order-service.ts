@@ -26,10 +26,16 @@ import {
 import { readPendingExtrasSupplement, withExtrasSupplementPaid } from "@/lib/release-extras-supplement";
 import { getReleaseLifecycleStatus } from "@/lib/release-counts";
 import { withReleaseTimelineStamp } from "@/lib/release-timeline";
-import { notifyAdminReleaseSubmitted } from "@/lib/telegram-notifier";
+import { notifyAdminReleaseSubmitted, sendTelegramMessage } from "@/lib/telegram-notifier";
 import { normalizeSubscriptionBillingPeriod } from "@/lib/subscription-billing";
 import { grantSubscriptionFromConfirmedPayment } from "@/lib/subscription-payment-service";
 import { recordReferralPayment } from "@/lib/referrals";
+import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
+import {
+  classifyReleaseOrderPayment,
+  describeSurplusCoverage,
+  ORDER_SURPLUS_KEY
+} from "@/lib/release-order-surplus";
 import { sendAiTokensCreditedEmail, sendAiTokensPendingEmail } from "@/lib/user-event-email";
 import {
   getYooKassaPayment,
@@ -208,6 +214,51 @@ async function recordReferralPaymentSafely(
   }
 }
 
+/** A payment that came on top of an already covered release: the admins refund it by hand. */
+async function notifyAdminsSurplusReleasePayment(
+  prisma: PrismaClient,
+  params: {
+    orderId: string;
+    releaseId: string;
+    releaseTitle: string;
+    amountRub: number | null;
+    providerPaymentId: string | null;
+    coveredBy: string;
+  }
+): Promise<void> {
+  const amount = params.amountRub != null ? `${params.amountRub} ₽` : "сумма не указана";
+  const message =
+    `Лишняя оплата релиза «${params.releaseTitle}»: ${amount}. Релиз уже был покрыт ${describeSurplusCoverage(params.coveredBy)}. ` +
+    `Проверьте и верните деньги в YooKassa (платёж ${params.providerPaymentId ?? "?"}, заказ ${params.orderId}).`;
+  console.warn("[release:pay] surplus payment", params);
+  try {
+    await sendTelegramMessage(`⚠️ ${message}`);
+  } catch (error) {
+    console.error("[telegram] surplus payment notification failed", { orderId: params.orderId, error });
+  }
+  try {
+    const admins = await prisma.user.findMany({ where: { isAdmin: true }, select: { id: true } });
+    await Promise.all(
+      admins.map((admin) =>
+        deliverUserNotificationSafely(prisma, {
+          id: `release-surplus-payment-${params.orderId}-${admin.id}`,
+          userId: admin.id,
+          kind: "release_surplus_payment",
+          title: "Лишняя оплата релиза",
+          message,
+          href: `/admin/releases/${params.releaseId}`,
+          sourceType: "release",
+          sourceId: params.releaseId,
+          sendEmail: false,
+          resetReadState: true
+        })
+      )
+    );
+  } catch (error) {
+    console.error("[release:pay] surplus admin notification failed", { orderId: params.orderId, error });
+  }
+}
+
 async function applyConfirmedOrder(params: {
   prisma: PrismaClient;
   order: {
@@ -350,27 +401,63 @@ async function applyConfirmedOrder(params: {
 
   if (params.order.type === "release") {
     const releaseId = typeof metadata.releaseId === "string" ? metadata.releaseId : null;
-    if (releaseId) {
-      const release = await params.prisma.release.findFirst({
-        where: { id: releaseId, userId: params.order.userId },
-        select: { id: true, roles: true, confirmed: true, status: true, title: true, performer: true }
+    const release = releaseId
+      ? await params.prisma.release.findFirst({
+          where: { id: releaseId, userId: params.order.userId },
+          select: { id: true, roles: true, confirmed: true, status: true, title: true, performer: true }
+        })
+      : null;
+    const outcome = classifyReleaseOrderPayment({
+      release,
+      orderId: params.order.id,
+      isSupplement: metadata.extrasSupplement === true || metadata.extrasSupplement === "1"
+    });
+
+    if (release && outcome.kind === "surplus") {
+      // The release was already covered: the money is kept on the order as a surplus to refund,
+      // it does not touch the release, and the admins hear about it once.
+      const flagged = await params.prisma.orders.updateMany({
+        where: { id: params.order.id, confirmed: false },
+        data: {
+          confirmed: true,
+          metadata: {
+            ...metadata,
+            [ORDER_SURPLUS_KEY]: { coveredBy: outcome.coveredBy, detectedAt: new Date().toISOString() }
+          } as Prisma.InputJsonValue
+        }
       });
+      await setOrderPaymentStatus({
+        prisma: params.prisma,
+        orderId: params.order.id,
+        status: "completed",
+        completedAt: new Date()
+      });
+      if (flagged.count > 0) {
+        await notifyAdminsSurplusReleasePayment(params.prisma, {
+          orderId: params.order.id,
+          releaseId: release.id,
+          releaseTitle: release.title?.trim() || "Без названия",
+          amountRub: readExpectedAmountRub(metadata),
+          providerPaymentId: readProviderPaymentId(metadata),
+          coveredBy: outcome.coveredBy
+        });
+      }
+      return;
+    }
+
+    if (release && outcome.kind !== "already_applied") {
       // A supplement for added extras keeps the release's original payment record.
-      const supplementRoles =
-        release && readPendingExtrasSupplement(release.roles)
-          ? withExtrasSupplementPaid(release.roles as Record<string, unknown>, { orderId: params.order.id })
-          : null;
+      const supplementRoles = readPendingExtrasSupplement(release.roles)
+        ? withExtrasSupplementPaid(release.roles as Record<string, unknown>, { orderId: params.order.id })
+        : null;
       const paymentRoles = supplementRoles
         ? (supplementRoles as Prisma.InputJsonValue)
-        : mergeReleaseRolesPaymentUsage(
-            release?.roles ?? null,
-            buildStandalonePaymentUsage({ orderId: params.order.id })
-          );
-      if (release && !release.confirmed) {
+        : mergeReleaseRolesPaymentUsage(release.roles ?? null, buildStandalonePaymentUsage({ orderId: params.order.id }));
+      if (outcome.kind === "covers") {
         // Only the request that actually confirms the release enters it into the queue and
         // tells the admin (the webhook and the return page may apply the same payment).
         const entered = await params.prisma.release.updateMany({
-          where: { id: releaseId, userId: params.order.userId, confirmed: false },
+          where: { id: release.id, userId: params.order.userId, confirmed: false },
           data: {
             confirmed: true,
             status: "moderating",
@@ -378,16 +465,32 @@ async function applyConfirmedOrder(params: {
             roles: withReleaseTimelineStamp(markSubmittedToModeration(paymentRoles), "queuedAt") as Prisma.InputJsonValue
           }
         });
-        if (entered.count > 0 && getReleaseLifecycleStatus(release.status, release.roles) === "moderation") {
+        const lifecycle = getReleaseLifecycleStatus(release.status, release.roles);
+        if (entered.count > 0 && lifecycle === "moderation") {
           void notifyAdminReleaseSubmitted({
             releaseTitle: release.title?.trim() || "Без названия",
             artistName: release.performer?.trim() || "Неизвестный исполнитель",
             paid: true
           }).catch((error) => {
-            console.error("[telegram] paid release notification failed", { releaseId, error });
+            console.error("[telegram] paid release notification failed", { releaseId: release.id, error });
+          });
+        } else if (entered.count > 0) {
+          // Paid after the artist withdrew it from moderation (or before sending): the payment is
+          // kept, and the release goes to moderation once the artist sends it.
+          await deliverUserNotificationSafely(params.prisma, {
+            id: `release-paid-not-sent-${release.id}`,
+            userId: params.order.userId,
+            kind: "release_paid_not_sent",
+            title: "Оплата получена",
+            message: `Оплата релиза «${release.title?.trim() || "Без названия"}» получена, но он сейчас не на модерации. Откройте его и нажмите «Отправить» — платить повторно не нужно.`,
+            href: `/dashboard/releases/${release.id}`,
+            sourceType: "release",
+            sourceId: release.id,
+            sendEmail: false,
+            resetReadState: true
           });
         }
-      } else if (release && !readMetadata(readMetadata(release.roles).paymentUsage).type) {
+      } else if (outcome.kind === "record") {
         // Already marked paid (e.g. by an admin) and possibly approved: keep its status,
         // only record which payment covered it.
         await params.prisma.release.update({

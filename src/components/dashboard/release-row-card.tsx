@@ -237,7 +237,8 @@ function ReleaseRowCardBase({
   const showChangesNotice =
     release.status === "changes_required" || release.status === "rejected";
   const showPendingVerificationNotice = release.status === "pending_verification";
-  const editLocked = release.status === "moderation";
+  // An unpaid release is not in the moderation queue yet: it can still be edited.
+  const editLocked = release.status === "moderation" && (release.paid || Boolean(release.moderationClaimed));
   const isDraftCardClickable = allowDraftDelete && release.status === "draft";
   const canRequestReleaseDeletion = release.status !== "draft";
   const activeCoverSrc = !coverBroken
@@ -592,7 +593,7 @@ function ReleaseRowCardBase({
               ariaLabel="Редактирование недоступно"
               title="Редактирование релиза на модерации недоступно."
             >
-              <Pencil className="h-3 w-3" strokeWidth={2} />
+              <Pencil className="h-4 w-4" strokeWidth={2} />
             </ActionIcon>
           ) : (
             <ActionLink
@@ -603,9 +604,9 @@ function ReleaseRowCardBase({
               onClick={() => setEditing(true)}
             >
               {editing ? (
-                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
               ) : (
-                <Pencil className="h-3 w-3" strokeWidth={2} />
+                <Pencil className="h-4 w-4" strokeWidth={2} />
               )}
             </ActionLink>
           )}
@@ -622,9 +623,9 @@ function ReleaseRowCardBase({
               }}
             >
               {deleting ? (
-                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
               ) : (
-                <Trash2 className="h-3 w-3" strokeWidth={2} />
+                <Trash2 className="h-4 w-4" strokeWidth={2} />
               )}
             </ActionIcon>
           ) : null}
@@ -641,9 +642,9 @@ function ReleaseRowCardBase({
               }}
             >
               {deleting ? (
-                <Loader2 className="h-3 w-3 animate-spin" strokeWidth={2} />
+                <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
               ) : (
-                <Trash2 className="h-3 w-3" strokeWidth={2} />
+                <Trash2 className="h-4 w-4" strokeWidth={2} />
               )}
             </ActionIcon>
           ) : null}
@@ -1092,7 +1093,7 @@ function ActionLink({
         ? { target: "_blank", rel: "noopener noreferrer" }
         : {})}
       className={cn(
-        "grid h-8 w-8 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all hover:border-white/[0.20] hover:bg-white/[0.05] hover:text-white/95",
+        "grid h-9 w-9 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all hover:border-white/[0.20] hover:bg-white/[0.05] hover:text-white/95",
         disabled && "pointer-events-none cursor-not-allowed opacity-70"
       )}
     >
@@ -1128,7 +1129,7 @@ function ActionIcon({
         onClick?.();
       }}
       className={cn(
-        "grid h-8 w-8 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all",
+        "grid h-9 w-9 place-items-center rounded-lg border border-white/[0.10] bg-white/[0.02] text-white/55 transition-all",
         disabled && "cursor-not-allowed opacity-50",
         danger
           ? "hover:border-[#ff5d6d]/40 hover:bg-[#ff5d6d]/[0.08] hover:text-[#ff5d6d]"

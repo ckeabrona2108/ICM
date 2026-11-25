@@ -49,6 +49,7 @@ import {
   findPaidPredecessorRelease,
   readReleaseCopySourceId,
   RELEASE_COPY_SOURCE_KEY,
+  withoutModerationDecision,
   withReleaseResubmission
 } from "@/lib/release-resubmission";
 import { withReleasePaymentWaitingSince } from "@/lib/release-payment-followup";
@@ -79,6 +80,7 @@ import {
 
 import { rememberReleaseArtistProfiles } from "@/lib/platform-link-discovery-service";
 import { executeIdempotentSubmission, validSubmissionKey } from "@/lib/release-submission-idempotency";
+import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
 import { claimReferralBonusForRelease } from "@/lib/referrals";
 
 export const dynamic = "force-dynamic";
@@ -161,6 +163,30 @@ async function notifyReleaseSubmittedSafe(params: {
   }
 }
 
+async function settleOpenInvoicesBeforeSubmit(userId: string, releaseId: string): Promise<Response | null> {
+  const release = await prisma.release.findFirst({ where: { id: releaseId, userId }, select: { confirmed: true } });
+  if (!release || release.confirmed) return null;
+  try {
+    const open = await settleOpenReleaseOrders({ prisma, userId, releaseId });
+    if (open.state !== "processing") return null;
+  } catch (error) {
+    // YooKassa unreachable: a payment made meanwhile is still caught as a surplus payment.
+    console.error("[release-submit] open invoices check failed", { releaseId, error });
+    return null;
+  }
+  const issue = {
+    code: "payment_processing",
+    field: "payment",
+    message: "Оплата этого релиза сейчас обрабатывается банком. Подождите пару минут и отправьте снова — второй раз платить не придётся."
+  };
+  const response: ReleaseSubmitFailureResponse = {
+    ok: false,
+    errors: [issue],
+    errors_by_step: { release_info: [], tracks: [], stores: [], pricing: [issue] }
+  };
+  return NextResponse.json(response, { status: 409 });
+}
+
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -169,6 +195,14 @@ export async function POST(request: Request) {
   let payload: unknown;
   try { payload = await request.clone().json(); }
   catch { return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 }); }
+  // An unpaid release may have an invoice the artist already paid (or is paying right now). It is
+  // settled before the submission picks a partner code, subscription slot, free single or bonus:
+  // otherwise the release would be covered twice and the card payment would come on top.
+  const submitReleaseId = asRecord(payload)?.releaseId;
+  if (typeof submitReleaseId === "string" && submitReleaseId.trim()) {
+    const blocked = await settleOpenInvoicesBeforeSubmit(session.user.id, submitReleaseId.trim());
+    if (blocked) return blocked;
+  }
   const notifications: Array<Parameters<typeof notifyReleaseSubmittedSafe>[0]> = [];
   const result = await executeIdempotentSubmission({
     prisma, userId: session.user.id, key, payload,
@@ -301,7 +335,8 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
   const editPermission = canEditRelease({
     status: lifecycle,
     moderationStarted: Boolean(existing.status === "moderating"),
-    claimedByModerator: isReleaseClaimedByModerator(existing.status, existing.roles)
+    claimedByModerator: isReleaseClaimedByModerator(existing.status, existing.roles),
+    awaitingPayment: !existing.confirmed
   });
   if (!editPermission.allowed) {
     return NextResponse.json({ error: editPermission.message }, { status: 409 });
@@ -313,6 +348,16 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       { error: "Принятый релиз меняется через «Редактировать»: изменения уходят на проверку отдельной заявкой." },
       { status: 409 }
     );
+  }
+
+  // Sending a returned / rejected release again: the old moderator decision is not part of the
+  // new submission (it would show as a stale reason, or come back as the artist's comment).
+  // Lifecycle is read from `lifecycleRoles`, which still has the legacy decision flags.
+  const lifecycleRoles = existing.roles;
+  // A rejected release reads as "changes_required" here too.
+  const leavesModerationDecision = lifecycle === "changes_required";
+  if (leavesModerationDecision) {
+    existing.roles = withoutModerationDecision(asRecord(existing.roles) ?? {}) as Prisma.JsonValue;
   }
 
   const contract = await getUserContractStatus({ prisma: db as PrismaClient, userId: session.user.id });
@@ -426,7 +471,10 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
             ...baseReleaseData,
             confirmed: params.confirmed,
             status: params.status,
-            roles: withReleaseTimelineStamp(params.roles, "submittedAt") as Prisma.InputJsonValue
+            roles: withReleaseTimelineStamp(params.roles, "submittedAt") as Prisma.InputJsonValue,
+            ...(leavesModerationDecision && params.status === "moderating"
+              ? { rejectReason: null, moderatorComment: null }
+              : {})
           }
         });
         // Edit tracks in place instead of delete + create: track ids are kept, so royalty
@@ -535,7 +583,17 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
     return NextResponse.json(response, { status: 409 });
   };
 
-  if (payload.mode === "edit") {
+  // An unpaid release edited after it was sent (still «Ожидает оплаты», or returned / rejected
+  // before payment) is paid for like a new send: partner code, free single, bonus, subscription
+  // or invoice. The in-place edit below would keep it unpaid and ignore the partner code.
+  const unpaidEditedSend =
+    payload.mode === "edit" &&
+    !existing.confirmed &&
+    !pendingSupplement &&
+    !readReleaseCopySourceId(existing.roles) &&
+    (lifecycle === "moderation" || shouldResubmitEditedRelease(lifecycle));
+
+  if (payload.mode === "edit" && !unpaidEditedSend) {
     // A free single stays a one-track single after edits too.
     if (!freeReleaseShape.ok && (await isFreeReleaseClaimedBy(db, existing.id))) {
       return pricingFailure("free_release_shape", freeReleaseShape.message);
@@ -548,9 +606,23 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       });
       const copyBlock = await copySubmitBlock(editedCopySourceId, source?.roles);
       if (copyBlock) return copyBlock;
+      // A copy returned for changes and sent again: the moderator sees what differs now, not the
+      // list from the first round.
+      const sourceSubmission = asRecord(source?.roles)?.submissionData;
+      if (sourceSubmission) {
+        const changes = diffReleaseSubmissions(sourceSubmission, submissionData);
+        existing.roles = {
+          ...(asRecord(existing.roles) ?? {}),
+          copyChanges: {
+            areas: changedReleaseAreas(changes),
+            unmarkedAreas: unmarkedReleaseChangeAreas(changes, readReleaseChangeRequest(submissionData)),
+            computedAt: new Date().toISOString()
+          }
+        } as Prisma.JsonValue;
+      }
     }
     const currentLifecycle =
-      getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus;
+      getReleaseLifecycleStatus(existing.status, lifecycleRoles) ?? payload.currentStatus;
     // Resubmission keeps the existing payment: the base fee is not charged again, only
     // lyrics / karaoke / video added beyond what was paid (see resolvePaidResend).
     const paidResend =
@@ -566,7 +638,7 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
       paidResend?.roles ?? mergeSubmissionData(existing.roles, submissionData),
       shouldResubmit
         ? "moderation"
-        : (getReleaseLifecycleStatus(existing.status, existing.roles) ?? payload.currentStatus ?? "draft")
+        : (getReleaseLifecycleStatus(existing.status, lifecycleRoles) ?? payload.currentStatus ?? "draft")
     );
     await updateReleaseAndSyncTracks({
       confirmed: paidResend ? paidResend.confirmed : existing.confirmed,
@@ -985,13 +1057,14 @@ async function executeSubmission(request: Request, db: Prisma.TransactionClient,
   }
 
   if (quota.requiresPaymentForNextRelease) {
+    const waitingRoles = withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation");
+    // Editing a release that already waits for payment keeps its reminder schedule.
+    const alreadyWaiting = lifecycle === "moderation" && Boolean(asRecord(waitingRoles.paymentReminders));
     await updateReleaseAndSyncTracks({
       confirmed: false,
       status: "moderating",
       // Payment reminders (1h / 24h / 3d) count from this moment.
-      roles: withReleasePaymentWaitingSince(
-        withReleaseLifecycleState(mergeSubmissionData(existing.roles, submissionData), "moderation")
-      ) as Prisma.InputJsonValue
+      roles: (alreadyWaiting ? waitingRoles : withReleasePaymentWaitingSince(waitingRoles)) as Prisma.InputJsonValue
     });
     // Not paid yet: it waits for payment, and the admin is told once it is paid.
 

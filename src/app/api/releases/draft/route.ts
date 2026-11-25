@@ -17,7 +17,7 @@ import {
 import { canEditRelease } from "@/lib/release-policy";
 import { isReleaseClaimedByModerator } from "@/lib/release-moderation-claim";
 import { readReleaseTypeFromSubmissionData } from "@/lib/release-submit-tracks";
-import { withReleaseCopySource } from "@/lib/release-resubmission";
+import { findOpenReleaseCopy, withReleaseCopySource, type OpenReleaseCopy } from "@/lib/release-resubmission";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +112,19 @@ async function resolveCopySourceId(userId: string, copyOfReleaseId: unknown): Pr
   return canEditRelease({ status: lifecycle }).createsModerationCopy ? source.id : null;
 }
 
+/** Why "Редактировать" cannot start a copy now: the changes already started are on review or returned. */
+function describeOpenCopyConflict(copy: OpenReleaseCopy | null): string | null {
+  if (!copy || copy.stale) return copy?.kind === "moderation" ? MODERATION_COPY_MESSAGE : null;
+  if (copy.kind === "moderation") return MODERATION_COPY_MESSAGE;
+  if (copy.kind === "changes_required") {
+    return "Изменения этого релиза вернули на доработку: откройте их в разделе «Требуют изменений» и отправьте снова.";
+  }
+  return null;
+}
+
+const MODERATION_COPY_MESSAGE =
+  "Изменения этого релиза уже на проверке. Дождитесь решения модератора, затем отправьте новые правки.";
+
 async function draftsCount(userId: string) {
   const counts = await getReleaseSidebarCountsForUser({
     userId,
@@ -141,10 +154,17 @@ export async function POST(request: Request) {
   const startDate = parseDate(data.startDate, releaseDate);
   const preorderDate = parseDate(data.preorderDate, releaseDate);
 
-  const newReleaseId = randomUUID();
   // An edited copy of an approved release remembers its original: moderation shows it as a
   // resubmission and approval merges it back instead of publishing a second release.
   const copySourceId = await resolveCopySourceId(session.user.id, payload.copyOfReleaseId);
+  // One round of changes per approved release: an unsent copy (or one too old to send) is
+  // reused instead of adding another copy each time "Редактировать" is opened.
+  const openCopy = copySourceId
+    ? await findOpenReleaseCopy(prisma, { userId: session.user.id, sourceReleaseId: copySourceId })
+    : null;
+  const openCopyConflict = describeOpenCopyConflict(openCopy);
+  if (openCopyConflict) return NextResponse.json({ error: openCopyConflict }, { status: 409 });
+  const newReleaseId = openCopy?.id ?? randomUUID();
   const initialRoles = withReleaseTimelineStamp({}, "createdAt", now) as Record<string, unknown>;
   const preview = await resolveReleasePreviewForPersistence({
     id: newReleaseId,
@@ -163,39 +183,53 @@ export async function POST(request: Request) {
     submissionDataCover
   });
 
-  const created = await prisma.release.create({
-    data: {
-      id: newReleaseId,
-      userId: session.user.id,
-      preview,
-      title: readTitle(data),
-      date: releaseDate,
-      language: readLanguage(data),
-      subtitle: typeof data.subtitle === "string" ? data.subtitle : null,
-      performer: readPerformer(data),
-      feat: typeof data.feat === "string" ? data.feat : null,
-      remixer: typeof data.remixer === "string" ? data.remixer : null,
-      genre: readGenre(data),
-      labelName: readLabel(data),
-      startDate,
-      preorderDate,
-      type: readReleaseTypeFromSubmissionData(data),
-      earlyStartInRussia: data.earlyRussiaStart === true,
-      realTimeDelivery: data.realTimeDelivery === true,
-      yandexSoonNewRelease: parseDate(data.yandexPreReleaseDate, releaseDate),
-      confirmed: false,
-      status: "moderating",
-      roles: withReleaseLifecycleState(
-        withDraftPersistenceState(
-          copySourceId ? withReleaseCopySource(initialRoles, copySourceId) : initialRoles,
-          payload.data as Record<string, unknown>,
-          now
-        ),
-        "draft"
-      ) as Prisma.InputJsonValue
-    },
-    select: { id: true }
+  const columns = {
+    preview,
+    title: readTitle(data),
+    date: releaseDate,
+    language: readLanguage(data),
+    subtitle: typeof data.subtitle === "string" ? data.subtitle : null,
+    performer: readPerformer(data),
+    feat: typeof data.feat === "string" ? data.feat : null,
+    remixer: typeof data.remixer === "string" ? data.remixer : null,
+    genre: readGenre(data),
+    labelName: readLabel(data),
+    startDate,
+    preorderDate,
+    type: readReleaseTypeFromSubmissionData(data),
+    earlyStartInRussia: data.earlyRussiaStart === true,
+    realTimeDelivery: data.realTimeDelivery === true,
+    yandexSoonNewRelease: parseDate(data.yandexPreReleaseDate, releaseDate),
+    confirmed: false,
+    status: "moderating" as const,
+    roles: withReleaseLifecycleState(
+      withDraftPersistenceState(
+        copySourceId ? withReleaseCopySource(initialRoles, copySourceId) : initialRoles,
+        payload.data as Record<string, unknown>,
+        now
+      ),
+      "draft"
+    ) as Prisma.InputJsonValue
+  };
+
+  const saved = await prisma.$transaction(async (tx) => {
+    if (!copySourceId) {
+      return tx.release.create({ data: { id: newReleaseId, userId: session.user.id, ...columns }, select: { id: true } });
+    }
+    // Two tabs (or a double click) opening "Редактировать" at once still end with one copy.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`release-copy:${session.user.id}:${copySourceId}`}, 0))`;
+    const current = await findOpenReleaseCopy(tx, { userId: session.user.id, sourceReleaseId: copySourceId });
+    const conflict = describeOpenCopyConflict(current);
+    if (conflict) return { conflict };
+    if (current) {
+      // Starts over from the current original: the old unsent draft (or stale copy) is replaced.
+      await tx.track.deleteMany({ where: { releaseId: current.id } });
+      return tx.release.update({ where: { id: current.id }, data: { ...columns, rejectReason: null, moderatorComment: null }, select: { id: true } });
+    }
+    return tx.release.create({ data: { id: newReleaseId, userId: session.user.id, ...columns }, select: { id: true } });
   });
+  if ("conflict" in saved) return NextResponse.json({ error: saved.conflict }, { status: 409 });
+  const created = saved;
 
   const response: ReleaseDraftSaveResponse = {
     ok: true,
@@ -244,7 +278,8 @@ export async function PATCH(request: Request) {
   const editPermission = canEditRelease({
     status: lifecycle,
     moderationStarted: existing.status === "moderating",
-    claimedByModerator: isReleaseClaimedByModerator(existing.status, existing.roles)
+    claimedByModerator: isReleaseClaimedByModerator(existing.status, existing.roles),
+    awaitingPayment: !existing.confirmed
   });
   if (!editPermission.allowed) {
     return NextResponse.json({ error: editPermission.message }, { status: 409 });

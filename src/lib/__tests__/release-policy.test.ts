@@ -406,6 +406,15 @@ test("canEditRelease blocks moderation already in review", () => {
   assert.equal(permission.allowed, false);
 });
 
+test("canEditRelease lets the artist edit a release that waits for payment", () => {
+  assert.equal(canEditRelease({ status: "moderation", moderationStarted: true, awaitingPayment: true }).allowed, true);
+  assert.equal(
+    canEditRelease({ status: "moderation", moderationStarted: true, awaitingPayment: true, claimedByModerator: true }).allowed,
+    false
+  );
+  assert.equal(canEditRelease({ status: "moderation", moderationStarted: true, awaitingPayment: false }).allowed, false);
+});
+
 test("canCancelModeration allows only moderation before start", () => {
   const allowed = canCancelModeration({
     status: "moderation",

@@ -64,7 +64,6 @@ test("admin reject moves release lifecycle to changes required", () => {
     rejectReason: "Нужно оплатить релиз",
     rejectionReason: "Нужно оплатить релиз",
     moderationComment: "Нужно оплатить релиз",
-    moderatorComment: "Нужно оплатить релиз",
     moderationRemarks: [
       {
         field: "cover",

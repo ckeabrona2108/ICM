@@ -45,9 +45,10 @@ export function ReleaseEditClient({
         : canEditRelease({
             status: release.status,
             moderationStarted: release.moderationStarted,
-            claimedByModerator: release.moderationClaimed
+            claimedByModerator: release.moderationClaimed,
+            awaitingPayment: !release.paid
           }),
-    [cancelledModeration, release.moderationClaimed, release.moderationStarted, release.status]
+    [cancelledModeration, release.moderationClaimed, release.moderationStarted, release.paid, release.status]
   );
   const createsModerationCopy = Boolean(editPermission.createsModerationCopy);
   const submissionMode = createsModerationCopy ? "new" : "edit";

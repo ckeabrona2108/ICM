@@ -61,9 +61,9 @@ export default async function ReleaseDetailsPage({
       releaseId: params.id
     }).catch((error) => {
       console.error("[releases:return] failed to check open payments", error);
-      return "none" as const;
+      return null;
     });
-    if (openPayment === "paid") {
+    if (openPayment?.state === "paid") {
       release = (await getCabinetReleaseByIdForUser(session.user.id, params.id)) ?? release;
     }
   }

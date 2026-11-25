@@ -27,6 +27,8 @@ export interface YooKassaPaymentDetails {
   metadata: Record<string, string>;
   rawStatus: string | null;
   cancellationReason: string | null;
+  /** Payment page of a payment still waiting for the payer. */
+  confirmationUrl: string | null;
 }
 
 interface YooKassaWebhookPayload {
@@ -201,6 +203,7 @@ export async function getYooKassaPayment(providerPaymentId: string): Promise<Yoo
         metadata?: Record<string, string>;
         description?: string;
         cancellation_details?: { party?: string; reason?: string };
+        confirmation?: { confirmation_url?: string };
       }
     | null;
 
@@ -220,7 +223,8 @@ export async function getYooKassaPayment(providerPaymentId: string): Promise<Yoo
     currency: typeof json?.amount?.currency === "string" ? json.amount.currency.trim().toUpperCase() : null,
     metadata: normalizeMetadata(json?.metadata),
     rawStatus: typeof json?.status === "string" ? json.status : null,
-    cancellationReason: json?.cancellation_details?.reason?.trim() || null
+    cancellationReason: json?.cancellation_details?.reason?.trim() || null,
+    confirmationUrl: json?.confirmation?.confirmation_url?.trim() || null
   };
 }
 

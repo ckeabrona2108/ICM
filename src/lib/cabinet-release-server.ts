@@ -314,7 +314,7 @@ function resolveRejectionReason(release: CabinetReleaseSource): string | undefin
     asString(root?.moderationComment) ??
     asString(submission?.rejectReason) ??
     asString(submission?.rejectionReason) ??
-    asString(submission?.moderatorComment) ??
+    // Not `submission.moderatorComment`: that is the artist's own comment for the moderator.
     asString(submission?.moderationComment) ??
     undefined
   );

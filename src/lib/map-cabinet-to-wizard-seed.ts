@@ -37,6 +37,16 @@ function formatDuration(seconds?: number | null): string | undefined {
   return `${m}:${s}`;
 }
 
+/**
+ * The artist's comment for the moderator. Returns before this fix wrote the moderator's reason into
+ * the same field, so a comment equal to the reason is the moderator's, not the artist's.
+ */
+function readArtistModeratorComment(comment: string | null | undefined, rejectionReason: string | undefined): string {
+  const value = comment?.trim() ?? "";
+  if (!value) return "";
+  return rejectionReason && value === rejectionReason.trim() ? "" : value;
+}
+
 /** Данные релиза из кабинета → черновик в мастере «Новый релиз» */
 export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<WizardData> {
   // Accepted releases are edited as new moderation copies with a fresh product identity.
@@ -140,7 +150,7 @@ export function mapCabinetReleaseToWizardSeed(r: CabinetRelease): Partial<Wizard
       vkStartTime: submission.vkStartTime || "00:00",
       vkPreSave: Boolean(submission.vkPreSave),
       vkPreSaveDate: submission.vkPreSaveDate ?? "",
-      moderatorComment: submission.moderatorComment ?? "",
+      moderatorComment: readArtistModeratorComment(submission.moderatorComment, r.rejectionReason),
       priorityRelease: Boolean(submission.priorityRelease),
       // A new copy starts with an empty request; a saved copy draft keeps what the artist marked.
       changeRequest: createsCopy ? { areas: [], comment: "" } : readReleaseChangeRequest(submission)

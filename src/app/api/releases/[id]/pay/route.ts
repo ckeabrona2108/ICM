@@ -1,15 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { getServerSession } from "next-auth";
 import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
-import { resolveReleaseAmountDue } from "@/lib/release-extras-supplement";
-import { RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
-import { priceWithReferralDiscount } from "@/lib/referrals";
-import { createYooKassaPayment } from "@/lib/yookassa";
+import { startReleasePayment } from "@/lib/release-payment-start";
 
 export const dynamic = "force-dynamic";
 
@@ -34,107 +29,24 @@ export async function POST(request: Request, context: { params: { id: string } }
     return NextResponse.json({ error: "releaseId is required" }, { status: 400 });
   }
 
-  const release = await prisma.release.findFirst({
-    where: {
-      id: releaseId,
-      userId: session.user.id
-    },
-    select: { id: true, title: true, confirmed: true, roles: true, track: { select: RELEASE_PRICING_TRACK_SELECT } }
-  });
-
-  if (!release) {
-    return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
-  }
-
-  // A paid release (including one sent back for changes or repeat moderation) is never charged again.
-  if (release.confirmed) {
-    return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
-  }
-
-  const openPayment = await settleOpenReleaseOrders({ prisma, userId: session.user.id, releaseId });
-  if (openPayment === "paid") {
-    return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
-  }
-  if (openPayment === "processing") {
-    return NextResponse.json(
-      {
-        processing: true,
-        error: "Предыдущий платёж ещё обрабатывается банком. Подождите пару минут — статус обновится сам."
-      },
-      { status: 409 }
-    );
-  }
-
-  // A re-sent paid release only owes the extras added since its payment.
-  const due = resolveReleaseAmountDue(release.roles, release.track);
-  const fullAmountRub = due.price.totalRub;
-  if (fullAmountRub <= 0) {
-    return NextResponse.json({ error: "Сумма к оплате не найдена. Обновите страницу." }, { status: 409 });
-  }
-  // A friend invited by a link pays 20% less for their first payment.
-  const { amountRub, discount } = await priceWithReferralDiscount(prisma, {
+  const baseUrl = getAppBaseUrl(request);
+  const result = await startReleasePayment({
+    prisma,
     userId: session.user.id,
-    amountRub: fullAmountRub,
-    supplement: due.supplement
+    email: session.user.email ?? null,
+    releaseId,
+    returnUrlFor: (orderId) => `${baseUrl}/dashboard/releases/${releaseId}?pay_order=${orderId}`
   });
-  const orderId = randomUUID();
-  const returnUrl = `${getAppBaseUrl(request)}/dashboard/releases/${releaseId}?pay_order=${orderId}`;
-  let payment;
-  try {
-    payment = await createYooKassaPayment({
-      amountRub,
-      description: due.supplement ? `Доплата за дополнения: ${release.title}` : `Оплата релиза: ${release.title}`,
-      returnUrl,
-      customerEmail: session.user.email,
-      idempotenceKey: orderId,
-      metadata: {
-        orderId,
-        kind: "release",
-        releaseId,
-        ...(due.supplement ? { extrasSupplement: "1" } : {}),
-        userId: session.user.id
-      }
-    });
-  } catch (error) {
-    console.error("[release:pay] failed to create payment", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? `Не удалось создать платёж в YooKassa: ${error.message}`
-            : "Не удалось создать платёж в YooKassa. Проверьте настройки платежного шлюза."
-      },
-      { status: 502 }
-    );
-  }
-
-  if (!payment.confirmationUrl) {
-    return NextResponse.json({ error: "Платёжный шлюз не вернул ссылку на оплату." }, { status: 502 });
-  }
-
-  await prisma.orders.create({
-    data: {
-      id: orderId,
-      userId: session.user.id,
-      type: "release",
-      confirmed: false,
-      metadata: {
-        releaseId,
-        amountRub,
-        ...(discount ? { referralDiscountPercent: discount.percent, fullAmountRub: discount.fullAmountRub } : {}),
-        ...(due.supplement ? { extrasSupplement: true } : {}),
-        providerPaymentId: payment.providerPaymentId,
-        returnUrl
-      }
-    }
-  });
+  if (result.kind === "already_paid") return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
+  if (result.kind === "error") return NextResponse.json(result.body, { status: result.status });
 
   return NextResponse.json(
     {
       ok: true,
-      orderId,
-      providerPaymentId: payment.providerPaymentId,
-      confirmationUrl: payment.confirmationUrl
+      orderId: result.orderId,
+      providerPaymentId: result.providerPaymentId,
+      confirmationUrl: result.confirmationUrl,
+      ...(result.reused ? { reused: true } : {})
     },
     { status: 200 }
   );

@@ -1027,11 +1027,18 @@ export function canEditRelease(params: {
   moderationStarted?: boolean;
   /** A moderator took the release in work: nothing changes until their decision. */
   claimedByModerator?: boolean;
+  /** Sent but not paid («Ожидает оплаты»): it is held out of the moderation queue. */
+  awaitingPayment?: boolean;
 }): EditPermissionResult {
   const { status } = params;
 
   if (status === "moderation" && params.claimedByModerator) {
     return { allowed: false, message: RELEASE_MODERATION_CLAIMED_MESSAGE };
+  }
+
+  // Nobody reviews an unpaid release yet, so the artist may still fix it or add a partner code.
+  if (status === "moderation" && params.awaitingPayment) {
+    return { allowed: true };
   }
 
   if (status === "archived") {

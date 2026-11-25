@@ -4,8 +4,7 @@ import { NextResponse } from "next/server";
 
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveReleaseAmountDue } from "@/lib/release-extras-supplement";
-import { RELEASE_BASE_PRICE_RUB, RELEASE_PRICING_TRACK_SELECT } from "@/lib/release-pricing";
+import { RELEASE_BASE_PRICE_RUB } from "@/lib/release-pricing";
 import {
   getSubscriptionTariffConfig,
   normalizeSubscriptionBillingPeriod
@@ -13,7 +12,7 @@ import {
 import { priceWithReferralDiscount } from "@/lib/referrals";
 import { createYooKassaPayment } from "@/lib/yookassa";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { settleOpenReleaseOrders } from "@/lib/release-payment-guard";
+import { startReleasePayment } from "@/lib/release-payment-start";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +56,7 @@ export async function POST(request: Request) {
 
   let amountRub = RELEASE_BASE_PRICE_RUB;
   let description = "Оплата релиза ICECREAMMUSIC";
-  let extrasSupplement = false;
+  const extrasSupplement = false;
   const billingPeriod = normalizeSubscriptionBillingPeriod(payload.billingPeriod);
   const subscriptionTariff =
     kind === "subscription"
@@ -71,52 +70,28 @@ export async function POST(request: Request) {
     amountRub = subscriptionTariff.amountRub;
     description = `Подписка ICECREAMMUSIC ${subscriptionTariff.title}`;
   } else if (payload.releaseId) {
-    const release = await prisma.release.findFirst({
-      where: {
-        id: payload.releaseId,
-        userId: session.user.id
-      },
-      select: {
-        title: true,
-        confirmed: true,
-        roles: true,
-        track: { select: RELEASE_PRICING_TRACK_SELECT }
-      }
-    });
-
-    if (!release) {
-      return NextResponse.json({ error: "Релиз не найден" }, { status: 404 });
-    }
-
-    if (release.confirmed) {
-      return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
-    }
-    const openPayment = await settleOpenReleaseOrders({
+    // Releases are paid through the same guarded flow as "Оплатить": one live payment per release.
+    const releaseId = payload.releaseId.trim();
+    const result = await startReleasePayment({
       prisma,
       userId: session.user.id,
-      releaseId: payload.releaseId
+      email: session.user.email ?? null,
+      releaseId,
+      returnUrlFor: (releaseOrderId) =>
+        payload.returnUrl ?? `${baseUrl}/dashboard/releases/${releaseId}?pay_order=${releaseOrderId}`
     });
-    if (openPayment === "paid") {
-      return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
-    }
-    if (openPayment === "processing") {
-      return NextResponse.json(
-        {
-          processing: true,
-          error: "Предыдущий платёж ещё обрабатывается банком. Подождите пару минут — статус обновится сам."
-        },
-        { status: 409 }
-      );
-    }
-
-    // A re-sent paid release only owes the extras added since its payment.
-    const due = resolveReleaseAmountDue(release.roles, release.track);
-    if (due.price.totalRub <= 0) {
-      return NextResponse.json({ error: "Сумма к оплате не найдена. Обновите страницу." }, { status: 409 });
-    }
-    amountRub = due.price.totalRub;
-    extrasSupplement = due.supplement;
-    description = due.supplement ? `Доплата за дополнения: ${release.title}` : `Оплата релиза: ${release.title}`;
+    if (result.kind === "already_paid") return NextResponse.json({ ok: true, alreadyPaid: true }, { status: 200 });
+    if (result.kind === "error") return NextResponse.json(result.body, { status: result.status });
+    return NextResponse.json(
+      {
+        ok: true,
+        paymentId: result.orderId,
+        providerPaymentId: result.providerPaymentId,
+        confirmationUrl: result.confirmationUrl,
+        ...(result.reused ? { reused: true } : {})
+      },
+      { status: 200 }
+    );
   }
 
   // A friend invited by a link pays 20% less for their first payment.

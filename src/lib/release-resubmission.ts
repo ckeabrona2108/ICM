@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import { getReleaseLifecycleStatus, shouldTreatReleaseAsApproved } from "@/lib/release-counts";
+import { isReleaseHiddenFromCabinet } from "@/lib/release-deletion-state";
 
 /** Marker of an already approved release that the artist sent to moderation again.
  * `sourceReleaseId` is set when the resubmission is a separate copy of the approved release. */
@@ -48,6 +49,29 @@ export function withReleaseResubmission(
   if (params.previousStatus) marker.previousStatus = params.previousStatus;
   if (params.sourceReleaseId) marker.sourceReleaseId = params.sourceReleaseId;
   return { ...roles, resubmission: marker };
+}
+
+/** Keys the moderator's "return for changes" / "reject" decision writes into `release.roles`. */
+const MODERATION_DECISION_KEYS = [
+  "needsChanges",
+  "moderationStatus",
+  "rejectReason",
+  "rejectionReason",
+  "moderationComment",
+  "moderatorComment",
+  "moderationRemarks",
+  "moderationReturnedAt"
+] as const;
+
+/**
+ * Drops the previous moderator decision when the artist sends the release again: the old
+ * reason must not show on the new submission (or as the artist's own comment). Only the root
+ * keys are dropped; `submissionData` is the artist's form and is replaced on every send.
+ */
+export function withoutModerationDecision(roles: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...roles };
+  for (const key of MODERATION_DECISION_KEYS) delete next[key];
+  return next;
 }
 
 export function readReleaseUpc(source: { upc?: string | null; roles: unknown }): string | null {
@@ -137,4 +161,64 @@ export function describeReleaseCopySubmitBlock(params: {
     return "Релиз изменился после того, как вы начали правку: приняты другие изменения. Удалите этот черновик и нажмите «Редактировать» у релиза заново.";
   }
   return null;
+}
+
+export type OpenReleaseCopyKind = "moderation" | "changes_required" | "draft";
+
+export interface OpenReleaseCopy {
+  id: string;
+  kind: OpenReleaseCopyKind;
+  /** Started before the original last changed: sending it would undo the changes approved since. */
+  stale: boolean;
+}
+
+/**
+ * The one round of changes of an approved release the artist is working on, if any: a copy on
+ * moderation, returned for changes, or an unsent draft. "Редактировать" opens it instead of
+ * starting yet another copy, so the artist never ends up with several copies of one release.
+ * Merged, deleted and hidden copies are not open any more.
+ */
+export function pickOpenReleaseCopy(
+  copies: ReadonlyArray<{ id: string; status: string | null; roles: unknown }>,
+  sourceRoles: unknown
+): OpenReleaseCopy | null {
+  const rank: Record<OpenReleaseCopyKind, number> = { moderation: 0, changes_required: 1, draft: 2 };
+  const sourceApprovedAt = readTimelineDate(sourceRoles, "approvedAt");
+  const open = copies
+    .map((copy) => {
+      const roles = asRecord(copy.roles);
+      if (asString(roles?.mergedIntoReleaseId)) return null;
+      if (isReleaseHiddenFromCabinet(roles)) return null;
+      const lifecycle = getReleaseLifecycleStatus(copy.status, roles);
+      const kind: OpenReleaseCopyKind | null =
+        lifecycle === "moderation" || lifecycle === "pending_verification"
+          ? "moderation"
+          : lifecycle === "changes_required"
+            ? "changes_required"
+            : lifecycle === "draft"
+              ? "draft"
+              : null;
+      if (!kind) return null;
+      const createdAt = readTimelineDate(roles, "createdAt");
+      const stale = Boolean(createdAt && sourceApprovedAt && sourceApprovedAt > createdAt);
+      return { id: copy.id, kind, stale, createdAt: createdAt?.getTime() ?? 0 };
+    })
+    .filter((copy): copy is NonNullable<typeof copy> => copy !== null)
+    .sort((a, b) => rank[a.kind] - rank[b.kind] || b.createdAt - a.createdAt);
+  const picked = open[0];
+  return picked ? { id: picked.id, kind: picked.kind, stale: picked.stale } : null;
+}
+
+export async function findOpenReleaseCopy(
+  db: { release: Pick<PrismaClient["release"], "findMany" | "findFirst"> },
+  params: { userId: string; sourceReleaseId: string }
+): Promise<OpenReleaseCopy | null> {
+  const [source, copies] = await Promise.all([
+    db.release.findFirst({ where: { id: params.sourceReleaseId, userId: params.userId }, select: { roles: true } }),
+    db.release.findMany({
+      where: { userId: params.userId, roles: { path: [RELEASE_COPY_SOURCE_KEY], equals: params.sourceReleaseId } },
+      select: { id: true, status: true, roles: true }
+    })
+  ]);
+  return pickOpenReleaseCopy(copies, source?.roles);
 }

@@ -6,6 +6,7 @@ import {
   getReleaseResubmission,
   readReleaseCopySourceId,
   readReleaseUpc,
+  withoutModerationDecision,
   withReleaseCopySource,
   withReleaseResubmission
 } from "@/lib/release-resubmission";
@@ -359,4 +360,25 @@ test("a copy started before newer changes of the original were approved is not s
     })),
     /изменился после того/u
   );
+});
+
+test("withoutModerationDecision drops the old return reason but keeps the artist's form", () => {
+  const roles = withoutModerationDecision({
+    lifecycleState: "changes_required",
+    needsChanges: true,
+    moderationStatus: "rejected",
+    rejectReason: "По запросу",
+    rejectionReason: "По запросу",
+    moderationComment: "По запросу",
+    moderatorComment: "По запросу",
+    moderationRemarks: null,
+    moderationReturnedAt: "2026-11-25T18:44:03.680Z",
+    paymentReminders: { stage: 3 },
+    submissionData: { title: "LASER SHOT", partnerCode: "CODE" }
+  });
+  assert.deepEqual(roles, {
+    lifecycleState: "changes_required",
+    paymentReminders: { stage: 3 },
+    submissionData: { title: "LASER SHOT", partnerCode: "CODE" }
+  });
 });

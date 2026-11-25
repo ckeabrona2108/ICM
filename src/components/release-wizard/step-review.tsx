@@ -5,6 +5,7 @@ import Image from "next/image";
 import {
   CheckCircle2,
   ChevronDown,
+  FileText,
   ExternalLink,
   ImageIcon,
   Loader2,
@@ -17,6 +18,7 @@ import { COUNTRIES } from "@/lib/countries";
 import { buildCoverImageSrcCandidates } from "@/lib/image-src";
 import { getReleasePlatformLabel } from "@/lib/release-platforms";
 import { getTrackAuthorCoverage } from "@/lib/release-policy";
+import { findTracksWithoutLyrics } from "@/lib/release-lyrics-hint";
 import { cn } from "@/lib/utils";
 
 import type { ReleaseSubmissionData } from "@/lib/release-policy";
@@ -30,6 +32,7 @@ import { CopyChangesReview } from "./change-request";
 import { FreeReleaseOption } from "./free-release-option";
 import { ReferralBonusOption } from "./referral-bonus-option";
 import { ModerationSubmitNotices } from "./moderation-date-notice";
+import { useExtrasIncludedInPlan } from "./use-extras-included";
 import { useWizard, type PersonRole, type TrackFile } from "./wizard-context";
 
 const TYPE_LABEL = {
@@ -271,6 +274,8 @@ export function StepReview({
     data.platformMode === "all" ? "Все площадки" : `${selectedPlatformLabels.length} площадок`;
 
   const peopleByRole = React.useMemo(() => groupPeopleByRole(data.persons), [data.persons]);
+  const lyricsIncluded = useExtrasIncludedInPlan() === true;
+  const tracksWithoutLyrics = React.useMemo(() => findTracksWithoutLyrics(data.tracks), [data.tracks]);
   const hasBlockingErrors = reviewErrors.length > 0;
 
   return (
@@ -286,6 +291,15 @@ export function StepReview({
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {/* On STANDARD lyrics are a paid extra: the hint would only push a surcharge there. */}
+      {lyricsIncluded && tracksWithoutLyrics.length > 0 ? (
+        <LyricsRecommendation
+          tracks={tracksWithoutLyrics}
+          totalTracks={data.tracks.length}
+          onAdd={() => setStep("tracks")}
+        />
       ) : null}
 
       <div className="space-y-6">
@@ -717,6 +731,51 @@ function groupPeopleByRole(persons: PersonRole[]) {
     name: person.name,
     role: person.role
   }));
+}
+
+/** A soft hint, not an error: the release goes out without lyrics too. */
+function LyricsRecommendation({
+  tracks,
+  totalTracks,
+  onAdd
+}: {
+  tracks: ReturnType<typeof findTracksWithoutLyrics>;
+  totalTracks: number;
+  onAdd: () => void;
+}) {
+  const allTracks = tracks.length === totalTracks;
+  return (
+    <div className="relative overflow-hidden rounded-[22px] border border-white/[0.07] bg-white/[0.03] py-4 pl-5 pr-4">
+      <span aria-hidden className="absolute inset-y-0 left-0 w-[3px] bg-amber-300/80" />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[13.5px] font-semibold text-white">Рекомендации</p>
+          <ul className="mt-1.5 space-y-1 text-[12.5px] leading-5 text-white/70">
+            <li className="flex gap-2">
+              <span aria-hidden className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-white/60" />
+              <span>
+                Релиз может пройти модерацию быстрее, если вы загрузите тексты треков
+                {!allTracks ? (
+                  <span className="text-white/45">
+                    {" "}
+                    — нет текста: {tracks.map((track) => `«${track.title}»`).join(", ")}
+                  </span>
+                ) : null}
+              </span>
+            </li>
+          </ul>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] border border-white/[0.12] px-3 text-[12px] font-medium text-white/80 transition hover:border-white/25 hover:text-white"
+        >
+          <FileText className="h-3.5 w-3.5" strokeWidth={2} />
+          Добавить текст
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function SectionTitle({ title }: { title: string }) {

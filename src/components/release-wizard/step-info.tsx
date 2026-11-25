@@ -666,7 +666,7 @@ export function StepInfo({
 
                 <div className="grid content-start gap-10 rounded-[24px] border border-white/[0.08] bg-[linear-gradient(180deg,rgba(24,26,42,0.82),rgba(13,16,30,0.78))] px-6 py-6 sm:px-7 sm:py-7">
                   <div className="grid gap-x-6 gap-y-10 sm:grid-cols-2">
-                    <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[24px_52px] gap-3">
                       <CodesFieldLabel required>Дата предзаказа</CodesFieldLabel>
                       <ReleaseDatePicker
                         value={data.preorderDate}
@@ -676,7 +676,7 @@ export function StepInfo({
                         className="min-w-0 w-full"
                       />
                     </div>
-                    <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[24px_52px] gap-3">
                       <CodesFieldLabel required>Дата старта</CodesFieldLabel>
                       <ReleaseDatePicker
                         value={data.startDate}
@@ -686,7 +686,7 @@ export function StepInfo({
                         className="min-w-0 w-full"
                       />
                     </div>
-                    <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[24px_52px] gap-3">
                       <CodesFieldLabel required>Дата релиза</CodesFieldLabel>
                       <ReleaseDatePicker
                         value={data.releaseDate}
@@ -694,8 +694,8 @@ export function StepInfo({
                         className="min-w-0 w-full"
                       />
                     </div>
-                    <div className="grid min-w-0 grid-rows-[24px_52px] gap-3">
-                      <CodesFieldLabel required>Год получения прав</CodesFieldLabel>
+                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] grid-rows-[24px_52px] gap-3">
+                      <CodesFieldLabel required>Год прав</CodesFieldLabel>
                       <TextInput
                         value={data.rightsYear}
                         onChange={(e) => set("rightsYear", e.target.value)}

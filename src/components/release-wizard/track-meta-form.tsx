@@ -1,9 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { ArrowUpRight, Mic2, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
-import { writeKaraokeHandoff, type KaraokeHandoff } from "@/components/karaoke/karaoke-handoff";
 import { LANGUAGES } from "@/lib/countries";
 import { trackPersonRoleOptions } from "@/lib/person-roles";
 import {
@@ -11,6 +10,7 @@ import {
   getTrackAuthorCoverage
 } from "@/lib/release-policy";
 
+import { SyncedLyricsCard } from "./synced-lyrics-card";
 import { useWizard, type PersonRole, type TrackMeta } from "./wizard-context";
 import { Checkbox, FieldLabel, InfoTooltip, Select, TextArea, TextInput } from "./wizard-ui";
 
@@ -439,17 +439,14 @@ export function TrackMetaForm({
                     />
                   </div>
                 ) : null}
-                <div className="grid gap-3 pt-1 lg:grid-cols-3">
-                  <TrackAssetUploadCard
-                    title="Синхронизированный текст трека"
-                    hint="Формат: .ttml"
-                    kind="syncedLyrics"
-                    fileName={meta.syncedLyricsFile?.fileName ?? null}
-                    uploading={uploadingAssetKind === "syncedLyrics"}
-                    karaokeHandoff={{ title: meta.title, lyrics: meta.lyrics, language: meta.metadataLanguage }}
-                    onUploadAsset={onUploadAsset}
-                    onRemoveAsset={onRemoveAsset}
-                  />
+                <SyncedLyricsCard
+                  fileName={meta.syncedLyricsFile?.fileName ?? null}
+                  uploading={uploadingAssetKind === "syncedLyrics"}
+                  handoff={{ title: meta.title, lyrics: meta.lyrics, language: meta.metadataLanguage }}
+                  onUpload={(file) => onUploadAsset("syncedLyrics", file)}
+                  onRemove={() => onRemoveAsset("syncedLyrics")}
+                />
+                <div className="grid gap-3 pt-1 sm:grid-cols-2">
                   <TrackAssetUploadCard
                     title="Добавление рингтона"
                     hint="Форматы: .wav, .flac"
@@ -482,16 +479,13 @@ function TrackAssetUploadCard({
   fileName,
   uploading,
   onUploadAsset,
-  onRemoveAsset,
-  karaokeHandoff
+  onRemoveAsset
 }: {
   title: string;
   hint: string;
   kind: TrackAssetKind;
   fileName: string | null;
   uploading: boolean;
-  /** Для TTML: если файла нет, предлагаем сделать его в нашем редакторе с текстом этого трека */
-  karaokeHandoff?: KaraokeHandoff;
   onUploadAsset: (kind: TrackAssetKind, file: File) => void;
   onRemoveAsset: (kind: TrackAssetKind) => void;
 }) {
@@ -512,26 +506,7 @@ function TrackAssetUploadCard({
       {fileName ? (
         <p className="mt-2 truncate text-[11px] text-emerald-200/85">{fileName}</p>
       ) : (
-        <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[11px] text-white/30">
-          Файл не загружен
-          {karaokeHandoff ? (
-            <>
-              <span aria-hidden>·</span>
-              <a
-                href="/dashboard/karaoke"
-                target="_blank"
-                rel="noopener"
-                onClick={() => writeKaraokeHandoff(karaokeHandoff)}
-                title="Бесплатный редактор караоке: текст трека подставится сам"
-                className="group inline-flex items-center gap-1 font-medium text-[#c4b5fd] transition hover:text-white"
-              >
-                <Mic2 className="h-3 w-3" />
-                Сделать в редакторе
-                <ArrowUpRight className="h-3 w-3 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-              </a>
-            </>
-          ) : null}
-        </p>
+        <p className="mt-2 text-[11px] text-white/30">Файл не загружен</p>
       )}
 
       <div className="mt-3 flex items-center gap-2">

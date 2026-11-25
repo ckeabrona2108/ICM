@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, CalendarClock, CalendarX2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, CalendarX2, History } from "lucide-react";
 
 import {
   firstSafeReleaseDay,
@@ -9,6 +9,7 @@ import {
   formatMskDayMonth,
   formatMskDayOn,
   moderationPause,
+  mskDayOf,
   parseMskDay,
   type MskDay
 } from "@/lib/moderation-schedule";
@@ -33,6 +34,15 @@ function earliestDay(dates: string[]): MskDay | null {
   const days = dates.map(parseMskDay).filter((day): day is MskDay => day !== null);
   if (days.length === 0) return null;
   return days.reduce((min, day) => (day.getTime() < min.getTime() ? day : min));
+}
+
+/** A date before today (Moscow): nothing to be late for, the release simply goes out with that date. */
+function isPastDay(now: Date, day: MskDay): boolean {
+  return day.getTime() < mskDayOf(now).getTime();
+}
+
+function formatFullDay(day: MskDay): string {
+  return `${formatMskDayMonth(day)}.${day.getUTCFullYear()}`;
 }
 
 const NEED_TIME = areRussianHolidaysEnabled()
@@ -72,10 +82,19 @@ export function ModerationDateHint({ dates, className }: { dates: string[]; clas
   const now = useMinuteNow();
   const day = earliestDay(dates);
   if (!now || !day) return null;
+  const safe = formatMskDayMonth(firstSafeReleaseDay(now));
+  if (isPastDay(now, day)) {
+    const full = formatFullDay(day);
+    return (
+      <Notice tone="info" icon={History} className={className}>
+        Дата {full} уже прошла. Релиз появится на площадках после модерации, а датой выхода у него будет
+        указано {full}. Если нужна новая дата, выберите не раньше {safe}.
+      </Notice>
+    );
+  }
   const fit = fitReleaseDate(now, day);
   if (fit === "ok") return null;
   const date = formatMskDayMonth(day);
-  const safe = formatMskDayMonth(firstSafeReleaseDay(now));
 
   return fit === "tight" ? (
     <Notice tone="warn" icon={AlertTriangle} className={className}>
@@ -105,8 +124,9 @@ export function ModerationSubmitNotices({
   if (!now) return null;
   const pause = moderationPause(now);
   const day = checkDates ? earliestDay(dates) : null;
-  const fit = day ? fitReleaseDate(now, day) : "ok";
-  if (!pause && fit === "ok") return null;
+  const past = day ? isPastDay(now, day) : false;
+  const fit = day && !past ? fitReleaseDate(now, day) : "ok";
+  if (!pause && !past && fit === "ok") return null;
 
   const changeDate = (
     <button
@@ -124,6 +144,12 @@ export function ModerationSubmitNotices({
         <Notice tone="info" icon={CalendarClock}>
           {pause.holiday ? "В праздничные дни" : "В выходные дни"} релизы не проверяются. Проверка релиза начнётся{" "}
           {formatMskDayOn(pause.start)}. Как только модератор ответит, придёт уведомление.
+        </Notice>
+      ) : null}
+      {day && past ? (
+        <Notice tone="info" icon={History}>
+          Дата {formatFullDay(day)} уже прошла: релиз появится на площадках после модерации, а датой выхода будет
+          указано {formatFullDay(day)}.{changeDate}
         </Notice>
       ) : null}
       {day && fit === "tight" ? (

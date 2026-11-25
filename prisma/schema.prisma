@@ -150,6 +150,20 @@ model promo_urls {
 }
 
 // Просмотры и переходы Smart Link. Пишутся только вставкой, итоги считаются запросами.
+/// Free 7-day trial of the GLAZE plugins. Starts on the first plugin sign-in of an account without a subscription.
+/// One per account and one per computer (device_id), so a new email on the same computer gets no second trial.
+model plugin_trials {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @unique @db.Uuid
+  device_id  String   @unique @db.VarChar(128)
+  product    String   @db.VarChar(80)
+  started_at DateTime @default(now()) @db.Timestamptz(6)
+  ends_at    DateTime @db.Timestamptz(6)
+  user       user     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@schema("icecream")
+}
+
 /// Artist profiles on streaming platforms, tied to one of the artist's names (profile_key) in a cabinet.
 /// "confirmed" profiles are searched for releases, "suggested" wait for the artist, "rejected" are never offered again.
 model artist_platform_profiles {
@@ -1190,6 +1204,7 @@ model user {
   partnerCodeUsages            partner_code_usages[]
   vk_link                      vk_links?
   artist_platform_profiles     artist_platform_profiles[]
+  plugin_trial                 plugin_trials?
   oauth_accounts               oauth_accounts[]
   security_codes               security_codes[]
   security_channel_holds       security_channel_holds[]

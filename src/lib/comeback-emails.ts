@@ -46,7 +46,7 @@ interface LetterCopy {
 
 const LETTERS: Record<ComebackCampaign, LetterCopy> = {
   "comeback-released": {
-    subject: "Привет от ICECREAMMUSIC 👋",
+    subject: "Привет от ICECREAMMUSIC",
     paragraphs: [
       "Привет!",
       "Давно не виделись, решили написать.",
@@ -57,7 +57,7 @@ const LETTERS: Record<ComebackCampaign, LetterCopy> = {
     closing: "Хорошего дня и вдохновения!"
   },
   "comeback-first-release": {
-    subject: "Как там твой первый трек? 🎵",
+    subject: "Как там твой первый трек?",
     paragraphs: [
       "Привет!",
       "Ты когда-то заглядывал к нам, но так и не выпустил первый релиз. Ничего страшного, всё ещё впереди.",
@@ -102,6 +102,7 @@ export function buildComebackLetter(
     copy.closing,
     "Команда ICECREAMMUSIC",
     "",
+    "Ты получил это письмо, потому что зарегистрирован на icecreammusic.net.",
     `Не хочешь получать такие письма? Отписаться: ${unsubscribeUrl}`
   ].join("\n");
 
@@ -124,6 +125,7 @@ export function buildComebackLetter(
     `<p style="margin:0;font-size:16px;line-height:1.6;color:#1f2330;">${escapeHtml(copy.closing)}<br>Команда ICECREAMMUSIC</p>` +
     `</td></tr></table>` +
     `<p style="max-width:520px;margin:16px auto 0;font-size:12px;line-height:1.5;color:#8a8799;text-align:center;">` +
+    `Ты получил это письмо, потому что зарегистрирован на icecreammusic.net.<br>` +
     `Не хочешь получать такие письма? <a href="${escapeHtml(unsubscribeUrl)}" style="color:#8a8799;">Отписаться</a></p>` +
     `</td></tr></table></body></html>`;
 

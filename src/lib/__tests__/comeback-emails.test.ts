@@ -21,7 +21,8 @@ test("unsubscribe tokens are random and URL-safe", () => {
 test("letters carry the soft copy, a marked button link and an unsubscribe link", () => {
   const token = newUnsubscribeToken();
   const released = buildComebackLetter("comeback-released", { unsubscribeToken: token });
-  assert.equal(released.subject, "Привет от ICECREAMMUSIC 👋");
+  assert.equal(released.subject, "Привет от ICECREAMMUSIC");
+  assert.match(released.text, /потому что зарегистрирован/u);
   assert.match(released.text, /Давно не виделись/u);
   assert.match(released.html, /\/dashboard\?utm_source=email&amp;utm_medium=letter&amp;utm_campaign=comeback-released/u);
   assert.match(released.html, /Отписаться/u);

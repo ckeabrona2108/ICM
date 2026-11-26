@@ -43,11 +43,32 @@ export interface SupportTicketResponse {
   updatedAt: string;
   lastMessage?: string;
   messages?: SupportTicketMessageResponse[];
+  release?: import("@/lib/support-release-request").SupportReleaseContext | null;
 }
 
 export interface CreateSupportTicketRequest {
   subject: string;
   body: string;
+}
+
+/** A ticket about one of the artist's releases; subject and first message are built on the server. */
+export interface CreateSupportReleaseTicketRequest {
+  releaseRequest: import("@/lib/support-release-request").SupportReleaseRequestInput;
+}
+
+export interface SupportReleaseOption {
+  id: string;
+  title: string;
+  artist: string;
+  upc: string | null;
+  coverUrl: string | null;
+  releaseDate: string | null;
+  group: "accepted" | "moderation";
+  statusLabel: string;
+}
+
+export interface SupportReleaseOptionsResponse {
+  releases: SupportReleaseOption[];
 }
 
 export interface AddSupportTicketMessageRequest {

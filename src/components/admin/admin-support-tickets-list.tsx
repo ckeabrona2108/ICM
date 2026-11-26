@@ -70,6 +70,13 @@ export function AdminSupportTicketsList({
               <p className="mt-1 text-[13px] text-white/65">
                 Пользователь: {ticket.userName} · {ticket.userEmail}
               </p>
+              {ticket.release ? (
+                <p className="mt-2 inline-flex flex-wrap items-center gap-2 rounded-lg bg-[#7b3df5]/14 px-2.5 py-1 text-[12.5px] text-[#d8ccff]">
+                  <span className="font-semibold">«{ticket.release.release.title}»</span>
+                  <span className="font-mono">UPC {ticket.release.release.upc || "—"}</span>
+                  {ticket.release.platforms.length ? <span>{ticket.release.platforms.join(", ")}</span> : null}
+                </p>
+              ) : null}
               {ticket.lastMessage ? (
                 <p className="mt-2 line-clamp-2 text-[14px] text-white/75">{ticket.lastMessage}</p>
               ) : null}

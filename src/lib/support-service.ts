@@ -17,6 +17,7 @@ import {
 import { isAnyPrismaTableMissingError } from "@/lib/prisma-errors";
 import { deliverUserNotificationSafely } from "@/lib/notification-delivery-service";
 import { buildSupportAutoReply, isSupportWorkingTime, lastSupportClose } from "@/lib/support-hours";
+import { parseSupportDescription, type SupportReleaseContext } from "@/lib/support-release-request";
 
 export const createSupportTicketSchema = z.object({
   subject: z.string().trim().min(3, "Укажите тему тикета.").max(160, "Тема слишком длинная."),
@@ -61,6 +62,8 @@ export interface SupportTicketDto {
   updatedAt: string;
   lastMessage?: string;
   messages?: SupportTicketMessageDto[];
+  /** Set when the ticket was opened about a specific release ("Релиз и модерация"). */
+  release?: SupportReleaseContext | null;
 }
 
 interface LoggerLike {
@@ -759,6 +762,7 @@ function buildSupportTicketDto(params: {
   updatedAt: Date;
   lastMessage?: string;
   messages?: SupportTicketMessageDto[];
+  description?: unknown;
 }): SupportTicketDto {
   return {
     id: params.id,
@@ -770,7 +774,8 @@ function buildSupportTicketDto(params: {
     createdAt: params.createdAt.toISOString(),
     updatedAt: params.updatedAt.toISOString(),
     lastMessage: params.lastMessage,
-    messages: params.messages
+    messages: params.messages,
+    release: parseSupportDescription(params.description)
   };
 }
 
@@ -793,7 +798,8 @@ function mapListTicket(record: TicketListRecord): SupportTicketDto {
     userEmail: userRecord?.email ?? "",
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
-    lastMessage: lastMessageRecord?.body
+    lastMessage: lastMessageRecord?.body,
+    description: (record as TicketListRecord & { description?: string }).description
   });
 }
 
@@ -972,6 +978,8 @@ export async function createSupportTicket(params: {
   userEmail: string;
   subject: string;
   body: string;
+  /** Stored in SupportTicket.description instead of the body (carries the release context). */
+  description?: string;
   notify?: (payload: TelegramNewTicketNotificationPayload) => Promise<boolean>;
   logger?: LoggerLike;
   /** Clock for the off-hours auto-reply; tests pass a fixed time. */
@@ -995,7 +1003,7 @@ export async function createSupportTicket(params: {
           id: randomUUID(),
           userId: params.userId,
           title: params.subject.trim(),
-          description: params.body.trim(),
+          description: params.description ?? params.body.trim(),
           status: SUPPORT_TICKET_STATUS.OPEN,
           updatedAt: now
         }
@@ -1019,7 +1027,8 @@ export async function createSupportTicket(params: {
         id: createdTicket.id,
         status: createdTicket.status ?? SUPPORT_TICKET_STATUS.OPEN,
         subject: createdTicket.title,
-        updatedAt: createdTicket.updatedAt ?? now
+        updatedAt: createdTicket.updatedAt ?? now,
+        description: createdTicket.description
       };
     });
 
@@ -1034,7 +1043,7 @@ export async function createSupportTicket(params: {
       notify,
       {
         ticketId: ticket.id,
-        subject: ticket.title,
+        subject: ticket.subject,
         userName: params.userName,
         userEmail: params.userEmail,
         createdAt: ticket.createdAt,
@@ -1052,6 +1061,7 @@ export async function createSupportTicket(params: {
       userEmail: params.userEmail,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt,
+      description: ticket.description,
       lastMessage: autoReply?.body ?? params.body.trim(),
       messages: [
         toSupportMessageDto({

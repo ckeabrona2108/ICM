@@ -17,11 +17,16 @@ import {
 import { PageHeader } from "@/components/layout/page-header";
 import { cn } from "@/lib/utils";
 import type {
+  SupportReleaseOption,
+  SupportReleaseOptionsResponse,
   SupportTicketResponse,
   SupportTicketListResponse,
   SupportTicketMutationResponse
 } from "@/lib/api/contracts";
 import { SUPPORT_STATUS_LABEL, formatSupportDate } from "@/lib/support-ui";
+import { SUPPORT_RELEASE_TOPIC, type SupportReleaseRequestInput } from "@/lib/support-release-request";
+import { SupportReleaseRequestForm } from "@/components/support/support-release-request-form";
+import { SupportReleaseCard } from "@/components/support/support-release-card";
 
 const SUPPORT_TOPICS = [
   { title: "Релиз и модерация", hint: "Статусы, правки, UPC", icon: Disc3, tone: "bg-[#7b61ff]/16 text-[#c4b5fd]" },
@@ -50,6 +55,12 @@ export function SupportTicketChat() {
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [composer, setComposer] = React.useState("");
   const [creating, setCreating] = React.useState(false);
+  const [createMode, setCreateMode] = React.useState<"plain" | "release">("plain");
+  const [releaseFormKey, setReleaseFormKey] = React.useState(0);
+  const lastReleaseRequest = React.useRef<SupportReleaseRequestInput | null>(null);
+  const [releaseOptions, setReleaseOptions] = React.useState<SupportReleaseOption[] | null>(null);
+  const [releaseOptionsError, setReleaseOptionsError] = React.useState<string | null>(null);
+  const [plainNote, setPlainNote] = React.useState<string | null>(null);
   const [newSubject, setNewSubject] = React.useState("");
   const [newBody, setNewBody] = React.useState("");
   const [loading, setLoading] = React.useState(true);
@@ -79,11 +90,50 @@ export function SupportTicketChat() {
     );
   });
 
+  // Releases load in the background when the page opens, so the picker is ready by the first click.
+  const loadReleaseOptions = React.useCallback(async () => {
+    setReleaseOptionsError(null);
+    setReleaseOptions(null);
+    try {
+      const response = await fetch("/api/support/releases", { cache: "no-store" });
+      const payload = (await response.json().catch(() => null)) as SupportReleaseOptionsResponse | null;
+      if (!response.ok || !payload || !Array.isArray(payload.releases)) throw new Error();
+      setReleaseOptions(payload.releases);
+    } catch {
+      setReleaseOptionsError("Не удалось загрузить релизы.");
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadReleaseOptions();
+  }, [loadReleaseOptions]);
+
+  const openPlainReleaseTicket = React.useCallback((note: string | null) => {
+    setCreateMode("plain");
+    setPlainNote(note);
+    setNewSubject(`${SUPPORT_RELEASE_TOPIC}: `);
+    window.setTimeout(() => newBodyRef.current?.focus(), 50);
+  }, []);
+
+  // No releases yet (new artists): nothing to pick, so the question goes straight to a normal ticket.
+  React.useEffect(() => {
+    if (creating && createMode === "release" && releaseOptions?.length === 0) {
+      openPlainReleaseTicket("У вас пока нет релизов — просто опишите вопрос, мы ответим здесь.");
+    }
+  }, [createMode, creating, openPlainReleaseTicket, releaseOptions]);
+
   const startNewTicket = (topic?: string) => {
     setCreating(true);
     setActiveId(null);
     setError(null);
     setRetryMode(null);
+    setPlainNote(null);
+    if (topic === SUPPORT_RELEASE_TOPIC) {
+      setCreateMode("release");
+      setReleaseFormKey((key) => key + 1);
+      return;
+    }
+    setCreateMode("plain");
     if (topic) {
       setNewSubject(`${topic}: `);
       window.setTimeout(() => newBodyRef.current?.focus(), 50);
@@ -193,10 +243,23 @@ export function SupportTicketChat() {
   }, [activeId, creating, loadTicketDetails]);
 
   const openNewTicket = async () => {
+    if (createMode === "release") {
+      if (lastReleaseRequest.current) void createTicket({ releaseRequest: lastReleaseRequest.current });
+      return;
+    }
     const subject = newSubject.trim();
     const body = newBody.trim();
-    if (!subject || !body || saving) return;
+    if (!subject || !body) return;
+    void createTicket({ subject, body });
+  };
 
+  const openReleaseTicket = (releaseRequest: SupportReleaseRequestInput) => {
+    lastReleaseRequest.current = releaseRequest;
+    void createTicket({ releaseRequest });
+  };
+
+  const createTicket = async (requestBody: Record<string, unknown>) => {
+    if (saving) return;
     setSaving(true);
     setError(null);
     setRetryMode(null);
@@ -204,7 +267,7 @@ export function SupportTicketChat() {
       const response = await fetch("/api/support/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, body })
+        body: JSON.stringify(requestBody)
       });
       const payload = (await response.json().catch(() => null)) as
         | SupportTicketMutationResponse
@@ -220,6 +283,8 @@ export function SupportTicketChat() {
       setActiveId(payload.ticket.id);
       setNewSubject("");
       setNewBody("");
+      lastReleaseRequest.current = null;
+      setCreateMode("plain");
       setCreating(false);
     } catch (createError) {
       setRetryMode("create");
@@ -429,13 +494,30 @@ export function SupportTicketChat() {
         </aside>
 
         <section className="ux-surface flex h-[78dvh] min-h-[480px] flex-col overflow-hidden rounded-[28px] lg:h-auto lg:min-h-0">
-          {creating ? (
+          {creating && createMode === "release" ? (
+            <SupportReleaseRequestForm
+              key={releaseFormKey}
+              saving={saving}
+              onSubmit={openReleaseTicket}
+              onCancel={() => {
+                setCreating(false);
+                setCreateMode("plain");
+                setActiveId(tickets[0]?.id ?? null);
+                setError(null);
+                setRetryMode(null);
+              }}
+              onPlainTicket={() => openPlainReleaseTicket(null)}
+              releases={releaseOptions}
+              releasesError={releaseOptionsError}
+              onReloadReleases={() => void loadReleaseOptions()}
+            />
+          ) : creating ? (
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5 sm:p-6">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#c7bcff]">Новое обращение</p>
                 <h2 className="mt-3 text-[28px] font-semibold tracking-[-0.03em] text-white">Опишите вопрос</h2>
                 <p className="mt-2 text-[15px] leading-6 text-white/62">
-                  После отправки обращение сразу появится в панели поддержки администратора.
+                  {plainNote ?? "После отправки обращение сразу появится в панели поддержки администратора."}
                 </p>
               </div>
 
@@ -498,6 +580,7 @@ export function SupportTicketChat() {
                   </div>
                   <SupportStatusPill status={active.status} />
                 </div>
+                {active.release ? <SupportReleaseCard context={active.release} className="mt-3" /> : null}
               </header>
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

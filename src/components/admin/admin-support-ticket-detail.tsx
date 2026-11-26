@@ -13,6 +13,7 @@ import {
   formatSupportDate,
   supportStatusBadgeClass
 } from "@/lib/support-ui";
+import { SupportReleaseCard } from "@/components/support/support-release-card";
 
 export function AdminSupportTicketDetail({
   initialTicket
@@ -99,6 +100,15 @@ export function AdminSupportTicketDetail({
           </span>
         </div>
 
+        {ticket.release ? (
+          <SupportReleaseCard
+            context={ticket.release}
+            adminReleaseHref={`/admin/releases/${ticket.release.release.id}`}
+            detailed
+            className="mt-4"
+          />
+        ) : null}
+
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <label className="text-[13px] text-white/65" htmlFor="ticket-status">
             Статус:
@@ -147,7 +157,7 @@ export function AdminSupportTicketDetail({
                     : "rounded-bl-md border border-white/[0.08] bg-white/[0.05] text-white/90"
                 )}
               >
-                <p>{message.body}</p>
+                <p className="whitespace-pre-wrap break-words">{message.body}</p>
                 <p className="mt-1.5 text-[11px] text-white/50">
                   {message.senderType === "ADMIN" ? "Администратор" : "Пользователь"} ·{" "}
                   {formatSupportDate(message.createdAt)}

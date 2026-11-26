@@ -14,7 +14,7 @@ import {
   getReleaseLifecycleStatus,
   shouldTreatReleaseAsApproved
 } from "@/lib/release-counts";
-import { getReleaseCoverAsset } from "@/lib/release-cover";
+import { getReleaseCoverAsset, normalizeReleaseCoverUrl } from "@/lib/release-cover";
 import { resolveTrackAudioAsset } from "@/lib/release-media-asset";
 import { getSceneShowcaseState } from "@/lib/scene-showcase-state";
 import { getReleaseDeletionState } from "@/lib/release-deletion-state";
@@ -332,6 +332,41 @@ function resolveModerationReturnedAt(release: CabinetReleaseSource): string | un
     asString(submission?.moderationReturnedAt) ??
     undefined
   );
+}
+
+export interface CabinetReleaseSummary {
+  id: string;
+  title: string;
+  artist: string;
+  upc: string | null;
+  status: CabinetReleaseStatus;
+  /** Saved preview URL as is: not checked in S3, so it may 404 (callers show a placeholder). */
+  coverUrl: string | null;
+}
+
+/**
+ * Same title / artist / UPC / status rules as mapReleaseToCabinetRelease, without the S3 lookups
+ * for covers and tracks — for quick pickers (support) where the full card is not needed.
+ */
+export function summarizeCabinetRelease(release: {
+  id: string;
+  title: string;
+  upc: string | null;
+  status: verification_status;
+  confirmed: boolean;
+  preview: string | null;
+  performer: string | null;
+  roles: unknown;
+}): CabinetReleaseSummary {
+  const upc = resolveReleaseUpc({ upc: release.upc, roles: release.roles });
+  return {
+    id: release.id,
+    title: release.title?.trim() || "Без названия",
+    artist: resolveReleaseArtist({ performer: release.performer, roles: release.roles }) ?? "",
+    upc: upc || null,
+    status: toCabinetStatus(release.status, release.confirmed, release.roles, upc),
+    coverUrl: normalizeReleaseCoverUrl(release.preview, release.id)
+  };
 }
 
 export async function mapReleaseToCabinetRelease(release: CabinetReleaseSource, number: number): Promise<CabinetRelease> {

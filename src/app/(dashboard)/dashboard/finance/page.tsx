@@ -41,6 +41,7 @@ export default async function FinancePage() {
       payoutWindow={data.payoutWindow}
       initialPayoutRequests={data.payoutRequests}
       contractNumber={contractStatus?.status === "approved" ? contractStatus.contractNumber : null}
+      contractStatus={contractStatus}
     />
   );
 }

@@ -128,12 +128,15 @@ function fieldError(
 export function ContractVerificationModal({
   open,
   mode = "gate",
+  purpose = "release",
   onLater,
   onSigned,
   initialSignerData = null
 }: {
   open: boolean;
   mode?: "gate" | "submit";
+  /** Why the artist is signing: to release music, or to withdraw money. Only the wording differs. */
+  purpose?: "release" | "payout";
   onLater: () => void;
   onSigned: () => void;
   initialSignerData?: ContractSignerFormData | null;
@@ -372,16 +375,19 @@ export function ContractVerificationModal({
             <div className="space-y-5 text-center">
               <div className="mx-auto max-w-4xl">
                 <h2 className="mt-2 text-[28px] font-semibold leading-tight text-white">
-                  Перед выпуском релиза необходимо подписать договор
+                  {purpose === "payout" ? "Чтобы вывести деньги, подпишите договор" : "Перед выпуском релиза необходимо подписать договор"}
                 </h2>
                 <p className="mt-3 text-[15px] leading-relaxed text-white/70">
-                  Для размещения музыки на площадках необходимо ознакомиться с договором и подтвердить согласие
-                  электронной подписью.
+                  {purpose === "payout"
+                    ? "Выплаты производятся по лицензионному договору. Ознакомьтесь с ним и подтвердите согласие электронной подписью."
+                    : "Для размещения музыки на площадках необходимо ознакомиться с договором и подтвердить согласие электронной подписью."}
                 </p>
               </div>
 
               <div className="mx-auto inline-flex w-auto max-w-4xl items-center justify-center rounded-full border border-white/10 bg-white/[0.03] px-6 py-2.5 text-center text-[13px] text-white/70">
-                Это займёт ~1–2 минуты. После подписания Вы сможете выпускать релизы без повторной проверки.
+                {purpose === "payout"
+                  ? "Это займёт ~1–2 минуты. Вывод станет доступен, как только администратор проверит договор."
+                  : "Это займёт ~1–2 минуты. После подписания Вы сможете выпускать релизы без повторной проверки."}
               </div>
 
               <div className="flex flex-col items-center gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
@@ -656,8 +662,10 @@ export function ContractVerificationModal({
                   <h2 className="text-[25px] font-semibold text-white">Договор подписан!</h2>
                   <p className="mt-2 text-[15px] text-white/75">
                     {signedStatus === "approved"
-                      ? "Теперь Вы можете выпускать релизы."
-                      : "Договор подписан. Верификация ожидает проверки администратора."}
+                      ? purpose === "payout" ? "Теперь Вы можете вывести деньги." : "Теперь Вы можете выпускать релизы."
+                      : purpose === "payout"
+                        ? "Договор подписан и ждёт проверки администратора. После подтверждения вывод станет доступен."
+                        : "Договор подписан. Верификация ожидает проверки администратора."}
                   </p>
                 </div>
               </div>

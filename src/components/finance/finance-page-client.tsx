@@ -33,6 +33,7 @@ import type { PayoutWindowState } from "@/lib/payout-schedule";
 import { computeAvailableToWithdraw } from "@/lib/payouts";
 import type { PayoutRequestSummary } from "@/lib/payout-request";
 import { PayoutRequestWizard } from "@/components/finance/payout-request-wizard";
+import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 
 const AccrualsChart = dynamic(
   () => import("@/components/finance/accruals-chart").then((module) => module.AccrualsChart),
@@ -70,7 +71,8 @@ export function FinancePageClient({
   minimumPayoutAmount,
   payoutWindow,
   initialPayoutRequests,
-  contractNumber
+  contractNumber,
+  contractStatus
 }: {
   initialReports: FinanceReportClientItem[];
   initialTransactions: FinanceTransactionView[];
@@ -82,6 +84,7 @@ export function FinancePageClient({
   payoutWindow: PayoutWindowState;
   initialPayoutRequests: PayoutRequestSummary[];
   contractNumber: number | null;
+  contractStatus: ContractStatusPayload | null;
 }) {
   const router = useRouter();
   const [reports, setReports] = React.useState(initialReports);
@@ -447,6 +450,7 @@ export function FinancePageClient({
                 payoutWindow={payoutWindow}
                 initialPayoutRequests={initialPayoutRequests}
                 contractNumber={contractNumber}
+                contractStatus={contractStatus}
               />
             </div>
           ) : null}

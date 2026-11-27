@@ -20,6 +20,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { useSecurityCode } from "@/components/security/security-code-dialog";
+import { getPayoutContractCopy, PayoutContractNotice } from "@/components/finance/payout-contract-notice";
+import type { ContractStatusPayload } from "@/lib/contract-verification-shared";
 import type { PayoutRequestBody, PayoutRequestFailureResponse, PayoutRequestSuccessResponse } from "@/lib/api/contracts";
 import type { FinanceReportClientItem } from "@/lib/finance-client";
 import type { PayoutRequestSummary } from "@/lib/payout-request";
@@ -147,13 +149,14 @@ function receiptHtml(input: {
   return `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Расписка ICECREAMMUSIC</title><style>body{font:16px Georgia,serif;line-height:1.55;margin:55px;color:#111}h1{text-align:center;font:700 22px Arial;margin:0 0 36px}.sign{margin-top:40px}</style><h1>РАСПИСКА</h1><p>Я, ${escape(input.recipientName)}, действующий на основании паспорта: серия ${escape(input.passportSeries)}, номер ${escape(input.passportNumber)}, выдан ${escape(input.passportIssuedBy)}, дата выдачи ${formatDate(input.passportIssueDate)}, дата рождения ${formatDate(input.birthDate)}, зарегистрированный по адресу ${escape(input.registrationAddress)}, по лицензионному договору № ${input.contractNumber},</p><p>получил вознаграждение (royalty) от ICECREAMMUSIC в размере:</p><p><strong>${formatRubCurrency(input.amount)}</strong><br>${escape(amountWords(input.amount))}</p><p>за отчетный период: <strong>${escape(input.quarterLabel)}</strong>.</p><p>Выплата производится по следующим реквизитам: ${escape(input.bankName)}, счет ${escape(input.accountNumber)}, БИК ${escape(input.bankBik)}, получатель ${escape(input.recipientName)}.</p><p>Претензий не имею.</p><p class="sign">Подпись: __________<br>Фамилия и инициалы: __________<br><br>Дата расписки: __________</p></html>`;
 }
 
-export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayoutAmount, payoutWindow, initialPayoutRequests, contractNumber }: {
+export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayoutAmount, payoutWindow, initialPayoutRequests, contractNumber, contractStatus }: {
   reports: FinanceReportClientItem[];
   availableToWithdraw: number;
   minimumPayoutAmount: number;
   payoutWindow: PayoutWindowState;
   initialPayoutRequests: PayoutRequestSummary[];
   contractNumber: number | null;
+  contractStatus: ContractStatusPayload | null;
 }) {
   const [payoutRequests, setPayoutRequests] = React.useState(initialPayoutRequests);
   // A quarter stays available while money is left in it and no request for it is open.
@@ -222,7 +225,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
     setNotice(null);
     if (step === 1 && !canStart) {
       setNotice(!contractNumber
-        ? "Для заявки на выплату подпишите действующую версию лицензионного договора."
+        ? getPayoutContractCopy(contractStatus)?.text ?? "Для заявки на выплату нужен подтверждённый лицензионный договор."
         : parsedAmount > 0 && parsedAmount < minimumPayoutAmount
         ? `Минимальная сумма выплаты — ${formatRubCurrency(minimumPayoutAmount)}.`
         : !selectedReport
@@ -326,6 +329,7 @@ export function PayoutRequestWizard({ reports, availableToWithdraw, minimumPayou
 
   return <div className="space-y-4">
     {securityCode.dialog}
+    {!contractNumber ? <PayoutContractNotice status={contractStatus} /> : null}
     <PayoutRequestHistory requests={payoutRequests} />
     <section className="rounded-[24px] border border-white/[0.09] bg-[#13151d] p-5 sm:p-7">
     <ol className="mb-7 flex items-center" aria-label="Этапы создания заявки">
